@@ -11,6 +11,8 @@ A static, privacy-first telecalling audit app designed for GitHub Pages.
 
 The lead history is sent directly from the browser to the OpenAI API for analysis. This is intentionally a browser-only JavaScript app: GitHub Pages serves the UI, SheetJS parses the workbook, and the browser calls OpenAI directly with the key entered by that user. There is no Python runtime, local-processing fallback, server proxy, or shared API key. Users should use their own trusted device/browser and remove the key when finished.
 
+The audit request keeps the stable system instructions at the beginning and puts each batch's unique lead data afterward, which allows OpenAI's automatic prompt caching to reuse the repeated prefix when eligible. The console reports input, cached-input, and output token counts; only the cached portion receives cached-input pricing, and unique lead data still consumes normal input tokens.
+
 ## Preview before publishing
 
 For a local preview only, serve the repository root so module imports and the service worker work correctly:
