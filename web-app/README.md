@@ -9,11 +9,11 @@ A static, privacy-first telecalling audit app designed for GitHub Pages.
 - Checkpoints, audit results and logs are stored in IndexedDB for this browser profile.
 - No workbook, API key, audit or log is committed to GitHub.
 
-The lead history is sent directly from the browser to the OpenAI API for analysis. A static GitHub Pages app cannot provide server-side secret storage or user accounts. Use a backend before deploying this for untrusted or shared-device users.
+The lead history is sent directly from the browser to the OpenAI API for analysis. This is intentionally a browser-only JavaScript app: GitHub Pages serves the UI, SheetJS parses the workbook, and the browser calls OpenAI directly with the key entered by that user. There is no Python runtime, local-processing fallback, server proxy, or shared API key. Users should use their own trusted device/browser and remove the key when finished.
 
-## Run locally
+## Preview before publishing
 
-Serve the repository root so module imports and the service worker work correctly:
+For a local preview only, serve the repository root so module imports and the service worker work correctly:
 
 ```powershell
 python -m http.server 8080

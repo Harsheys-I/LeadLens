@@ -21,7 +21,7 @@
         <button class="nav-item" data-view="history"><span>◷</span>History</button>
         <button class="nav-item" data-view="settings"><span>⚙</span>Settings</button>
       </nav>
-      <div class="privacy-note"><strong>Runs on this device</strong><span>Files, keys, logs and checkpoints are never uploaded to GitHub.</span></div>
+      <div class="privacy-note"><strong>Browser-only processing</strong><span>No Python server or local fallback is required. Files, keys, logs and checkpoints stay in this browser.</span></div>
     </aside>
 
     <main>
@@ -63,7 +63,7 @@
       <section id="view-settings" class="view">
         <div class="settings-grid">
           <form id="settings-form" class="settings-card">
-            <div class="card-title"><h2>OpenAI connection</h2><p>The key is sent only to OpenAI during an audit.</p></div>
+            <div class="card-title"><h2>OpenAI connection</h2><p>Your key is held by this browser and sent only to OpenAI during an audit. It is never part of the GitHub Pages deployment.</p></div>
             <label>API key<div class="input-row"><input id="api-key" type="password" autocomplete="off" placeholder="sk-…"><button id="toggle-key" type="button" class="secondary-button">Show</button></div></label>
             <label class="check-row"><input id="remember-key" type="checkbox"><span>Remember on this device <small>Uses this browser's local storage.</small></span></label>
             <div class="inline-actions"><button id="save-key" type="button" class="primary-button">Save key</button><button id="forget-key" type="button" class="text-button">Forget key</button><span id="key-message" class="form-message"></span></div>
