@@ -1,4 +1,4 @@
-export const APP_VERSION = "2.4.2";
+export const APP_VERSION = "2.4.3";
 
 export const ERROR_CATALOG = [
   {code:"0",label:"Comment displaying -ve, but Lead Status is +ve",hint:"-ve comment vs +ve status"},
@@ -20,7 +20,7 @@ export const DEFAULT_INPUT_FIELDS = [
   {id:"mobile",label:"Mobile",aliases:"mobile, mobile number, mobile no, phone, phone number",required:true},
   {id:"project",label:"Project Name",aliases:"project name, project",required:true},
   {id:"registration",label:"Lead Registration Date",aliases:"lead registration date, registration date",required:false},
-  {id:"telecaller",label:"Telecaller Name",aliases:"telecaller name, tellecaller name, caller name, agent name",required:false},
+  {id:"telecaller",label:"Telecaller Name",aliases:"telecaller name, tellecaller name, tele caller name, telle caller name, caller name, agent name, executive name",required:false},
   {id:"update",label:"Call / Lead Update Date",aliases:"lead update date, call date, update date",required:false},
   {id:"status",label:"Lead Status",aliases:"lead status, status",required:false},
   {id:"comments",label:"Comments",aliases:"comments, comment, remarks, remark",required:false},
@@ -165,6 +165,21 @@ const clean=value=>["","nan","none","nat","undefined","null"].includes(norm(valu
 const clone=value=>JSON.parse(JSON.stringify(value));
 const list=value=>String(value||"").split(",").map(norm).filter(Boolean);
 const firstNonEmpty=values=>values.map(clean).find(Boolean)||"";
+/** Excel exports often write Mobile/Project/Telecaller once, then leave later rows blank. */
+function fillDownWithinGroup(records,fieldId){
+  let last="";
+  for(const record of records){
+    const value=clean(record[fieldId]);
+    if(value)last=value;
+    else if(last)record[fieldId]=last;
+  }
+  const first=firstNonEmpty(records.map(record=>record[fieldId]));
+  if(first){
+    for(const record of records){
+      if(!clean(record[fieldId]))record[fieldId]=first;
+    }
+  }
+}
 function isBlankish(value){
   const s=clean(value);
   if(!s)return true;
@@ -323,6 +338,9 @@ export function parseWorkbook(arrayBuffer,rawSettings=DEFAULT_SETTINGS){
   const leads=[];
   for(const [groupId,records] of grouped.entries()){
     records.sort((a,b)=>(a.updateDate?.valueOf()??a.rowIndex)-(b.updateDate?.valueOf()??b.rowIndex));
+    // Carry telecaller (and registration) across blank follow-up rows inside the same lead.
+    fillDownWithinGroup(records,"telecaller");
+    fillDownWithinGroup(records,"registration");
     for(const record of records)record.connected=connectedFromParameter(record.parameter,settings);
     const dated=records.filter(record=>record.updateDate);
     const latestDay=dated.length
@@ -333,6 +351,7 @@ export function parseWorkbook(arrayBuffer,rawSettings=DEFAULT_SETTINGS){
       ?records.filter(record=>dayKey(record.updateDate)===latestDay)
       :[records.at(-1)];
     const registration=firstNonEmpty(records.map(record=>record.registration));
+    const telecaller=firstNonEmpty(records.map(record=>record.telecaller));
     const daySnapshots=dayCalls.map(callSnapshot);
 
     dayCalls.forEach((call,callIndex)=>{
@@ -341,7 +360,7 @@ export function parseWorkbook(arrayBuffer,rawSettings=DEFAULT_SETTINGS){
         project:call.project,
         mobile:call.mobile,
         registration,
-        telecaller:call.telecaller,
+        telecaller:clean(call.telecaller)||telecaller,
         status:call.status,
         comments:call.comments,
         next:dateText(call.nextDate||call.next),

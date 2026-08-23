@@ -1,5 +1,5 @@
 {
-  "version": "2.4.2",
+  "version": "2.4.3",
   "name": "LeadLens",
-  "notes": "Observation must not echo comments; richer recommendations; anti-echo fallbacks"
+  "notes": "Fill-down Telecaller Name within each lead so blank follow-up rows keep the agent"
 }
