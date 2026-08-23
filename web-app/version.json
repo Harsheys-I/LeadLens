@@ -1,5 +1,5 @@
 {
-  "version": "2.3.3",
+  "version": "2.4.0",
   "name": "LeadLens",
-  "notes": "Fix download sort — use live Sort By/Order from Settings on every export"
+  "notes": "Latest-day multi-call rows, strict comment quality, requirement empty/wrong codes, sort column first"
 }

@@ -1,16 +1,17 @@
-export const APP_VERSION = "2.3.3";
+export const APP_VERSION = "2.4.0";
 
 export const ERROR_CATALOG = [
   {code:"0",label:"Comment displaying -ve, but Lead Status is +ve",hint:"-ve comment vs +ve status"},
   {code:"1",label:"Comment displaying +ve, but Lead Status is -ve",hint:"+ve comment vs -ve status"},
   {code:"2",label:"Followup Date is Missed",hint:"missed follow-up date"},
-  {code:"3",label:"Customer Location is empty",hint:"connected + empty location"},
-  {code:"4",label:"Customer Requirement is empty",hint:"connected + empty requirement"},
-  {code:"5",label:"Estimated Budget is empty",hint:"connected + empty budget"},
-  {code:"6",label:"Analysis Parameter is Empty",hint:"analysis parameter empty"}
+  {code:"3",label:"Customer Location is empty",hint:"connected + empty/placeholder location"},
+  {code:"4",label:"Customer Requirement is empty",hint:"connected + empty/placeholder requirement"},
+  {code:"5",label:"Estimated Budget is empty",hint:"connected + empty/placeholder budget"},
+  {code:"6",label:"Analysis Parameter is Empty",hint:"analysis parameter empty"},
+  {code:"7",label:"Customer Requirement is set wrong",hint:"rq is call-status/comment junk, not a real customer requirement"}
 ];
 export const ERROR_TYPES = ERROR_CATALOG.map(item=>item.label);
-export const HIGH_SEVERITY_CODES = new Set(["0","1","2","3"]);
+export const HIGH_SEVERITY_CODES = new Set(["0","1","2","3","7"]);
 export const HIGH_SEVERITY_ERRORS = new Set(ERROR_CATALOG.filter(item=>HIGH_SEVERITY_CODES.has(item.code)).map(item=>item.label));
 
 export const AI_FIELD_KEYS = {status:"s",comments:"c",next:"n",location:"l",requirement:"rq",budget:"b",connected:"k"};
@@ -36,17 +37,21 @@ export const DEFAULT_AI_FIELDS = [
   {id:"connected",label:"Connected",enabled:true,history:false}
 ];
 export const DEFAULT_OUTPUT_FIELDS = [
-  {id:"project",label:"Project Name",enabled:true},{id:"mobile",label:"Mobile Number",enabled:true},{id:"registration",label:"Lead Registration Date",enabled:true},
-  {id:"telecaller",label:"Telecaller Name",enabled:true},{id:"status",label:"Latest Lead Status",enabled:true},{id:"comments",label:"Comments",enabled:true},
-  {id:"next",label:"Next Followup Date",enabled:true},{id:"totalFollowups",label:"Total Followups",enabled:true},{id:"location",label:"Customer Location",enabled:true},
+  {id:"project",label:"Project Name",enabled:true},{id:"mobile",label:"Mobile Number",enabled:true},
+  {id:"callDate",label:"Call Date",enabled:true},{id:"dayCallIndex",label:"Call # on Day",enabled:true},
+  {id:"registration",label:"Lead Registration Date",enabled:true},
+  {id:"telecaller",label:"Telecaller Name",enabled:true},{id:"status",label:"Lead Status",enabled:true},{id:"comments",label:"Comments",enabled:true},
+  {id:"next",label:"Next Followup Date",enabled:true},{id:"totalFollowups",label:"Total Followups",enabled:true},{id:"dayCallCount",label:"Calls on Latest Day",enabled:true},
+  {id:"location",label:"Customer Location",enabled:true},
   {id:"requirement",label:"Customer Requirement",enabled:true},{id:"parameter",label:"Analysis Parameter",enabled:true},{id:"budget",label:"Estimated Budget",enabled:true},
   {id:"commentQuality",label:"Comment Quality Score",enabled:true},{id:"errorTypes",label:"Error Type(s)",enabled:true},{id:"errorSeverity",label:"Error Severity",enabled:true},
   {id:"buyingIntent",label:"Buying Intent",enabled:true},{id:"observation",label:"AI Observation",enabled:true},{id:"recommendation",label:"AI Recommendation",enabled:true}
 ];
 export const DEFAULT_RULES = [
   {field:"Lead Status + Comments",instruction:"Comments are source of truth. Emit code 0 only for clear -ve comment vs +ve status. Emit code 1 only for clear +ve comment vs -ve status. Neutral/not-connected is not a mismatch.",errors:"0,1"},
-  {field:"Comment quality",instruction:"Score q 0-10. Reward specific requirement/budget/objection/next action. Generic or empty notes score low.",errors:""},
-  {field:"Buying intent",instruction:"i=1 only for genuine positive purchase interest in latest comment/status; else i=0.",errors:""}
+  {field:"Comment quality",instruction:"Score q strictly. q must reflect how well Comments capture the real telecaller–customer conversation (need, budget, location preference, objection, decision-maker, next step). One-word/CRM crumbs like visited/RNR/CNP/busy/followup = q 0-2 max. Generic connected notes without customer detail = q <=4. Only rich descriptive talk earns 8-10.",errors:""},
+  {field:"Customer Requirement",instruction:"rq must be a real customer requirement (config/area/location preference/budget need/plot size etc). If connected and rq is empty/placeholder (., -, NA) use code 4. If rq is call jargon or comment/status text (RNR, Visited, CNP, Busy, Followup, Interested, etc.) emit code 7 — not a valid requirement.",errors:"4,7"},
+  {field:"Buying intent",instruction:"i=1 only for genuine positive purchase interest in this call's comment/status; else i=0.",errors:""}
 ];
 export const DEFAULT_SETTINGS = {
   batchSize:20,concurrency:2,model:"gpt-4o-mini",
@@ -58,66 +63,94 @@ export const DEFAULT_SETTINGS = {
 };
 
 /* Stable prefix sized just over OpenAI's ~1024-token cache floor. Keep static text first; lead payloads last. */
-const CACHE_HANDBOOK = `LeadLens QA v2.3 compact auditor. Evidence only. Never invent facts, dates, budgets, locations, or prior calls.
+const CACHE_HANDBOOK = `LeadLens QA v2.4. Evidence only. Never invent facts.
 
-INPUT KEYS (short): id=opaque lead id (echo exact), s=Lead Status, c=Comments, n=Next Followup, l=Location, rq=Requirement, b=Budget, k=Connected Yes/No/"". If a value is an array it is chronological history for that key only. Empty string means unknown. Location may already be blanked for project exceptions — do not restore it.
+INPUT: id (echo exact). Per-call fields: s=status, c=comments, n=next followup, l=location, rq=requirement, b=budget, k=connected Yes/No/"". Optional day[] = all calls on the same latest calendar day (siblings). Audit THIS call's fields; use day[] only as context. Empty "" = unknown. Do not restore blanked locations.
 
-OUTPUT KEYS (short JSON only, schema a[]): id, q (int 0-10), e (array of error CODE strings only), i (0 or 1 buying intent), o (<=18 words), r (<=14 words). Do not output severity. Do not output full error sentences. No markdown fences.
+OUTPUT a[]: id, q (0-10), e (error CODES only), i (0|1), o (<=18 words), r (<=14 words). No severity. No full error sentences. No markdown.
 
-ERROR CODES — emit codes only:
-0 = -ve comment vs +ve status
-1 = +ve comment vs -ve status
-2 = missed follow-up date
-3 = connected call + empty location
-4 = connected call + empty requirement
-5 = connected call + empty budget
-6 = analysis parameter empty
-Also emit only extra codes listed in RUN CHECKS. Prefer e:[] over weak guesses. App expands codes to Excel text.
+ERROR CODES:
+0:-ve comment vs +ve status
+1:+ve comment vs -ve status
+2:missed follow-up
+3:connected + empty/placeholder location
+4:connected + empty/placeholder requirement
+5:connected + empty/placeholder budget
+6:empty analysis parameter
+7:requirement set wrong (call jargon / not a real customer need)
+Prefer e:[] over weak guesses. App may also add 2-6 deterministically.
 
-q RUBRIC: 10=req+budget/objection+clear next action; 8-9=strong context+next step; 6-7=partial useful notes; 4-5=thin connected note; 2-3=boilerplate; 0-1=empty/unreadable.
-i=1 only for genuine purchase interest (site visit, options request, active shortlist, budget toward buy). i=0 for CNP/busy/NI/wrong number/neutral admin/no interest signal.
-Status mismatch: comments are source of truth. Neutral or not-connected comments are NOT mismatches.
-If k is No or "", do not demand l/rq/b unless a run check explicitly requires it.
-o must cite decisive evidence only. r must be one coaching/process action. Never dump the full comment into o or r.
-Never drop an id. Never invent ids. Never merge leads.
+COMMENT QUALITY q — STRICT (comments must mirror the actual talk):
+10: rich conversation — config/area + budget/objection + decision context + clear next action
+8-9: strong descriptive talk with customer need and next step
+6-7: partial real conversation detail, still actionable
+4-5: thin connected note, little customer substance
+2-3: boilerplate / 2-3 vague words
+0-1: empty, unreadable, or single CRM crumb
+HARD CAPS: "visited"/"visit"/"RNR"/"CNP"/"busy"/"followup"/"SV" alone or near-alone => q<=2. Not descriptive => never 8-10.
 
-EXAMPLES (patterns only):
-A) s=Interested, c=not interested stop calling → e includes 0, i=0, low q if thin.
-B) k=Yes, l/rq/b empty, c=talked later → low q, i=0; deterministic codes 3/4/5 may apply in-app.
-C) s=Hot, c=2BHK Whitefield under 90L wants Saturday visit → high q, i=1, e:[].
-D) k=No, c=ringing no answer → i=0, usually e:[] from model.
-E) soft callback with active search → i may be 1; honor promised window in r.
+CUSTOMER REQUIREMENT rq:
+Valid: 2BHK, plot size, locality preference, facing, budget band as need, possession timeline as need, etc.
+INVALID (code 7 when connected and non-blank): RNR, CNP, Visited, Site visit, Busy, Followup, Callback, Interested, Not interested, Connected, ringing, wrong number, status/comment dumps.
+Placeholder-only (., -, NA, nil) on connected call => code 4 (empty), not 7.
 
-Consistency: CNP/busy/switched off ≠ status mismatch. "SV fixed/positive" usually i=1. Boilerplate across leads → low q. Mixed-language comments OK — judge meaning. Insufficient data → short o + r asking what to capture next.
+i=1 only for real buy interest. Status mismatch: comments win; neutrals ≠ mismatch.
+If k is No/"", do not demand l/rq/b unless a run check says so.
+o/r terse; never dump full comment. Never drop/add ids.
 
-FIELD NOTES
-- Dates may be DD/MM/YYYY. Do not convert timezones. Do not invent missing dates.
-- Budget ranges stay as written; do not normalize currency.
-- Requirement configs like 1BHK/2BHK/plot count as quality evidence.
-- Telecaller CRM labels (Hot/Warm/Cold/NI/CNP/Busy) are interpreted with comment polarity, not alone.
-- "Just enquiry/browsing" with no next step is usually i=0.
-- Callback-after-salary / active locality search can support i=1 if interest continues.
-- Budget objection with continued option openness can still be i=1; capture budget in r if missing.
-- If history arrays exist, use them as context only; latest values drive i and status codes unless a run check says otherwise.
-- Deterministic app checks may also add codes 2/3/4/5/6; you may still mention process gaps in o/r without inventing disallowed codes.
-- Identical empty connected-call notes across many leads should stay low q.
-- Emoji-only or symbol-only comments → q near 0.
-- Illegal/harassing calling advice is forbidden in r.
+EXAMPLES:
+A) c="visited" => q<=2, usually i=0.
+B) k=Yes, rq="." or "" => code 4.
+C) k=Yes, rq="RNR" or "Visited" => code 7.
+D) k=Yes, rq="2BHK Whitefield" => rq OK.
+E) Two day[] siblings: score/flag THIS call; siblings are context only.
 
-OUTPUT DISCIPLINE
-- Return exactly one object per input id inside a[].
-- Keep o and r short: decisive evidence + one action.
-- Never restate this handbook.
-- Never output keys other than id,q,e,i,o,r.
-- If unsure about a mismatch code, omit it.
-
-This handbook is identical across batches for prompt caching. Unique lead payloads follow run checks.`;
+This handbook is identical across batches for prompt caching.`;
 
 const norm=value=>String(value??"").trim().toLowerCase().replace(/[_-]+/g," ").replace(/\s+/g," ");
 const clean=value=>["","nan","none","nat","undefined","null"].includes(norm(value))?"":String(value).trim();
 const clone=value=>JSON.parse(JSON.stringify(value));
 const list=value=>String(value||"").split(",").map(norm).filter(Boolean);
 const firstNonEmpty=values=>values.map(clean).find(Boolean)||"";
+function isBlankish(value){
+  const s=clean(value);
+  if(!s)return true;
+  if(/^[.\-–—_/\\|,;:~`'"*+#]+$/.test(s))return true;
+  const n=norm(s);
+  return["na","n/a","n a","nil","none","null","blank","empty","dot","x","xx","xxx","tbd","not available"].includes(n);
+}
+const REQUIREMENT_JUNK=new Set([
+  "rnr","cnp","visited","visit","sv","site visit","site visited","sv done","busy","switched off","switch off",
+  "not connected","connected","follow up","followup","cb","callback","call back","ni","not interested",
+  "interested","ringing","no answer","wrong number","wn","call later","will call","talked","spoke","ok","yes","no"
+]);
+function looksLikeWrongRequirement(value){
+  if(isBlankish(value))return false;
+  const n=norm(value);
+  if(REQUIREMENT_JUNK.has(n))return true;
+  if(/^(rnr|cnp|sv|ni|wn|cb)\b/.test(n)&&n.split(" ").length<=3)return true;
+  return false;
+}
+function clampCommentQuality(score,comments){
+  let q=Number(score);
+  if(!Number.isFinite(q))q=0;
+  q=Math.max(0,Math.min(10,Math.round(q)));
+  const text=clean(comments);
+  const words=text.split(/\s+/).filter(Boolean);
+  const n=norm(text);
+  if(!text)return Math.min(q,1);
+  if(words.length===1)return Math.min(q,2);
+  if(/^(visited|visit|rnr|cnp|busy|ni|follow\s*up|followup|site\s*visit|sv|sv\s*done|ringing|callback|call\s*back)$/.test(n))return Math.min(q,2);
+  if(words.length===2)return Math.min(q,3);
+  const hasDetail=/\d|bhk|sq\.?\s?ft|budget|lakh|lac|\bcr\b|interested|not interested|want|need|prefer|looking|location|callback|call back|objection|family|loan|possession|facing|plot|apartment|villa|whitefield|anekal|electronic city|sarjapur|price|discount|inventory/i.test(text);
+  if(words.length<=4&&!hasDetail)return Math.min(q,4);
+  if(!hasDetail&&words.length<8)return Math.min(q,5);
+  return q;
+}
+function dayKey(date){
+  if(!(date instanceof Date)||Number.isNaN(date.valueOf()))return"";
+  return`${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,"0")}-${String(date.getDate()).padStart(2,"0")}`;
+}
 const defaultsById=(saved,fallback)=>fallback.map(base=>({...base,...((Array.isArray(saved)?saved:[]).find(item=>item.id===base.id)||{})}));
 
 export function buildErrorMaps(settings=DEFAULT_SETTINGS){
@@ -184,8 +217,33 @@ export function indianMobile(value){let digits=clean(value).replace(/\.0$/,"").r
 function fieldColumns(headers,fields){const normalized=headers.map(header=>({header,key:norm(header)}));return Object.fromEntries(fields.filter(field=>field.required||field.enabled!==false).map(field=>{const match=normalized.find(item=>list(field.aliases).includes(item.key));return[field.id,match?.header||""];}));}
 function correctedAiLocation(project,location){const exceptions=new Set(["guru punvaanii eureka|bidadi","guru punvaanii ernika|anekal","guru punvaanii eka|anekal","guru punvaanii elegance|bheemenahalli"]);return exceptions.has(`${norm(project)}|${norm(location)}`)?"":location;}
 function connectedFromParameter(parameter,settings){const value=norm(parameter);if(!value)return"";if(list(settings.yesValues).includes(value)||value==="yes")return"Yes";if(list(settings.noValues).includes(value)||value==="no")return"No";return"";}
-function deterministicErrorCodes(latest,aiLocation){const codes=[];const today=new Date();today.setHours(0,0,0,0);if(latest.nextDate&&latest.nextDate<today)codes.push("2");if(!latest.parameter)codes.push("6");if(latest.connected==="Yes"&&!aiLocation)codes.push("3");if(latest.connected==="Yes"&&!latest.requirement)codes.push("4");if(latest.connected==="Yes"&&!latest.budget)codes.push("5");return codes;}
+function deterministicErrorCodes(call,aiLocation){
+  const codes=[];
+  const today=new Date();today.setHours(0,0,0,0);
+  if(call.nextDate&&call.nextDate<today)codes.push("2");
+  if(isBlankish(call.parameter))codes.push("6");
+  if(call.connected==="Yes"){
+    if(isBlankish(call.location))codes.push("3");
+    if(isBlankish(call.requirement))codes.push("4");
+    else if(looksLikeWrongRequirement(call.requirement))codes.push("7");
+    if(isBlankish(call.budget))codes.push("5");
+  }
+  return codes;
+}
 function contextValue(id,record,aiLocation){if(id==="connected")return record.connected;if(id==="next")return dateText(record.nextDate||record.next);if(id==="location")return aiLocation;return record[id]||"";}
+function callSnapshot(record){
+  const aiLocation=correctedAiLocation(record.project,record.location);
+  return{
+    d:dateText(record.updateDate||record.update),
+    s:record.status||"",
+    c:record.comments||"",
+    n:dateText(record.nextDate||record.next),
+    l:aiLocation,
+    rq:record.requirement||"",
+    b:record.budget||"",
+    k:record.connected||""
+  };
+}
 
 export function parseWorkbook(arrayBuffer,rawSettings=DEFAULT_SETTINGS){
   if(!window.XLSX)throw new Error("Excel reader failed to load. Check the internet connection and reload.");
@@ -208,24 +266,59 @@ export function parseWorkbook(arrayBuffer,rawSettings=DEFAULT_SETTINGS){
     if(!grouped.has(key))grouped.set(key,[]);
     grouped.get(key).push(record);
   }
-  const leads=[...grouped.entries()].map(([leadId,records])=>{
+
+  const leads=[];
+  for(const [groupId,records] of grouped.entries()){
     records.sort((a,b)=>(a.updateDate?.valueOf()??a.rowIndex)-(b.updateDate?.valueOf()??b.rowIndex));
     for(const record of records)record.connected=connectedFromParameter(record.parameter,settings);
-    const latest=records.at(-1),aiLocation=correctedAiLocation(latest.project,latest.location);
-    const staticValues={
-      project:latest.project,mobile:latest.mobile,registration:firstNonEmpty(records.map(record=>record.registration)),
-      telecaller:latest.telecaller,status:latest.status,comments:latest.comments,next:dateText(latest.nextDate||latest.next),
-      totalFollowups:records.length,location:latest.location,requirement:latest.requirement,parameter:latest.parameter,budget:latest.budget
-    };
-    const auditContext={};
-    for(const field of settings.aiFields.filter(field=>field.enabled)){
-      const key=AI_FIELD_KEYS[field.id]||field.id;
-      auditContext[key]=field.history
-        ?records.map(record=>contextValue(field.id,record,correctedAiLocation(record.project,record.location)))
-        :contextValue(field.id,latest,aiLocation);
-    }
-    return{leadId,staticValues,auditContext,deterministicErrors:deterministicErrorCodes(latest,aiLocation)};
-  });
+    const dated=records.filter(record=>record.updateDate);
+    const latestDay=dated.length
+      ?dayKey(dated.reduce((best,record)=>record.updateDate.valueOf()>=best.updateDate.valueOf()?record:best).updateDate)
+      :"";
+    // All calls on the latest calendar day (or the last row if dates are missing).
+    const dayCalls=latestDay
+      ?records.filter(record=>dayKey(record.updateDate)===latestDay)
+      :[records.at(-1)];
+    const registration=firstNonEmpty(records.map(record=>record.registration));
+    const daySnapshots=dayCalls.map(callSnapshot);
+
+    dayCalls.forEach((call,callIndex)=>{
+      const aiLocation=correctedAiLocation(call.project,call.location);
+      const staticValues={
+        project:call.project,
+        mobile:call.mobile,
+        registration,
+        telecaller:call.telecaller,
+        status:call.status,
+        comments:call.comments,
+        next:dateText(call.nextDate||call.next),
+        callDate:dateText(call.updateDate||call.update),
+        totalFollowups:records.length,
+        dayCallCount:dayCalls.length,
+        dayCallIndex:callIndex+1,
+        location:call.location,
+        requirement:call.requirement,
+        parameter:call.parameter,
+        budget:call.budget
+      };
+      const auditContext={};
+      for(const field of settings.aiFields.filter(field=>field.enabled)){
+        const key=AI_FIELD_KEYS[field.id]||field.id;
+        auditContext[key]=field.history
+          ?records.map(record=>contextValue(field.id,record,correctedAiLocation(record.project,record.location)))
+          :contextValue(field.id,call,aiLocation);
+      }
+      // Always attach same-day sibling calls so multi-call days are not collapsed.
+      if(daySnapshots.length>1)auditContext.day=daySnapshots;
+      leads.push({
+        leadId:`${groupId}#${call.rowIndex}`,
+        groupId,
+        staticValues,
+        auditContext,
+        deterministicErrors:deterministicErrorCodes(call,aiLocation)
+      });
+    });
+  }
   if(!leads.length)throw new Error("No valid Indian mobile numbers were found. Only 10-digit Indian mobiles starting with 6, 7, 8 or 9 are processed.");
   return{sheetName:selected.name,leads,rowCount:selected.rows.length,invalidRows};
 }
@@ -338,12 +431,14 @@ export async function auditBatch(apiKey,rawSettings,batch,signal,log,onUsage){
   return batch.map(lead=>{
     const ai=byId.get(lead.leadId);
     const aiCodes=Array.isArray(ai.e)?ai.e.map(code=>maps.resolve(code)).filter(code=>allowed.has(code)):[];
-    const codes=unique([...lead.deterministicErrors,...aiCodes]);
+    // If deterministic already flagged empty (4), drop conflicting wrong (7) from model.
+    const merged=unique([...lead.deterministicErrors,...aiCodes]);
+    const codes=merged.includes("4")?merged.filter(code=>code!=="7"):merged;
     const labels=codes.map(code=>maps.labelOf(code)).filter(Boolean);
     const intent=Number(ai.i)===1||clean(ai.i)==="1"||norm(ai.i)==="yes"?"Yes":"No";
     return{
       ...lead.staticValues,
-      commentQuality:ai.q,
+      commentQuality:clampCommentQuality(ai.q,lead.staticValues.comments),
       errorTypes:labels.length?labels.join(", "):"None",
       errorSeverity:severityFromCodes(codes),
       buyingIntent:intent,
@@ -353,16 +448,23 @@ export async function auditBatch(apiKey,rawSettings,batch,signal,log,onUsage){
   });
 }
 
-export const selectedOutputFields=rawSettings=>normalizeSettings(rawSettings).outputFields.filter(field=>field.enabled);
+export function selectedOutputFields(rawSettings){
+  const settings=normalizeSettings(rawSettings);
+  const enabled=settings.outputFields.filter(field=>field.enabled!==false);
+  const sortId=settings.sort?.field;
+  const primary=enabled.find(field=>field.id===sortId);
+  if(!primary)return enabled;
+  return[primary,...enabled.filter(field=>field.id!==sortId)];
+}
 
-const DATE_SORT_FIELDS=new Set(["registration","next","update"]);
+const DATE_SORT_FIELDS=new Set(["registration","next","update","callDate"]);
 function sortValue(row,fieldId){
   const raw=row?.[fieldId];
   if(DATE_SORT_FIELDS.has(fieldId)){
     const date=parseDate(raw);
     return date?date.valueOf():Number.NEGATIVE_INFINITY;
   }
-  if(fieldId==="totalFollowups"||fieldId==="commentQuality")return Number(raw)||0;
+  if(fieldId==="totalFollowups"||fieldId==="commentQuality"||fieldId==="dayCallIndex"||fieldId==="dayCallCount")return Number(raw)||0;
   return String(raw??"").toLocaleLowerCase();
 }
 export function sortResults(rows,rawSettings=DEFAULT_SETTINGS){
@@ -375,6 +477,10 @@ export function sortResults(rows,rawSettings=DEFAULT_SETTINGS){
     if(typeof av==="number"&&typeof bv==="number")cmp=av===bv?0:av<bv?-1:1;
     else cmp=String(av).localeCompare(String(bv),undefined,{numeric:true,sensitivity:"base"});
     if(cmp)return cmp*dir;
+    const dateCmp=(parseDate(a.callDate)?.valueOf()??0)-(parseDate(b.callDate)?.valueOf()??0);
+    if(dateCmp)return dateCmp;
+    const idx=(Number(a.dayCallIndex)||0)-(Number(b.dayCallIndex)||0);
+    if(idx)return idx;
     const mobileCmp=String(a.mobile??"").localeCompare(String(b.mobile??""),undefined,{numeric:true});
     if(mobileCmp)return mobileCmp;
     return String(a.project??"").localeCompare(String(b.project??""),undefined,{numeric:true,sensitivity:"base"});

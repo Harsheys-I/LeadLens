@@ -5,7 +5,7 @@ const $=id=>document.getElementById(id);
 const ids=["file-input","drop-zone","file-list","validation","start-audit","page-title","key-state","run-name","pause-run","download-result","progress-label","progress-percent","progress-bar","metric-leads","metric-batch","metric-completed","metric-status","metric-input-tokens","metric-cached-tokens","metric-output-tokens","metric-duration","metric-cost","live-log","clear-console","history-list","clear-history","api-key","remember-key","toggle-key","save-key","forget-key","key-message","batch-size","concurrency","model","input-field-config","ai-field-config","rule-config","add-rule","output-field-config","yes-values","no-values","additional-instructions","input-price","cached-price","output-price","save-settings","reset-settings","settings-message","toast","mobile-menu","active-job-switch","sort-field","sort-direction","app-version","export-settings","import-settings","import-settings-file","update-banner","update-banner-text","reload-app"];
 const els=Object.fromEntries(ids.map(id=>[id,$(id)]));
 const titles={new:"New audit",console:"Run console",history:"History",settings:"Settings"};
-const ENGINE_VERSION="latest-call-v2";
+const ENGINE_VERSION="latest-day-v3";
 const ACTIVE_JOB_KEY="leadlens.activeJobId";
 
 let parsedFiles=[],currentJob=null,displayLogs=true;
@@ -305,7 +305,7 @@ function renderFileList(){
     const title=document.createElement("strong");
     title.textContent=file.fileName;
     const meta=document.createElement("p");
-    meta.textContent=`${(file.fileSize/1048576).toFixed(1)} MB · ${file.sheetName} · ${file.leads.length.toLocaleString()} valid leads`;
+    meta.textContent=`${(file.fileSize/1048576).toFixed(1)} MB · ${file.sheetName} · ${file.leads.length.toLocaleString()} latest-day call rows`;
     copy.append(title,meta);
     left.append(icon,copy);
     const remove=document.createElement("button");
@@ -326,8 +326,8 @@ function updateValidationSummary(){
   const leads=parsedFiles.reduce((sum,file)=>sum+file.leads.length,0);
   const invalid=parsedFiles.reduce((sum,file)=>sum+(file.invalidRows||0),0);
   box.textContent=parsedFiles.length===1
-    ?`Ready: ${parsedFiles[0].rowCount.toLocaleString()} rows · ${leads.toLocaleString()} valid Indian mobile leads.${invalid?` ${invalid} invalid-mobile row(s) excluded.`:""}`
-    :`Ready: ${parsedFiles.length} separate workbooks · ${leads.toLocaleString()} total valid leads. Each file runs as its own audit (not merged).${invalid?` ${invalid} invalid-mobile row(s) excluded.`:" "}`;
+    ?`Ready: ${parsedFiles[0].rowCount.toLocaleString()} rows · ${leads.toLocaleString()} latest-day call row(s) to audit (all calls on each lead’s newest date).${invalid?` ${invalid} invalid-mobile row(s) excluded.`:""}`
+    :`Ready: ${parsedFiles.length} separate workbooks · ${leads.toLocaleString()} total latest-day call rows. Each file runs as its own audit (not merged).${invalid?` ${invalid} invalid-mobile row(s) excluded.`:" "}`;
 }
 
 async function handleFiles(fileList){
