@@ -1,5 +1,5 @@
 {
-  "version": "2.6.2",
+  "version": "2.6.0",
   "name": "LeadLens",
-  "notes": "gpt-5-nano: reasoning_effort=minimal + higher max_completion_tokens so JSON is not empty"
+  "notes": "Smarter history status + 30min first-talk SLA; progress moves on any API response; Leads/Calls/Audited metrics"
 }
