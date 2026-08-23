@@ -1,5 +1,5 @@
 {
-  "version": "2.4.3",
+  "version": "2.4.4",
   "name": "LeadLens",
-  "notes": "Fill-down Telecaller Name within each lead so blank follow-up rows keep the agent"
+  "notes": "Removed cache warmup — all batches start in the parallel pool immediately"
 }
