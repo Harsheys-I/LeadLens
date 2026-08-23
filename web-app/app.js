@@ -221,7 +221,7 @@ async function runJob(job){
   job.elapsedMs=job.elapsedMs||0;
   job.pendingBatches=job.pendingBatches||{};
   displayLogs=true;
-  const concurrency=Math.min(8,Math.max(1,Number(job.settings.concurrency)||1));
+  const concurrency=Math.min(20,Math.max(1,Number(job.settings.concurrency)||1));
   addLog(job,`Run started: continuous pool of ${concurrency} parallel batch${concurrency>1?"es":""}, batch size ${job.settings.batchSize}, model ${job.settings.model}, app ${APP_VERSION}.`);
   await putJob(job);
   if(!currentJob||currentJob.id===job.id||!controllers.has(currentJob.id))renderProgress(job);
@@ -653,7 +653,7 @@ els["add-rule"].onclick=()=>{settings=collectSettings();settings.rules.push({fie
 els["save-settings"].onclick=()=>{
   const next=collectSettings();
   if(!Number.isInteger(next.batchSize)||next.batchSize<1||next.batchSize>50){els["settings-message"].textContent="Batch size must be 1–50.";return;}
-  if(!Number.isInteger(next.concurrency)||next.concurrency<1||next.concurrency>8){els["settings-message"].textContent="Parallel batches must be 1–8.";return;}
+  if(!Number.isInteger(next.concurrency)||next.concurrency<1||next.concurrency>20){els["settings-message"].textContent="Parallel batches must be 1–20.";return;}
   if(!next.model){els["settings-message"].textContent="Enter a model name.";return;}
   if(!next.outputFields.some(field=>field.enabled)){els["settings-message"].textContent="Select at least one output Excel field.";return;}
   settings=next;

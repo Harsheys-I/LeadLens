@@ -1,5 +1,5 @@
 {
-  "version": "2.3.0",
+  "version": "2.3.1",
   "name": "LeadLens",
-  "notes": "Continuous parallel pool, error codes, compact tokens, configurable sort, settings import/export, update banner"
+  "notes": "Parallel batches max raised to 20"
 }

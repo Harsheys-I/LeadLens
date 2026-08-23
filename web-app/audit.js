@@ -1,4 +1,4 @@
-export const APP_VERSION = "2.3.0";
+export const APP_VERSION = "2.3.1";
 
 export const ERROR_CATALOG = [
   {code:"0",label:"Comment displaying -ve, but Lead Status is +ve",hint:"-ve comment vs +ve status"},
@@ -163,7 +163,7 @@ export function normalizeSettings(saved={}){
   if(!merged.outputFields.some(field=>field.id===merged.sort.field))merged.sort.field="project";
   merged.sort.direction=merged.sort.direction==="desc"?"desc":"asc";
   const concurrency=Number(merged.concurrency);
-  merged.concurrency=Number.isInteger(concurrency)?Math.min(8,Math.max(1,concurrency)):DEFAULT_SETTINGS.concurrency;
+  merged.concurrency=Number.isInteger(concurrency)?Math.min(20,Math.max(1,concurrency)):DEFAULT_SETTINGS.concurrency;
   const batchSize=Number(merged.batchSize);
   merged.batchSize=Number.isInteger(batchSize)?Math.min(50,Math.max(1,batchSize)):DEFAULT_SETTINGS.batchSize;
   const maps=buildErrorMaps(merged);
