@@ -1,5 +1,5 @@
 {
-  "version": "2.4.8",
+  "version": "2.4.9",
   "name": "LeadLens",
-  "notes": "All AI rules visible; comment history for status ladder; sticky settings toolbar"
+  "notes": "Removed numeric error codes; AI and Excel use full error type labels"
 }

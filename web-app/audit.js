@@ -1,21 +1,43 @@
-export const APP_VERSION = "2.4.8";
+export const APP_VERSION = "2.4.9";
 /** Bump when default AI rules / field defaults must refresh existing localStorage settings. */
-export const SETTINGS_SEED = 2;
+export const SETTINGS_SEED = 3;
 
-export const ERROR_CATALOG = [
-  {code:"0",label:"Comment displaying -ve, but Lead Status is +ve",hint:"-ve comment vs +ve status"},
-  {code:"1",label:"Comment displaying +ve, but Lead Status is -ve",hint:"+ve comment vs -ve status"},
-  {code:"2",label:"Followup Date is Missed",hint:"missed follow-up date"},
-  {code:"3",label:"Customer Location is empty",hint:"connected + empty/placeholder location"},
-  {code:"4",label:"Customer Requirement is empty",hint:"connected + empty/placeholder requirement"},
-  {code:"5",label:"Estimated Budget is empty",hint:"connected + empty/placeholder budget"},
-  {code:"6",label:"Analysis Parameter is Empty",hint:"analysis parameter empty"},
-  {code:"7",label:"Customer Requirement is set wrong",hint:"rq is call-status/comment junk, not a real customer requirement"}
+export const ERROR_TYPES = [
+  "Comment displaying -ve, but Lead Status is +ve",
+  "Comment displaying +ve, but Lead Status is -ve",
+  "Followup Date is Missed",
+  "Customer Location is empty",
+  "Customer Requirement is empty",
+  "Estimated Budget is empty",
+  "Analysis Parameter is Empty",
+  "Customer Requirement is set wrong"
 ];
-export const ERROR_TYPES = ERROR_CATALOG.map(item=>item.label);
-export const HIGH_SEVERITY_CODES = new Set(["0","1","2","3","7"]);
-export const HIGH_SEVERITY_ERRORS = new Set(ERROR_CATALOG.filter(item=>HIGH_SEVERITY_CODES.has(item.code)).map(item=>item.label));
-
+export const HIGH_SEVERITY_ERRORS = new Set([
+  "Comment displaying -ve, but Lead Status is +ve",
+  "Comment displaying +ve, but Lead Status is -ve",
+  "Followup Date is Missed",
+  "Customer Location is empty",
+  "Customer Requirement is set wrong"
+]);
+const CONNECTED_ONLY_ERRORS = new Set([
+  "Customer Location is empty",
+  "Customer Requirement is empty",
+  "Estimated Budget is empty",
+  "Customer Requirement is set wrong"
+]);
+const EMPTY_REQUIREMENT = "Customer Requirement is empty";
+const WRONG_REQUIREMENT = "Customer Requirement is set wrong";
+/** Old numeric codes → labels (ignored in prompts; kept only to normalize leftover saved settings). */
+const LEGACY_ERROR_CODES = {
+  "0":"Comment displaying -ve, but Lead Status is +ve",
+  "1":"Comment displaying +ve, but Lead Status is -ve",
+  "2":"Followup Date is Missed",
+  "3":"Customer Location is empty",
+  "4":"Customer Requirement is empty",
+  "5":"Estimated Budget is empty",
+  "6":"Analysis Parameter is Empty",
+  "7":"Customer Requirement is set wrong"
+};
 export const AI_FIELD_KEYS = {status:"s",comments:"c",next:"n",location:"l",requirement:"rq",budget:"b",connected:"k"};
 
 export const DEFAULT_INPUT_FIELDS = [
@@ -63,9 +85,9 @@ export const DEFAULT_OUTPUT_FIELDS = [
   {id:"buyingIntent",label:"Buying Intent",enabled:true},{id:"observation",label:"AI Observation",enabled:true},{id:"recommendation",label:"AI Recommendation",enabled:true}
 ];
 export const DEFAULT_RULES = [
-  {field:"Lead Status + Comments",instruction:`Allowed Lead Status labels only (case-insensitive): Prospect, Hot, Warm, Cold, Beyond Budget, Lost. Heat ladder highest→lowest: ${STATUS_LADDER_TEXT}. When c is an array, it is the FULL chronological comment history for the lead — read ALL entries, then judge whether CURRENT s (Lead Status on this call) still fits the LATEST meaningful customer tone. Example: earlier comments showed strong interest (status correctly Prospect), but the latest comment is neutral/cold/RNR-like and s is still Prospect/Hot → emit code 0. Latest comment clearly +ve/hot but s is Cold/Beyond Budget/Lost → emit code 1. RNR/CNP/busy alone is not a status upgrade. Do not keep high status after the conversation cooled. Neutral admin notes with no polarity shift are not mismatches.`,errors:"0,1"},
+  {field:"Lead Status + Comments",instruction:`Allowed Lead Status labels only (case-insensitive): Prospect, Hot, Warm, Cold, Beyond Budget, Lost. Heat ladder highest→lowest: ${STATUS_LADDER_TEXT}. When c is an array, it is the FULL chronological comment history for the lead — read ALL entries, then judge whether CURRENT s (Lead Status on this call) still fits the LATEST meaningful customer tone. Example: earlier comments showed strong interest (status correctly Prospect), but the latest comment is neutral/cold/RNR-like and s is still Prospect/Hot → emit "Comment displaying -ve, but Lead Status is +ve". Latest comment clearly +ve/hot but s is Cold/Beyond Budget/Lost → emit "Comment displaying +ve, but Lead Status is -ve". RNR/CNP/busy alone is not a status upgrade. Do not keep high status after the conversation cooled. Neutral admin notes with no polarity shift are not mismatches.`,errors:"Comment displaying -ve, but Lead Status is +ve | Comment displaying +ve, but Lead Status is -ve"},
   {field:"Comment quality",instruction:"Score q strictly. q must reflect how well Comments capture the real telecaller–customer conversation (need, budget, location preference, objection, decision-maker, next step). One-word/CRM crumbs like visited/RNR/CNP/busy/followup = q 0-2 max. Generic connected notes without customer detail = q <=4. Only rich descriptive talk earns 8-10. When c is an array, score THIS call's latest comment (last entry), using earlier entries only as context.",errors:""},
-  {field:"Customer Requirement",instruction:"ONLY when k=Yes: rq must be a real customer requirement. Empty/placeholder (., -, **, NA) => code 4. Call jargon (RNR, Visited, etc.) => code 7. If k is No or blank, NEVER emit 4 or 7.",errors:"4,7"},
+  {field:"Customer Requirement",instruction:`ONLY when k=Yes: rq must be a real customer requirement. Empty/placeholder (., -, **, NA) => "${EMPTY_REQUIREMENT}". Call jargon (RNR, Visited, etc.) => "${WRONG_REQUIREMENT}". If k is No or blank, NEVER emit those requirement errors.`,errors:`${EMPTY_REQUIREMENT} | ${WRONG_REQUIREMENT}`},
   {field:"AI Observation",instruction:"o is a QA judgment, NOT a rewrite of Comments. Forbidden: copying, lightly shortening, or paraphrasing c. Required: name what is missing/wrong/strong for audit (e.g. thin note, rq junk, status mismatch vs history, missing budget on connected call). 18-28 words.",errors:""},
   {field:"AI Recommendation",instruction:"r must be a concrete telecaller coaching action: what to ask/capture/correct on the next call (fields, questions, status fix down/up the Prospect→Lost ladder, follow-up discipline). Not vague ('follow up', 'update remarks'). 20-40 words, specific to THIS call's gaps.",errors:""},
   {field:"Buying intent",instruction:"i=1 only for genuine positive purchase interest in THIS call's latest comment/status; else i=0. Earlier history alone does not set i=1 if the latest comment cooled.",errors:""}
@@ -101,22 +123,22 @@ Empty string means unknown / not captured.
 OUTPUT CONTRACT (JSON schema a[] only)
 For each id return:
 - q: integer 0-10 comment quality
-- e: array of error CODE strings only (never full sentences)
+- e: array of exact Error Type labels from the allowed list (full text, never numeric codes)
 - i: 0 or 1 buying intent
 - o: 18-28 words QA observation (analysis, not a comment copy)
 - r: 20-40 words concrete coaching recommendation
 No severity field. No markdown. No extra keys.
 
-ERROR CODES (emit codes only)
-0 = -ve comment vs +ve status
-1 = +ve comment vs -ve status
-2 = missed follow-up date
-3 = connected + empty/placeholder location
-4 = connected + empty/placeholder requirement
-5 = connected + empty/placeholder budget
-6 = empty analysis parameter
-7 = requirement set wrong (call jargon / not a real customer requirement)
-Prefer e:[] over weak guesses. The app may also add 2-6 deterministically.
+ERROR TYPES (emit exact labels only — no codes, no paraphrases)
+- Comment displaying -ve, but Lead Status is +ve
+- Comment displaying +ve, but Lead Status is -ve
+- Followup Date is Missed
+- Customer Location is empty
+- Customer Requirement is empty
+- Estimated Budget is empty
+- Analysis Parameter is Empty
+- Customer Requirement is set wrong
+Prefer e:[] over weak guesses. The app may also add some empty-field errors deterministically.
 
 COMMENT QUALITY q — STRICT
 Comments must reflect the actual telecaller–customer talk (need, budget, locality preference, objection, decision-maker, next step).
@@ -130,8 +152,8 @@ HARD CAPS: visited / visit / RNR / CNP / busy / followup / SV alone or near-alon
 
 CUSTOMER REQUIREMENT rq
 Valid examples: 2BHK, 30x40 plot, Whitefield, east facing, under 90L need, possession in 2027, etc.
-INVALID when connected and non-blank (code 7): RNR, CNP, Visited, Site visit, Busy, Followup, Callback, Interested, Not interested, Connected, ringing, wrong number, status/comment dumps.
-Placeholder-only (., -, NA, nil) on connected call => code 4 (empty), not 7.
+INVALID when connected and non-blank ("Customer Requirement is set wrong"): RNR, CNP, Visited, Site visit, Busy, Followup, Callback, Interested, Not interested, Connected, ringing, wrong number, status/comment dumps.
+Placeholder-only (., -, NA, nil) on connected call => "Customer Requirement is empty", not "set wrong".
 
 BUYING INTENT i
 i=1 only for genuine purchase interest (site visit interest, options request, active shortlist, budget toward buy).
@@ -141,13 +163,13 @@ STATUS vs COMMENT
 Allowed Lead Status labels (case-insensitive): Prospect, Hot, Warm, Cold, Beyond Budget, Lost.
 Heat ladder highest→lowest: Prospect > Hot > Warm > Cold > Beyond Budget > Lost.
 Comments win. When c is an array, it is full chronological lead history — use ALL entries, then judge CURRENT s against the LATEST meaningful tone.
-Emit 0 when status is too hot vs latest comments (e.g. still Prospect after latest note cooled to neutral/cold/RNR).
-Emit 1 when status is too cold vs clear +ve latest interest.
+Emit "Comment displaying -ve, but Lead Status is +ve" when status is too hot vs latest comments (e.g. still Prospect after latest note cooled to neutral/cold/RNR).
+Emit "Comment displaying +ve, but Lead Status is -ve" when status is too cold vs clear +ve latest interest.
 RNR/CNP/busy alone does not justify keeping/upgrading to Prospect/Hot. Neutral / not-connected admin notes without polarity shift are NOT mismatches.
 
 CONNECTED GATING
-Codes 3, 4, 5, and 7 are ALLOWED ONLY when k=Yes.
-If k is No or "", NEVER emit 3, 4, 5, or 7 — even if l/rq/b are empty, "**", ".", or junk.
+"Customer Location is empty", "Customer Requirement is empty", "Estimated Budget is empty", and "Customer Requirement is set wrong" are ALLOWED ONLY when k=Yes.
+If k is No or "", NEVER emit those four — even if l/rq/b are empty, "**", ".", or junk.
 
 STYLE — OBSERVATION (o) AND RECOMMENDATION (r)
 o = auditor judgment about data quality / process gaps / mismatches. It must NOT copy, trim, or paraphrase Comments (c). Bad o examples: restating "customer visited", "wants 2BHK Whitefield". Good o examples: "Connected call note is non-descriptive; requirement captured as visit jargon; budget missing." / "Status says Interested but comment shows clear rejection — polarity mismatch."
@@ -156,11 +178,11 @@ Never dump the full comment into o or r. Never restate this handbook.
 
 EXAMPLES
 A) c="visited" => q<=2, usually i=0.
-B) k=Yes, rq="." or "" => code 4.
-C) k=Yes, rq="RNR" or "Visited" => code 7.
+B) k=Yes, rq="." or "" => "Customer Requirement is empty".
+C) k=Yes, rq="RNR" or "Visited" => "Customer Requirement is set wrong".
 D) k=Yes, rq="2BHK Whitefield" => rq OK.
 E) day[] siblings present: score/flag THIS call only; siblings are context.
-F) s=Interested, c=customer said not interested stop calling => code 0, i=0.
+F) s=Interested, c=customer said not interested stop calling => status -ve/+ve mismatch, i=0.
 G) s=Hot, c=wants 2BHK under 90L Saturday visit => high q, i=1, e:[].
 H) k=No, c=ringing no answer => i=0, usually e:[] from model.
 
@@ -174,10 +196,10 @@ EDGE CASES
 - CRM labels Hot/Warm/Cold/NI/CNP/Busy need comment polarity, not label alone.
 - "Just enquiry/browsing" with no next step is usually i=0.
 - Callback-after-salary with active locality search can support i=1.
-- If history arrays exist for a field, use as context. For Comments history arrays, status mismatch (0/1) must weigh the full timeline then the latest tone; q and i still focus on THIS call's latest comment unless a run check says otherwise.
+- If history arrays exist for a field, use as context. For Comments history arrays, status mismatch must weigh the full timeline then the latest tone; q and i still focus on THIS call's latest comment unless a run check says otherwise.
 
 CACHE STABILITY PAD (identical every request — do not vary)
-LeadLens keeps this handbook byte-stable so automatic prompt caching can reuse the prefix across batches in a run and across nearby reruns. Static instructions stay first; configured run checks follow; unique lead payloads stay last. Routing uses a stable prompt_cache_key derived from model + rules. Parallel workers must warm this prefix once before fanning out. Treat the following checklist as fixed operating procedure: verify id echo, apply q hard caps, distinguish rq empty vs wrong, gate l/rq/b on connected, keep outputs compact, never invent sibling calls, never merge two ids, never emit full error sentences, never emit severity, never wrap JSON in fences, never discuss pricing or tokens, never mention cache mechanics in o/r. Repeatable discipline improves audit consistency across telecalling QA shifts, projects, and batch sizes while preserving privacy of customer records inside the browser-only LeadLens workflow.
+LeadLens keeps this handbook byte-stable so automatic prompt caching can reuse the prefix across batches in a run and across nearby reruns. Static instructions stay first; configured run checks follow; unique lead payloads stay last. Routing uses a stable prompt_cache_key derived from model + rules. Parallel workers must warm this prefix once before fanning out. Treat the following checklist as fixed operating procedure: verify id echo, apply q hard caps, distinguish rq empty vs wrong, gate l/rq/b on connected, keep outputs compact, never invent sibling calls, never merge two ids, never invent error labels, never emit severity, never wrap JSON in fences, never discuss pricing or tokens, never mention cache mechanics in o/r. Repeatable discipline improves audit consistency across telecalling QA shifts, projects, and batch sizes while preserving privacy of customer records inside the browser-only LeadLens workflow.
 
 This handbook is identical across batches for prompt caching.`;
 
@@ -242,35 +264,37 @@ function dayKey(date){
 }
 const defaultsById=(saved,fallback)=>fallback.map(base=>({...base,...((Array.isArray(saved)?saved:[]).find(item=>item.id===base.id)||{})}));
 
+export function splitErrorList(value){
+  return String(value||"")
+    .split("|")
+    .flatMap(part=>part.includes(",")&&/^\s*\d+(\s*,\s*\d+)*\s*$/.test(part)?part.split(","):[part])
+    .map(part=>clean(part))
+    .filter(Boolean);
+}
+
 export function buildErrorMaps(settings=DEFAULT_SETTINGS){
-  const byCode=new Map(ERROR_CATALOG.map(item=>[item.code,{...item}]));
-  const byLabel=new Map(ERROR_CATALOG.map(item=>[norm(item.label),item.code]));
-  let next=8;
+  const byNorm=new Map(ERROR_TYPES.map(label=>[norm(label),label]));
   for(const rule of settings.rules||[]){
-    for(const part of String(rule.errors||"").split(",")){
-      const token=clean(part);
-      if(!token)continue;
-      if(byCode.has(token))continue;
-      if(byLabel.has(norm(token)))continue;
-      const code=String(next++);
-      byCode.set(code,{code,label:token,hint:token.slice(0,48)});
-      byLabel.set(norm(token),code);
+    for(const token of splitErrorList(rule.errors)){
+      const legacy=LEGACY_ERROR_CODES[token];
+      const label=legacy||token;
+      if(!byNorm.has(norm(label)))byNorm.set(norm(label),label);
     }
   }
   const resolve=token=>{
     const raw=clean(token);
     if(!raw)return"";
-    if(byCode.has(raw))return raw;
-    return byLabel.get(norm(raw))||"";
+    if(LEGACY_ERROR_CODES[raw])return LEGACY_ERROR_CODES[raw];
+    return byNorm.get(norm(raw))||"";
   };
-  const labelOf=code=>byCode.get(clean(code))?.label||"";
-  return{byCode,byLabel,resolve,labelOf};
+  const allowed=new Set([...byNorm.values()]);
+  return{resolve,allowed,labels:[...allowed]};
 }
 
 function normalizeRuleErrors(rules,maps){
   return (rules||[]).map(rule=>{
-    const codes=String(rule.errors||"").split(",").map(part=>maps.resolve(part)).filter(Boolean);
-    return{...rule,errors:[...new Set(codes)].join(",")};
+    const labels=splitErrorList(rule.errors).map(part=>maps.resolve(part)).filter(Boolean);
+    return{...rule,errors:[...new Set(labels)].join(" | ")};
   });
 }
 
@@ -334,18 +358,18 @@ export function indianMobile(value){let digits=clean(value).replace(/\.0$/,"").r
 function fieldColumns(headers,fields){const normalized=headers.map(header=>({header,key:norm(header)}));return Object.fromEntries(fields.filter(field=>field.required||field.enabled!==false).map(field=>{const match=normalized.find(item=>list(field.aliases).includes(item.key));return[field.id,match?.header||""];}));}
 function correctedAiLocation(project,location){const exceptions=new Set(["guru punvaanii eureka|bidadi","guru punvaanii ernika|anekal","guru punvaanii eka|anekal","guru punvaanii elegance|bheemenahalli"]);return exceptions.has(`${norm(project)}|${norm(location)}`)?"":location;}
 function connectedFromParameter(parameter,settings){const value=norm(parameter);if(!value)return"";if(list(settings.yesValues).includes(value)||value==="yes")return"Yes";if(list(settings.noValues).includes(value)||value==="no")return"No";return"";}
-function deterministicErrorCodes(call,aiLocation){
-  const codes=[];
+function deterministicErrors(call,aiLocation){
+  const errors=[];
   const today=new Date();today.setHours(0,0,0,0);
-  if(call.nextDate&&call.nextDate<today)codes.push("2");
-  if(isBlankish(call.parameter))codes.push("6");
+  if(call.nextDate&&call.nextDate<today)errors.push("Followup Date is Missed");
+  if(isBlankish(call.parameter))errors.push("Analysis Parameter is Empty");
   if(call.connected==="Yes"){
-    if(isBlankish(call.location))codes.push("3");
-    if(isBlankish(call.requirement))codes.push("4");
-    else if(looksLikeWrongRequirement(call.requirement))codes.push("7");
-    if(isBlankish(call.budget))codes.push("5");
+    if(isBlankish(call.location))errors.push("Customer Location is empty");
+    if(isBlankish(call.requirement))errors.push(EMPTY_REQUIREMENT);
+    else if(looksLikeWrongRequirement(call.requirement))errors.push(WRONG_REQUIREMENT);
+    if(isBlankish(call.budget))errors.push("Estimated Budget is empty");
   }
-  return codes;
+  return errors;
 }
 function contextValue(id,record,aiLocation){if(id==="connected")return record.connected;if(id==="next")return dateText(record.nextDate||record.next);if(id==="location")return aiLocation;return record[id]||"";}
 function callSnapshot(record){
@@ -439,7 +463,7 @@ export function parseWorkbook(arrayBuffer,rawSettings=DEFAULT_SETTINGS){
         groupId,
         staticValues,
         auditContext,
-        deterministicErrors:deterministicErrorCodes(call,aiLocation)
+        deterministicErrors:deterministicErrors(call,aiLocation)
       });
     });
   }
@@ -449,19 +473,13 @@ export function parseWorkbook(arrayBuffer,rawSettings=DEFAULT_SETTINGS){
 
 function buildPrompt(settings){
   const maps=buildErrorMaps(settings);
-  // Stable catalog order first (helps identical prefixes), then any custom codes.
-  const catalogCodes=ERROR_CATALOG.map(item=>`${item.code}:${item.hint||item.label}`);
-  const customCodes=[...maps.byCode.entries()]
-    .filter(([code])=>!ERROR_CATALOG.some(item=>item.code===code))
-    .map(([code,item])=>`${code}:${item.hint||item.label}`);
-  const codeLegend=[...catalogCodes,...customCodes].join(" | ");
+  const errorLegend=maps.labels.join(" | ");
   const rules=settings.rules.filter(rule=>clean(rule.instruction)).map((rule,index)=>{
-    const codes=String(rule.errors||"").split(",").map(clean).filter(Boolean);
-    return`${index+1}. ${clean(rule.field)||"check"}: ${clean(rule.instruction)}${codes.length?` codes:${codes.join(",")}`:""}`;
+    const errors=splitErrorList(rule.errors);
+    return`${index+1}. ${clean(rule.field)||"check"}: ${clean(rule.instruction)}${errors.length?` errors:${errors.join(" | ")}`:""}`;
   }).join("\n");
   const extra=clean(settings.additionalInstructions);
-  // Handbook first (cacheable), then run config (stable within a job), lead data stays in the user message.
-  return `${CACHE_HANDBOOK}\n\nRUN CODES: ${codeLegend}\n\nRUN CHECKS:\n${rules||"none"}${extra?`\n\nEXTRA:\n${extra}`:""}`;
+  return `${CACHE_HANDBOOK}\n\nALLOWED ERROR TYPES: ${errorLegend}\n\nRUN CHECKS:\n${rules||"none"}${extra?`\n\nEXTRA:\n${extra}`:""}`;
 }
 function promptCacheKey(settings){
   // Keep key stable for the whole run / identical settings so parallel requests route together.
@@ -517,40 +535,40 @@ function isCommentEcho(observation,comments){
   for(const word of ow)if(cw.has(word))overlap++;
   return overlap/ow.size>=0.72;
 }
-function fallbackObservation(row,codes,q){
+function fallbackObservation(row,errors,q){
   const bits=[];
   if(q<=3)bits.push("Comment lacks a real telecaller–customer conversation.");
-  if(codes.includes("0")||codes.includes("1"))bits.push("Lead status conflicts with comment polarity.");
-  if(codes.includes("4"))bits.push("Connected call has empty/placeholder requirement.");
-  if(codes.includes("7"))bits.push("Requirement field holds call jargon, not a customer need.");
-  if(codes.includes("3"))bits.push("Connected call missing usable location.");
-  if(codes.includes("5"))bits.push("Connected call missing budget.");
-  if(codes.includes("2"))bits.push("Follow-up date is already past.");
-  if(codes.includes("6"))bits.push("Analysis parameter is blank.");
+  if(errors.some(e=>/Lead Status/i.test(e)))bits.push("Lead status conflicts with comment polarity.");
+  if(errors.includes(EMPTY_REQUIREMENT))bits.push("Connected call has empty/placeholder requirement.");
+  if(errors.includes(WRONG_REQUIREMENT))bits.push("Requirement field holds call jargon, not a customer need.");
+  if(errors.includes("Customer Location is empty"))bits.push("Connected call missing usable location.");
+  if(errors.includes("Estimated Budget is empty"))bits.push("Connected call missing budget.");
+  if(errors.includes("Followup Date is Missed"))bits.push("Follow-up date is already past.");
+  if(errors.includes("Analysis Parameter is Empty"))bits.push("Analysis parameter is blank.");
   if(!bits.length)bits.push("Review note quality and field completeness for this call.");
   return clipWords(bits.join(" "),28);
 }
-function fallbackRecommendation(row,codes,q){
+function fallbackRecommendation(row,errors,q){
   const bits=[];
   if(q<=4)bits.push("Rewrite remarks with what the customer said: need, locality, budget, objection, and next step.");
-  if(codes.includes("7")||codes.includes("4"))bits.push("On next connected call capture a real requirement (config/area), not RNR/Visited/status text.");
-  if(codes.includes("3"))bits.push("Ask and save preferred micro-market/location.");
-  if(codes.includes("5"))bits.push("Ask and save budget band before ending the call.");
-  if(codes.includes("0")||codes.includes("1"))bits.push("Align Lead Status on the Prospect→Lost ladder to the latest comment tone.");
-  if(codes.includes("2"))bits.push("Call on/before the promised follow-up and set a fresh dated next step.");
+  if(errors.includes(WRONG_REQUIREMENT)||errors.includes(EMPTY_REQUIREMENT))bits.push("On next connected call capture a real requirement (config/area), not RNR/Visited/status text.");
+  if(errors.includes("Customer Location is empty"))bits.push("Ask and save preferred micro-market/location.");
+  if(errors.includes("Estimated Budget is empty"))bits.push("Ask and save budget band before ending the call.");
+  if(errors.some(e=>/Lead Status/i.test(e)))bits.push("Align Lead Status on the Prospect→Lost ladder to the latest comment tone.");
+  if(errors.includes("Followup Date is Missed"))bits.push("Call on/before the promised follow-up and set a fresh dated next step.");
   if(!bits.length)bits.push("Confirm interest, capture missing fields, and lock a dated next action the same day.");
   return clipWords(bits.join(" "),40);
 }
-function finalizeObservation(aiText,row,codes,q){
+function finalizeObservation(aiText,row,errors,q){
   const clipped=clipWords(aiText,28);
-  if(!clipped||isCommentEcho(clipped,row.comments))return fallbackObservation(row,codes,q);
+  if(!clipped||isCommentEcho(clipped,row.comments))return fallbackObservation(row,errors,q);
   return clipped;
 }
-function finalizeRecommendation(aiText,row,codes,q){
+function finalizeRecommendation(aiText,row,errors,q){
   const clipped=clipWords(aiText,40);
   const words=clipped.split(/\s+/).filter(Boolean);
   const vague=/^(follow\s*up|call\s*again|update\s*(comments?|remarks?)|try\s*later|connect\s*again)\.?$/i.test(clipped);
-  if(!clipped||words.length<10||vague)return fallbackRecommendation(row,codes,q);
+  if(!clipped||words.length<10||vague)return fallbackRecommendation(row,errors,q);
   return clipped;
 }
 
@@ -562,7 +580,7 @@ async function requestAudit(apiKey,settings,leads,signal,log,onUsage){
     body:JSON.stringify({
       model:settings.model,
       temperature:0,
-      max_tokens:Math.max(400,leads.length*120),
+      max_tokens:Math.max(500,leads.length*140),
       prompt_cache_key:promptCacheKey(settings),
       messages:[
         {role:"system",content:buildPrompt(settings)},
@@ -590,12 +608,11 @@ async function requestAudit(apiKey,settings,leads,signal,log,onUsage){
 }
 
 const unique=values=>[...new Set(values.filter(Boolean))];
-const severityFromCodes=codes=>!codes.length?"NONE":codes.some(code=>HIGH_SEVERITY_CODES.has(code))?"HIGH":"MEDIUM";
+const severityFromErrors=errors=>!errors.length?"NONE":errors.some(error=>HIGH_SEVERITY_ERRORS.has(error))?"HIGH":"MEDIUM";
 
 export async function auditBatch(apiKey,rawSettings,batch,signal,log,onUsage){
   const settings=normalizeSettings(rawSettings);
   const maps=buildErrorMaps(settings);
-  const allowed=new Set([...maps.byCode.keys()]);
   let result,lastError;
   for(let attempt=1;attempt<=3;attempt++){
     try{result=await requestAudit(apiKey,settings,batch,signal,log,onUsage);break;}
@@ -618,25 +635,22 @@ export async function auditBatch(apiKey,rawSettings,batch,signal,log,onUsage){
   if(missing.length)throw new Error(`OpenAI still omitted ${missing.length} lead(s). Saved batches are safe; resume to retry.`);
   return batch.map(lead=>{
     const ai=byId.get(lead.leadId);
-    const aiCodes=Array.isArray(ai.e)?ai.e.map(code=>maps.resolve(code)).filter(code=>allowed.has(code)):[];
-    // Connected-only field errors must never stick when Connected is not Yes (AI sometimes ignores gating).
-    const connectedOnly=new Set(["3","4","5","7"]);
+    const aiErrors=Array.isArray(ai.e)?ai.e.map(token=>maps.resolve(token)).filter(label=>maps.allowed.has(label)):[];
     const connectedYes=lead.staticValues.connected==="Yes";
-    const filteredAi=connectedYes?aiCodes:aiCodes.filter(code=>!connectedOnly.has(code));
-    const filteredDet=connectedYes?lead.deterministicErrors:lead.deterministicErrors.filter(code=>!connectedOnly.has(code));
+    const filteredAi=connectedYes?aiErrors:aiErrors.filter(label=>!CONNECTED_ONLY_ERRORS.has(label));
+    const filteredDet=connectedYes?lead.deterministicErrors:lead.deterministicErrors.filter(label=>!CONNECTED_ONLY_ERRORS.has(label));
     const merged=unique([...filteredDet,...filteredAi]);
-    const codes=merged.includes("4")?merged.filter(code=>code!=="7"):merged;
-    const labels=codes.map(code=>maps.labelOf(code)).filter(Boolean);
+    const errors=merged.includes(EMPTY_REQUIREMENT)?merged.filter(label=>label!==WRONG_REQUIREMENT):merged;
     const intent=Number(ai.i)===1||clean(ai.i)==="1"||norm(ai.i)==="yes"?"Yes":"No";
     const q=clampCommentQuality(ai.q,lead.staticValues.comments);
     return{
       ...lead.staticValues,
       commentQuality:q,
-      errorTypes:labels.length?labels.join(", "):"None",
-      errorSeverity:severityFromCodes(codes),
+      errorTypes:errors.length?errors.join(", "):"None",
+      errorSeverity:severityFromErrors(errors),
       buyingIntent:intent,
-      observation:finalizeObservation(ai.o,lead.staticValues,codes,q),
-      recommendation:finalizeRecommendation(ai.r,lead.staticValues,codes,q)
+      observation:finalizeObservation(ai.o,lead.staticValues,errors,q),
+      recommendation:finalizeRecommendation(ai.r,lead.staticValues,errors,q)
     };
   });
 }

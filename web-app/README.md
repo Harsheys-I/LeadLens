@@ -15,8 +15,7 @@ A static, privacy-first telecalling audit app designed for GitHub Pages.
 ## Token design
 
 - Stable compact handbook + short field keys (`s`,`c`,`n`,…) at the front for prompt caching; lead payloads last.
-- AI returns short keys and **error codes** (`0`–`6`); the app expands codes to full Excel error text.
-- Observation/recommendation are word-capped; severity is computed in-app (not by the model).
+- AI returns short keys and **full error type labels** in `e[]` (no numeric codes). Severity is computed in-app.
 - Console shows total input, cached input, and **billable input** (total − cached).
 
 ## Parallel batches

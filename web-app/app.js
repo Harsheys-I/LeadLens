@@ -533,7 +533,7 @@ function ruleOptions(current){
 function renderRules(){
   els["rule-config"].replaceChildren();
   for(let index=0;index<settings.rules.length;index++){
-    const rule=settings.rules[index],row=configRow("rule-row"),field=document.createElement("select"),instruction=document.createElement("textarea"),errors=input("text",rule.errors,"Possible error codes"),remove=document.createElement("button");
+    const rule=settings.rules[index],row=configRow("rule-row"),field=document.createElement("select"),instruction=document.createElement("textarea"),errors=input("text",rule.errors,"Possible error types"),remove=document.createElement("button");
     field.dataset.ruleField=index;
     instruction.dataset.ruleInstruction=index;
     errors.dataset.ruleErrors=index;
@@ -547,7 +547,7 @@ function renderRules(){
     instruction.value=rule.instruction||"";
     instruction.rows=3;
     instruction.placeholder="What should the AI validate?";
-    errors.placeholder="Error codes, e.g. 0,1 (not full sentences)";
+    errors.placeholder="Error types separated by |";
     remove.type="button";
     remove.className="text-button";
     remove.textContent="Remove";
