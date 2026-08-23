@@ -5,7 +5,7 @@ const $=id=>document.getElementById(id);
 const ids=["file-input","drop-zone","file-list","validation","start-audit","page-title","key-state","run-name","pause-run","download-result","progress-label","progress-percent","progress-bar","metric-leads","metric-excel-rows","metric-batch","metric-completed","metric-status","metric-input-tokens","metric-cached-tokens","metric-output-tokens","metric-duration","metric-cost","live-log","clear-console","history-list","clear-history","api-key","remember-key","toggle-key","save-key","forget-key","key-message","batch-size","concurrency","model","input-field-config","add-input-field","ai-field-config","rule-config","add-rule","output-field-config","yes-values","no-values","additional-instructions","input-price","cached-price","output-price","save-settings","reset-settings","settings-message","toast","mobile-menu","active-job-switch","sort-field","sort-direction","app-version","export-settings","import-settings","import-settings-file","update-banner","update-banner-text","reload-app"];
 const els=Object.fromEntries(ids.map(id=>[id,$(id)]));
 const titles={new:"New audit",console:"Run console",history:"History",settings:"Settings"};
-const ENGINE_VERSION="latest-day-v3";
+const ENGINE_VERSION="latest-day-v4";
 const ACTIVE_JOB_KEY="leadlens.activeJobId";
 
 let parsedFiles=[],currentJob=null,displayLogs=true;
@@ -74,12 +74,27 @@ function uniqueLeadCount(job){
   for(const row of job.results||[])keys.add(`${row.project||""} | ${row.mobile||""}`);
   return keys.size||job.totalLeads||0;
 }
+/** Group call-rows by project+mobile so batch size means N leads (not N calls). */
+function groupCallRowsByLead(callRows){
+  const map=new Map();
+  for(const row of callRows||[]){
+    const key=row.groupId||`${row.staticValues?.project||""} | ${row.staticValues?.mobile||""}`||row.leadId;
+    if(!map.has(key))map.set(key,[]);
+    map.get(key).push(row);
+  }
+  return[...map.values()];
+}
+function leadBatchCount(job){
+  const leadCount=uniqueLeadCount(job);
+  const batchSize=Math.max(1,Number(job.settings?.batchSize)||1);
+  return Math.ceil(leadCount/batchSize)||0;
+}
 function renderProgress(job){
   if(!job)return;
   currentJob=job;
   setActiveJobId(job.id);
-  const total=job.totalLeads||0,done=job.results?.length||0,pct=total?Math.round(done/total*100):0;
-  const batchSize=job.settings?.batchSize||1,batches=Math.ceil(total/batchSize),usage=job.tokenUsage||{};
+  const totalCalls=job.totalLeads||0,done=job.results?.length||0,pct=totalCalls?Math.round(done/totalCalls*100):0;
+  const batches=leadBatchCount(job),usage=job.tokenUsage||{};
   const concurrency=job.settings?.concurrency||1;
   const billable=Math.max(0,number(usage.input)-number(usage.cached));
   els["run-name"].textContent=job.fileName||"No active audit";
@@ -88,8 +103,8 @@ function renderProgress(job){
   els["progress-bar"].style.width=`${pct}%`;
   els["metric-leads"].textContent=uniqueLeadCount(job)||"—";
   if(els["metric-excel-rows"])els["metric-excel-rows"].textContent=job.rowCount?Number(job.rowCount).toLocaleString():"—";
-  els["metric-batch"].textContent=total?`${Math.min((job.nextBatch||0)+1,batches)} / ${batches}`:"—";
-  els["metric-completed"].textContent=total?`${done} / ${total}`:"—";
+  els["metric-batch"].textContent=batches?`${Math.min((job.nextBatch||0)+1,batches)} / ${batches}`:"—";
+  els["metric-completed"].textContent=totalCalls?`${done} / ${totalCalls}`:"—";
   els["metric-status"].textContent=job.status?job.status[0].toUpperCase()+job.status.slice(1):"Idle";
   els["metric-input-tokens"].textContent=`${number(usage.input).toLocaleString()} (${billable.toLocaleString()} billable)`;
   els["metric-cached-tokens"].textContent=number(usage.cached).toLocaleString();
@@ -230,13 +245,14 @@ async function runJob(job){
   job.pendingBatches=job.pendingBatches||{};
   displayLogs=true;
   const concurrency=Math.min(20,Math.max(1,Number(job.settings.concurrency)||1));
-  addLog(job,`Run started: live pool of ${concurrency} (next batch fires the instant one frees a slot), batch size ${job.settings.batchSize}, model ${job.settings.model}, app ${APP_VERSION}. Checkpoints stay in order — later batches may finish API first and wait.`);
+  addLog(job,`Run started: live pool of ${concurrency} (next batch fires the instant one frees a slot), batch size ${job.settings.batchSize} leads, model ${job.settings.model}, app ${APP_VERSION}. Checkpoints stay in order — later batches may finish API first and wait.`);
   await putJob(job);
   if(!currentJob||currentJob.id===job.id||!controllers.has(currentJob.id))renderProgress(job);
   showView("console");
 
-  const batchSize=job.settings.batchSize;
-  const totalBatches=Math.ceil(job.leads.length/batchSize);
+  const batchSize=Math.max(1,Number(job.settings.batchSize)||1);
+  const leadGroups=groupCallRowsByLead(job.leads);
+  const totalBatches=Math.ceil(leadGroups.length/batchSize);
   const pending=job.pendingBatches||{};
   // Full remaining work pre-queued; workers pull instantly when a slot frees.
   const queue=[];
@@ -264,10 +280,11 @@ async function runJob(job){
     while(!fatalError&&!controller.signal.aborted){
       const index=queue.shift();
       if(index===undefined)return;
-      const batch=job.leads.slice(index*batchSize,(index+1)*batchSize);
+      const leadSlice=leadGroups.slice(index*batchSize,(index+1)*batchSize);
+      const batch=leadSlice.flat();
       launched++;
       if(!quietLogs||launched<=concurrency||launched%concurrency===1||index===totalBatches-1){
-        addLog(job,`Dispatch batch ${index+1}/${totalBatches} (${batch.length} calls) · queue left ${queue.length} · pool ${concurrency}.`);
+        addLog(job,`Dispatch batch ${index+1}/${totalBatches} (${leadSlice.length} leads · ${batch.length} call${batch.length===1?"":"s"}) · queue left ${queue.length} · pool ${concurrency}.`);
       }
       throttleProgress(job);
       try{
@@ -465,7 +482,7 @@ async function renderHistory(){
     meta.className="history-meta";
     meta.textContent=legacy
       ?`${timeText(job.createdAt)} · previous engine result — upload the file and run it again for v2 rules.`
-      :`${timeText(job.createdAt)} · ${uniqueLeadCount(job)} leads · ${job.results?.length||0}/${job.totalLeads} audited · ${durationText(job.elapsedMs||0)} · cost ${estimatedCost(job).toFixed(4)} · cached ${number(job.tokenUsage?.cached).toLocaleString()}`;
+      :`${timeText(job.createdAt)} · ${uniqueLeadCount(job)} leads · ${job.results?.length||0}/${job.totalLeads} calls · ${durationText(job.elapsedMs||0)} · cost ${estimatedCost(job).toFixed(4)} · cached ${number(job.tokenUsage?.cached).toLocaleString()}`;
     info.append(title,document.createTextNode(" "),status,meta);
     actions.className="history-actions";
     const view=document.createElement("button");

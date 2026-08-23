@@ -1,5 +1,5 @@
 {
-  "version": "2.5.2",
+  "version": "2.5.3",
   "name": "LeadLens",
-  "notes": "Console Leads = unique project+mobile; Audited = call rows"
+  "notes": "Batch by leads; Calls metric = latest-day call rows"
 }

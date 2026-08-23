@@ -1,4 +1,4 @@
-export const APP_VERSION = "2.5.2";
+export const APP_VERSION = "2.5.3";
 /** Bump when default AI rules / field defaults must refresh existing localStorage settings. */
 export const SETTINGS_SEED = 4;
 
