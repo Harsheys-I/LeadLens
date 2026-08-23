@@ -1,4 +1,6 @@
-export const APP_VERSION = "2.4.7";
+export const APP_VERSION = "2.4.8";
+/** Bump when default AI rules / field defaults must refresh existing localStorage settings. */
+export const SETTINGS_SEED = 2;
 
 export const ERROR_CATALOG = [
   {code:"0",label:"Comment displaying -ve, but Lead Status is +ve",hint:"-ve comment vs +ve status"},
@@ -31,11 +33,23 @@ export const DEFAULT_INPUT_FIELDS = [
   {id:"budget",label:"Estimated Budget",aliases:"estimated budget, budget",required:false}
 ];
 export const DEFAULT_AI_FIELDS = [
-  {id:"status",label:"Lead Status",enabled:true,history:false},{id:"comments",label:"Comments",enabled:true,history:false},
+  {id:"status",label:"Lead Status",enabled:true,history:false},
+  {id:"comments",label:"Comments",enabled:true,history:true},
   {id:"next",label:"Next Followup Date",enabled:true,history:false},{id:"location",label:"Customer Location",enabled:true,history:false},
   {id:"requirement",label:"Customer Requirement",enabled:true,history:false},{id:"budget",label:"Estimated Budget",enabled:true,history:false},
   {id:"connected",label:"Connected",enabled:true,history:false}
 ];
+
+/** Allowed Lead Status labels (case-insensitive). Rank: Prospect highest → Lost lowest. */
+export const LEAD_STATUS_LADDER = [
+  {label:"Prospect",rank:6},
+  {label:"Hot",rank:5},
+  {label:"Warm",rank:4},
+  {label:"Cold",rank:3},
+  {label:"Beyond Budget",rank:2},
+  {label:"Lost",rank:1}
+];
+const STATUS_LADDER_TEXT = LEAD_STATUS_LADDER.map(item=>item.label).join(" > ") + " (highest → lowest)";
 export const DEFAULT_OUTPUT_FIELDS = [
   {id:"project",label:"Project Name",enabled:true},{id:"mobile",label:"Mobile Number",enabled:true},
   {id:"callDate",label:"Call Date",enabled:true},{id:"dayCallIndex",label:"Call # on Day",enabled:true},
@@ -49,12 +63,12 @@ export const DEFAULT_OUTPUT_FIELDS = [
   {id:"buyingIntent",label:"Buying Intent",enabled:true},{id:"observation",label:"AI Observation",enabled:true},{id:"recommendation",label:"AI Recommendation",enabled:true}
 ];
 export const DEFAULT_RULES = [
-  {field:"Lead Status + Comments",instruction:"Comments are source of truth. Emit code 0 only for clear -ve comment vs +ve status. Emit code 1 only for clear +ve comment vs -ve status. Neutral/not-connected is not a mismatch.",errors:"0,1"},
-  {field:"Comment quality",instruction:"Score q strictly. q must reflect how well Comments capture the real telecaller–customer conversation (need, budget, location preference, objection, decision-maker, next step). One-word/CRM crumbs like visited/RNR/CNP/busy/followup = q 0-2 max. Generic connected notes without customer detail = q <=4. Only rich descriptive talk earns 8-10.",errors:""},
+  {field:"Lead Status + Comments",instruction:`Allowed Lead Status labels only (case-insensitive): Prospect, Hot, Warm, Cold, Beyond Budget, Lost. Heat ladder highest→lowest: ${STATUS_LADDER_TEXT}. When c is an array, it is the FULL chronological comment history for the lead — read ALL entries, then judge whether CURRENT s (Lead Status on this call) still fits the LATEST meaningful customer tone. Example: earlier comments showed strong interest (status correctly Prospect), but the latest comment is neutral/cold/RNR-like and s is still Prospect/Hot → emit code 0. Latest comment clearly +ve/hot but s is Cold/Beyond Budget/Lost → emit code 1. RNR/CNP/busy alone is not a status upgrade. Do not keep high status after the conversation cooled. Neutral admin notes with no polarity shift are not mismatches.`,errors:"0,1"},
+  {field:"Comment quality",instruction:"Score q strictly. q must reflect how well Comments capture the real telecaller–customer conversation (need, budget, location preference, objection, decision-maker, next step). One-word/CRM crumbs like visited/RNR/CNP/busy/followup = q 0-2 max. Generic connected notes without customer detail = q <=4. Only rich descriptive talk earns 8-10. When c is an array, score THIS call's latest comment (last entry), using earlier entries only as context.",errors:""},
   {field:"Customer Requirement",instruction:"ONLY when k=Yes: rq must be a real customer requirement. Empty/placeholder (., -, **, NA) => code 4. Call jargon (RNR, Visited, etc.) => code 7. If k is No or blank, NEVER emit 4 or 7.",errors:"4,7"},
-  {field:"AI Observation",instruction:"o is a QA judgment, NOT a rewrite of Comments. Forbidden: copying, lightly shortening, or paraphrasing c. Required: name what is missing/wrong/strong for audit (e.g. thin note, rq junk, status mismatch, missing budget on connected call). 18-28 words.",errors:""},
-  {field:"AI Recommendation",instruction:"r must be a concrete telecaller coaching action: what to ask/capture/correct on the next call (fields, questions, status fix, follow-up discipline). Not vague ('follow up', 'update remarks'). 20-40 words, specific to THIS call's gaps.",errors:""},
-  {field:"Buying intent",instruction:"i=1 only for genuine positive purchase interest in this call's comment/status; else i=0.",errors:""}
+  {field:"AI Observation",instruction:"o is a QA judgment, NOT a rewrite of Comments. Forbidden: copying, lightly shortening, or paraphrasing c. Required: name what is missing/wrong/strong for audit (e.g. thin note, rq junk, status mismatch vs history, missing budget on connected call). 18-28 words.",errors:""},
+  {field:"AI Recommendation",instruction:"r must be a concrete telecaller coaching action: what to ask/capture/correct on the next call (fields, questions, status fix down/up the Prospect→Lost ladder, follow-up discipline). Not vague ('follow up', 'update remarks'). 20-40 words, specific to THIS call's gaps.",errors:""},
+  {field:"Buying intent",instruction:"i=1 only for genuine positive purchase interest in THIS call's latest comment/status; else i=0. Earlier history alone does not set i=1 if the latest comment cooled.",errors:""}
 ];
 export const DEFAULT_SETTINGS = {
   batchSize:20,concurrency:2,model:"gpt-4o-mini",
@@ -75,7 +89,7 @@ You audit Indian real-estate telecalling follow-up notes. Judge only the supplie
 INPUT CONTRACT
 - id: opaque lead/call id. Echo it exactly. Never invent or drop ids.
 - s: Lead Status
-- c: Comments (source of truth for conversation quality and status polarity)
+- c: Comments — string for this call, OR array of all chronological comments when history is enabled (status ladder uses the full array)
 - n: Next Followup Date (DD/MM/YYYY or "")
 - l: Customer Location (may already be blanked for known project exceptions — do not restore)
 - rq: Customer Requirement
@@ -124,7 +138,12 @@ i=1 only for genuine purchase interest (site visit interest, options request, ac
 i=0 for CNP/busy/NI/wrong number/neutral admin/no interest signal.
 
 STATUS vs COMMENT
-Comments win. Emit 0 only for clear -ve comment vs +ve status. Emit 1 only for clear +ve comment vs -ve status. Neutral / not-connected comments are NOT mismatches.
+Allowed Lead Status labels (case-insensitive): Prospect, Hot, Warm, Cold, Beyond Budget, Lost.
+Heat ladder highest→lowest: Prospect > Hot > Warm > Cold > Beyond Budget > Lost.
+Comments win. When c is an array, it is full chronological lead history — use ALL entries, then judge CURRENT s against the LATEST meaningful tone.
+Emit 0 when status is too hot vs latest comments (e.g. still Prospect after latest note cooled to neutral/cold/RNR).
+Emit 1 when status is too cold vs clear +ve latest interest.
+RNR/CNP/busy alone does not justify keeping/upgrading to Prospect/Hot. Neutral / not-connected admin notes without polarity shift are NOT mismatches.
 
 CONNECTED GATING
 Codes 3, 4, 5, and 7 are ALLOWED ONLY when k=Yes.
@@ -155,7 +174,7 @@ EDGE CASES
 - CRM labels Hot/Warm/Cold/NI/CNP/Busy need comment polarity, not label alone.
 - "Just enquiry/browsing" with no next step is usually i=0.
 - Callback-after-salary with active locality search can support i=1.
-- If history arrays exist for a field, use as context; THIS call values still drive i and mismatch codes unless a run check says otherwise.
+- If history arrays exist for a field, use as context. For Comments history arrays, status mismatch (0/1) must weigh the full timeline then the latest tone; q and i still focus on THIS call's latest comment unless a run check says otherwise.
 
 CACHE STABILITY PAD (identical every request — do not vary)
 LeadLens keeps this handbook byte-stable so automatic prompt caching can reuse the prefix across batches in a run and across nearby reruns. Static instructions stay first; configured run checks follow; unique lead payloads stay last. Routing uses a stable prompt_cache_key derived from model + rules. Parallel workers must warm this prefix once before fanning out. Treat the following checklist as fixed operating procedure: verify id echo, apply q hard caps, distinguish rq empty vs wrong, gate l/rq/b on connected, keep outputs compact, never invent sibling calls, never merge two ids, never emit full error sentences, never emit severity, never wrap JSON in fences, never discuss pricing or tokens, never mention cache mechanics in o/r. Repeatable discipline improves audit consistency across telecalling QA shifts, projects, and batch sizes while preserving privacy of customer records inside the browser-only LeadLens workflow.
@@ -255,12 +274,40 @@ function normalizeRuleErrors(rules,maps){
   });
 }
 
+/** Ensure every default rule field exists; on seed bump, refresh default rule text. Keep custom user rules. */
+function mergeRules(savedRules,seedFresh){
+  const saved=Array.isArray(savedRules)?savedRules:[];
+  const byField=new Map();
+  for(const rule of saved){
+    const key=norm(rule.field)||`custom-${byField.size}`;
+    if(!byField.has(key))byField.set(key,rule);
+  }
+  const merged=DEFAULT_RULES.map(def=>{
+    const key=norm(def.field);
+    const existing=byField.get(key);
+    byField.delete(key);
+    if(!existing)return clone(def);
+    if(seedFresh)return{field:def.field,instruction:def.instruction,errors:def.errors};
+    return{field:def.field||existing.field,instruction:clean(existing.instruction)?existing.instruction:def.instruction,errors:existing.errors??def.errors};
+  });
+  for(const leftover of byField.values())merged.push({field:leftover.field||"Custom",instruction:leftover.instruction||"",errors:leftover.errors||""});
+  return merged;
+}
+
 export function normalizeSettings(saved={}){
   const merged={...clone(DEFAULT_SETTINGS),...saved};
+  const previousSeed=Number(saved.settingsSeed)||0;
+  const seedFresh=previousSeed<SETTINGS_SEED;
   merged.inputFields=defaultsById(saved.inputFields,DEFAULT_INPUT_FIELDS);
   merged.aiFields=defaultsById(saved.aiFields,DEFAULT_AI_FIELDS);
   merged.outputFields=defaultsById(saved.outputFields,DEFAULT_OUTPUT_FIELDS);
-  merged.rules=Array.isArray(saved.rules)?saved.rules:clone(DEFAULT_RULES);
+  merged.rules=mergeRules(saved.rules,seedFresh||!Array.isArray(saved.rules)||!saved.rules.length);
+  if(seedFresh){
+    // Comments history on by default so status can be judged against full lead notes.
+    const comments=merged.aiFields.find(field=>field.id==="comments");
+    if(comments)comments.history=true;
+  }
+  merged.settingsSeed=SETTINGS_SEED;
   merged.pricing={...DEFAULT_SETTINGS.pricing,...(saved.pricing||{})};
   merged.sort={...DEFAULT_SETTINGS.sort,...(saved.sort||{})};
   if(!merged.outputFields.some(field=>field.id===merged.sort.field))merged.sort.field="project";
@@ -489,7 +536,7 @@ function fallbackRecommendation(row,codes,q){
   if(codes.includes("7")||codes.includes("4"))bits.push("On next connected call capture a real requirement (config/area), not RNR/Visited/status text.");
   if(codes.includes("3"))bits.push("Ask and save preferred micro-market/location.");
   if(codes.includes("5"))bits.push("Ask and save budget band before ending the call.");
-  if(codes.includes("0")||codes.includes("1"))bits.push("Align Lead Status to the comment polarity immediately.");
+  if(codes.includes("0")||codes.includes("1"))bits.push("Align Lead Status on the Prospect→Lost ladder to the latest comment tone.");
   if(codes.includes("2"))bits.push("Call on/before the promised follow-up and set a fresh dated next step.");
   if(!bits.length)bits.push("Confirm interest, capture missing fields, and lock a dated next action the same day.");
   return clipWords(bits.join(" "),40);

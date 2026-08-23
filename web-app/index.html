@@ -63,22 +63,83 @@
       </section>
 
       <section id="view-settings" class="view">
-        <div class="settings-grid settings-layout">
-          <form id="settings-form" class="settings-card">
-            <div class="card-title"><h2>OpenAI connection</h2><p>Your key is held by this browser and sent only to OpenAI during an audit. It is never part of the GitHub Pages deployment.</p></div>
-            <label>API key<div class="input-row"><input id="api-key" type="password" autocomplete="off" placeholder="sk-…"><button id="toggle-key" type="button" class="secondary-button">Show</button></div></label>
-            <label class="check-row"><input id="remember-key" type="checkbox"><span>Remember on this device <small>Uses this browser's local storage.</small></span></label>
-            <div class="inline-actions"><button id="save-key" type="button" class="primary-button">Save key</button><button id="forget-key" type="button" class="text-button">Forget key</button><span id="key-message" class="form-message"></span></div>
-          </form>
-          <div class="settings-stack">
-            <section class="settings-card"><div class="card-title"><h2>Run configuration</h2><p>Applied to new audits. Parallel batches send multiple API requests at once; checkpoints still save one batch at a time.</p></div><div class="field-grid run-grid"><label>Batch size<input id="batch-size" type="number" min="1" max="50" value="20"></label><label>Parallel batches<input id="concurrency" type="number" min="1" max="20" value="2"></label><label>Model<input id="model" type="text" value="gpt-4o-mini"></label></div></section>
-            <section class="settings-card"><div class="card-title"><h2>Input Excel fields</h2><p>Edit header aliases to match exports. Invalid Indian mobiles are excluded before AI processing.</p></div><div id="input-field-config" class="config-list"></div></section>
-            <section class="settings-card"><div class="card-title"><h2>Fields sent to AI</h2><p>Latest call is the default. Switch on “All history” for individual fields when needed.</p></div><div id="ai-field-config" class="config-list"></div><div class="field-grid"><label>Connected = Yes values<input id="yes-values" type="text"></label><label>Connected = No values<input id="no-values" type="text"></label></div></section>
-            <section class="settings-card"><div class="card-title"><h2>AI audit rules</h2><p>Instructions and allowed error <strong>codes</strong> (0–6 built-in, or custom). The model never sees full error sentences; Excel still shows the full text.</p></div><div id="rule-config" class="rule-list"></div><button id="add-rule" type="button" class="secondary-button">Add AI rule</button><label>Additional instructions<textarea id="additional-instructions" rows="5" placeholder="Optional instructions for the auditor"></textarea></label></section>
-            <section class="settings-card"><div class="card-title"><h2>Output Excel fields</h2><p>Select columns to include. Every download reads the Sort By / Order below live — change them and re-download.</p></div><div id="output-field-config" class="config-list output-list"></div><div class="field-grid sort-grid"><label>Sort by<select id="sort-field"></select></label><label>Order<select id="sort-direction"><option value="asc">Ascending (A→Z, oldest first)</option><option value="desc">Descending (Z→A, newest first)</option></select></label></div><p class="hint-copy">Dates (Lead Registration / Next Followup) sort chronologically. Filename includes the active sort so you can tell exports apart.</p></section>
-            <section class="settings-card"><div class="card-title"><h2>Cost settings</h2><p>Enter your own rates per 1 million tokens. Console cost uses billable input (total − cached) at the input rate, cached at the cached rate, and output at the output rate.</p></div><div class="field-grid pricing-grid"><label>Input rate<input id="input-price" type="number" min="0" step="0.000001"></label><label>Cached input rate<input id="cached-price" type="number" min="0" step="0.000001"></label><label>Output rate<input id="output-price" type="number" min="0" step="0.000001"></label></div></section>
-            <section class="settings-card"><div class="card-title"><h2>Backup &amp; version</h2><p>Export settings as JSON before a browser reset. Import restores aliases, rules, sort, pricing and run config. API keys are never included in the file.</p></div><div class="version-row"><span>App version</span><strong id="app-version">…</strong></div><div class="inline-actions settings-actions"><button id="export-settings" type="button" class="secondary-button">Export settings JSON</button><button id="import-settings" type="button" class="secondary-button">Import settings JSON</button><input id="import-settings-file" type="file" accept="application/json,.json" hidden></div><p class="hint-copy">Error codes: 0 status −ve/+ve · 1 status +ve/−ve · 2 missed follow-up · 3 empty location · 4 empty requirement · 5 empty budget · 6 empty analysis parameter · 7 requirement set wrong. Excel shows full error text. Sort column is always exported first.</p></section>
-            <div class="inline-actions settings-actions"><button id="save-settings" type="button" class="primary-button">Save settings</button><button id="reset-settings" type="button" class="text-button">Restore defaults</button><span id="settings-message" class="form-message"></span></div>
+        <div class="settings-page">
+          <div class="settings-toolbar" role="toolbar" aria-label="Settings actions">
+            <div class="settings-toolbar-copy">
+              <strong>Settings</strong>
+              <span>Changes apply to new audits after you save. Sort applies on the next Excel download.</span>
+            </div>
+            <div class="inline-actions settings-toolbar-actions">
+              <button id="save-settings" type="button" class="primary-button">Save settings</button>
+              <button id="reset-settings" type="button" class="text-button">Restore defaults</button>
+              <span id="settings-message" class="form-message"></span>
+            </div>
+          </div>
+
+          <div class="settings-sections">
+            <form id="settings-form" class="settings-card">
+              <div class="card-title"><h2>1 · OpenAI connection</h2><p>Your key stays in this browser and is sent only to OpenAI during an audit. It is never part of the GitHub Pages deployment.</p></div>
+              <label>API key<div class="input-row"><input id="api-key" type="password" autocomplete="off" placeholder="sk-…"><button id="toggle-key" type="button" class="secondary-button">Show</button></div></label>
+              <label class="check-row"><input id="remember-key" type="checkbox"><span>Remember on this device <small>Uses this browser's local storage.</small></span></label>
+              <div class="inline-actions"><button id="save-key" type="button" class="primary-button">Save key</button><button id="forget-key" type="button" class="text-button">Forget key</button><span id="key-message" class="form-message"></span></div>
+            </form>
+
+            <section class="settings-card">
+              <div class="card-title"><h2>2 · Run &amp; cost</h2><p>Applied to new audits. Parallel batches keep multiple API requests in flight; checkpoints still save in order.</p></div>
+              <div class="field-grid run-grid">
+                <label>Batch size<input id="batch-size" type="number" min="1" max="50" value="20"></label>
+                <label>Parallel batches<input id="concurrency" type="number" min="1" max="20" value="2"></label>
+                <label>Model<input id="model" type="text" value="gpt-4o-mini"></label>
+              </div>
+              <div class="field-grid pricing-grid settings-subgrid">
+                <label>Input rate / 1M<input id="input-price" type="number" min="0" step="0.000001"></label>
+                <label>Cached input / 1M<input id="cached-price" type="number" min="0" step="0.000001"></label>
+                <label>Output rate / 1M<input id="output-price" type="number" min="0" step="0.000001"></label>
+              </div>
+              <p class="hint-copy">Console cost = (input − cached) × input rate + cached × cached rate + output × output rate.</p>
+            </section>
+
+            <section class="settings-card">
+              <div class="card-title"><h2>3 · Input Excel fields</h2><p>Edit header aliases to match your CRM export. Invalid Indian mobiles are excluded before AI processing.</p></div>
+              <div id="input-field-config" class="config-list"></div>
+            </section>
+
+            <section class="settings-card">
+              <div class="card-title"><h2>4 · Fields sent to AI</h2><p>Comments use <strong>All history</strong> by default so Lead Status can be judged against the full lead timeline. Other fields default to the latest call only.</p></div>
+              <div id="ai-field-config" class="config-list"></div>
+              <div class="field-grid settings-subgrid">
+                <label>Connected = Yes values<input id="yes-values" type="text"></label>
+                <label>Connected = No values<input id="no-values" type="text"></label>
+              </div>
+            </section>
+
+            <section class="settings-card">
+              <div class="card-title"><h2>5 · AI audit rules</h2><p>All default checks are listed below. Use error <strong>codes</strong> (0–7 built-in, or custom text). The model sees codes only; Excel shows full error text.</p></div>
+              <div id="rule-config" class="rule-list"></div>
+              <button id="add-rule" type="button" class="secondary-button">Add AI rule</button>
+              <label>Additional instructions<textarea id="additional-instructions" rows="4" placeholder="Optional extra instructions for the auditor"></textarea></label>
+            </section>
+
+            <section class="settings-card">
+              <div class="card-title"><h2>6 · Output Excel &amp; sort</h2><p>Choose columns to include. Sort By / Order are read live on every download.</p></div>
+              <div id="output-field-config" class="config-list output-list"></div>
+              <div class="field-grid sort-grid">
+                <label>Sort by<select id="sort-field"></select></label>
+                <label>Order<select id="sort-direction"><option value="asc">Ascending (A→Z, oldest first)</option><option value="desc">Descending (Z→A, newest first)</option></select></label>
+              </div>
+              <p class="hint-copy">Dates (Lead Registration / Next Followup) sort chronologically. Filename includes the active sort. Sort column is exported first.</p>
+            </section>
+
+            <section class="settings-card">
+              <div class="card-title"><h2>7 · Backup &amp; version</h2><p>Export settings as JSON before a browser reset. Import restores aliases, rules, sort, pricing and run config. API keys are never included.</p></div>
+              <div class="version-row"><span>App version</span><strong id="app-version">…</strong></div>
+              <div class="inline-actions settings-actions">
+                <button id="export-settings" type="button" class="secondary-button">Export settings JSON</button>
+                <button id="import-settings" type="button" class="secondary-button">Import settings JSON</button>
+                <input id="import-settings-file" type="file" accept="application/json,.json" hidden>
+              </div>
+              <p class="hint-copy">Error codes: 0 status too hot · 1 status too cold · 2 missed follow-up · 3 empty location · 4 empty requirement · 5 empty budget · 6 empty analysis parameter · 7 requirement set wrong.</p>
+            </section>
           </div>
         </div>
       </section>

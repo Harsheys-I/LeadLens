@@ -1,5 +1,5 @@
 import {putJob,getJob,getJobs,deleteJob,clearJobs,loadSettings,saveSettings,getApiKey,apiKeyIsRemembered,saveApiKey,forgetApiKey} from "./db.js";
-import {APP_VERSION,DEFAULT_SETTINGS,normalizeSettings,parseWorkbook,auditBatch,downloadWorkbook} from "./audit.js";
+import {APP_VERSION,DEFAULT_SETTINGS,SETTINGS_SEED,normalizeSettings,parseWorkbook,auditBatch,downloadWorkbook} from "./audit.js";
 
 const $=id=>document.getElementById(id);
 const ids=["file-input","drop-zone","file-list","validation","start-audit","page-title","key-state","run-name","pause-run","download-result","progress-label","progress-percent","progress-bar","metric-leads","metric-batch","metric-completed","metric-status","metric-input-tokens","metric-cached-tokens","metric-output-tokens","metric-duration","metric-cost","live-log","clear-console","history-list","clear-history","api-key","remember-key","toggle-key","save-key","forget-key","key-message","batch-size","concurrency","model","input-field-config","ai-field-config","rule-config","add-rule","output-field-config","yes-values","no-values","additional-instructions","input-price","cached-price","output-price","save-settings","reset-settings","settings-message","toast","mobile-menu","active-job-switch","sort-field","sort-direction","app-version","export-settings","import-settings","import-settings-file","update-banner","update-banner-text","reload-app"];
@@ -11,7 +11,10 @@ const ACTIVE_JOB_KEY="leadlens.activeJobId";
 let parsedFiles=[],currentJob=null,displayLogs=true;
 const controllers=new Map();
 const saveChains=new Map();
-let settings=normalizeSettings(loadSettings(DEFAULT_SETTINGS));
+const loadedSettings=loadSettings(DEFAULT_SETTINGS);
+const previousSettingsSeed=Number(loadedSettings.settingsSeed)||0;
+let settings=normalizeSettings(loadedSettings);
+if(previousSettingsSeed<SETTINGS_SEED)saveSettings(settings);
 
 const deepCopy=value=>JSON.parse(JSON.stringify(value));
 const number=value=>Number.isFinite(Number(value))?Number(value):0;
@@ -516,9 +519,16 @@ function renderAiFields(){
   }
 }
 function ruleOptions(current){
-  const options=["Lead Status + Comments",...settings.aiFields.map(field=>field.label),"Comment quality","Buying intent"];
+  const options=[
+    "Lead Status + Comments",
+    ...settings.aiFields.map(field=>field.label),
+    "Comment quality",
+    "Buying intent",
+    "AI Observation",
+    "AI Recommendation"
+  ];
   if(current&&!options.includes(current))options.push(current);
-  return options;
+  return [...new Set(options)];
 }
 function renderRules(){
   els["rule-config"].replaceChildren();

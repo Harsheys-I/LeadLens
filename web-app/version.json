@@ -1,5 +1,5 @@
 {
-  "version": "2.4.7",
+  "version": "2.4.8",
   "name": "LeadLens",
-  "notes": "Fill-down Lead Status within each lead like Telecaller"
+  "notes": "All AI rules visible; comment history for status ladder; sticky settings toolbar"
 }
