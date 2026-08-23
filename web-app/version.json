@@ -1,5 +1,5 @@
 {
-  "version": "2.5.1",
+  "version": "2.5.2",
   "name": "LeadLens",
-  "notes": "Dedupe near-identical calls within 1 hour; simpler lead/row ready summary"
+  "notes": "Console Leads = unique project+mobile; Audited = call rows"
 }

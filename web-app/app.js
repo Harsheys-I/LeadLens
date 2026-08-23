@@ -2,7 +2,7 @@ import {putJob,getJob,getJobs,deleteJob,clearJobs,loadSettings,saveSettings,getA
 import {APP_VERSION,DEFAULT_SETTINGS,DEFAULT_OUTPUT_FIELDS,SETTINGS_SEED,normalizeSettings,normalizeInputFields,slugFieldId,parseWorkbook,auditBatch,downloadWorkbook} from "./audit.js";
 
 const $=id=>document.getElementById(id);
-const ids=["file-input","drop-zone","file-list","validation","start-audit","page-title","key-state","run-name","pause-run","download-result","progress-label","progress-percent","progress-bar","metric-leads","metric-batch","metric-completed","metric-status","metric-input-tokens","metric-cached-tokens","metric-output-tokens","metric-duration","metric-cost","live-log","clear-console","history-list","clear-history","api-key","remember-key","toggle-key","save-key","forget-key","key-message","batch-size","concurrency","model","input-field-config","add-input-field","ai-field-config","rule-config","add-rule","output-field-config","yes-values","no-values","additional-instructions","input-price","cached-price","output-price","save-settings","reset-settings","settings-message","toast","mobile-menu","active-job-switch","sort-field","sort-direction","app-version","export-settings","import-settings","import-settings-file","update-banner","update-banner-text","reload-app"];
+const ids=["file-input","drop-zone","file-list","validation","start-audit","page-title","key-state","run-name","pause-run","download-result","progress-label","progress-percent","progress-bar","metric-leads","metric-excel-rows","metric-batch","metric-completed","metric-status","metric-input-tokens","metric-cached-tokens","metric-output-tokens","metric-duration","metric-cost","live-log","clear-console","history-list","clear-history","api-key","remember-key","toggle-key","save-key","forget-key","key-message","batch-size","concurrency","model","input-field-config","add-input-field","ai-field-config","rule-config","add-rule","output-field-config","yes-values","no-values","additional-instructions","input-price","cached-price","output-price","save-settings","reset-settings","settings-message","toast","mobile-menu","active-job-switch","sort-field","sort-direction","app-version","export-settings","import-settings","import-settings-file","update-banner","update-banner-text","reload-app"];
 const els=Object.fromEntries(ids.map(id=>[id,$(id)]));
 const titles={new:"New audit",console:"Run console",history:"History",settings:"Settings"};
 const ENGINE_VERSION="latest-day-v3";
@@ -63,6 +63,17 @@ function durationText(ms){const seconds=Math.max(0,Math.floor(ms/1000)),minutes=
 function estimatedCost(job){const usage=job.tokenUsage||{},rates=job.pricing||settings.pricing||{};return Math.max(0,(number(usage.input)-number(usage.cached))*number(rates.input)/1e6+number(usage.cached)*number(rates.cached)/1e6+number(usage.output)*number(rates.output)/1e6);}
 function stopClock(job){if(job.runStartedAt){job.elapsedMs=(job.elapsedMs||0)+Date.now()-new Date(job.runStartedAt).valueOf();job.runStartedAt="";}}
 
+function uniqueLeadCount(job){
+  if(Number.isFinite(Number(job.leadCount))&&Number(job.leadCount)>0)return Number(job.leadCount);
+  const keys=new Set();
+  for(const lead of job.leads||[]){
+    if(lead.groupId)keys.add(lead.groupId);
+    else keys.add(`${lead.staticValues?.project||""} | ${lead.staticValues?.mobile||""}`);
+  }
+  if(keys.size)return keys.size;
+  for(const row of job.results||[])keys.add(`${row.project||""} | ${row.mobile||""}`);
+  return keys.size||job.totalLeads||0;
+}
 function renderProgress(job){
   if(!job)return;
   currentJob=job;
@@ -75,7 +86,8 @@ function renderProgress(job){
   els["progress-label"].textContent=job.status==="completed"?"Audit complete":job.status==="running"?`Keeping ${concurrency} batch request${concurrency>1?"s":""} in flight…`:job.status==="paused"?"Audit paused — ready to resume":job.status==="failed"?"Audit stopped — saved work is safe":"Waiting for a file";
   els["progress-percent"].textContent=`${pct}%`;
   els["progress-bar"].style.width=`${pct}%`;
-  els["metric-leads"].textContent=total||"—";
+  els["metric-leads"].textContent=uniqueLeadCount(job)||"—";
+  if(els["metric-excel-rows"])els["metric-excel-rows"].textContent=job.rowCount?Number(job.rowCount).toLocaleString():"—";
   els["metric-batch"].textContent=total?`${Math.min((job.nextBatch||0)+1,batches)} / ${batches}`:"—";
   els["metric-completed"].textContent=total?`${done} / ${total}`:"—";
   els["metric-status"].textContent=job.status?job.status[0].toUpperCase()+job.status.slice(1):"Idle";
@@ -198,7 +210,7 @@ async function flushPendingBatches(job){
     }
     job.updatedAt=timestamp();
     await putJob(job);
-    if(merged)addLog(job,`Flushed checkpoints ${from+1}–${job.nextBatch}. ${job.results.length}/${job.totalLeads} leads complete.`);
+    if(merged)addLog(job,`Flushed checkpoints ${from+1}–${job.nextBatch}. ${job.results.length}/${job.totalLeads} call rows saved (${uniqueLeadCount(job)} leads).`);
   });
 }
 
@@ -404,6 +416,8 @@ async function startNew(){
       updatedAt:timestamp(),
       status:"queued",
       totalLeads:file.leads.length,
+      leadCount:file.leadCount||0,
+      rowCount:file.rowCount||0,
       nextBatch:0,
       pendingBatches:{},
       leads:file.leads,
@@ -451,7 +465,7 @@ async function renderHistory(){
     meta.className="history-meta";
     meta.textContent=legacy
       ?`${timeText(job.createdAt)} · previous engine result — upload the file and run it again for v2 rules.`
-      :`${timeText(job.createdAt)} · ${job.results?.length||0}/${job.totalLeads} leads · ${durationText(job.elapsedMs||0)} · cost ${estimatedCost(job).toFixed(4)} · cached ${number(job.tokenUsage?.cached).toLocaleString()}`;
+      :`${timeText(job.createdAt)} · ${uniqueLeadCount(job)} leads · ${job.results?.length||0}/${job.totalLeads} audited · ${durationText(job.elapsedMs||0)} · cost ${estimatedCost(job).toFixed(4)} · cached ${number(job.tokenUsage?.cached).toLocaleString()}`;
     info.append(title,document.createTextNode(" "),status,meta);
     actions.className="history-actions";
     const view=document.createElement("button");
