@@ -5,7 +5,7 @@ const $=id=>document.getElementById(id);
 const ids=["file-input","drop-zone","file-list","validation","start-audit","page-title","key-state","run-name","pause-run","download-result","progress-label","progress-percent","progress-bar","metric-leads","metric-excel-rows","metric-calls","metric-batch","metric-completed","metric-status","metric-input-tokens","metric-cached-tokens","metric-output-tokens","metric-duration","metric-cost","live-log","clear-console","history-list","clear-history","api-key","remember-key","toggle-key","save-key","forget-key","key-message","batch-size","concurrency","model","input-field-config","add-input-field","ai-field-config","rule-config","add-rule","output-field-config","yes-values","no-values","additional-instructions","input-price","cached-price","output-price","save-settings","reset-settings","settings-message","toast","mobile-menu","active-job-switch","sort-field","sort-direction","app-version","export-settings","import-settings","import-settings-file","update-banner","update-banner-text","reload-app"];
 const els=Object.fromEntries(ids.map(id=>[id,$(id)]));
 const titles={new:"New audit",console:"Run console",history:"History",settings:"Settings"};
-const ENGINE_VERSION="latest-day-v6";
+const ENGINE_VERSION="latest-day-v7";
 const ACTIVE_JOB_KEY="leadlens.activeJobId";
 
 let parsedFiles=[],currentJob=null,displayLogs=true;
@@ -89,23 +89,33 @@ function leadBatchCount(job){
   const batchSize=Math.max(1,Number(job.settings?.batchSize)||1);
   return Math.ceil(leadCount/batchSize)||0;
 }
+/** Include out-of-order finished batches so the bar moves as soon as any API responds. */
+function pendingResultCount(job){
+  return Object.values(job.pendingBatches||{}).reduce((n,rows)=>n+(Array.isArray(rows)?rows.length:0),0);
+}
+function auditedDoneCount(job){
+  return (job.results?.length||0)+pendingResultCount(job);
+}
 function renderProgress(job){
   if(!job)return;
   currentJob=job;
   setActiveJobId(job.id);
-  const totalCalls=job.totalLeads||0,done=job.results?.length||0,pct=totalCalls?Math.round(done/totalCalls*100):0;
+  const totalAudited=job.totalLeads||0,done=auditedDoneCount(job),pct=totalAudited?Math.round(Math.min(done,totalAudited)/totalAudited*100):0;
   const batches=leadBatchCount(job),usage=job.tokenUsage||{};
   const concurrency=job.settings?.concurrency||1;
   const billable=Math.max(0,number(usage.input)-number(usage.cached));
+  const pendingLeft=Object.keys(job.pendingBatches||{}).length;
   els["run-name"].textContent=job.fileName||"No active audit";
-  els["progress-label"].textContent=job.status==="completed"?"Audit complete":job.status==="running"?`Keeping ${concurrency} batch request${concurrency>1?"s":""} in flight…`:job.status==="paused"?"Audit paused — ready to resume":job.status==="failed"?"Audit stopped — saved work is safe":"Waiting for a file";
+  els["progress-label"].textContent=job.status==="completed"?"Audit complete":job.status==="running"
+    ?`Keeping ${concurrency} batch request${concurrency>1?"s":""} in flight${pendingLeft?` · ${pendingLeft} batch(es) waiting to checkpoint`:""}…`
+    :job.status==="paused"?"Audit paused — ready to resume":job.status==="failed"?"Audit stopped — saved work is safe":"Waiting for a file";
   els["progress-percent"].textContent=`${pct}%`;
   els["progress-bar"].style.width=`${pct}%`;
   els["metric-leads"].textContent=uniqueLeadCount(job)||"—";
   if(els["metric-excel-rows"])els["metric-excel-rows"].textContent=job.rowCount?Number(job.rowCount).toLocaleString():"—";
-  if(els["metric-calls"])els["metric-calls"].textContent=job.callCount!=null?Number(job.callCount).toLocaleString():"—";
+  if(els["metric-calls"])els["metric-calls"].textContent=job.callCount!=null?Number(job.callCount).toLocaleString():(job.rowCount?Number(job.rowCount).toLocaleString():"—");
   els["metric-batch"].textContent=batches?`${Math.min((job.nextBatch||0)+1,batches)} / ${batches}`:"—";
-  els["metric-completed"].textContent=totalCalls?`${done} / ${totalCalls}`:"—";
+  els["metric-completed"].textContent=totalAudited?`${done} / ${totalAudited}`:"—";
   els["metric-status"].textContent=job.status?job.status[0].toUpperCase()+job.status.slice(1):"Idle";
   els["metric-input-tokens"].textContent=`${number(usage.input).toLocaleString()} (${billable.toLocaleString()} billable)`;
   els["metric-cached-tokens"].textContent=number(usage.cached).toLocaleString();
@@ -182,6 +192,13 @@ function throttleProgress(job){
  * out-of-order completion (that was blocking the contiguous flush behind ~20 heavy saves).
  */
 async function commitBatch(job,index,rows){
+  // Park API results immediately so the progress bar moves even when this batch
+  // is ahead of nextBatch and waiting for in-order checkpoint flush.
+  job.pendingBatches=job.pendingBatches||{};
+  if(rows&&job.pendingBatches[String(index)]===undefined){
+    job.pendingBatches[String(index)]=rows;
+    throttleProgress(job);
+  }
   await withJobSave(job.id,async()=>{
     job.pendingBatches=job.pendingBatches||{};
     if(rows)job.pendingBatches[String(index)]=rows;
@@ -199,13 +216,12 @@ async function commitBatch(job,index,rows){
       await putJob(job);
       const pendingLeft=Object.keys(job.pendingBatches).length;
       addLog(job,merged===1
-        ?`Checkpoint batch ${from+1}. ${job.results.length}/${job.totalLeads} saved${pendingLeft?` · ${pendingLeft} finished API batch(es) waiting for order`:""}.`
-        :`Checkpoint batches ${from+1}–${job.nextBatch}. ${job.results.length}/${job.totalLeads} saved${pendingLeft?` · ${pendingLeft} finished API batch(es) waiting for order`:""}.`);
+        ?`Checkpoint batch ${from+1}. ${auditedDoneCount(job)}/${job.totalLeads} audited (${job.results.length} saved)${pendingLeft?` · ${pendingLeft} finished API batch(es) waiting for order`:""}.`
+        :`Checkpoint batches ${from+1}–${job.nextBatch}. ${auditedDoneCount(job)}/${job.totalLeads} audited (${job.results.length} saved)${pendingLeft?` · ${pendingLeft} finished API batch(es) waiting for order`:""}.`);
       throttleProgress(job);
     }else{
-      // Finished early (e.g. batch 9 before batch 1) — keep in RAM, soft-persist later.
       const waitingFor=(job.nextBatch||0)+1;
-      addLog(job,`Batch ${index+1} API done — held until batch ${waitingFor} checkpoints (in-order save).`);
+      addLog(job,`Batch ${index+1} API done (${rows?.length||0} audited) — progress updated; checkpoint waits for batch ${waitingFor}.`);
       schedulePendingPersist(job);
       throttleProgress(job);
     }
@@ -364,7 +380,7 @@ function renderFileList(){
     const title=document.createElement("strong");
     title.textContent=file.fileName;
     const meta=document.createElement("p");
-    meta.textContent=`${(file.fileSize/1048576).toFixed(1)} MB · ${file.sheetName} · ${(file.leadCount??0).toLocaleString()} leads · ${(file.callCount??0).toLocaleString()} calls · ${(file.latestDayCalls??file.leads.length).toLocaleString()} latest-day · ${file.rowCount.toLocaleString()} Excel rows`;
+    meta.textContent=`${(file.fileSize/1048576).toFixed(1)} MB · ${file.sheetName} · ${(file.leadCount??0).toLocaleString()} leads · ${(file.callCount??file.rowCount??0).toLocaleString()} calls · ${(file.latestDayCalls??file.leads.length).toLocaleString()} audited · ${file.rowCount.toLocaleString()} Excel rows`;
     copy.append(title,meta);
     left.append(icon,copy);
     const remove=document.createElement("button");
@@ -384,14 +400,13 @@ function updateValidationSummary(){
   box.className="validation";
   if(parsedFiles.length===1){
     const file=parsedFiles[0];
-    box.textContent=`${(file.leadCount??0).toLocaleString()} leads · ${(file.callCount??0).toLocaleString()} calls · ${(file.latestDayCalls??file.leads.length).toLocaleString()} latest-day · ${file.rowCount.toLocaleString()} Excel rows`;
+    box.textContent=`${(file.leadCount??0).toLocaleString()} leads · ${(file.callCount??file.rowCount??0).toLocaleString()} calls · ${(file.latestDayCalls??file.leads.length).toLocaleString()} audited`;
     return;
   }
   const leads=parsedFiles.reduce((sum,file)=>sum+(file.leadCount||0),0);
-  const calls=parsedFiles.reduce((sum,file)=>sum+(file.callCount||0),0);
+  const calls=parsedFiles.reduce((sum,file)=>sum+(file.callCount||file.rowCount||0),0);
   const latest=parsedFiles.reduce((sum,file)=>sum+(file.latestDayCalls||file.leads?.length||0),0);
-  const rows=parsedFiles.reduce((sum,file)=>sum+(file.rowCount||0),0);
-  box.textContent=`${parsedFiles.length} files · ${leads.toLocaleString()} leads · ${calls.toLocaleString()} calls · ${latest.toLocaleString()} latest-day · ${rows.toLocaleString()} Excel rows`;
+  box.textContent=`${parsedFiles.length} files · ${leads.toLocaleString()} leads · ${calls.toLocaleString()} calls · ${latest.toLocaleString()} audited`;
 }
 
 async function handleFiles(fileList){
@@ -487,7 +502,7 @@ async function renderHistory(){
     meta.className="history-meta";
     meta.textContent=legacy
       ?`${timeText(job.createdAt)} · previous engine result — upload the file and run it again for v2 rules.`
-      :`${timeText(job.createdAt)} · ${uniqueLeadCount(job)} leads · ${job.callCount??"—"} calls · ${job.results?.length||0}/${job.totalLeads} latest-day · ${durationText(job.elapsedMs||0)} · cost ${estimatedCost(job).toFixed(4)} · cached ${number(job.tokenUsage?.cached).toLocaleString()}`;
+      :`${timeText(job.createdAt)} · ${uniqueLeadCount(job)} leads · ${job.callCount??job.rowCount??"—"} calls · ${auditedDoneCount(job)}/${job.totalLeads} audited · ${durationText(job.elapsedMs||0)} · cost ${estimatedCost(job).toFixed(4)} · cached ${number(job.tokenUsage?.cached).toLocaleString()}`;
     info.append(title,document.createTextNode(" "),status,meta);
     actions.className="history-actions";
     const view=document.createElement("button");

@@ -25,7 +25,7 @@
         <button class="nav-item" data-view="history"><span>◷</span>History</button>
         <button class="nav-item" data-view="settings"><span>⚙</span>Settings</button>
       </nav>
-      <div class="privacy-note"><strong>Leads · Calls · Latest-day</strong><span>Lead = Mobile + Project. Calls = rows after update-date dedupe. Only each lead’s latest calendar day is sent to AI / exported.</span></div>
+      <div class="privacy-note"><strong>Leads · Calls · Audited</strong><span>Lead = Mobile + Project. Calls = each Excel row. Audited = all calls on each lead’s latest calendar day (sent to AI). Full comment history + first-talk SLA included.</span></div>
     </aside>
 
     <main>
@@ -52,7 +52,7 @@
         <div class="progress-panel">
           <div class="progress-copy"><strong id="progress-label">Waiting for a file</strong><span id="progress-percent">0%</span></div>
           <div class="progress-track"><div id="progress-bar" class="progress-bar"></div></div>
-          <div class="metrics"><div><span>Leads</span><strong id="metric-leads">—</strong></div><div><span>Excel rows</span><strong id="metric-excel-rows">—</strong></div><div><span>Calls</span><strong id="metric-calls">—</strong></div><div><span>Latest-day</span><strong id="metric-completed">—</strong></div><div><span>Batch</span><strong id="metric-batch">—</strong></div><div><span>Status</span><strong id="metric-status">Idle</strong></div><div><span>Input tokens</span><strong id="metric-input-tokens">—</strong></div><div><span>Cached input</span><strong id="metric-cached-tokens">—</strong></div><div><span>Output tokens</span><strong id="metric-output-tokens">—</strong></div><div><span>Run time</span><strong id="metric-duration">—</strong></div><div><span>Run cost</span><strong id="metric-cost">—</strong></div></div>
+          <div class="metrics"><div><span>Leads</span><strong id="metric-leads">—</strong></div><div><span>Calls</span><strong id="metric-calls">—</strong></div><div><span>Audited</span><strong id="metric-completed">—</strong></div><div><span>Batch</span><strong id="metric-batch">—</strong></div><div><span>Status</span><strong id="metric-status">Idle</strong></div><div><span>Input tokens</span><strong id="metric-input-tokens">—</strong></div><div><span>Cached input</span><strong id="metric-cached-tokens">—</strong></div><div><span>Output tokens</span><strong id="metric-output-tokens">—</strong></div><div><span>Run time</span><strong id="metric-duration">—</strong></div><div><span>Run cost</span><strong id="metric-cost">—</strong></div></div>
         </div>
         <div class="console-panel"><div class="panel-head"><div><span class="live-dot"></span><strong>Live log</strong></div><button id="clear-console" class="text-button">Clear view</button></div><div id="live-log" class="log-list"><div class="empty-state">Run activity will appear here.</div></div></div>
       </section>
@@ -106,7 +106,7 @@
             </section>
 
             <section class="settings-card">
-              <div class="card-title"><h2>4 · Fields sent to AI</h2><p>Comments use <strong>All history</strong> by default so Lead Status can be judged against the full lead timeline. Other fields default to the latest call only.</p></div>
+              <div class="card-title"><h2>4 · Fields sent to AI</h2><p>Comments always send <strong>full chronological history</strong>. The app also sends <code>reg</code> (registration) and <code>fu</code> (first Lead Update after near-dupe filter) for the 30-minute talk SLA. Other fields default to the latest call only.</p></div>
               <div id="ai-field-config" class="config-list"></div>
               <div class="field-grid settings-subgrid">
                 <label>Connected = Yes values<input id="yes-values" type="text"></label>
@@ -139,7 +139,7 @@
                 <button id="import-settings" type="button" class="secondary-button">Import settings JSON</button>
                 <input id="import-settings-file" type="file" accept="application/json,.json" hidden>
               </div>
-              <p class="hint-copy">Built-in error types: status −ve/+ve · status +ve/−ve · missed follow-up · empty location · empty requirement · empty budget · empty analysis parameter · requirement set wrong. Separate multiple types with |.</p>
+              <p class="hint-copy">Built-in error types: status history mismatch · status −ve/+ve · status +ve/−ve · missed 30min talk · missed follow-up · empty location · empty requirement · empty budget · empty analysis parameter · requirement set wrong. Separate multiple types with |.</p>
             </section>
           </div>
         </div>

@@ -1,5 +1,5 @@
 {
-  "version": "2.5.5",
+  "version": "2.6.0",
   "name": "LeadLens",
-  "notes": "AI/export only latest-day calls; console shows Calls + Latest-day progress"
+  "notes": "Smarter history status + 30min first-talk SLA; progress moves on any API response; Leads/Calls/Audited metrics"
 }

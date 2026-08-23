@@ -85,10 +85,11 @@ export const DEFAULT_OUTPUT_FIELDS = [
   {id:"buyingIntent",label:"Buying Intent",enabled:true},{id:"observation",label:"AI Observation",enabled:true},{id:"recommendation",label:"AI Recommendation",enabled:true}
 ];
 export const DEFAULT_RULES = [
-  {field:"Lead Status + Comments",instruction:`Allowed Lead Status labels only (case-insensitive): Prospect, Hot, Warm, Cold, Beyond Budget, Lost. Heat ladder highest→lowest: ${STATUS_LADDER_TEXT}. When c is an array, it is the FULL chronological comment history for the lead — read ALL entries, then judge whether CURRENT s (Lead Status on this call) still fits the LATEST meaningful customer tone. Example: earlier comments showed strong interest (status correctly Prospect), but the latest comment is neutral/cold/RNR-like and s is still Prospect/Hot → emit "Comment displaying -ve, but Lead Status is +ve". Latest comment clearly +ve/hot but s is Cold/Beyond Budget/Lost → emit "Comment displaying +ve, but Lead Status is -ve". RNR/CNP/busy alone is not a status upgrade. Do not keep high status after the conversation cooled. Neutral admin notes with no polarity shift are not mismatches.`,errors:"Comment displaying -ve, but Lead Status is +ve | Comment displaying +ve, but Lead Status is -ve"},
+  {field:"Lead Status + Comments",instruction:`Allowed Lead Status labels only (case-insensitive): Prospect, Hot, Warm, Cold, Beyond Budget, Lost. Heat ladder highest→lowest: ${STATUS_LADDER_TEXT}. c is ALWAYS the FULL chronological comment history (oldest→newest) — read EVERY entry before judging CURRENT s. Trajectory matters: if early comments were highly positive but later entries cool to RNR/CNP/WhatsApp-followup/neutral/negative, s must step down the ladder (e.g. Prospect → Warm); keeping Prospect/Hot is wrong. HARD RULE: more than 2 continuous trailing RNR-like notes (RNR, CNP, busy, ringing, WhatsApp follow-up/WA FU, no answer, switched off) ⇒ s cannot be Prospect — emit "Lead Status not reflecting Comment History". Same in reverse: history warms from cold/RNR to clear positive interest but s stays Cold/Beyond Budget/Lost ⇒ emit "Lead Status not reflecting Comment History". Also emit "Comment displaying -ve, but Lead Status is +ve" / "Comment displaying +ve, but Lead Status is -ve" for clear latest-tone polarity mismatches. RNR/CNP/busy alone never upgrades status. Neutral admin notes with no polarity shift are not mismatches.`,errors:"Lead Status not reflecting Comment History | Comment displaying -ve, but Lead Status is +ve | Comment displaying +ve, but Lead Status is -ve"},
+  {field:"First talk SLA",instruction:"Inputs reg = Lead Registration DateTime, fu = FIRST Lead Update DateTime after near-duplicate filtering (oldest call, NOT the latest). Only when reg has a clock time AND falls between 09:30 and 17:00 inclusive: fu must be within 30 minutes after reg. If fu is missing, earlier than reg, or more than 30 minutes later → emit \"Missed 30min talk before\". If reg is outside 09:30–17:00, or reg is date-only (no usable time), do nothing for this check.",errors:"Missed 30min talk before"},
   {field:"Comment quality",instruction:"Score q strictly. q must reflect how well Comments capture the real telecaller–customer conversation (need, budget, location preference, objection, decision-maker, next step). One-word/CRM crumbs like visited/RNR/CNP/busy/followup = q 0-2 max. Generic connected notes without customer detail = q <=4. Only rich descriptive talk earns 8-10. When c is an array, score THIS call's latest comment (last entry), using earlier entries only as context.",errors:""},
   {field:"Customer Requirement",instruction:`ONLY when k=Yes: rq must be a real customer requirement. Empty/placeholder (., -, **, NA) => "${EMPTY_REQUIREMENT}". Call jargon (RNR, Visited, etc.) => "${WRONG_REQUIREMENT}". If k is No or blank, NEVER emit those requirement errors.`,errors:`${EMPTY_REQUIREMENT} | ${WRONG_REQUIREMENT}`},
-  {field:"AI Observation",instruction:"o is a QA judgment, NOT a rewrite of Comments. Forbidden: copying, lightly shortening, or paraphrasing c. Required: name what is missing/wrong/strong for audit (e.g. thin note, rq junk, status mismatch vs history, missing budget on connected call). 18-28 words.",errors:""},
+  {field:"AI Observation",instruction:"o is a QA judgment, NOT a rewrite of Comments. Forbidden: copying, lightly shortening, or paraphrasing c. Required: name what is missing/wrong/strong for audit (e.g. thin note, rq junk, status mismatch vs full history, missed first-talk SLA, missing budget on connected call). 18-28 words.",errors:""},
   {field:"AI Recommendation",instruction:"r must be a concrete telecaller coaching action: what to ask/capture/correct on the next call (fields, questions, status fix down/up the Prospect→Lost ladder, follow-up discipline). Not vague ('follow up', 'update remarks'). 20-40 words, specific to THIS call's gaps.",errors:""},
   {field:"Buying intent",instruction:"i=1 only for genuine positive purchase interest in THIS call's latest comment/status; else i=0. Earlier history alone does not set i=1 if the latest comment cooled.",errors:""}
 ];
@@ -103,20 +104,22 @@ export const DEFAULT_SETTINGS = {
 
 /* Large stable prefix FIRST so OpenAI prompt caching can activate (>=1024 tokens;
    some models need closer to 2048). Run-specific rules come after; lead data last. */
-const CACHE_HANDBOOK = `LeadLens QA v2.4.2 — stable cacheable auditor handbook. Evidence only. Never invent facts, dates, budgets, locations, or prior calls.
+const CACHE_HANDBOOK = `LeadLens QA v2.6.0 — stable cacheable auditor handbook. Evidence only. Never invent facts, dates, budgets, locations, or prior calls.
 
 PURPOSE
 You audit Indian real-estate telecalling follow-up notes. Judge only the supplied fields for THIS call id. Optional day[] lists sibling calls on the same latest calendar day — context only; still return one result for THIS id.
 
 INPUT CONTRACT
 - id: opaque lead/call id. Echo it exactly. Never invent or drop ids.
-- s: Lead Status
-- c: Comments — string for this call, OR array of all chronological comments when history is enabled (status ladder uses the full array)
+- s: Lead Status on THIS call
+- c: Comments — ALWAYS full chronological history array for the lead (oldest→newest). Status trajectory uses the entire array; q/i focus on the last entry
 - n: Next Followup Date (DD/MM/YYYY or "")
 - l: Customer Location (may already be blanked for known project exceptions — do not restore)
 - rq: Customer Requirement
 - b: Estimated Budget
 - k: Connected Yes / No / ""
+- reg: Lead Registration DateTime (DD/MM/YYYY or DD/MM/YYYY HH:MM) — lead-level
+- fu: FIRST Lead Update DateTime after near-duplicate filtering (oldest call only — NOT the latest)
 - day[] (optional): siblings [{d,s,c,n,l,rq,b,k}, ...] same calendar day
 Empty string means unknown / not captured.
 
@@ -132,13 +135,15 @@ No severity field. No markdown. No extra keys.
 ERROR TYPES (emit exact labels only — no codes, no paraphrases)
 - Comment displaying -ve, but Lead Status is +ve
 - Comment displaying +ve, but Lead Status is -ve
+- Lead Status not reflecting Comment History
+- Missed 30min talk before
 - Followup Date is Missed
 - Customer Location is empty
 - Customer Requirement is empty
 - Estimated Budget is empty
 - Analysis Parameter is Empty
 - Customer Requirement is set wrong
-Prefer e:[] over weak guesses. The app may also add some empty-field errors deterministically.
+Prefer e:[] over weak guesses. The app may also add some empty-field / SLA / history errors deterministically.
 
 COMMENT QUALITY q — STRICT
 Comments must reflect the actual telecaller–customer talk (need, budget, locality preference, objection, decision-maker, next step).
@@ -159,20 +164,28 @@ BUYING INTENT i
 i=1 only for genuine purchase interest (site visit interest, options request, active shortlist, budget toward buy).
 i=0 for CNP/busy/NI/wrong number/neutral admin/no interest signal.
 
-STATUS vs COMMENT
+STATUS vs FULL COMMENT HISTORY
 Allowed Lead Status labels (case-insensitive): Prospect, Hot, Warm, Cold, Beyond Budget, Lost.
 Heat ladder highest→lowest: Prospect > Hot > Warm > Cold > Beyond Budget > Lost.
-Comments win. When c is an array, it is full chronological lead history — use ALL entries, then judge CURRENT s against the LATEST meaningful tone.
-Emit "Comment displaying -ve, but Lead Status is +ve" when status is too hot vs latest comments (e.g. still Prospect after latest note cooled to neutral/cold/RNR).
-Emit "Comment displaying +ve, but Lead Status is -ve" when status is too cold vs clear +ve latest interest.
+c is the full chronological timeline — read ALL entries, then judge CURRENT s against the trajectory and the latest meaningful tone.
+If early comments were hot/positive but later notes cool to RNR/CNP/WhatsApp-followup/neutral/negative, s must decrease (Prospect should become Warm or lower). Keeping Prospect after a cooled timeline is wrong.
+HARD RULE: more than 2 continuous trailing RNR-like notes (RNR, CNP, busy, ringing, no answer, switched off, WhatsApp follow-up / WA FU) ⇒ s cannot be Prospect — emit "Lead Status not reflecting Comment History".
+Opposite: history warms from cold/RNR to clear positive interest but s stays Cold/Beyond Budget/Lost ⇒ emit "Lead Status not reflecting Comment History".
+Also emit "Comment displaying -ve, but Lead Status is +ve" when status is too hot vs latest comments, and "Comment displaying +ve, but Lead Status is -ve" when status is too cold vs clear +ve latest interest.
 RNR/CNP/busy alone does not justify keeping/upgrading to Prospect/Hot. Neutral / not-connected admin notes without polarity shift are NOT mismatches.
+
+FIRST TALK SLA (reg + fu)
+reg = registration datetime; fu = FIRST update datetime (oldest after near-dupe filter), never the latest call.
+ONLY when reg includes a usable clock time AND is between 09:30 and 17:00 inclusive: fu must be within 30 minutes after reg.
+If fu is blank, before reg, or >30 minutes after reg → emit "Missed 30min talk before".
+If reg is outside 09:30–17:00, or reg is date-only with no clock time, skip this check entirely.
 
 CONNECTED GATING
 "Customer Location is empty", "Customer Requirement is empty", "Estimated Budget is empty", and "Customer Requirement is set wrong" are ALLOWED ONLY when k=Yes.
 If k is No or "", NEVER emit those four — even if l/rq/b are empty, "**", ".", or junk.
 
 STYLE — OBSERVATION (o) AND RECOMMENDATION (r)
-o = auditor judgment about data quality / process gaps / mismatches. It must NOT copy, trim, or paraphrase Comments (c). Bad o examples: restating "customer visited", "wants 2BHK Whitefield". Good o examples: "Connected call note is non-descriptive; requirement captured as visit jargon; budget missing." / "Status says Interested but comment shows clear rejection — polarity mismatch."
+o = auditor judgment about data quality / process gaps / mismatches. It must NOT copy, trim, or paraphrase Comments (c). Bad o examples: restating "customer visited", "wants 2BHK Whitefield". Good o examples: "Connected call note is non-descriptive; requirement captured as visit jargon; budget missing." / "Status still Prospect after three trailing RNRs — history not reflected."
 r = specific next-call coaching: what questions to ask, which fields to fill (rq/location/budget), how to correct status, when to call back. Bad r: "Follow up", "Update comments", "Call again". Good r: "On next connected call ask preferred config, micro-market, and budget band; replace rq junk with real requirement; set follow-up date same day."
 Never dump the full comment into o or r. Never restate this handbook.
 
@@ -185,6 +198,8 @@ E) day[] siblings present: score/flag THIS call only; siblings are context.
 F) s=Interested, c=customer said not interested stop calling => status -ve/+ve mismatch, i=0.
 G) s=Hot, c=wants 2BHK under 90L Saturday visit => high q, i=1, e:[].
 H) k=No, c=ringing no answer => i=0, usually e:[] from model.
+I) c history [hot interest, RNR, RNR, WA followup] and s=Prospect => "Lead Status not reflecting Comment History".
+J) reg=12/03/2026 10:00, fu=12/03/2026 11:00 => "Missed 30min talk before". reg=12/03/2026 18:00 => skip SLA.
 
 EDGE CASES
 - Mixed-language comments are valid; judge meaning, not grammar.
@@ -196,10 +211,10 @@ EDGE CASES
 - CRM labels Hot/Warm/Cold/NI/CNP/Busy need comment polarity, not label alone.
 - "Just enquiry/browsing" with no next step is usually i=0.
 - Callback-after-salary with active locality search can support i=1.
-- If history arrays exist for a field, use as context. For Comments history arrays, status mismatch must weigh the full timeline then the latest tone; q and i still focus on THIS call's latest comment unless a run check says otherwise.
+- For Comments history arrays, status must weigh the full timeline then the latest tone; q and i still focus on THIS call's latest comment unless a run check says otherwise.
 
 CACHE STABILITY PAD (identical every request — do not vary)
-LeadLens keeps this handbook byte-stable so automatic prompt caching can reuse the prefix across batches in a run and across nearby reruns. Static instructions stay first; configured run checks follow; unique lead payloads stay last. Routing uses a stable prompt_cache_key derived from model + rules. Parallel workers must warm this prefix once before fanning out. Treat the following checklist as fixed operating procedure: verify id echo, apply q hard caps, distinguish rq empty vs wrong, gate l/rq/b on connected, keep outputs compact, never invent sibling calls, never merge two ids, never invent error labels, never emit severity, never wrap JSON in fences, never discuss pricing or tokens, never mention cache mechanics in o/r. Repeatable discipline improves audit consistency across telecalling QA shifts, projects, and batch sizes while preserving privacy of customer records inside the browser-only LeadLens workflow.
+LeadLens keeps this handbook byte-stable so automatic prompt caching can reuse the prefix across batches in a run and across nearby reruns. Static instructions stay first; configured run checks follow; unique lead payloads stay last. Routing uses a stable prompt_cache_key derived from model + rules. Parallel workers must warm this prefix once before fanning out. Treat the following checklist as fixed operating procedure: verify id echo, apply q hard caps, distinguish rq empty vs wrong, gate l/rq/b on connected, apply history trajectory + first-talk SLA, keep outputs compact, never invent sibling calls, never merge two ids, never invent error labels, never emit severity, never wrap JSON in fences, never discuss pricing or tokens, never mention cache mechanics in o/r. Repeatable discipline improves audit consistency across telecalling QA shifts, projects, and batch sizes while preserving privacy of customer records inside the browser-only LeadLens workflow.
 
 This handbook is identical across batches for prompt caching.`;
 
@@ -420,6 +435,9 @@ export function normalizeSettings(saved={}){
     const dayCount=merged.outputFields.find(field=>field.id==="dayCallCount");
     if(dayCount)dayCount.label="Calls on Latest Day";
   }
+  // Comments history is required for trajectory checks — always on.
+  const commentsField=merged.aiFields.find(field=>field.id==="comments");
+  if(commentsField){commentsField.enabled=true;commentsField.history=true;}
   merged.settingsSeed=SETTINGS_SEED;
   merged.pricing={...DEFAULT_SETTINGS.pricing,...(saved.pricing||{})};
   // Force Lead Update Date ascending on first upgrade to seed 4; keep user sort afterward.
@@ -458,11 +476,70 @@ function parseDateTime(value){
   return Number.isNaN(parsed.valueOf())?null:parsed;
 }
 const dateText=value=>{const d=value instanceof Date?value:parseDateTime(value)||parseDate(value);return d?`${String(d.getDate()).padStart(2,"0")}/${String(d.getMonth()+1).padStart(2,"0")}/${d.getFullYear()}`:clean(value);};
+const hasClockTime=d=>d instanceof Date&&!Number.isNaN(d.valueOf())&&(d.getHours()!==0||d.getMinutes()!==0||d.getSeconds()!==0);
+const dateTimeText=value=>{
+  const d=value instanceof Date?value:parseDateTime(value);
+  if(!d)return clean(value);
+  const base=`${String(d.getDate()).padStart(2,"0")}/${String(d.getMonth()+1).padStart(2,"0")}/${d.getFullYear()}`;
+  if(!hasClockTime(d))return base;
+  return`${base} ${String(d.getHours()).padStart(2,"0")}:${String(d.getMinutes()).padStart(2,"0")}`;
+};
+function isBusinessHoursRegistration(d){
+  if(!(d instanceof Date)||Number.isNaN(d.valueOf())||!hasClockTime(d))return false;
+  const mins=d.getHours()*60+d.getMinutes();
+  return mins>=(9*60+30)&&mins<=(17*60);
+}
+function missedThirtyMinTalk(registrationAt,firstUpdateAt){
+  if(!registrationAt||!firstUpdateAt||!isBusinessHoursRegistration(registrationAt))return false;
+  const delta=firstUpdateAt.valueOf()-registrationAt.valueOf();
+  return delta<0||delta>30*60*1000;
+}
+function isRnrLikeComment(value){
+  const n=norm(value);
+  if(!n)return false;
+  if(/\b(whats?\s*app|wa)\b/.test(n)&&/\b(follow\s*up|followup|fu|msg|message|ping|text)\b/.test(n))return true;
+  if(/^(rnr|cnp|ni|busy|ringing|no answer|not reachable|switched off|switch off|not connected|call not connected|wrong number|wn|callback|call back|follow\s*up|followup|whatsapp|wa)(\b|[\s.,_-]|$)/.test(n))return true;
+  if(/\b(rnr|cnp)\b/.test(n)&&n.split(/\s+/).length<=5)return true;
+  return false;
+}
+function isStrongPositiveComment(value){
+  const n=norm(value);
+  if(!n||isRnrLikeComment(n))return false;
+  if(/\b(not interested|\bni\b|don't|dont|do not|no need|stop calling)\b/.test(n))return false;
+  return/\b(interested|site visit|sv done|want(s|ed)?|looking for|budget|2bhk|3bhk|visit(ed)?|call me|send(ing)? details|shortlist|book(ing)?|come(s)? for visit)\b/.test(n);
+}
+function trailingRnrStreak(comments){
+  let streak=0;
+  for(let i=comments.length-1;i>=0;i--){
+    if(isRnrLikeComment(comments[i]))streak++;
+    else break;
+  }
+  return streak;
+}
+function historyStatusErrors(status,comments){
+  const errors=[];
+  const list=Array.isArray(comments)?comments.map(clean).filter(Boolean):[clean(comments)].filter(Boolean);
+  if(!list.length)return errors;
+  const statusNorm=norm(status);
+  const streak=trailingRnrStreak(list);
+  if(streak>2&&statusNorm==="prospect")errors.push(STATUS_HISTORY_ERROR);
+  if(["prospect","hot"].includes(statusNorm)&&streak>=2){
+    const earlier=list.slice(0,-streak);
+    if(earlier.some(item=>isStrongPositiveComment(item)||/\b(interested|hot|prospect|site visit|want)\b/.test(norm(item)))){
+      if(!errors.includes(STATUS_HISTORY_ERROR))errors.push(STATUS_HISTORY_ERROR);
+    }
+  }
+  const last=list[list.length-1];
+  if(isStrongPositiveComment(last)&&["cold","beyond budget","lost"].includes(statusNorm)){
+    if(!errors.includes(STATUS_HISTORY_ERROR))errors.push(STATUS_HISTORY_ERROR);
+  }
+  return errors;
+}
 export function indianMobile(value){let digits=clean(value).replace(/\.0$/,"").replace(/\D/g,"");if(digits.length===12&&digits.startsWith("91"))digits=digits.slice(2);if(digits.length===11&&digits.startsWith("0"))digits=digits.slice(1);return /^[6-9]\d{9}$/.test(digits)?digits:"";}
 function fieldColumns(headers,fields){const normalized=headers.map(header=>({header,key:norm(header)}));return Object.fromEntries(fields.filter(field=>field.required||field.enabled!==false).map(field=>{const match=normalized.find(item=>list(field.aliases).includes(item.key));return[field.id,match?.header||""];}));}
 function correctedAiLocation(project,location){const exceptions=new Set(["guru punvaanii eureka|bidadi","guru punvaanii ernika|anekal","guru punvaanii eka|anekal","guru punvaanii elegance|bheemenahalli"]);return exceptions.has(`${norm(project)}|${norm(location)}`)?"":location;}
 function connectedFromParameter(parameter,settings){const value=norm(parameter);if(!value)return"";if(list(settings.yesValues).includes(value)||value==="yes")return"Yes";if(list(settings.noValues).includes(value)||value==="no")return"No";return"";}
-function deterministicErrors(call,aiLocation){
+function deterministicErrors(call,aiLocation,{commentHistory=[],registrationAt=null,firstUpdateAt=null}={}){
   const errors=[];
   const today=new Date();today.setHours(0,0,0,0);
   if(call.nextDate&&call.nextDate<today)errors.push("Followup Date is Missed");
@@ -472,6 +549,10 @@ function deterministicErrors(call,aiLocation){
     if(isBlankish(call.requirement))errors.push(EMPTY_REQUIREMENT);
     else if(looksLikeWrongRequirement(call.requirement))errors.push(WRONG_REQUIREMENT);
     if(isBlankish(call.budget))errors.push("Estimated Budget is empty");
+  }
+  if(missedThirtyMinTalk(registrationAt,firstUpdateAt))errors.push(MISSED_30MIN_ERROR);
+  for(const label of historyStatusErrors(call.status,commentHistory.length?commentHistory:[call.comments])){
+    if(!errors.includes(label))errors.push(label);
   }
   return errors;
 }
@@ -545,7 +626,6 @@ export function parseWorkbook(arrayBuffer,rawSettings=DEFAULT_SETTINGS){
 
   const leads=[];
   let dedupedRows=0;
-  let callCount=0;
   for(const [groupId,rawRecords] of grouped.entries()){
     rawRecords.sort((a,b)=>(a.updateAt?.valueOf()??a.updateDate?.valueOf()??a.rowIndex)-(b.updateAt?.valueOf()??b.updateDate?.valueOf()??b.rowIndex));
     // Carry agent/registration/status across blank follow-up rows inside the same lead
@@ -555,10 +635,9 @@ export function parseWorkbook(arrayBuffer,rawSettings=DEFAULT_SETTINGS){
     fillDownWithinGroup(rawRecords,"status");
     for(const record of rawRecords)record.connected=connectedFromParameter(record.parameter,settings);
     const before=rawRecords.length;
-    // All post-dedupe rows count as Calls for the lead timeline; only latest-day rows go to AI/export.
+    // Near-dupe filter first; only latest-day rows go to AI/export. Calls metric = Excel rows.
     const records=dedupeNearDuplicateCalls(rawRecords,settings.inputFields);
     dedupedRows+=Math.max(0,before-records.length);
-    callCount+=records.length;
     const dated=records.filter(record=>record.updateDate);
     const latestDay=dated.length
       ?dayKey(dated.reduce((best,record)=>(record.updateAt?.valueOf()??record.updateDate.valueOf())>=(best.updateAt?.valueOf()??best.updateDate.valueOf())?record:best).updateDate)
@@ -568,6 +647,10 @@ export function parseWorkbook(arrayBuffer,rawSettings=DEFAULT_SETTINGS){
       :[records.at(-1)];
     const registration=firstNonEmpty(records.map(record=>record.registration));
     const telecaller=firstNonEmpty(records.map(record=>record.telecaller));
+    const registrationAt=records.map(record=>parseDateTime(record.registration)).find(Boolean)||null;
+    const firstRecord=records.find(record=>record.updateAt||record.updateDate)||records[0];
+    const firstUpdateAt=firstRecord?.updateAt||(firstRecord?.updateDate?new Date(firstRecord.updateDate.getFullYear(),firstRecord.updateDate.getMonth(),firstRecord.updateDate.getDate()):null)||null;
+    const commentHistory=records.map(record=>record.comments||"");
     const daySnapshots=dayCalls.map(callSnapshot);
 
     dayCalls.forEach((call,callIndex)=>{
@@ -576,7 +659,7 @@ export function parseWorkbook(arrayBuffer,rawSettings=DEFAULT_SETTINGS){
       const staticValues={
         project:call.project,
         mobile:call.mobile,
-        registration,
+        registration:dateTimeText(registrationAt)||registration,
         telecaller:clean(call.telecaller)||telecaller,
         status:call.status,
         comments:call.comments,
@@ -601,10 +684,14 @@ export function parseWorkbook(arrayBuffer,rawSettings=DEFAULT_SETTINGS){
       const auditContext={};
       for(const field of settings.aiFields.filter(field=>field.enabled)){
         const key=AI_FIELD_KEYS[field.id]||field.id;
-        auditContext[key]=field.history
+        // Comments always ship full chronological history for smarter status trajectory.
+        if(field.id==="comments")auditContext[key]=commentHistory;
+        else auditContext[key]=field.history
           ?records.map(record=>contextValue(field.id,record,correctedAiLocation(record.project,record.location)))
           :contextValue(field.id,call,aiLocation);
       }
+      auditContext.reg=dateTimeText(registrationAt)||registration||"";
+      auditContext.fu=dateTimeText(firstUpdateAt)||"";
       // Same-day siblings on the latest day are context only; each latest-day call still gets its own result.
       if(daySnapshots.length>1)auditContext.day=daySnapshots;
       leads.push({
@@ -612,7 +699,7 @@ export function parseWorkbook(arrayBuffer,rawSettings=DEFAULT_SETTINGS){
         groupId,
         staticValues,
         auditContext,
-        deterministicErrors:deterministicErrors(call,aiLocation)
+        deterministicErrors:deterministicErrors(call,aiLocation,{commentHistory,registrationAt,firstUpdateAt})
       });
     });
   }
@@ -622,7 +709,7 @@ export function parseWorkbook(arrayBuffer,rawSettings=DEFAULT_SETTINGS){
     leads,
     rowCount:selected.rows.length,
     leadCount:grouped.size,
-    callCount,
+    callCount:selected.rows.length,
     latestDayCalls:leads.length,
     invalidRows,
     dedupedRows
@@ -696,7 +783,9 @@ function isCommentEcho(observation,comments){
 function fallbackObservation(row,errors,q){
   const bits=[];
   if(q<=3)bits.push("Comment lacks a real telecaller–customer conversation.");
-  if(errors.some(e=>/Lead Status/i.test(e)))bits.push("Lead status conflicts with comment polarity.");
+  if(errors.includes(STATUS_HISTORY_ERROR))bits.push("Lead status does not reflect the full comment history trajectory.");
+  else if(errors.some(e=>/Lead Status/i.test(e)))bits.push("Lead status conflicts with comment polarity.");
+  if(errors.includes(MISSED_30MIN_ERROR))bits.push("First update missed the 30-minute talk window after daytime registration.");
   if(errors.includes(EMPTY_REQUIREMENT))bits.push("Connected call has empty/placeholder requirement.");
   if(errors.includes(WRONG_REQUIREMENT))bits.push("Requirement field holds call jargon, not a customer need.");
   if(errors.includes("Customer Location is empty"))bits.push("Connected call missing usable location.");
@@ -709,10 +798,12 @@ function fallbackObservation(row,errors,q){
 function fallbackRecommendation(row,errors,q){
   const bits=[];
   if(q<=4)bits.push("Rewrite remarks with what the customer said: need, locality, budget, objection, and next step.");
+  if(errors.includes(STATUS_HISTORY_ERROR))bits.push("Align Lead Status on the Prospect→Lost ladder to the full comment timeline (step down after repeated RNR).");
+  if(errors.includes(MISSED_30MIN_ERROR))bits.push("Call daytime registrations within 30 minutes and log the first update promptly.");
   if(errors.includes(WRONG_REQUIREMENT)||errors.includes(EMPTY_REQUIREMENT))bits.push("On next connected call capture a real requirement (config/area), not RNR/Visited/status text.");
   if(errors.includes("Customer Location is empty"))bits.push("Ask and save preferred micro-market/location.");
   if(errors.includes("Estimated Budget is empty"))bits.push("Ask and save budget band before ending the call.");
-  if(errors.some(e=>/Lead Status/i.test(e)))bits.push("Align Lead Status on the Prospect→Lost ladder to the latest comment tone.");
+  if(errors.some(e=>/Lead Status/i.test(e))&&!errors.includes(STATUS_HISTORY_ERROR))bits.push("Align Lead Status on the Prospect→Lost ladder to the latest comment tone.");
   if(errors.includes("Followup Date is Missed"))bits.push("Call on/before the promised follow-up and set a fresh dated next step.");
   if(!bits.length)bits.push("Confirm interest, capture missing fields, and lock a dated next action the same day.");
   return clipWords(bits.join(" "),40);
@@ -742,7 +833,7 @@ async function requestAudit(apiKey,settings,leads,signal,log,onUsage){
       prompt_cache_key:promptCacheKey(settings),
       messages:[
         {role:"system",content:buildPrompt(settings)},
-        {role:"user",content:`Audit ${leads.length} call(s). Echo each id. o=QA analysis not comment copy; r=specific coaching.\n${JSON.stringify({L:modelInput})}`}
+        {role:"user",content:`Audit ${leads.length} call(s). Echo each id. c=full history; reg+fu=first-talk SLA; o=QA analysis not comment copy; r=specific coaching.\n${JSON.stringify({L:modelInput})}`}
       ],
       response_format:{type:"json_schema",json_schema:{name:"ll_audit",strict:true,schema:responseSchema}}
     })

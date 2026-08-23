@@ -20,7 +20,7 @@ A static, privacy-first telecalling audit app designed for GitHub Pages.
 
 ## Parallel batches
 
-Settings → **Parallel batches** keeps that many API requests in flight continuously. When one batch finishes, the next starts immediately. Checkpoints append in order via a save lock (out-of-order completions are buffered in `pendingBatches`).
+Settings → **Parallel batches** keeps that many API requests in flight continuously. When one batch finishes, the next starts immediately. Batch size is **N leads** (Mobile+Project); all latest-day calls for a lead stay in the same batch. Checkpoints append in order via a save lock (`pendingBatches`), but the Run Console progress bar counts finished API batches immediately — even when a later batch is waiting for earlier checkpoints.
 
 ## Preview / deploy
 
