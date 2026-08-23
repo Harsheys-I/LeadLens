@@ -1,4 +1,4 @@
-export const APP_VERSION = "2.4.1";
+export const APP_VERSION = "2.4.2";
 
 export const ERROR_CATALOG = [
   {code:"0",label:"Comment displaying -ve, but Lead Status is +ve",hint:"-ve comment vs +ve status"},
@@ -51,6 +51,8 @@ export const DEFAULT_RULES = [
   {field:"Lead Status + Comments",instruction:"Comments are source of truth. Emit code 0 only for clear -ve comment vs +ve status. Emit code 1 only for clear +ve comment vs -ve status. Neutral/not-connected is not a mismatch.",errors:"0,1"},
   {field:"Comment quality",instruction:"Score q strictly. q must reflect how well Comments capture the real telecaller–customer conversation (need, budget, location preference, objection, decision-maker, next step). One-word/CRM crumbs like visited/RNR/CNP/busy/followup = q 0-2 max. Generic connected notes without customer detail = q <=4. Only rich descriptive talk earns 8-10.",errors:""},
   {field:"Customer Requirement",instruction:"rq must be a real customer requirement (config/area/location preference/budget need/plot size etc). If connected and rq is empty/placeholder (., -, NA) use code 4. If rq is call jargon or comment/status text (RNR, Visited, CNP, Busy, Followup, Interested, etc.) emit code 7 — not a valid requirement.",errors:"4,7"},
+  {field:"AI Observation",instruction:"o is a QA judgment, NOT a rewrite of Comments. Forbidden: copying, lightly shortening, or paraphrasing c. Required: name what is missing/wrong/strong for audit (e.g. thin note, rq junk, status mismatch, missing budget on connected call). 18-28 words.",errors:""},
+  {field:"AI Recommendation",instruction:"r must be a concrete telecaller coaching action: what to ask/capture/correct on the next call (fields, questions, status fix, follow-up discipline). Not vague ('follow up', 'update remarks'). 20-40 words, specific to THIS call's gaps.",errors:""},
   {field:"Buying intent",instruction:"i=1 only for genuine positive purchase interest in this call's comment/status; else i=0.",errors:""}
 ];
 export const DEFAULT_SETTINGS = {
@@ -64,7 +66,7 @@ export const DEFAULT_SETTINGS = {
 
 /* Large stable prefix FIRST so OpenAI prompt caching can activate (>=1024 tokens;
    some models need closer to 2048). Run-specific rules come after; lead data last. */
-const CACHE_HANDBOOK = `LeadLens QA v2.4.1 — stable cacheable auditor handbook. Evidence only. Never invent facts, dates, budgets, locations, or prior calls.
+const CACHE_HANDBOOK = `LeadLens QA v2.4.2 — stable cacheable auditor handbook. Evidence only. Never invent facts, dates, budgets, locations, or prior calls.
 
 PURPOSE
 You audit Indian real-estate telecalling follow-up notes. Judge only the supplied fields for THIS call id. Optional day[] lists sibling calls on the same latest calendar day — context only; still return one result for THIS id.
@@ -86,8 +88,8 @@ For each id return:
 - q: integer 0-10 comment quality
 - e: array of error CODE strings only (never full sentences)
 - i: 0 or 1 buying intent
-- o: <=18 words observation
-- r: <=14 words recommendation
+- o: 18-28 words QA observation (analysis, not a comment copy)
+- r: 20-40 words concrete coaching recommendation
 No severity field. No markdown. No extra keys.
 
 ERROR CODES (emit codes only)
@@ -126,8 +128,10 @@ Comments win. Emit 0 only for clear -ve comment vs +ve status. Emit 1 only for c
 CONNECTED GATING
 If k is No or "", do not demand l/rq/b unless a run check explicitly requires it.
 
-STYLE
-o cites decisive evidence only. r is one coaching/process action. Never dump the full comment into o or r. Never restate this handbook.
+STYLE — OBSERVATION (o) AND RECOMMENDATION (r)
+o = auditor judgment about data quality / process gaps / mismatches. It must NOT copy, trim, or paraphrase Comments (c). Bad o examples: restating "customer visited", "wants 2BHK Whitefield". Good o examples: "Connected call note is non-descriptive; requirement captured as visit jargon; budget missing." / "Status says Interested but comment shows clear rejection — polarity mismatch."
+r = specific next-call coaching: what questions to ask, which fields to fill (rq/location/budget), how to correct status, when to call back. Bad r: "Follow up", "Update comments", "Call again". Good r: "On next connected call ask preferred config, micro-market, and budget band; replace rq junk with real requirement; set follow-up date same day."
+Never dump the full comment into o or r. Never restate this handbook.
 
 EXAMPLES
 A) c="visited" => q<=2, usually i=0.
@@ -427,6 +431,57 @@ function clipWords(text,maxWords){
   const words=clean(text).split(/\s+/).filter(Boolean);
   return words.slice(0,maxWords).join(" ");
 }
+function tokenSet(text){
+  return new Set(norm(text).split(" ").filter(word=>word.length>1));
+}
+function isCommentEcho(observation,comments){
+  const o=norm(observation),c=norm(comments);
+  if(!o||!c)return false;
+  if(o===c)return true;
+  if(c.includes(o)&&o.split(" ").length>=3)return true;
+  if(o.includes(c)&&c.split(" ").length>=3)return true;
+  const ow=tokenSet(o),cw=tokenSet(c);
+  if(ow.size<3)return c.includes(o);
+  let overlap=0;
+  for(const word of ow)if(cw.has(word))overlap++;
+  return overlap/ow.size>=0.72;
+}
+function fallbackObservation(row,codes,q){
+  const bits=[];
+  if(q<=3)bits.push("Comment lacks a real telecaller–customer conversation.");
+  if(codes.includes("0")||codes.includes("1"))bits.push("Lead status conflicts with comment polarity.");
+  if(codes.includes("4"))bits.push("Connected call has empty/placeholder requirement.");
+  if(codes.includes("7"))bits.push("Requirement field holds call jargon, not a customer need.");
+  if(codes.includes("3"))bits.push("Connected call missing usable location.");
+  if(codes.includes("5"))bits.push("Connected call missing budget.");
+  if(codes.includes("2"))bits.push("Follow-up date is already past.");
+  if(codes.includes("6"))bits.push("Analysis parameter is blank.");
+  if(!bits.length)bits.push("Review note quality and field completeness for this call.");
+  return clipWords(bits.join(" "),28);
+}
+function fallbackRecommendation(row,codes,q){
+  const bits=[];
+  if(q<=4)bits.push("Rewrite remarks with what the customer said: need, locality, budget, objection, and next step.");
+  if(codes.includes("7")||codes.includes("4"))bits.push("On next connected call capture a real requirement (config/area), not RNR/Visited/status text.");
+  if(codes.includes("3"))bits.push("Ask and save preferred micro-market/location.");
+  if(codes.includes("5"))bits.push("Ask and save budget band before ending the call.");
+  if(codes.includes("0")||codes.includes("1"))bits.push("Align Lead Status to the comment polarity immediately.");
+  if(codes.includes("2"))bits.push("Call on/before the promised follow-up and set a fresh dated next step.");
+  if(!bits.length)bits.push("Confirm interest, capture missing fields, and lock a dated next action the same day.");
+  return clipWords(bits.join(" "),40);
+}
+function finalizeObservation(aiText,row,codes,q){
+  const clipped=clipWords(aiText,28);
+  if(!clipped||isCommentEcho(clipped,row.comments))return fallbackObservation(row,codes,q);
+  return clipped;
+}
+function finalizeRecommendation(aiText,row,codes,q){
+  const clipped=clipWords(aiText,40);
+  const words=clipped.split(/\s+/).filter(Boolean);
+  const vague=/^(follow\s*up|call\s*again|update\s*(comments?|remarks?)|try\s*later|connect\s*again)\.?$/i.test(clipped);
+  if(!clipped||words.length<10||vague)return fallbackRecommendation(row,codes,q);
+  return clipped;
+}
 
 async function requestAudit(apiKey,settings,leads,signal,log,onUsage){
   const modelInput=leads.map(lead=>({id:lead.leadId,...lead.auditContext}));
@@ -436,11 +491,11 @@ async function requestAudit(apiKey,settings,leads,signal,log,onUsage){
     body:JSON.stringify({
       model:settings.model,
       temperature:0,
-      max_tokens:Math.max(256,leads.length*90),
+      max_tokens:Math.max(400,leads.length*120),
       prompt_cache_key:promptCacheKey(settings),
       messages:[
         {role:"system",content:buildPrompt(settings)},
-        {role:"user",content:`Audit ${leads.length}. Echo each id. Compact only.\n${JSON.stringify({L:modelInput})}`}
+        {role:"user",content:`Audit ${leads.length} call(s). Echo each id. o=QA analysis not comment copy; r=specific coaching.\n${JSON.stringify({L:modelInput})}`}
       ],
       response_format:{type:"json_schema",json_schema:{name:"ll_audit",strict:true,schema:responseSchema}}
     })
@@ -498,14 +553,15 @@ export async function auditBatch(apiKey,rawSettings,batch,signal,log,onUsage){
     const codes=merged.includes("4")?merged.filter(code=>code!=="7"):merged;
     const labels=codes.map(code=>maps.labelOf(code)).filter(Boolean);
     const intent=Number(ai.i)===1||clean(ai.i)==="1"||norm(ai.i)==="yes"?"Yes":"No";
+    const q=clampCommentQuality(ai.q,lead.staticValues.comments);
     return{
       ...lead.staticValues,
-      commentQuality:clampCommentQuality(ai.q,lead.staticValues.comments),
+      commentQuality:q,
       errorTypes:labels.length?labels.join(", "):"None",
       errorSeverity:severityFromCodes(codes),
       buyingIntent:intent,
-      observation:clipWords(ai.o,18),
-      recommendation:clipWords(ai.r,14)
+      observation:finalizeObservation(ai.o,lead.staticValues,codes,q),
+      recommendation:finalizeRecommendation(ai.r,lead.staticValues,codes,q)
     };
   });
 }

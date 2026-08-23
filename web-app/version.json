@@ -1,5 +1,5 @@
 {
-  "version": "2.4.1",
+  "version": "2.4.2",
   "name": "LeadLens",
-  "notes": "Prompt-cache warmup + longer stable handbook so cached input tokens activate reliably"
+  "notes": "Observation must not echo comments; richer recommendations; anti-echo fallbacks"
 }
