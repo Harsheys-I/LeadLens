@@ -21,7 +21,7 @@
         <button class="nav-item" data-view="history"><span>◷</span>History</button>
         <button class="nav-item" data-view="settings"><span>⚙</span>Settings</button>
       </nav>
-      <div class="privacy-note"><strong>Audit engine v2 · latest-call rules</strong><span>No Python server or local fallback is required. Files, keys, logs and checkpoints stay in this browser.</span></div>
+      <div class="privacy-note"><strong>Audit engine v2 · latest-call rules</strong><span>Checkpoints survive reload. Files, keys, logs and progress stay in this browser.</span></div>
     </aside>
 
     <main>
@@ -32,21 +32,19 @@
       </header>
 
       <section id="view-new" class="view active">
-        <div class="intro"><h2>Turn follow-up history into decisions.</h2><p>Upload an Excel export. LeadLens groups every customer journey, checks compliance, audits it with AI, and creates a dashboard-ready workbook.</p></div>
-        <div id="drop-zone" class="drop-zone" role="button" tabindex="0" aria-label="Upload Excel file">
-          <input id="file-input" type="file" accept=".xlsx,.xls,.xlsm" hidden>
-          <div class="upload-icon">⇧</div><h3>Drop your Excel file here</h3><p>or click to browse · XLSX, XLS or XLSM</p>
+        <div class="intro"><h2>Turn follow-up history into decisions.</h2><p>Upload one or more Excel exports. LeadLens runs each file as a separate audit, checks compliance, audits with AI, and creates dashboard-ready workbooks.</p></div>
+        <div id="drop-zone" class="drop-zone" role="button" tabindex="0" aria-label="Upload Excel files">
+          <input id="file-input" type="file" accept=".xlsx,.xls,.xlsm" multiple hidden>
+          <div class="upload-icon">⇧</div><h3>Drop Excel files here</h3><p>or click to browse · one or many · XLSX, XLS or XLSM · files are audited separately</p>
         </div>
-        <div id="file-card" class="file-card hidden">
-          <div><span class="file-icon">X</span><div><strong id="file-name"></strong><p id="file-meta"></p></div></div>
-          <button id="remove-file" class="text-button">Remove</button>
-        </div>
+        <div id="file-list" class="file-list hidden"></div>
         <div id="validation" class="validation hidden" role="status"></div>
         <div class="action-row"><button id="start-audit" class="primary-button" disabled>Start audit <span>→</span></button></div>
       </section>
 
       <section id="view-console" class="view">
         <div class="run-head"><div><p class="eyebrow">CURRENT RUN</p><h2 id="run-name">No active audit</h2></div><div class="run-actions"><button id="pause-run" class="secondary-button" disabled>Pause</button><button id="download-result" class="primary-button" disabled>Download Excel</button></div></div>
+        <div id="active-job-switch" class="job-switch hidden" aria-live="polite"></div>
         <div class="progress-panel">
           <div class="progress-copy"><strong id="progress-label">Waiting for a file</strong><span id="progress-percent">0%</span></div>
           <div class="progress-track"><div id="progress-bar" class="progress-bar"></div></div>
@@ -69,7 +67,7 @@
             <div class="inline-actions"><button id="save-key" type="button" class="primary-button">Save key</button><button id="forget-key" type="button" class="text-button">Forget key</button><span id="key-message" class="form-message"></span></div>
           </form>
           <div class="settings-stack">
-            <section class="settings-card"><div class="card-title"><h2>Run configuration</h2><p>Applied to new audits.</p></div><div class="field-grid"><label>Batch size<input id="batch-size" type="number" min="1" max="50" value="20"></label><label>Model<input id="model" type="text" value="gpt-4o-mini"></label></div></section>
+            <section class="settings-card"><div class="card-title"><h2>Run configuration</h2><p>Applied to new audits. Parallel batches send multiple API requests at once; checkpoints still save one batch at a time.</p></div><div class="field-grid run-grid"><label>Batch size<input id="batch-size" type="number" min="1" max="50" value="20"></label><label>Parallel batches<input id="concurrency" type="number" min="1" max="8" value="2"></label><label>Model<input id="model" type="text" value="gpt-4o-mini"></label></div></section>
             <section class="settings-card"><div class="card-title"><h2>Input Excel fields</h2><p>Edit header aliases to match exports. Invalid Indian mobiles are excluded before AI processing.</p></div><div id="input-field-config" class="config-list"></div></section>
             <section class="settings-card"><div class="card-title"><h2>Fields sent to AI</h2><p>Latest call is the default. Switch on “All history” for individual fields when needed.</p></div><div id="ai-field-config" class="config-list"></div><div class="field-grid"><label>Connected = Yes values<input id="yes-values" type="text"></label><label>Connected = No values<input id="no-values" type="text"></label></div></section>
             <section class="settings-card"><div class="card-title"><h2>AI audit rules</h2><p>Add instructions and the exact errors the AI may select. Deterministic data checks are always enforced.</p></div><div id="rule-config" class="rule-list"></div><button id="add-rule" type="button" class="secondary-button">Add AI rule</button><label>Additional instructions<textarea id="additional-instructions" rows="5" placeholder="Optional instructions for the auditor"></textarea></label></section>
