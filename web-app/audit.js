@@ -1,4 +1,4 @@
-export const APP_VERSION = "2.4.5";
+export const APP_VERSION = "2.4.7";
 
 export const ERROR_CATALOG = [
   {code:"0",label:"Comment displaying -ve, but Lead Status is +ve",hint:"-ve comment vs +ve status"},
@@ -340,9 +340,11 @@ export function parseWorkbook(arrayBuffer,rawSettings=DEFAULT_SETTINGS){
   const leads=[];
   for(const [groupId,records] of grouped.entries()){
     records.sort((a,b)=>(a.updateDate?.valueOf()??a.rowIndex)-(b.updateDate?.valueOf()??b.rowIndex));
-    // Carry telecaller (and registration) across blank follow-up rows inside the same lead.
+    // Carry agent/registration/status across blank follow-up rows inside the same lead
+    // (CRM exports often write these once, then leave later rows empty).
     fillDownWithinGroup(records,"telecaller");
     fillDownWithinGroup(records,"registration");
+    fillDownWithinGroup(records,"status");
     for(const record of records)record.connected=connectedFromParameter(record.parameter,settings);
     const dated=records.filter(record=>record.updateDate);
     const latestDay=dated.length

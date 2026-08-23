@@ -1,5 +1,5 @@
 {
-  "version": "2.4.5",
+  "version": "2.4.7",
   "name": "LeadLens",
-  "notes": "Requirement/location/budget errors only when Connected=Yes; Connected column in Excel export"
+  "notes": "Fill-down Lead Status within each lead like Telecaller"
 }

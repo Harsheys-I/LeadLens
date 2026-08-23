@@ -118,6 +118,24 @@ function withJobSave(jobId,action){
   return next.finally(()=>{if(saveChains.get(jobId)===next)saveChains.delete(jobId);});
 }
 
+const pendingPersistTimers=new Map();
+function schedulePendingPersist(job){
+  const prior=pendingPersistTimers.get(job.id);
+  if(prior)clearTimeout(prior);
+  pendingPersistTimers.set(job.id,setTimeout(()=>{
+    pendingPersistTimers.delete(job.id);
+    withJobSave(job.id,async()=>{
+      job.updatedAt=timestamp();
+      await putJob(job);
+    }).catch(()=>{});
+  },1500));
+}
+function clearPendingPersist(jobId){
+  const prior=pendingPersistTimers.get(jobId);
+  if(prior)clearTimeout(prior);
+  pendingPersistTimers.delete(jobId);
+}
+
 function throttleProgress(job){
   if(currentJob?.id!==job.id)return;
   if(throttleProgress._timer)return;
@@ -127,7 +145,11 @@ function throttleProgress(job){
   },200);
 }
 
-/** Merge finished batches in order and write IndexedDB once — never blocks the API pool. */
+/**
+ * Record a finished batch. Checkpoints only advance in order (1,2,3…).
+ * Out-of-order API finishes stay in memory — we do NOT IndexedDB-write on every
+ * out-of-order completion (that was blocking the contiguous flush behind ~20 heavy saves).
+ */
 async function commitBatch(job,index,rows){
   await withJobSave(job.id,async()=>{
     job.pendingBatches=job.pendingBatches||{};
@@ -140,18 +162,27 @@ async function commitBatch(job,index,rows){
       job.nextBatch+=1;
       merged++;
     }
-    job.updatedAt=timestamp();
-    await putJob(job);
     if(merged){
+      clearPendingPersist(job.id);
+      job.updatedAt=timestamp();
+      await putJob(job);
+      const pendingLeft=Object.keys(job.pendingBatches).length;
       addLog(job,merged===1
-        ?`Batch ${from+1} checkpointed. ${job.results.length}/${job.totalLeads} leads complete.`
-        :`Batches ${from+1}–${job.nextBatch} checkpointed. ${job.results.length}/${job.totalLeads} leads complete.`);
+        ?`Checkpoint batch ${from+1}. ${job.results.length}/${job.totalLeads} saved${pendingLeft?` · ${pendingLeft} finished API batch(es) waiting for order`:""}.`
+        :`Checkpoint batches ${from+1}–${job.nextBatch}. ${job.results.length}/${job.totalLeads} saved${pendingLeft?` · ${pendingLeft} finished API batch(es) waiting for order`:""}.`);
+      throttleProgress(job);
+    }else{
+      // Finished early (e.g. batch 9 before batch 1) — keep in RAM, soft-persist later.
+      const waitingFor=(job.nextBatch||0)+1;
+      addLog(job,`Batch ${index+1} API done — held until batch ${waitingFor} checkpoints (in-order save).`);
+      schedulePendingPersist(job);
       throttleProgress(job);
     }
   });
 }
 
 async function flushPendingBatches(job){
+  clearPendingPersist(job.id);
   await withJobSave(job.id,async()=>{
     job.pendingBatches=job.pendingBatches||{};
     let merged=0;
@@ -162,14 +193,9 @@ async function flushPendingBatches(job){
       job.nextBatch+=1;
       merged++;
     }
-    if(merged){
-      job.updatedAt=timestamp();
-      await putJob(job);
-      addLog(job,`Flushed checkpoints ${from+1}–${job.nextBatch}. ${job.results.length}/${job.totalLeads} leads complete.`);
-    }else{
-      job.updatedAt=timestamp();
-      await putJob(job);
-    }
+    job.updatedAt=timestamp();
+    await putJob(job);
+    if(merged)addLog(job,`Flushed checkpoints ${from+1}–${job.nextBatch}. ${job.results.length}/${job.totalLeads} leads complete.`);
   });
 }
 
@@ -189,7 +215,7 @@ async function runJob(job){
   job.pendingBatches=job.pendingBatches||{};
   displayLogs=true;
   const concurrency=Math.min(20,Math.max(1,Number(job.settings.concurrency)||1));
-  addLog(job,`Run started: live pool of ${concurrency} (next batch fires the instant one frees a slot), batch size ${job.settings.batchSize}, model ${job.settings.model}, app ${APP_VERSION}.`);
+  addLog(job,`Run started: live pool of ${concurrency} (next batch fires the instant one frees a slot), batch size ${job.settings.batchSize}, model ${job.settings.model}, app ${APP_VERSION}. Checkpoints stay in order — later batches may finish API first and wait.`);
   await putJob(job);
   if(!currentJob||currentJob.id===job.id||!controllers.has(currentJob.id))renderProgress(job);
   showView("console");
