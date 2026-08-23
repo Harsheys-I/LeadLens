@@ -1,5 +1,5 @@
 {
-  "version": "2.3.2",
+  "version": "2.3.3",
   "name": "LeadLens",
-  "notes": "Non-blocking checkpoint pipeline — keep N batches in flight with no save hiccup"
+  "notes": "Fix download sort — use live Sort By/Order from Settings on every export"
 }

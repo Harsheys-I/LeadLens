@@ -395,7 +395,15 @@ async function startNew(){
   await Promise.all(jobs.map(job=>runJob(job)));
 }
 
-function download(job){try{downloadWorkbook(job,settings);}catch(error){toast(error.message);}}
+function download(job){
+  try{
+    const live=collectSettings();
+    settings=live;
+    saveSettings(settings);
+    downloadWorkbook(job,live);
+    toast(`Downloaded · sorted by ${live.sort.field} (${live.sort.direction})`);
+  }catch(error){toast(error.message);}
+}
 
 async function renderHistory(){
   const jobs=await getJobs();
@@ -695,13 +703,20 @@ els["save-settings"].onclick=()=>{
   if(!next.outputFields.some(field=>field.enabled)){els["settings-message"].textContent="Select at least one output Excel field.";return;}
   settings=next;
   saveSettings(settings);
-  els["settings-message"].textContent="Settings saved. New audits will use them; downloads use the current output selection & sort.";
+  els["settings-message"].textContent="Settings saved. Downloads always use the Sort By / Order shown here.";
   renderSettings();
 };
 els["reset-settings"].onclick=()=>{settings=normalizeSettings(DEFAULT_SETTINGS);saveSettings(settings);renderSettings();els["settings-message"].textContent="Defaults restored.";};
 els["export-settings"].onclick=exportSettings;
 els["import-settings"].onclick=()=>els["import-settings-file"].click();
 els["import-settings-file"].onchange=event=>importSettingsFile(event.target.files?.[0]);
+function persistSortFromForm(){
+  settings=collectSettings();
+  saveSettings(settings);
+  els["settings-message"].textContent=`Sort set to ${els["sort-field"].selectedOptions[0]?.textContent||settings.sort.field} · ${settings.sort.direction==="desc"?"descending":"ascending"}. Re-download the Excel to apply.`;
+}
+els["sort-field"].onchange=persistSortFromForm;
+els["sort-direction"].onchange=persistSortFromForm;
 els["reload-app"]?.addEventListener("click",async()=>{
   if("serviceWorker" in navigator){
     const regs=await navigator.serviceWorker.getRegistrations();

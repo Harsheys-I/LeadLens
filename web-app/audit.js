@@ -1,4 +1,4 @@
-export const APP_VERSION = "2.3.2";
+export const APP_VERSION = "2.3.3";
 
 export const ERROR_CATALOG = [
   {code:"0",label:"Comment displaying -ve, but Lead Status is +ve",hint:"-ve comment vs +ve status"},
@@ -372,10 +372,12 @@ export function sortResults(rows,rawSettings=DEFAULT_SETTINGS){
   return[...(rows||[])].sort((a,b)=>{
     const av=sortValue(a,field),bv=sortValue(b,field);
     let cmp=0;
-    if(typeof av==="number"&&typeof bv==="number")cmp=av-bv;
+    if(typeof av==="number"&&typeof bv==="number")cmp=av===bv?0:av<bv?-1:1;
     else cmp=String(av).localeCompare(String(bv),undefined,{numeric:true,sensitivity:"base"});
     if(cmp)return cmp*dir;
-    return String(a.mobile??"").localeCompare(String(b.mobile??""))||String(a.project??"").localeCompare(String(b.project??""));
+    const mobileCmp=String(a.mobile??"").localeCompare(String(b.mobile??""),undefined,{numeric:true});
+    if(mobileCmp)return mobileCmp;
+    return String(a.project??"").localeCompare(String(b.project??""),undefined,{numeric:true,sensitivity:"base"});
   });
 }
 
@@ -387,7 +389,8 @@ export function downloadWorkbook(job,currentSettings){
   const data=rows.map(row=>Object.fromEntries(fields.map(field=>[field.label,row[field.id]??""])));
   const sheet=XLSX.utils.json_to_sheet(data,{header:fields.map(field=>field.label)});
   sheet["!cols"]=fields.map(field=>({wch:Math.min(48,Math.max(14,field.label.length+2,...data.slice(0,100).map(row=>String(row[field.label]??"").length+2)))}));
-  const mergeField=fields.find(field=>field.id===settings.sort.field)||fields.find(field=>field.id==="project");
+  // Only merge adjacent cells for the active sort column (so sort order stays visible).
+  const mergeField=fields.find(field=>field.id===settings.sort.field);
   if(mergeField){
     const key=mergeField.label,col=fields.findIndex(field=>field.id===mergeField.id);
     let start=0;
@@ -400,5 +403,6 @@ export function downloadWorkbook(job,currentSettings){
   }
   const book=XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(book,sheet,"Audit Data");
-  XLSX.writeFile(book,`Audit_Data_${new Date().toISOString().slice(0,10)}.xlsx`);
+  const stamp=new Date().toISOString().slice(0,19).replace(/[:T]/g,"-");
+  XLSX.writeFile(book,`Audit_Data_${stamp}_${settings.sort.field}-${settings.sort.direction}.xlsx`);
 }
