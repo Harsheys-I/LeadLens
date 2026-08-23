@@ -1,4 +1,4 @@
-export const APP_VERSION = "2.5.0";
+export const APP_VERSION = "2.5.1";
 /** Bump when default AI rules / field defaults must refresh existing localStorage settings. */
 export const SETTINGS_SEED = 4;
 
@@ -435,14 +435,27 @@ export function normalizeSettings(saved={}){
 }
 
 function parseDate(value){
-  if(value instanceof Date&&!Number.isNaN(value.valueOf()))return new Date(value.getFullYear(),value.getMonth(),value.getDate());
-  if(typeof value==="number"&&window.XLSX?.SSF){const d=XLSX.SSF.parse_date_code(value);return d?new Date(d.y,d.m-1,d.d):null;}
-  const s=clean(value);if(!s)return null;
-  const match=s.match(/^(\d{1,2})[\/-](\d{1,2})[\/-](\d{2,4})/);
-  if(match){const year=match[3].length===2?Number(`20${match[3]}`):Number(match[3]);const d=new Date(year,Number(match[2])-1,Number(match[1]));return Number.isNaN(d.valueOf())?null:d;}
-  const parsed=new Date(s);return Number.isNaN(parsed.valueOf())?null:new Date(parsed.getFullYear(),parsed.getMonth(),parsed.getDate());
+  const full=parseDateTime(value);
+  return full?new Date(full.getFullYear(),full.getMonth(),full.getDate()):null;
 }
-const dateText=value=>{const d=value instanceof Date?value:parseDate(value);return d?`${String(d.getDate()).padStart(2,"0")}/${String(d.getMonth()+1).padStart(2,"0")}/${d.getFullYear()}`:clean(value);};
+function parseDateTime(value){
+  if(value instanceof Date&&!Number.isNaN(value.valueOf()))return new Date(value.getTime());
+  if(typeof value==="number"&&window.XLSX?.SSF){
+    const d=XLSX.SSF.parse_date_code(value);
+    if(!d)return null;
+    return new Date(d.y,d.m-1,d.d,d.H||0,d.M||0,Math.floor(d.S||0));
+  }
+  const s=clean(value);if(!s)return null;
+  const match=s.match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})(?:[ T]+(\d{1,2}):(\d{2})(?::(\d{2}))?)?/);
+  if(match){
+    const year=match[3].length===2?Number(`20${match[3]}`):Number(match[3]);
+    const d=new Date(year,Number(match[2])-1,Number(match[1]),Number(match[4]||0),Number(match[5]||0),Number(match[6]||0));
+    return Number.isNaN(d.valueOf())?null:d;
+  }
+  const parsed=new Date(s);
+  return Number.isNaN(parsed.valueOf())?null:parsed;
+}
+const dateText=value=>{const d=value instanceof Date?value:parseDateTime(value)||parseDate(value);return d?`${String(d.getDate()).padStart(2,"0")}/${String(d.getMonth()+1).padStart(2,"0")}/${d.getFullYear()}`:clean(value);};
 export function indianMobile(value){let digits=clean(value).replace(/\.0$/,"").replace(/\D/g,"");if(digits.length===12&&digits.startsWith("91"))digits=digits.slice(2);if(digits.length===11&&digits.startsWith("0"))digits=digits.slice(1);return /^[6-9]\d{9}$/.test(digits)?digits:"";}
 function fieldColumns(headers,fields){const normalized=headers.map(header=>({header,key:norm(header)}));return Object.fromEntries(fields.filter(field=>field.required||field.enabled!==false).map(field=>{const match=normalized.find(item=>list(field.aliases).includes(item.key));return[field.id,match?.header||""];}));}
 function correctedAiLocation(project,location){const exceptions=new Set(["guru punvaanii eureka|bidadi","guru punvaanii ernika|anekal","guru punvaanii eka|anekal","guru punvaanii elegance|bheemenahalli"]);return exceptions.has(`${norm(project)}|${norm(location)}`)?"":location;}
@@ -464,7 +477,7 @@ function contextValue(id,record,aiLocation){if(id==="connected")return record.co
 function callSnapshot(record){
   const aiLocation=correctedAiLocation(record.project,record.location);
   return{
-    d:dateText(record.updateDate||record.update),
+    d:dateText(record.updateAt||record.updateDate||record.update),
     s:record.status||"",
     c:record.comments||"",
     n:dateText(record.nextDate||record.next),
@@ -473,6 +486,35 @@ function callSnapshot(record){
     b:record.budget||"",
     k:record.connected||""
   };
+}
+
+const ONE_HOUR_MS=60*60*1000;
+/** Drop CRM twin rows: same lead content within <1 hour (timestamp glitches / double-writes). */
+function dedupeNearDuplicateCalls(records,inputFields){
+  if(records.length<=1)return records;
+  const compareIds=(inputFields||[])
+    .filter(field=>field.required||field.enabled!==false)
+    .map(field=>field.id)
+    .filter(id=>id!=="update");
+  const signature=record=>compareIds.map(id=>norm(record[id]??"")).join("\u0001");
+  const stamp=record=>record.updateAt?.valueOf()??record.updateDate?.valueOf()??null;
+  const sorted=[...records].sort((a,b)=>{
+    const av=stamp(a),bv=stamp(b);
+    if(av!=null&&bv!=null&&av!==bv)return av-bv;
+    if(av!=null&&bv==null)return -1;
+    if(av==null&&bv!=null)return 1;
+    return a.rowIndex-b.rowIndex;
+  });
+  const kept=[];
+  for(const record of sorted){
+    const prev=kept[kept.length-1];
+    if(!prev){kept.push(record);continue;}
+    const t1=stamp(prev),t2=stamp(record);
+    const withinHour=t1!=null&&t2!=null&&Math.abs(t2-t1)<ONE_HOUR_MS;
+    if(withinHour&&signature(prev)===signature(record))continue;
+    kept.push(record);
+  }
+  return kept;
 }
 
 export function parseWorkbook(arrayBuffer,rawSettings=DEFAULT_SETTINGS){
@@ -492,23 +534,29 @@ export function parseWorkbook(arrayBuffer,rawSettings=DEFAULT_SETTINGS){
     const values={};
     for(const field of settings.inputFields)values[field.id]=clean(row[selected.columns[field.id]]);
     values.mobile=lastMobile;values.project=lastProject;
-    const record={...values,rowIndex:index,updateDate:parseDate(values.update),nextDate:parseDate(values.next)},key=`${lastProject} | ${lastMobile}`;
+    const updateAt=parseDateTime(values.update);
+    const updateDate=updateAt?new Date(updateAt.getFullYear(),updateAt.getMonth(),updateAt.getDate()):parseDate(values.update);
+    const record={...values,rowIndex:index,updateAt,updateDate,nextDate:parseDate(values.next)},key=`${lastProject} | ${lastMobile}`;
     if(!grouped.has(key))grouped.set(key,[]);
     grouped.get(key).push(record);
   }
 
   const leads=[];
-  for(const [groupId,records] of grouped.entries()){
-    records.sort((a,b)=>(a.updateDate?.valueOf()??a.rowIndex)-(b.updateDate?.valueOf()??b.rowIndex));
+  let dedupedRows=0;
+  for(const [groupId,rawRecords] of grouped.entries()){
+    rawRecords.sort((a,b)=>(a.updateAt?.valueOf()??a.updateDate?.valueOf()??a.rowIndex)-(b.updateAt?.valueOf()??b.updateDate?.valueOf()??b.rowIndex));
     // Carry agent/registration/status across blank follow-up rows inside the same lead
     // (CRM exports often write these once, then leave later rows empty).
-    fillDownWithinGroup(records,"telecaller");
-    fillDownWithinGroup(records,"registration");
-    fillDownWithinGroup(records,"status");
-    for(const record of records)record.connected=connectedFromParameter(record.parameter,settings);
+    fillDownWithinGroup(rawRecords,"telecaller");
+    fillDownWithinGroup(rawRecords,"registration");
+    fillDownWithinGroup(rawRecords,"status");
+    for(const record of rawRecords)record.connected=connectedFromParameter(record.parameter,settings);
+    const before=rawRecords.length;
+    const records=dedupeNearDuplicateCalls(rawRecords,settings.inputFields);
+    dedupedRows+=Math.max(0,before-records.length);
     const dated=records.filter(record=>record.updateDate);
     const latestDay=dated.length
-      ?dayKey(dated.reduce((best,record)=>record.updateDate.valueOf()>=best.updateDate.valueOf()?record:best).updateDate)
+      ?dayKey(dated.reduce((best,record)=>(record.updateAt?.valueOf()??record.updateDate.valueOf())>=(best.updateAt?.valueOf()??best.updateDate.valueOf())?record:best).updateDate)
       :"";
     // All calls on the latest calendar day (or the last row if dates are missing).
     const dayCalls=latestDay
@@ -520,7 +568,7 @@ export function parseWorkbook(arrayBuffer,rawSettings=DEFAULT_SETTINGS){
 
     dayCalls.forEach((call,callIndex)=>{
       const aiLocation=correctedAiLocation(call.project,call.location);
-      const leadUpdateDate=dateText(call.updateDate||call.update);
+      const leadUpdateDate=dateText(call.updateAt||call.updateDate||call.update);
       const staticValues={
         project:call.project,
         mobile:call.mobile,
@@ -565,7 +613,7 @@ export function parseWorkbook(arrayBuffer,rawSettings=DEFAULT_SETTINGS){
     });
   }
   if(!leads.length)throw new Error("No valid Indian mobile numbers were found. Only 10-digit Indian mobiles starting with 6, 7, 8 or 9 are processed.");
-  return{sheetName:selected.name,leads,rowCount:selected.rows.length,invalidRows};
+  return{sheetName:selected.name,leads,rowCount:selected.rows.length,leadCount:grouped.size,invalidRows,dedupedRows};
 }
 
 function buildPrompt(settings){

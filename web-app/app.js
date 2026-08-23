@@ -334,7 +334,7 @@ function renderFileList(){
     const title=document.createElement("strong");
     title.textContent=file.fileName;
     const meta=document.createElement("p");
-    meta.textContent=`${(file.fileSize/1048576).toFixed(1)} MB · ${file.sheetName} · ${file.leads.length.toLocaleString()} latest-day call rows`;
+    meta.textContent=`${(file.fileSize/1048576).toFixed(1)} MB · ${file.sheetName} · ${(file.leadCount??file.leads.length).toLocaleString()} leads · ${file.rowCount.toLocaleString()} rows`;
     copy.append(title,meta);
     left.append(icon,copy);
     const remove=document.createElement("button");
@@ -352,11 +352,14 @@ function updateValidationSummary(){
   if(!parsedFiles.length){box.classList.add("hidden");box.textContent="";return;}
   box.classList.remove("hidden");
   box.className="validation";
-  const leads=parsedFiles.reduce((sum,file)=>sum+file.leads.length,0);
-  const invalid=parsedFiles.reduce((sum,file)=>sum+(file.invalidRows||0),0);
-  box.textContent=parsedFiles.length===1
-    ?`Ready: ${parsedFiles[0].rowCount.toLocaleString()} rows · ${leads.toLocaleString()} latest-day call row(s) to audit (all calls on each lead’s newest date).${invalid?` ${invalid} invalid-mobile row(s) excluded.`:""}`
-    :`Ready: ${parsedFiles.length} separate workbooks · ${leads.toLocaleString()} total latest-day call rows. Each file runs as its own audit (not merged).${invalid?` ${invalid} invalid-mobile row(s) excluded.`:" "}`;
+  if(parsedFiles.length===1){
+    const file=parsedFiles[0];
+    box.textContent=`${(file.leadCount??0).toLocaleString()} leads · ${file.rowCount.toLocaleString()} Excel rows`;
+    return;
+  }
+  const leads=parsedFiles.reduce((sum,file)=>sum+(file.leadCount||0),0);
+  const rows=parsedFiles.reduce((sum,file)=>sum+(file.rowCount||0),0);
+  box.textContent=`${parsedFiles.length} files · ${leads.toLocaleString()} leads · ${rows.toLocaleString()} Excel rows`;
 }
 
 async function handleFiles(fileList){
