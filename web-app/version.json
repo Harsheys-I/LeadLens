@@ -1,5 +1,5 @@
 {
-  "version": "2.5.4",
+  "version": "2.5.5",
   "name": "LeadLens",
-  "notes": "Lead=mobile+project; Call=every row after update-date dedupe (no latest-day merge)"
+  "notes": "AI/export only latest-day calls; console shows Calls + Latest-day progress"
 }

@@ -25,7 +25,7 @@
         <button class="nav-item" data-view="history"><span>◷</span>History</button>
         <button class="nav-item" data-view="settings"><span>⚙</span>Settings</button>
       </nav>
-      <div class="privacy-note"><strong>Leads vs Calls</strong><span>Lead = unique Mobile + Project. Call = each Excel row after near-duplicate Lead Update Date filtering. Batch size is in leads.</span></div>
+      <div class="privacy-note"><strong>Leads · Calls · Latest-day</strong><span>Lead = Mobile + Project. Calls = rows after update-date dedupe. Only each lead’s latest calendar day is sent to AI / exported.</span></div>
     </aside>
 
     <main>
@@ -52,7 +52,7 @@
         <div class="progress-panel">
           <div class="progress-copy"><strong id="progress-label">Waiting for a file</strong><span id="progress-percent">0%</span></div>
           <div class="progress-track"><div id="progress-bar" class="progress-bar"></div></div>
-          <div class="metrics"><div><span>Leads</span><strong id="metric-leads">—</strong></div><div><span>Excel rows</span><strong id="metric-excel-rows">—</strong></div><div><span>Calls</span><strong id="metric-completed">—</strong></div><div><span>Batch</span><strong id="metric-batch">—</strong></div><div><span>Status</span><strong id="metric-status">Idle</strong></div><div><span>Input tokens</span><strong id="metric-input-tokens">—</strong></div><div><span>Cached input</span><strong id="metric-cached-tokens">—</strong></div><div><span>Output tokens</span><strong id="metric-output-tokens">—</strong></div><div><span>Run time</span><strong id="metric-duration">—</strong></div><div><span>Run cost</span><strong id="metric-cost">—</strong></div></div>
+          <div class="metrics"><div><span>Leads</span><strong id="metric-leads">—</strong></div><div><span>Excel rows</span><strong id="metric-excel-rows">—</strong></div><div><span>Calls</span><strong id="metric-calls">—</strong></div><div><span>Latest-day</span><strong id="metric-completed">—</strong></div><div><span>Batch</span><strong id="metric-batch">—</strong></div><div><span>Status</span><strong id="metric-status">Idle</strong></div><div><span>Input tokens</span><strong id="metric-input-tokens">—</strong></div><div><span>Cached input</span><strong id="metric-cached-tokens">—</strong></div><div><span>Output tokens</span><strong id="metric-output-tokens">—</strong></div><div><span>Run time</span><strong id="metric-duration">—</strong></div><div><span>Run cost</span><strong id="metric-cost">—</strong></div></div>
         </div>
         <div class="console-panel"><div class="panel-head"><div><span class="live-dot"></span><strong>Live log</strong></div><button id="clear-console" class="text-button">Clear view</button></div><div id="live-log" class="log-list"><div class="empty-state">Run activity will appear here.</div></div></div>
       </section>

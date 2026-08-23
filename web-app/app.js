@@ -2,10 +2,10 @@ import {putJob,getJob,getJobs,deleteJob,clearJobs,loadSettings,saveSettings,getA
 import {APP_VERSION,DEFAULT_SETTINGS,DEFAULT_OUTPUT_FIELDS,SETTINGS_SEED,normalizeSettings,normalizeInputFields,slugFieldId,parseWorkbook,auditBatch,downloadWorkbook} from "./audit.js";
 
 const $=id=>document.getElementById(id);
-const ids=["file-input","drop-zone","file-list","validation","start-audit","page-title","key-state","run-name","pause-run","download-result","progress-label","progress-percent","progress-bar","metric-leads","metric-excel-rows","metric-batch","metric-completed","metric-status","metric-input-tokens","metric-cached-tokens","metric-output-tokens","metric-duration","metric-cost","live-log","clear-console","history-list","clear-history","api-key","remember-key","toggle-key","save-key","forget-key","key-message","batch-size","concurrency","model","input-field-config","add-input-field","ai-field-config","rule-config","add-rule","output-field-config","yes-values","no-values","additional-instructions","input-price","cached-price","output-price","save-settings","reset-settings","settings-message","toast","mobile-menu","active-job-switch","sort-field","sort-direction","app-version","export-settings","import-settings","import-settings-file","update-banner","update-banner-text","reload-app"];
+const ids=["file-input","drop-zone","file-list","validation","start-audit","page-title","key-state","run-name","pause-run","download-result","progress-label","progress-percent","progress-bar","metric-leads","metric-excel-rows","metric-calls","metric-batch","metric-completed","metric-status","metric-input-tokens","metric-cached-tokens","metric-output-tokens","metric-duration","metric-cost","live-log","clear-console","history-list","clear-history","api-key","remember-key","toggle-key","save-key","forget-key","key-message","batch-size","concurrency","model","input-field-config","add-input-field","ai-field-config","rule-config","add-rule","output-field-config","yes-values","no-values","additional-instructions","input-price","cached-price","output-price","save-settings","reset-settings","settings-message","toast","mobile-menu","active-job-switch","sort-field","sort-direction","app-version","export-settings","import-settings","import-settings-file","update-banner","update-banner-text","reload-app"];
 const els=Object.fromEntries(ids.map(id=>[id,$(id)]));
 const titles={new:"New audit",console:"Run console",history:"History",settings:"Settings"};
-const ENGINE_VERSION="all-calls-v5";
+const ENGINE_VERSION="latest-day-v6";
 const ACTIVE_JOB_KEY="leadlens.activeJobId";
 
 let parsedFiles=[],currentJob=null,displayLogs=true;
@@ -103,6 +103,7 @@ function renderProgress(job){
   els["progress-bar"].style.width=`${pct}%`;
   els["metric-leads"].textContent=uniqueLeadCount(job)||"—";
   if(els["metric-excel-rows"])els["metric-excel-rows"].textContent=job.rowCount?Number(job.rowCount).toLocaleString():"—";
+  if(els["metric-calls"])els["metric-calls"].textContent=job.callCount!=null?Number(job.callCount).toLocaleString():"—";
   els["metric-batch"].textContent=batches?`${Math.min((job.nextBatch||0)+1,batches)} / ${batches}`:"—";
   els["metric-completed"].textContent=totalCalls?`${done} / ${totalCalls}`:"—";
   els["metric-status"].textContent=job.status?job.status[0].toUpperCase()+job.status.slice(1):"Idle";
@@ -363,7 +364,7 @@ function renderFileList(){
     const title=document.createElement("strong");
     title.textContent=file.fileName;
     const meta=document.createElement("p");
-    meta.textContent=`${(file.fileSize/1048576).toFixed(1)} MB · ${file.sheetName} · ${(file.leadCount??0).toLocaleString()} leads · ${(file.callCount??file.leads.length).toLocaleString()} calls · ${file.rowCount.toLocaleString()} Excel rows`;
+    meta.textContent=`${(file.fileSize/1048576).toFixed(1)} MB · ${file.sheetName} · ${(file.leadCount??0).toLocaleString()} leads · ${(file.callCount??0).toLocaleString()} calls · ${(file.latestDayCalls??file.leads.length).toLocaleString()} latest-day · ${file.rowCount.toLocaleString()} Excel rows`;
     copy.append(title,meta);
     left.append(icon,copy);
     const remove=document.createElement("button");
@@ -383,13 +384,14 @@ function updateValidationSummary(){
   box.className="validation";
   if(parsedFiles.length===1){
     const file=parsedFiles[0];
-    box.textContent=`${(file.leadCount??0).toLocaleString()} leads · ${(file.callCount??file.leads.length).toLocaleString()} calls · ${file.rowCount.toLocaleString()} Excel rows`;
+    box.textContent=`${(file.leadCount??0).toLocaleString()} leads · ${(file.callCount??0).toLocaleString()} calls · ${(file.latestDayCalls??file.leads.length).toLocaleString()} latest-day · ${file.rowCount.toLocaleString()} Excel rows`;
     return;
   }
   const leads=parsedFiles.reduce((sum,file)=>sum+(file.leadCount||0),0);
-  const calls=parsedFiles.reduce((sum,file)=>sum+(file.callCount||file.leads?.length||0),0);
+  const calls=parsedFiles.reduce((sum,file)=>sum+(file.callCount||0),0);
+  const latest=parsedFiles.reduce((sum,file)=>sum+(file.latestDayCalls||file.leads?.length||0),0);
   const rows=parsedFiles.reduce((sum,file)=>sum+(file.rowCount||0),0);
-  box.textContent=`${parsedFiles.length} files · ${leads.toLocaleString()} leads · ${calls.toLocaleString()} calls · ${rows.toLocaleString()} Excel rows`;
+  box.textContent=`${parsedFiles.length} files · ${leads.toLocaleString()} leads · ${calls.toLocaleString()} calls · ${latest.toLocaleString()} latest-day · ${rows.toLocaleString()} Excel rows`;
 }
 
 async function handleFiles(fileList){
@@ -435,7 +437,8 @@ async function startNew(){
       status:"queued",
       totalLeads:file.leads.length,
       leadCount:file.leadCount||0,
-      callCount:file.callCount||file.leads.length,
+      callCount:file.callCount||0,
+      latestDayCalls:file.latestDayCalls||file.leads.length,
       rowCount:file.rowCount||0,
       nextBatch:0,
       pendingBatches:{},
@@ -484,7 +487,7 @@ async function renderHistory(){
     meta.className="history-meta";
     meta.textContent=legacy
       ?`${timeText(job.createdAt)} · previous engine result — upload the file and run it again for v2 rules.`
-      :`${timeText(job.createdAt)} · ${uniqueLeadCount(job)} leads · ${job.results?.length||0}/${job.totalLeads} calls · ${durationText(job.elapsedMs||0)} · cost ${estimatedCost(job).toFixed(4)} · cached ${number(job.tokenUsage?.cached).toLocaleString()}`;
+      :`${timeText(job.createdAt)} · ${uniqueLeadCount(job)} leads · ${job.callCount??"—"} calls · ${job.results?.length||0}/${job.totalLeads} latest-day · ${durationText(job.elapsedMs||0)} · cost ${estimatedCost(job).toFixed(4)} · cached ${number(job.tokenUsage?.cached).toLocaleString()}`;
     info.append(title,document.createTextNode(" "),status,meta);
     actions.className="history-actions";
     const view=document.createElement("button");
