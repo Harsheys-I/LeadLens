@@ -1,5 +1,5 @@
 {
-  "version": "2.4.0",
+  "version": "2.4.1",
   "name": "LeadLens",
-  "notes": "Latest-day multi-call rows, strict comment quality, requirement empty/wrong codes, sort column first"
+  "notes": "Prompt-cache warmup + longer stable handbook so cached input tokens activate reliably"
 }

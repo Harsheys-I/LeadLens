@@ -219,14 +219,38 @@ async function runJob(job){
   let launched=0;
   const quietLogs=concurrency>=4;
 
+  // Warm OpenAI prompt cache with ONE batch before fanning out.
+  // Otherwise the first parallel wave all miss (nothing cached yet) and a short run can show ~0 cached.
+  if(queue.length&&!controller.signal.aborted){
+    const warmIndex=queue.shift();
+    const warmBatch=job.leads.slice(warmIndex*batchSize,(warmIndex+1)*batchSize);
+    addLog(job,`Cache warmup: batch ${warmIndex+1}/${totalBatches} alone (${warmBatch.length} calls), then live pool of ${concurrency}.`);
+    try{
+      const warmRows=await auditBatch(key,job.settings,warmBatch,controller.signal,(message,level)=>addLog(job,message,level),persistUsage);
+      checkpointTasks.push(commitBatch(job,warmIndex,warmRows));
+      launched++;
+      const warmCached=number(job.tokenUsage.cached);
+      addLog(job,warmCached
+        ?`Cache warmup done — ${warmCached.toLocaleString()} cached tokens already visible (likely from a recent run).`
+        :"Cache warmup done — prefix written; following parallel batches should show cached input.");
+    }catch(error){
+      if(error.name==="AbortError")fatalError=error;
+      else{
+        fatalError=error;
+        controller.abort();
+      }
+      queue.length=0;
+    }
+  }
+
   const workers=Array.from({length:Math.min(concurrency,Math.max(queue.length,1))},async()=>{
     while(!fatalError&&!controller.signal.aborted){
       const index=queue.shift();
       if(index===undefined)return;
       const batch=job.leads.slice(index*batchSize,(index+1)*batchSize);
       launched++;
-      if(!quietLogs||launched<=concurrency||launched%concurrency===1||index===totalBatches-1){
-        addLog(job,`Dispatch batch ${index+1}/${totalBatches} (${batch.length} leads) · queue left ${queue.length} · pool ${concurrency}.`);
+      if(!quietLogs||launched<=concurrency+1||launched%concurrency===1||index===totalBatches-1){
+        addLog(job,`Dispatch batch ${index+1}/${totalBatches} (${batch.length} calls) · queue left ${queue.length} · pool ${concurrency}.`);
       }
       throttleProgress(job);
       try{

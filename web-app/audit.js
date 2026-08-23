@@ -1,4 +1,4 @@
-export const APP_VERSION = "2.4.0";
+export const APP_VERSION = "2.4.1";
 
 export const ERROR_CATALOG = [
   {code:"0",label:"Comment displaying -ve, but Lead Status is +ve",hint:"-ve comment vs +ve status"},
@@ -62,48 +62,97 @@ export const DEFAULT_SETTINGS = {
   pricing:{input:0,cached:0,output:0}
 };
 
-/* Stable prefix sized just over OpenAI's ~1024-token cache floor. Keep static text first; lead payloads last. */
-const CACHE_HANDBOOK = `LeadLens QA v2.4. Evidence only. Never invent facts.
+/* Large stable prefix FIRST so OpenAI prompt caching can activate (>=1024 tokens;
+   some models need closer to 2048). Run-specific rules come after; lead data last. */
+const CACHE_HANDBOOK = `LeadLens QA v2.4.1 — stable cacheable auditor handbook. Evidence only. Never invent facts, dates, budgets, locations, or prior calls.
 
-INPUT: id (echo exact). Per-call fields: s=status, c=comments, n=next followup, l=location, rq=requirement, b=budget, k=connected Yes/No/"". Optional day[] = all calls on the same latest calendar day (siblings). Audit THIS call's fields; use day[] only as context. Empty "" = unknown. Do not restore blanked locations.
+PURPOSE
+You audit Indian real-estate telecalling follow-up notes. Judge only the supplied fields for THIS call id. Optional day[] lists sibling calls on the same latest calendar day — context only; still return one result for THIS id.
 
-OUTPUT a[]: id, q (0-10), e (error CODES only), i (0|1), o (<=18 words), r (<=14 words). No severity. No full error sentences. No markdown.
+INPUT CONTRACT
+- id: opaque lead/call id. Echo it exactly. Never invent or drop ids.
+- s: Lead Status
+- c: Comments (source of truth for conversation quality and status polarity)
+- n: Next Followup Date (DD/MM/YYYY or "")
+- l: Customer Location (may already be blanked for known project exceptions — do not restore)
+- rq: Customer Requirement
+- b: Estimated Budget
+- k: Connected Yes / No / ""
+- day[] (optional): siblings [{d,s,c,n,l,rq,b,k}, ...] same calendar day
+Empty string means unknown / not captured.
 
-ERROR CODES:
-0:-ve comment vs +ve status
-1:+ve comment vs -ve status
-2:missed follow-up
-3:connected + empty/placeholder location
-4:connected + empty/placeholder requirement
-5:connected + empty/placeholder budget
-6:empty analysis parameter
-7:requirement set wrong (call jargon / not a real customer need)
-Prefer e:[] over weak guesses. App may also add 2-6 deterministically.
+OUTPUT CONTRACT (JSON schema a[] only)
+For each id return:
+- q: integer 0-10 comment quality
+- e: array of error CODE strings only (never full sentences)
+- i: 0 or 1 buying intent
+- o: <=18 words observation
+- r: <=14 words recommendation
+No severity field. No markdown. No extra keys.
 
-COMMENT QUALITY q — STRICT (comments must mirror the actual talk):
+ERROR CODES (emit codes only)
+0 = -ve comment vs +ve status
+1 = +ve comment vs -ve status
+2 = missed follow-up date
+3 = connected + empty/placeholder location
+4 = connected + empty/placeholder requirement
+5 = connected + empty/placeholder budget
+6 = empty analysis parameter
+7 = requirement set wrong (call jargon / not a real customer requirement)
+Prefer e:[] over weak guesses. The app may also add 2-6 deterministically.
+
+COMMENT QUALITY q — STRICT
+Comments must reflect the actual telecaller–customer talk (need, budget, locality preference, objection, decision-maker, next step).
 10: rich conversation — config/area + budget/objection + decision context + clear next action
 8-9: strong descriptive talk with customer need and next step
 6-7: partial real conversation detail, still actionable
 4-5: thin connected note, little customer substance
 2-3: boilerplate / 2-3 vague words
 0-1: empty, unreadable, or single CRM crumb
-HARD CAPS: "visited"/"visit"/"RNR"/"CNP"/"busy"/"followup"/"SV" alone or near-alone => q<=2. Not descriptive => never 8-10.
+HARD CAPS: visited / visit / RNR / CNP / busy / followup / SV alone or near-alone => q<=2. Not descriptive => never score 8-10.
 
-CUSTOMER REQUIREMENT rq:
-Valid: 2BHK, plot size, locality preference, facing, budget band as need, possession timeline as need, etc.
-INVALID (code 7 when connected and non-blank): RNR, CNP, Visited, Site visit, Busy, Followup, Callback, Interested, Not interested, Connected, ringing, wrong number, status/comment dumps.
+CUSTOMER REQUIREMENT rq
+Valid examples: 2BHK, 30x40 plot, Whitefield, east facing, under 90L need, possession in 2027, etc.
+INVALID when connected and non-blank (code 7): RNR, CNP, Visited, Site visit, Busy, Followup, Callback, Interested, Not interested, Connected, ringing, wrong number, status/comment dumps.
 Placeholder-only (., -, NA, nil) on connected call => code 4 (empty), not 7.
 
-i=1 only for real buy interest. Status mismatch: comments win; neutrals ≠ mismatch.
-If k is No/"", do not demand l/rq/b unless a run check says so.
-o/r terse; never dump full comment. Never drop/add ids.
+BUYING INTENT i
+i=1 only for genuine purchase interest (site visit interest, options request, active shortlist, budget toward buy).
+i=0 for CNP/busy/NI/wrong number/neutral admin/no interest signal.
 
-EXAMPLES:
+STATUS vs COMMENT
+Comments win. Emit 0 only for clear -ve comment vs +ve status. Emit 1 only for clear +ve comment vs -ve status. Neutral / not-connected comments are NOT mismatches.
+
+CONNECTED GATING
+If k is No or "", do not demand l/rq/b unless a run check explicitly requires it.
+
+STYLE
+o cites decisive evidence only. r is one coaching/process action. Never dump the full comment into o or r. Never restate this handbook.
+
+EXAMPLES
 A) c="visited" => q<=2, usually i=0.
 B) k=Yes, rq="." or "" => code 4.
 C) k=Yes, rq="RNR" or "Visited" => code 7.
 D) k=Yes, rq="2BHK Whitefield" => rq OK.
-E) Two day[] siblings: score/flag THIS call; siblings are context only.
+E) day[] siblings present: score/flag THIS call only; siblings are context.
+F) s=Interested, c=customer said not interested stop calling => code 0, i=0.
+G) s=Hot, c=wants 2BHK under 90L Saturday visit => high q, i=1, e:[].
+H) k=No, c=ringing no answer => i=0, usually e:[] from model.
+
+EDGE CASES
+- Mixed-language comments are valid; judge meaning, not grammar.
+- Boilerplate repeated across leads stays low q.
+- Emoji-only / symbol-only comments => q near 0.
+- Insufficient data => short o + r asking what to capture next.
+- Illegal or harassing calling advice is forbidden in r.
+- Budget ranges stay as written; do not normalize currency.
+- CRM labels Hot/Warm/Cold/NI/CNP/Busy need comment polarity, not label alone.
+- "Just enquiry/browsing" with no next step is usually i=0.
+- Callback-after-salary with active locality search can support i=1.
+- If history arrays exist for a field, use as context; THIS call values still drive i and mismatch codes unless a run check says otherwise.
+
+CACHE STABILITY PAD (identical every request — do not vary)
+LeadLens keeps this handbook byte-stable so automatic prompt caching can reuse the prefix across batches in a run and across nearby reruns. Static instructions stay first; configured run checks follow; unique lead payloads stay last. Routing uses a stable prompt_cache_key derived from model + rules. Parallel workers must warm this prefix once before fanning out. Treat the following checklist as fixed operating procedure: verify id echo, apply q hard caps, distinguish rq empty vs wrong, gate l/rq/b on connected, keep outputs compact, never invent sibling calls, never merge two ids, never emit full error sentences, never emit severity, never wrap JSON in fences, never discuss pricing or tokens, never mention cache mechanics in o/r. Repeatable discipline improves audit consistency across telecalling QA shifts, projects, and batch sizes while preserving privacy of customer records inside the browser-only LeadLens workflow.
 
 This handbook is identical across batches for prompt caching.`;
 
@@ -156,7 +205,7 @@ const defaultsById=(saved,fallback)=>fallback.map(base=>({...base,...((Array.isA
 export function buildErrorMaps(settings=DEFAULT_SETTINGS){
   const byCode=new Map(ERROR_CATALOG.map(item=>[item.code,{...item}]));
   const byLabel=new Map(ERROR_CATALOG.map(item=>[norm(item.label),item.code]));
-  let next=7;
+  let next=8;
   for(const rule of settings.rules||[]){
     for(const part of String(rule.errors||"").split(",")){
       const token=clean(part);
@@ -325,16 +374,29 @@ export function parseWorkbook(arrayBuffer,rawSettings=DEFAULT_SETTINGS){
 
 function buildPrompt(settings){
   const maps=buildErrorMaps(settings);
-  const codeLegend=[...maps.byCode.entries()].map(([code,item])=>`${code}:${item.hint||item.label}`).join(" | ");
+  // Stable catalog order first (helps identical prefixes), then any custom codes.
+  const catalogCodes=ERROR_CATALOG.map(item=>`${item.code}:${item.hint||item.label}`);
+  const customCodes=[...maps.byCode.entries()]
+    .filter(([code])=>!ERROR_CATALOG.some(item=>item.code===code))
+    .map(([code,item])=>`${code}:${item.hint||item.label}`);
+  const codeLegend=[...catalogCodes,...customCodes].join(" | ");
   const rules=settings.rules.filter(rule=>clean(rule.instruction)).map((rule,index)=>{
     const codes=String(rule.errors||"").split(",").map(clean).filter(Boolean);
     return`${index+1}. ${clean(rule.field)||"check"}: ${clean(rule.instruction)}${codes.length?` codes:${codes.join(",")}`:""}`;
   }).join("\n");
   const extra=clean(settings.additionalInstructions);
+  // Handbook first (cacheable), then run config (stable within a job), lead data stays in the user message.
   return `${CACHE_HANDBOOK}\n\nRUN CODES: ${codeLegend}\n\nRUN CHECKS:\n${rules||"none"}${extra?`\n\nEXTRA:\n${extra}`:""}`;
 }
 function promptCacheKey(settings){
-  const material=JSON.stringify({v:APP_VERSION,model:settings.model,rules:settings.rules,additionalInstructions:settings.additionalInstructions||"",aiFields:settings.aiFields});
+  // Keep key stable for the whole run / identical settings so parallel requests route together.
+  const material=JSON.stringify({
+    v:APP_VERSION,
+    model:settings.model,
+    rules:settings.rules,
+    additionalInstructions:settings.additionalInstructions||"",
+    aiFields:(settings.aiFields||[]).map(field=>({id:field.id,enabled:field.enabled!==false,history:Boolean(field.history)}))
+  });
   let hash=2166136261;
   for(let i=0;i<material.length;i++){hash^=material.charCodeAt(i);hash=Math.imul(hash,16777619);}
   return `leadlens-${APP_VERSION}-${(hash>>>0).toString(16)}`;
