@@ -118,6 +118,177 @@ function withJobSave(jobId,action){
   return next.finally(()=>{if(saveChains.get(jobId)===next)saveChains.delete(jobId);});
 }
 
+function throttleProgress(job){
+  if(currentJob?.id!==job.id)return;
+  if(throttleProgress._timer)return;
+  throttleProgress._timer=setTimeout(()=>{
+    throttleProgress._timer=null;
+    if(currentJob?.id===job.id)renderProgress(currentJob);
+  },200);
+}
+
+/** Merge finished batches in order and write IndexedDB once — never blocks the API pool. */
+async function commitBatch(job,index,rows){
+  await withJobSave(job.id,async()=>{
+    job.pendingBatches=job.pendingBatches||{};
+    if(rows)job.pendingBatches[String(index)]=rows;
+    let merged=0;
+    const from=job.nextBatch;
+    while(job.pendingBatches[String(job.nextBatch)]){
+      job.results.push(...job.pendingBatches[String(job.nextBatch)]);
+      delete job.pendingBatches[String(job.nextBatch)];
+      job.nextBatch+=1;
+      merged++;
+    }
+    job.updatedAt=timestamp();
+    await putJob(job);
+    if(merged){
+      addLog(job,merged===1
+        ?`Batch ${from+1} checkpointed. ${job.results.length}/${job.totalLeads} leads complete.`
+        :`Batches ${from+1}–${job.nextBatch} checkpointed. ${job.results.length}/${job.totalLeads} leads complete.`);
+      throttleProgress(job);
+    }
+  });
+}
+
+async function flushPendingBatches(job){
+  await withJobSave(job.id,async()=>{
+    job.pendingBatches=job.pendingBatches||{};
+    let merged=0;
+    const from=job.nextBatch;
+    while(job.pendingBatches[String(job.nextBatch)]){
+      job.results.push(...job.pendingBatches[String(job.nextBatch)]);
+      delete job.pendingBatches[String(job.nextBatch)];
+      job.nextBatch+=1;
+      merged++;
+    }
+    if(merged){
+      job.updatedAt=timestamp();
+      await putJob(job);
+      addLog(job,`Flushed checkpoints ${from+1}–${job.nextBatch}. ${job.results.length}/${job.totalLeads} leads complete.`);
+    }else{
+      job.updatedAt=timestamp();
+      await putJob(job);
+    }
+  });
+}
+
+async function runJob(job){
+  if(controllers.has(job.id)){toast("That audit is already running.");return;}
+  const key=getApiKey();
+  if(!key){showView("settings");toast("Add an OpenAI API key first.");return;}
+  if(!/^sk-[A-Za-z0-9_-]{20,}$/.test(key)){showView("settings");toast("That does not look like an OpenAI API key.");return;}
+
+  const controller=new AbortController();
+  controllers.set(job.id,controller);
+  job.status="running";
+  job.error="";
+  job.runStartedAt=timestamp();
+  job.tokenUsage=job.tokenUsage||{input:0,cached:0,output:0};
+  job.elapsedMs=job.elapsedMs||0;
+  job.pendingBatches=job.pendingBatches||{};
+  displayLogs=true;
+  const concurrency=Math.min(20,Math.max(1,Number(job.settings.concurrency)||1));
+  addLog(job,`Run started: live pool of ${concurrency} (next batch fires the instant one frees a slot), batch size ${job.settings.batchSize}, model ${job.settings.model}, app ${APP_VERSION}.`);
+  await putJob(job);
+  if(!currentJob||currentJob.id===job.id||!controllers.has(currentJob.id))renderProgress(job);
+  showView("console");
+
+  const batchSize=job.settings.batchSize;
+  const totalBatches=Math.ceil(job.leads.length/batchSize);
+  const pending=job.pendingBatches||{};
+  // Full remaining work pre-queued; workers pull instantly when a slot frees.
+  const queue=[];
+  for(let index=0;index<totalBatches;index++){
+    if(index<job.nextBatch)continue;
+    if(pending[String(index)])continue;
+    queue.push(index);
+  }
+
+  await flushPendingBatches(job);
+
+  const persistUsage=usage=>{
+    job.tokenUsage.input+=usage.input;
+    job.tokenUsage.cached+=usage.cached;
+    job.tokenUsage.output+=usage.output;
+    throttleProgress(job);
+  };
+
+  let fatalError=null;
+  const checkpointTasks=[];
+  let launched=0;
+  const quietLogs=concurrency>=4;
+
+  const workers=Array.from({length:Math.min(concurrency,Math.max(queue.length,1))},async()=>{
+    while(!fatalError&&!controller.signal.aborted){
+      const index=queue.shift();
+      if(index===undefined)return;
+      const batch=job.leads.slice(index*batchSize,(index+1)*batchSize);
+      launched++;
+      if(!quietLogs||launched<=concurrency||launched%concurrency===1||index===totalBatches-1){
+        addLog(job,`Dispatch batch ${index+1}/${totalBatches} (${batch.length} leads) · queue left ${queue.length} · pool ${concurrency}.`);
+      }
+      throttleProgress(job);
+      try{
+        const rows=await auditBatch(
+          key,
+          job.settings,
+          batch,
+          controller.signal,
+          quietLogs?(message,level)=>{if(level==="error"||level==="warn")addLog(job,message,level);}:((message,level)=>addLog(job,message,level)),
+          persistUsage
+        );
+        // Checkpoint in background — do NOT await before starting the next API call.
+        checkpointTasks.push(commitBatch(job,index,rows));
+      }catch(error){
+        if(error.name==="AbortError"){
+          fatalError=error;
+          queue.length=0;
+          return;
+        }
+        fatalError=error;
+        queue.length=0;
+        controller.abort();
+      }
+    }
+  });
+
+  try{
+    await Promise.all(workers);
+    // Drain all background checkpoints before status flip.
+    await Promise.allSettled(checkpointTasks);
+    await flushPendingBatches(job);
+    if(fatalError)throw fatalError;
+    if(job.nextBatch<totalBatches)throw new Error("Audit stopped before all batches finished. Resume to continue.");
+    job.status="completed";
+    job.pendingBatches={};
+    stopClock(job);
+    job.updatedAt=timestamp();
+    const billable=Math.max(0,number(job.tokenUsage.input)-number(job.tokenUsage.cached));
+    addLog(job,`Audit complete in ${durationText(job.elapsedMs)}. Cost est. ${estimatedCost(job).toFixed(4)}. Cached ${number(job.tokenUsage.cached).toLocaleString()} · billable input ${billable.toLocaleString()} · output ${number(job.tokenUsage.output).toLocaleString()}.`,"success");
+    await putJob(job);
+    if(currentJob?.id===job.id)renderProgress(job);
+    toast(`${job.fileName}: audit complete.`);
+  }catch(error){
+    await Promise.allSettled(checkpointTasks);
+    await flushPendingBatches(job).catch(()=>{});
+    stopClock(job);
+    if(error.name==="AbortError"){
+      job.status="paused";
+      addLog(job,"Audit paused. Completed + pending batch checkpoints are saved on this device.","warn");
+    }else{
+      job.status="failed";
+      job.error=error.message;
+      addLog(job,error.message,"error");
+    }
+    job.updatedAt=timestamp();
+    await putJob(job);
+    if(currentJob?.id===job.id)renderProgress(job);
+  }finally{
+    controllers.delete(job.id);
+  }
+}
+
 function renderFileList(){
   const list=els["file-list"];
   list.replaceChildren();
@@ -185,140 +356,6 @@ async function handleFiles(fileList){
   renderFileList();
   updateValidationSummary();
   if(errors.length)toast(`${errors.length} file(s) skipped.`);
-}
-
-async function commitBatch(job,index,rows){
-  await withJobSave(job.id,async()=>{
-    job.pendingBatches=job.pendingBatches||{};
-    job.pendingBatches[String(index)]=rows;
-    while(job.pendingBatches[String(job.nextBatch)]){
-      const ready=job.pendingBatches[String(job.nextBatch)];
-      job.results.push(...ready);
-      delete job.pendingBatches[String(job.nextBatch)];
-      job.nextBatch+=1;
-      job.updatedAt=timestamp();
-      addLog(job,`Batch ${job.nextBatch} checkpoint saved. ${job.results.length}/${job.totalLeads} leads complete.`);
-      await putJob(job);
-      if(currentJob?.id===job.id)renderProgress(job);
-    }
-    job.updatedAt=timestamp();
-    await putJob(job);
-  });
-}
-
-async function runJob(job){
-  if(controllers.has(job.id)){toast("That audit is already running.");return;}
-  const key=getApiKey();
-  if(!key){showView("settings");toast("Add an OpenAI API key first.");return;}
-  if(!/^sk-[A-Za-z0-9_-]{20,}$/.test(key)){showView("settings");toast("That does not look like an OpenAI API key.");return;}
-
-  const controller=new AbortController();
-  controllers.set(job.id,controller);
-  job.status="running";
-  job.error="";
-  job.runStartedAt=timestamp();
-  job.tokenUsage=job.tokenUsage||{input:0,cached:0,output:0};
-  job.elapsedMs=job.elapsedMs||0;
-  job.pendingBatches=job.pendingBatches||{};
-  displayLogs=true;
-  const concurrency=Math.min(20,Math.max(1,Number(job.settings.concurrency)||1));
-  addLog(job,`Run started: continuous pool of ${concurrency} parallel batch${concurrency>1?"es":""}, batch size ${job.settings.batchSize}, model ${job.settings.model}, app ${APP_VERSION}.`);
-  await putJob(job);
-  if(!currentJob||currentJob.id===job.id||!controllers.has(currentJob.id))renderProgress(job);
-  showView("console");
-
-  const batchSize=job.settings.batchSize;
-  const totalBatches=Math.ceil(job.leads.length/batchSize);
-  const pending=job.pendingBatches||{};
-  const queue=[];
-  for(let index=0;index<totalBatches;index++){
-    if(index<job.nextBatch)continue;
-    if(pending[String(index)])continue;
-    queue.push(index);
-  }
-
-  // Flush any already-pending out-of-order batches from a prior pause.
-  await withJobSave(job.id,async()=>{
-    job.pendingBatches=job.pendingBatches||{};
-    while(job.pendingBatches[String(job.nextBatch)]){
-      job.results.push(...job.pendingBatches[String(job.nextBatch)]);
-      delete job.pendingBatches[String(job.nextBatch)];
-      job.nextBatch+=1;
-      job.updatedAt=timestamp();
-      addLog(job,`Batch ${job.nextBatch} checkpoint saved. ${job.results.length}/${job.totalLeads} leads complete.`);
-      await putJob(job);
-      if(currentJob?.id===job.id)renderProgress(job);
-    }
-  });
-
-  const persistUsage=usage=>{
-    job.tokenUsage.input+=usage.input;
-    job.tokenUsage.cached+=usage.cached;
-    job.tokenUsage.output+=usage.output;
-    if(currentJob?.id===job.id)renderProgress(job);
-  };
-
-  let fatalError=null;
-  const workers=Array.from({length:Math.min(concurrency,Math.max(1,queue.length||1))},async()=>{
-    while(queue.length&&!fatalError&&!controller.signal.aborted){
-      const index=queue.shift();
-      if(index===undefined)return;
-      const batch=job.leads.slice(index*batchSize,(index+1)*batchSize);
-      addLog(job,`Sending batch ${index+1}/${totalBatches} (${batch.length} leads). In-flight pool active.`);
-      if(currentJob?.id===job.id)renderProgress(job);
-      try{
-        const rows=await auditBatch(key,job.settings,batch,controller.signal,(message,level)=>addLog(job,message,level),persistUsage);
-        await commitBatch(job,index,rows);
-      }catch(error){
-        if(error.name==="AbortError"){
-          fatalError=error;
-          queue.length=0;
-          return;
-        }
-        fatalError=error;
-        queue.length=0;
-        controller.abort();
-      }
-    }
-  });
-
-  try{
-    if(queue.length)await Promise.all(workers);
-    else await withJobSave(job.id,async()=>{
-      while(job.pendingBatches?.[String(job.nextBatch)]){
-        job.results.push(...job.pendingBatches[String(job.nextBatch)]);
-        delete job.pendingBatches[String(job.nextBatch)];
-        job.nextBatch+=1;
-        await putJob(job);
-      }
-    });
-    if(fatalError)throw fatalError;
-    if(job.nextBatch<totalBatches)throw new Error("Audit stopped before all batches finished. Resume to continue.");
-    job.status="completed";
-    job.pendingBatches={};
-    stopClock(job);
-    job.updatedAt=timestamp();
-    const billable=Math.max(0,number(job.tokenUsage.input)-number(job.tokenUsage.cached));
-    addLog(job,`Audit complete in ${durationText(job.elapsedMs)}. Cost est. ${estimatedCost(job).toFixed(4)}. Cached ${number(job.tokenUsage.cached).toLocaleString()} · billable input ${billable.toLocaleString()} · output ${number(job.tokenUsage.output).toLocaleString()}.`,"success");
-    await putJob(job);
-    if(currentJob?.id===job.id)renderProgress(job);
-    toast(`${job.fileName}: audit complete.`);
-  }catch(error){
-    stopClock(job);
-    if(error.name==="AbortError"){
-      job.status="paused";
-      addLog(job,"Audit paused. Completed + pending batch checkpoints are saved on this device.","warn");
-    }else{
-      job.status="failed";
-      job.error=error.message;
-      addLog(job,error.message,"error");
-    }
-    job.updatedAt=timestamp();
-    await putJob(job);
-    if(currentJob?.id===job.id)renderProgress(job);
-  }finally{
-    controllers.delete(job.id);
-  }
 }
 
 async function startNew(){

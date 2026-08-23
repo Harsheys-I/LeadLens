@@ -1,4 +1,4 @@
-export const APP_VERSION = "2.3.1";
+export const APP_VERSION = "2.3.2";
 
 export const ERROR_CATALOG = [
   {code:"0",label:"Comment displaying -ve, but Lead Status is +ve",hint:"-ve comment vs +ve status"},

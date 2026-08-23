@@ -1,5 +1,5 @@
 {
-  "version": "2.3.1",
+  "version": "2.3.2",
   "name": "LeadLens",
-  "notes": "Parallel batches max raised to 20"
+  "notes": "Non-blocking checkpoint pipeline — keep N batches in flight with no save hiccup"
 }
