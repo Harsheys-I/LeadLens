@@ -1,6 +1,6 @@
-export const APP_VERSION = "2.5.3";
+export const APP_VERSION = "2.5.4";
 /** Bump when default AI rules / field defaults must refresh existing localStorage settings. */
-export const SETTINGS_SEED = 4;
+export const SETTINGS_SEED = 5;
 
 export const ERROR_TYPES = [
   "Comment displaying -ve, but Lead Status is +ve",
@@ -77,7 +77,7 @@ export const DEFAULT_OUTPUT_FIELDS = [
   {id:"callDate",label:"Lead Update Date",enabled:true},{id:"dayCallIndex",label:"Call # on Day",enabled:true},
   {id:"registration",label:"Lead Registration Date",enabled:true},
   {id:"telecaller",label:"Telecaller Name",enabled:true},{id:"status",label:"Lead Status",enabled:true},{id:"comments",label:"Comments",enabled:true},
-  {id:"next",label:"Next Followup Date",enabled:true},{id:"totalFollowups",label:"Total Followups",enabled:true},{id:"dayCallCount",label:"Calls on Latest Day",enabled:true},
+  {id:"next",label:"Next Followup Date",enabled:true},{id:"totalFollowups",label:"Total Followups",enabled:true},{id:"dayCallCount",label:"Calls on Day",enabled:true},
   {id:"connected",label:"Connected",enabled:true},
   {id:"location",label:"Customer Location",enabled:true},
   {id:"requirement",label:"Customer Requirement",enabled:true},{id:"parameter",label:"Analysis Parameter",enabled:true},{id:"budget",label:"Estimated Budget",enabled:true},
@@ -106,7 +106,7 @@ export const DEFAULT_SETTINGS = {
 const CACHE_HANDBOOK = `LeadLens QA v2.4.2 — stable cacheable auditor handbook. Evidence only. Never invent facts, dates, budgets, locations, or prior calls.
 
 PURPOSE
-You audit Indian real-estate telecalling follow-up notes. Judge only the supplied fields for THIS call id. Optional day[] lists sibling calls on the same latest calendar day — context only; still return one result for THIS id.
+You audit Indian real-estate telecalling follow-up notes. Judge only the supplied fields for THIS call id. Optional day[] lists sibling calls on the same calendar day — context only; still return one result for THIS id.
 
 INPUT CONTRACT
 - id: opaque lead/call id. Echo it exactly. Never invent or drop ids.
@@ -417,6 +417,8 @@ export function normalizeSettings(saved={}){
   if(seedFresh){
     const comments=merged.aiFields.find(field=>field.id==="comments");
     if(comments)comments.history=true;
+    const dayCount=merged.outputFields.find(field=>field.id==="dayCallCount");
+    if(dayCount)dayCount.label="Calls on Day";
   }
   merged.settingsSeed=SETTINGS_SEED;
   merged.pricing={...DEFAULT_SETTINGS.pricing,...(saved.pricing||{})};
@@ -552,23 +554,18 @@ export function parseWorkbook(arrayBuffer,rawSettings=DEFAULT_SETTINGS){
     fillDownWithinGroup(rawRecords,"status");
     for(const record of rawRecords)record.connected=connectedFromParameter(record.parameter,settings);
     const before=rawRecords.length;
+    // Calls = every remaining row after near-duplicate Lead Update Date filtering (no latest-day merge).
     const records=dedupeNearDuplicateCalls(rawRecords,settings.inputFields);
     dedupedRows+=Math.max(0,before-records.length);
-    const dated=records.filter(record=>record.updateDate);
-    const latestDay=dated.length
-      ?dayKey(dated.reduce((best,record)=>(record.updateAt?.valueOf()??record.updateDate.valueOf())>=(best.updateAt?.valueOf()??best.updateDate.valueOf())?record:best).updateDate)
-      :"";
-    // All calls on the latest calendar day (or the last row if dates are missing).
-    const dayCalls=latestDay
-      ?records.filter(record=>dayKey(record.updateDate)===latestDay)
-      :[records.at(-1)];
     const registration=firstNonEmpty(records.map(record=>record.registration));
     const telecaller=firstNonEmpty(records.map(record=>record.telecaller));
-    const daySnapshots=dayCalls.map(callSnapshot);
 
-    dayCalls.forEach((call,callIndex)=>{
+    records.forEach((call,callIndex)=>{
       const aiLocation=correctedAiLocation(call.project,call.location);
       const leadUpdateDate=dateText(call.updateAt||call.updateDate||call.update);
+      const callDay=dayKey(call.updateDate);
+      const sameDayCalls=callDay?records.filter(record=>dayKey(record.updateDate)===callDay):[call];
+      const daySnapshots=sameDayCalls.map(callSnapshot);
       const staticValues={
         project:call.project,
         mobile:call.mobile,
@@ -580,8 +577,8 @@ export function parseWorkbook(arrayBuffer,rawSettings=DEFAULT_SETTINGS){
         callDate:leadUpdateDate,
         update:leadUpdateDate,
         totalFollowups:records.length,
-        dayCallCount:dayCalls.length,
-        dayCallIndex:callIndex+1,
+        dayCallCount:sameDayCalls.length,
+        dayCallIndex:sameDayCalls.findIndex(record=>record.rowIndex===call.rowIndex)+1||callIndex+1,
         connected:call.connected||"",
         location:call.location,
         requirement:call.requirement,
@@ -601,7 +598,7 @@ export function parseWorkbook(arrayBuffer,rawSettings=DEFAULT_SETTINGS){
           ?records.map(record=>contextValue(field.id,record,correctedAiLocation(record.project,record.location)))
           :contextValue(field.id,call,aiLocation);
       }
-      // Always attach same-day sibling calls so multi-call days are not collapsed.
+      // Same-calendar-day siblings are context only; each call still gets its own result row.
       if(daySnapshots.length>1)auditContext.day=daySnapshots;
       leads.push({
         leadId:`${groupId}#${call.rowIndex}`,
@@ -613,7 +610,15 @@ export function parseWorkbook(arrayBuffer,rawSettings=DEFAULT_SETTINGS){
     });
   }
   if(!leads.length)throw new Error("No valid Indian mobile numbers were found. Only 10-digit Indian mobiles starting with 6, 7, 8 or 9 are processed.");
-  return{sheetName:selected.name,leads,rowCount:selected.rows.length,leadCount:grouped.size,invalidRows,dedupedRows};
+  return{
+    sheetName:selected.name,
+    leads,
+    rowCount:selected.rows.length,
+    leadCount:grouped.size,
+    callCount:leads.length,
+    invalidRows,
+    dedupedRows
+  };
 }
 
 function buildPrompt(settings){

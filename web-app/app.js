@@ -5,7 +5,7 @@ const $=id=>document.getElementById(id);
 const ids=["file-input","drop-zone","file-list","validation","start-audit","page-title","key-state","run-name","pause-run","download-result","progress-label","progress-percent","progress-bar","metric-leads","metric-excel-rows","metric-batch","metric-completed","metric-status","metric-input-tokens","metric-cached-tokens","metric-output-tokens","metric-duration","metric-cost","live-log","clear-console","history-list","clear-history","api-key","remember-key","toggle-key","save-key","forget-key","key-message","batch-size","concurrency","model","input-field-config","add-input-field","ai-field-config","rule-config","add-rule","output-field-config","yes-values","no-values","additional-instructions","input-price","cached-price","output-price","save-settings","reset-settings","settings-message","toast","mobile-menu","active-job-switch","sort-field","sort-direction","app-version","export-settings","import-settings","import-settings-file","update-banner","update-banner-text","reload-app"];
 const els=Object.fromEntries(ids.map(id=>[id,$(id)]));
 const titles={new:"New audit",console:"Run console",history:"History",settings:"Settings"};
-const ENGINE_VERSION="latest-day-v4";
+const ENGINE_VERSION="all-calls-v5";
 const ACTIVE_JOB_KEY="leadlens.activeJobId";
 
 let parsedFiles=[],currentJob=null,displayLogs=true;
@@ -363,7 +363,7 @@ function renderFileList(){
     const title=document.createElement("strong");
     title.textContent=file.fileName;
     const meta=document.createElement("p");
-    meta.textContent=`${(file.fileSize/1048576).toFixed(1)} MB · ${file.sheetName} · ${(file.leadCount??file.leads.length).toLocaleString()} leads · ${file.rowCount.toLocaleString()} rows`;
+    meta.textContent=`${(file.fileSize/1048576).toFixed(1)} MB · ${file.sheetName} · ${(file.leadCount??0).toLocaleString()} leads · ${(file.callCount??file.leads.length).toLocaleString()} calls · ${file.rowCount.toLocaleString()} Excel rows`;
     copy.append(title,meta);
     left.append(icon,copy);
     const remove=document.createElement("button");
@@ -383,12 +383,13 @@ function updateValidationSummary(){
   box.className="validation";
   if(parsedFiles.length===1){
     const file=parsedFiles[0];
-    box.textContent=`${(file.leadCount??0).toLocaleString()} leads · ${file.rowCount.toLocaleString()} Excel rows`;
+    box.textContent=`${(file.leadCount??0).toLocaleString()} leads · ${(file.callCount??file.leads.length).toLocaleString()} calls · ${file.rowCount.toLocaleString()} Excel rows`;
     return;
   }
   const leads=parsedFiles.reduce((sum,file)=>sum+(file.leadCount||0),0);
+  const calls=parsedFiles.reduce((sum,file)=>sum+(file.callCount||file.leads?.length||0),0);
   const rows=parsedFiles.reduce((sum,file)=>sum+(file.rowCount||0),0);
-  box.textContent=`${parsedFiles.length} files · ${leads.toLocaleString()} leads · ${rows.toLocaleString()} Excel rows`;
+  box.textContent=`${parsedFiles.length} files · ${leads.toLocaleString()} leads · ${calls.toLocaleString()} calls · ${rows.toLocaleString()} Excel rows`;
 }
 
 async function handleFiles(fileList){
@@ -434,6 +435,7 @@ async function startNew(){
       status:"queued",
       totalLeads:file.leads.length,
       leadCount:file.leadCount||0,
+      callCount:file.callCount||file.leads.length,
       rowCount:file.rowCount||0,
       nextBatch:0,
       pendingBatches:{},
