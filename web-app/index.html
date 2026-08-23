@@ -100,8 +100,9 @@
             </section>
 
             <section class="settings-card">
-              <div class="card-title"><h2>3 · Input Excel fields</h2><p>Edit header aliases to match your CRM export. Invalid Indian mobiles are excluded before AI processing.</p></div>
+              <div class="card-title"><h2>3 · Input Excel fields</h2><p>Add, remove, or reorder columns. Toggle which headers to read. Mobile and Project are required. <strong>Lead Update Date</strong> is accepted for ascending arrange/export only — it is not sent to the AI.</p></div>
               <div id="input-field-config" class="config-list"></div>
+              <button id="add-input-field" type="button" class="secondary-button">Add input field</button>
             </section>
 
             <section class="settings-card">
@@ -127,7 +128,7 @@
                 <label>Sort by<select id="sort-field"></select></label>
                 <label>Order<select id="sort-direction"><option value="asc">Ascending (A→Z, oldest first)</option><option value="desc">Descending (Z→A, newest first)</option></select></label>
               </div>
-              <p class="hint-copy">Dates (Lead Registration / Next Followup) sort chronologically. Filename includes the active sort. Sort column is exported first.</p>
+              <p class="hint-copy">Dates (Lead Update Date / Lead Registration / Next Followup) sort chronologically. Default sort is Lead Update Date ascending. Filename includes the active sort. Sort column is exported first.</p>
             </section>
 
             <section class="settings-card">

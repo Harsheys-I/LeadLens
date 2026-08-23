@@ -1,5 +1,5 @@
 {
-  "version": "2.4.9",
+  "version": "2.5.0",
   "name": "LeadLens",
-  "notes": "Removed numeric error codes; AI and Excel use full error type labels"
+  "notes": "Editable input fields; Lead Update Date for ascending arrange/export only"
 }

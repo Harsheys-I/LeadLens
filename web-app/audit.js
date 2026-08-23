@@ -1,6 +1,6 @@
-export const APP_VERSION = "2.4.9";
+export const APP_VERSION = "2.5.0";
 /** Bump when default AI rules / field defaults must refresh existing localStorage settings. */
-export const SETTINGS_SEED = 3;
+export const SETTINGS_SEED = 4;
 
 export const ERROR_TYPES = [
   "Comment displaying -ve, but Lead Status is +ve",
@@ -45,7 +45,7 @@ export const DEFAULT_INPUT_FIELDS = [
   {id:"project",label:"Project Name",aliases:"project name, project",required:true},
   {id:"registration",label:"Lead Registration Date",aliases:"lead registration date, registration date",required:false},
   {id:"telecaller",label:"Telecaller Name",aliases:"telecaller name, tellecaller name, tele caller name, telle caller name, caller name, agent name, executive name",required:false},
-  {id:"update",label:"Call / Lead Update Date",aliases:"lead update date, call date, update date",required:false},
+  {id:"update",label:"Lead Update Date",aliases:"lead update date, call date, update date, lead update, call / lead update date",required:false},
   {id:"status",label:"Lead Status",aliases:"lead status, status",required:false},
   {id:"comments",label:"Comments",aliases:"comments, comment, remarks, remark",required:false},
   {id:"next",label:"Next Followup Date",aliases:"next followup date, next follow-up date, next follow up date",required:false},
@@ -74,7 +74,7 @@ export const LEAD_STATUS_LADDER = [
 const STATUS_LADDER_TEXT = LEAD_STATUS_LADDER.map(item=>item.label).join(" > ") + " (highest → lowest)";
 export const DEFAULT_OUTPUT_FIELDS = [
   {id:"project",label:"Project Name",enabled:true},{id:"mobile",label:"Mobile Number",enabled:true},
-  {id:"callDate",label:"Call Date",enabled:true},{id:"dayCallIndex",label:"Call # on Day",enabled:true},
+  {id:"callDate",label:"Lead Update Date",enabled:true},{id:"dayCallIndex",label:"Call # on Day",enabled:true},
   {id:"registration",label:"Lead Registration Date",enabled:true},
   {id:"telecaller",label:"Telecaller Name",enabled:true},{id:"status",label:"Lead Status",enabled:true},{id:"comments",label:"Comments",enabled:true},
   {id:"next",label:"Next Followup Date",enabled:true},{id:"totalFollowups",label:"Total Followups",enabled:true},{id:"dayCallCount",label:"Calls on Latest Day",enabled:true},
@@ -97,7 +97,7 @@ export const DEFAULT_SETTINGS = {
   inputFields:DEFAULT_INPUT_FIELDS,aiFields:DEFAULT_AI_FIELDS,outputFields:DEFAULT_OUTPUT_FIELDS,rules:DEFAULT_RULES,
   yesValues:"yes, connected, call connected",noValues:"no, not connected, call not connected",
   additionalInstructions:"",
-  sort:{field:"project",direction:"asc"},
+  sort:{field:"callDate",direction:"asc"},
   pricing:{input:0,cached:0,output:0}
 };
 
@@ -264,6 +264,94 @@ function dayKey(date){
 }
 const defaultsById=(saved,fallback)=>fallback.map(base=>({...base,...((Array.isArray(saved)?saved:[]).find(item=>item.id===base.id)||{})}));
 
+export function slugFieldId(label,used=new Set()){
+  let base=norm(label).replace(/[^a-z0-9]+/g,"_").replace(/^_|_$/g,"")||"field";
+  if(/^\d/.test(base))base=`f_${base}`;
+  let id=base,n=2;
+  while(used.has(id)||["leadId","groupId","staticValues","auditContext","deterministicErrors","rowIndex","updateDate","nextDate"].includes(id)){
+    id=`${base}_${n++}`;
+  }
+  return id;
+}
+
+/** Preserve user order and custom fields; always keep required Mobile + Project. */
+export function normalizeInputFields(saved,seedFresh=false){
+  const defaults=clone(DEFAULT_INPUT_FIELDS);
+  const defaultById=new Map(defaults.map(field=>[field.id,field]));
+  if(!Array.isArray(saved)||!saved.length)return defaults;
+  const used=new Set();
+  const out=[];
+  for(const field of saved){
+    let id=clean(field.id);
+    if(!id)id=slugFieldId(field.label||"field",used);
+    if(used.has(id))continue;
+    used.add(id);
+    const base=defaultById.get(id);
+    out.push({
+      id,
+      label:clean(field.label)||base?.label||id,
+      aliases:clean(field.aliases)||base?.aliases||clean(field.label)||id,
+      required:Boolean(base?.required),
+      enabled:base?.required?true:field.enabled!==false
+    });
+  }
+  for(const req of defaults.filter(field=>field.required)){
+    if(used.has(req.id))continue;
+    out.unshift(clone(req));
+    used.add(req.id);
+  }
+  if(seedFresh){
+    for(const def of defaults){
+      if(!used.has(def.id)){
+        out.push(clone(def));
+        used.add(def.id);
+        continue;
+      }
+      if(def.id==="update"){
+        const row=out.find(field=>field.id==="update");
+        if(row){
+          row.label=def.label;
+          const aliasSet=new Set([...list(row.aliases),...list(def.aliases)]);
+          row.aliases=[...aliasSet].join(", ");
+        }
+      }
+    }
+  }
+  return out;
+}
+
+/** Preserve enabled flags and custom pass-through columns; keep known defaults present. */
+export function normalizeOutputFields(saved,seedFresh=false){
+  const defaults=clone(DEFAULT_OUTPUT_FIELDS);
+  const defaultById=new Map(defaults.map(field=>[field.id,field]));
+  if(!Array.isArray(saved)||!saved.length)return defaults;
+  const used=new Set();
+  const out=[];
+  for(const field of saved){
+    const id=clean(field.id);
+    if(!id||used.has(id))continue;
+    used.add(id);
+    const base=defaultById.get(id);
+    out.push({
+      id,
+      label:clean(field.label)||base?.label||id,
+      enabled:field.enabled!==false
+    });
+  }
+  for(const def of defaults){
+    if(used.has(def.id)){
+      if(seedFresh&&def.id==="callDate"){
+        const row=out.find(field=>field.id==="callDate");
+        if(row)row.label=def.label;
+      }
+      continue;
+    }
+    out.push(clone(def));
+    used.add(def.id);
+  }
+  return out;
+}
+
 export function splitErrorList(value){
   return String(value||"")
     .split("|")
@@ -322,19 +410,20 @@ export function normalizeSettings(saved={}){
   const merged={...clone(DEFAULT_SETTINGS),...saved};
   const previousSeed=Number(saved.settingsSeed)||0;
   const seedFresh=previousSeed<SETTINGS_SEED;
-  merged.inputFields=defaultsById(saved.inputFields,DEFAULT_INPUT_FIELDS);
+  merged.inputFields=normalizeInputFields(saved.inputFields,seedFresh);
   merged.aiFields=defaultsById(saved.aiFields,DEFAULT_AI_FIELDS);
-  merged.outputFields=defaultsById(saved.outputFields,DEFAULT_OUTPUT_FIELDS);
+  merged.outputFields=normalizeOutputFields(saved.outputFields,seedFresh);
   merged.rules=mergeRules(saved.rules,seedFresh||!Array.isArray(saved.rules)||!saved.rules.length);
   if(seedFresh){
-    // Comments history on by default so status can be judged against full lead notes.
     const comments=merged.aiFields.find(field=>field.id==="comments");
     if(comments)comments.history=true;
   }
   merged.settingsSeed=SETTINGS_SEED;
   merged.pricing={...DEFAULT_SETTINGS.pricing,...(saved.pricing||{})};
-  merged.sort={...DEFAULT_SETTINGS.sort,...(saved.sort||{})};
-  if(!merged.outputFields.some(field=>field.id===merged.sort.field))merged.sort.field="project";
+  // Force Lead Update Date ascending on first upgrade to seed 4; keep user sort afterward.
+  if(seedFresh&&previousSeed<4)merged.sort={field:"callDate",direction:"asc"};
+  else merged.sort={...DEFAULT_SETTINGS.sort,...(saved.sort||{})};
+  if(!merged.outputFields.some(field=>field.id===merged.sort.field))merged.sort.field="callDate";
   merged.sort.direction=merged.sort.direction==="desc"?"desc":"asc";
   const concurrency=Number(merged.concurrency);
   merged.concurrency=Number.isInteger(concurrency)?Math.min(20,Math.max(1,concurrency)):DEFAULT_SETTINGS.concurrency;
@@ -431,6 +520,7 @@ export function parseWorkbook(arrayBuffer,rawSettings=DEFAULT_SETTINGS){
 
     dayCalls.forEach((call,callIndex)=>{
       const aiLocation=correctedAiLocation(call.project,call.location);
+      const leadUpdateDate=dateText(call.updateDate||call.update);
       const staticValues={
         project:call.project,
         mobile:call.mobile,
@@ -439,7 +529,8 @@ export function parseWorkbook(arrayBuffer,rawSettings=DEFAULT_SETTINGS){
         status:call.status,
         comments:call.comments,
         next:dateText(call.nextDate||call.next),
-        callDate:dateText(call.updateDate||call.update),
+        callDate:leadUpdateDate,
+        update:leadUpdateDate,
         totalFollowups:records.length,
         dayCallCount:dayCalls.length,
         dayCallIndex:callIndex+1,
@@ -449,6 +540,12 @@ export function parseWorkbook(arrayBuffer,rawSettings=DEFAULT_SETTINGS){
         parameter:call.parameter,
         budget:call.budget
       };
+      // Custom input columns pass through to Excel only — never added to AI context here.
+      for(const field of settings.inputFields){
+        if(!field.required&&field.enabled===false)continue;
+        if(staticValues[field.id]!==undefined)continue;
+        staticValues[field.id]=call[field.id]||"";
+      }
       const auditContext={};
       for(const field of settings.aiFields.filter(field=>field.enabled)){
         const key=AI_FIELD_KEYS[field.id]||field.id;

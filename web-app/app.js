@@ -1,8 +1,8 @@
 import {putJob,getJob,getJobs,deleteJob,clearJobs,loadSettings,saveSettings,getApiKey,apiKeyIsRemembered,saveApiKey,forgetApiKey} from "./db.js";
-import {APP_VERSION,DEFAULT_SETTINGS,SETTINGS_SEED,normalizeSettings,parseWorkbook,auditBatch,downloadWorkbook} from "./audit.js";
+import {APP_VERSION,DEFAULT_SETTINGS,DEFAULT_OUTPUT_FIELDS,SETTINGS_SEED,normalizeSettings,normalizeInputFields,slugFieldId,parseWorkbook,auditBatch,downloadWorkbook} from "./audit.js";
 
 const $=id=>document.getElementById(id);
-const ids=["file-input","drop-zone","file-list","validation","start-audit","page-title","key-state","run-name","pause-run","download-result","progress-label","progress-percent","progress-bar","metric-leads","metric-batch","metric-completed","metric-status","metric-input-tokens","metric-cached-tokens","metric-output-tokens","metric-duration","metric-cost","live-log","clear-console","history-list","clear-history","api-key","remember-key","toggle-key","save-key","forget-key","key-message","batch-size","concurrency","model","input-field-config","ai-field-config","rule-config","add-rule","output-field-config","yes-values","no-values","additional-instructions","input-price","cached-price","output-price","save-settings","reset-settings","settings-message","toast","mobile-menu","active-job-switch","sort-field","sort-direction","app-version","export-settings","import-settings","import-settings-file","update-banner","update-banner-text","reload-app"];
+const ids=["file-input","drop-zone","file-list","validation","start-audit","page-title","key-state","run-name","pause-run","download-result","progress-label","progress-percent","progress-bar","metric-leads","metric-batch","metric-completed","metric-status","metric-input-tokens","metric-cached-tokens","metric-output-tokens","metric-duration","metric-cost","live-log","clear-console","history-list","clear-history","api-key","remember-key","toggle-key","save-key","forget-key","key-message","batch-size","concurrency","model","input-field-config","add-input-field","ai-field-config","rule-config","add-rule","output-field-config","yes-values","no-values","additional-instructions","input-price","cached-price","output-price","save-settings","reset-settings","settings-message","toast","mobile-menu","active-job-switch","sort-field","sort-direction","app-version","export-settings","import-settings","import-settings-file","update-banner","update-banner-text","reload-app"];
 const els=Object.fromEntries(ids.map(id=>[id,$(id)]));
 const titles={new:"New audit",console:"Run console",history:"History",settings:"Settings"};
 const ENGINE_VERSION="latest-day-v3";
@@ -489,17 +489,76 @@ async function renderHistory(){
 
 function configRow(className){const row=document.createElement("div");row.className=className;return row;}
 function input(type,value,aria){const element=document.createElement("input");element.type=type;element.value=value??"";if(aria)element.setAttribute("aria-label",aria);return element;}
+const SYSTEM_OUTPUT_IDS=new Set(DEFAULT_OUTPUT_FIELDS.map(field=>field.id));
+function syncCustomOutputField(field,{remove=false}={}){
+  if(!field?.id||SYSTEM_OUTPUT_IDS.has(field.id)||field.id==="update")return;
+  const list=settings.outputFields.slice();
+  const index=list.findIndex(item=>item.id===field.id);
+  if(remove){
+    if(index>=0)list.splice(index,1);
+  }else if(index<0){
+    list.push({id:field.id,label:field.label||field.id,enabled:true});
+  }else{
+    list[index]={...list[index],label:field.label||list[index].label};
+  }
+  settings.outputFields=list;
+}
+function moveInputField(index,delta){
+  settings=collectSettings();
+  const target=index+delta;
+  if(target<0||target>=settings.inputFields.length)return;
+  const copy=settings.inputFields.slice();
+  const [row]=copy.splice(index,1);
+  copy.splice(target,0,row);
+  settings.inputFields=normalizeInputFields(copy,false);
+  renderInputFields();
+}
 function renderInputFields(){
   els["input-field-config"].replaceChildren();
-  for(const field of settings.inputFields){
-    const row=configRow("config-row mapping-row"),toggle=input("checkbox","",`${field.label} enabled`),name=document.createElement("span"),aliases=input("text",field.aliases,`${field.label} aliases`);
+  for(let index=0;index<settings.inputFields.length;index++){
+    const field=settings.inputFields[index];
+    const row=configRow("config-row mapping-row input-field-row");
+    const toggle=input("checkbox","",`${field.label} enabled`);
+    const label=input("text",field.label,`${field.label} display name`);
+    const aliases=input("text",field.aliases,`${field.label} aliases`);
+    const actions=document.createElement("div");
+    const up=document.createElement("button");
+    const down=document.createElement("button");
+    const remove=document.createElement("button");
+    row.dataset.inputRow=field.id;
+    if(field.required)row.dataset.required="1";
     toggle.checked=field.required||field.enabled!==false;
     toggle.disabled=field.required;
-    toggle.dataset.inputId=field.id;
+    toggle.dataset.inputEnabled=field.id;
+    label.dataset.inputLabel=field.id;
     aliases.dataset.aliasId=field.id;
-    name.textContent=field.label+(field.required?" *":"");
-    aliases.placeholder="Accepted Excel headers, separated by commas";
-    row.append(toggle,name,aliases);
+    label.placeholder="Column name";
+    aliases.placeholder="Accepted Excel headers, comma-separated";
+    actions.className="field-row-actions";
+    up.type=down.type=remove.type="button";
+    up.className=down.className="secondary-button icon-tiny";
+    remove.className="text-button";
+    up.textContent="↑";
+    down.textContent="↓";
+    remove.textContent="Remove";
+    up.title="Move up";
+    down.title="Move down";
+    up.disabled=index===0;
+    down.disabled=index===settings.inputFields.length-1;
+    up.onclick=()=>moveInputField(index,-1);
+    down.onclick=()=>moveInputField(index,1);
+    remove.disabled=field.required;
+    remove.onclick=()=>{
+      if(field.required)return;
+      settings=collectSettings();
+      syncCustomOutputField(field,{remove:true});
+      settings.inputFields=normalizeInputFields(settings.inputFields.filter(item=>item.id!==field.id),false);
+      renderInputFields();
+      renderOutputFields();
+      renderSortFields();
+    };
+    actions.append(up,down,remove);
+    row.append(toggle,label,aliases,actions);
     els["input-field-config"].append(row);
   }
 }
@@ -611,11 +670,26 @@ function collectSettings(){
   next.noValues=els["no-values"].value.trim();
   next.additionalInstructions=els["additional-instructions"].value.trim();
   next.pricing={input:number(els["input-price"].value),cached:number(els["cached-price"].value),output:number(els["output-price"].value)};
-  next.sort={field:els["sort-field"]?.value||"project",direction:els["sort-direction"]?.value==="desc"?"desc":"asc"};
-  next.inputFields=next.inputFields.map(field=>({...field,enabled:field.required||Boolean(document.querySelector(`[data-input-id="${field.id}"]`)?.checked),aliases:document.querySelector(`[data-alias-id="${field.id}"]`)?.value.trim()||field.aliases}));
+  next.sort={field:els["sort-field"]?.value||"callDate",direction:els["sort-direction"]?.value==="desc"?"desc":"asc"};
+  next.inputFields=normalizeInputFields([...document.querySelectorAll("[data-input-row]")].map(row=>{
+    const id=row.dataset.inputRow;
+    const label=document.querySelector(`[data-input-label="${id}"]`)?.value.trim()||id;
+    return{
+      id,
+      label,
+      aliases:document.querySelector(`[data-alias-id="${id}"]`)?.value.trim()||label,
+      required:row.dataset.required==="1",
+      enabled:row.dataset.required==="1"||Boolean(document.querySelector(`[data-input-enabled="${id}"]`)?.checked)
+    };
+  }),false);
   next.aiFields=next.aiFields.map(field=>({...field,enabled:Boolean(document.querySelector(`[data-ai-id="${field.id}"]`)?.checked),history:Boolean(document.querySelector(`[data-history-id="${field.id}"]`)?.checked)}));
   next.outputFields=next.outputFields.map(field=>({...field,enabled:Boolean(document.querySelector(`[data-output-id="${field.id}"]`)?.checked)}));
-  next.rules=[...document.querySelectorAll("[data-rule-field]")].map(field=>{
+  for(const field of next.inputFields){
+    if(SYSTEM_OUTPUT_IDS.has(field.id)||field.id==="update")continue;
+    const output=next.outputFields.find(item=>item.id===field.id);
+    if(output)output.label=field.label;
+    else next.outputFields.push({id:field.id,label:field.label,enabled:true});
+  }  next.rules=[...document.querySelectorAll("[data-rule-field]")].map(field=>{
     const index=field.dataset.ruleField;
     return{field:field.value,instruction:document.querySelector(`[data-rule-instruction="${index}"]`)?.value.trim()||"",errors:document.querySelector(`[data-rule-errors="${index}"]`)?.value.trim()||""};
   });
@@ -731,6 +805,17 @@ els["save-key"].onclick=()=>{
 };
 els["forget-key"].onclick=()=>{forgetApiKey();els["api-key"].value="";els["remember-key"].checked=false;els["key-message"].textContent="Key removed.";updateKeyState();};
 els["add-rule"].onclick=()=>{settings=collectSettings();settings.rules.push({field:"Comments",instruction:"",errors:""});renderRules();};
+els["add-input-field"].onclick=()=>{
+  settings=collectSettings();
+  const used=new Set(settings.inputFields.map(field=>field.id));
+  const label=`Custom field ${settings.inputFields.length+1}`;
+  const field={id:slugFieldId(label,used),label,aliases:label,required:false,enabled:true};
+  settings.inputFields=normalizeInputFields([...settings.inputFields,field],false);
+  syncCustomOutputField(field);
+  renderInputFields();
+  renderOutputFields();
+  renderSortFields();
+};
 els["save-settings"].onclick=()=>{
   const next=collectSettings();
   if(!Number.isInteger(next.batchSize)||next.batchSize<1||next.batchSize>50){els["settings-message"].textContent="Batch size must be 1–50.";return;}

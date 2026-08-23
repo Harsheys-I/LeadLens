@@ -25,6 +25,9 @@ body .settings-sections{display:grid;gap:18px}
 body .settings-subgrid{margin-top:8px}
 body .config-list,body .rule-list{display:grid;gap:9px}
 body .config-row{display:grid;grid-template-columns:auto minmax(150px,.75fr) minmax(220px,2fr);gap:10px;align-items:center;padding:10px 0;border-bottom:1px solid var(--line);font-size:13px}
+body .input-field-row{grid-template-columns:auto minmax(140px,.7fr) minmax(200px,1.4fr) auto;align-items:start}
+body .field-row-actions{display:flex;align-items:center;gap:4px;flex-wrap:wrap}
+body .icon-tiny{padding:6px 9px;min-width:34px;line-height:1}
 body .config-row input[type="text"],body .rule-row input,body .rule-row select,body .rule-row textarea{width:100%;border:1px solid #cfd8d2;border-radius:8px;background:#fff;padding:8px 9px;color:var(--ink)}
 body .ai-row{grid-template-columns:auto 1fr auto}
 body .output-row{grid-template-columns:auto 1fr}
@@ -49,7 +52,9 @@ body .metrics div:nth-child(5n){border-right:0}
   body .config-row,body .rule-row,body .pricing-grid,body .run-grid,body .sort-grid{grid-template-columns:1fr}
   body .run-grid label:last-child{grid-column:auto}
   body .mapping-row{grid-template-columns:auto 1fr}
-  body .mapping-row input[type="text"]{grid-column:1 / -1}
+  body .input-field-row{grid-template-columns:auto 1fr}
+  body .mapping-row input[type="text"],body .input-field-row input[type="text"]{grid-column:1 / -1}
+  body .field-row-actions{grid-column:1 / -1}
   body .ai-row{grid-template-columns:auto 1fr}
   body .history-toggle{grid-column:2}
   body .metrics{grid-template-columns:1fr 1fr}
