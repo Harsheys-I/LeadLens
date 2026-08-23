@@ -1,5 +1,5 @@
 {
-  "version": "2.4.4",
+  "version": "2.4.5",
   "name": "LeadLens",
-  "notes": "Removed cache warmup — all batches start in the parallel pool immediately"
+  "notes": "Requirement/location/budget errors only when Connected=Yes; Connected column in Excel export"
 }

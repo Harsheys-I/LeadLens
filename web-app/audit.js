@@ -1,4 +1,4 @@
-export const APP_VERSION = "2.4.4";
+export const APP_VERSION = "2.4.5";
 
 export const ERROR_CATALOG = [
   {code:"0",label:"Comment displaying -ve, but Lead Status is +ve",hint:"-ve comment vs +ve status"},
@@ -42,6 +42,7 @@ export const DEFAULT_OUTPUT_FIELDS = [
   {id:"registration",label:"Lead Registration Date",enabled:true},
   {id:"telecaller",label:"Telecaller Name",enabled:true},{id:"status",label:"Lead Status",enabled:true},{id:"comments",label:"Comments",enabled:true},
   {id:"next",label:"Next Followup Date",enabled:true},{id:"totalFollowups",label:"Total Followups",enabled:true},{id:"dayCallCount",label:"Calls on Latest Day",enabled:true},
+  {id:"connected",label:"Connected",enabled:true},
   {id:"location",label:"Customer Location",enabled:true},
   {id:"requirement",label:"Customer Requirement",enabled:true},{id:"parameter",label:"Analysis Parameter",enabled:true},{id:"budget",label:"Estimated Budget",enabled:true},
   {id:"commentQuality",label:"Comment Quality Score",enabled:true},{id:"errorTypes",label:"Error Type(s)",enabled:true},{id:"errorSeverity",label:"Error Severity",enabled:true},
@@ -50,7 +51,7 @@ export const DEFAULT_OUTPUT_FIELDS = [
 export const DEFAULT_RULES = [
   {field:"Lead Status + Comments",instruction:"Comments are source of truth. Emit code 0 only for clear -ve comment vs +ve status. Emit code 1 only for clear +ve comment vs -ve status. Neutral/not-connected is not a mismatch.",errors:"0,1"},
   {field:"Comment quality",instruction:"Score q strictly. q must reflect how well Comments capture the real telecaller–customer conversation (need, budget, location preference, objection, decision-maker, next step). One-word/CRM crumbs like visited/RNR/CNP/busy/followup = q 0-2 max. Generic connected notes without customer detail = q <=4. Only rich descriptive talk earns 8-10.",errors:""},
-  {field:"Customer Requirement",instruction:"rq must be a real customer requirement (config/area/location preference/budget need/plot size etc). If connected and rq is empty/placeholder (., -, NA) use code 4. If rq is call jargon or comment/status text (RNR, Visited, CNP, Busy, Followup, Interested, etc.) emit code 7 — not a valid requirement.",errors:"4,7"},
+  {field:"Customer Requirement",instruction:"ONLY when k=Yes: rq must be a real customer requirement. Empty/placeholder (., -, **, NA) => code 4. Call jargon (RNR, Visited, etc.) => code 7. If k is No or blank, NEVER emit 4 or 7.",errors:"4,7"},
   {field:"AI Observation",instruction:"o is a QA judgment, NOT a rewrite of Comments. Forbidden: copying, lightly shortening, or paraphrasing c. Required: name what is missing/wrong/strong for audit (e.g. thin note, rq junk, status mismatch, missing budget on connected call). 18-28 words.",errors:""},
   {field:"AI Recommendation",instruction:"r must be a concrete telecaller coaching action: what to ask/capture/correct on the next call (fields, questions, status fix, follow-up discipline). Not vague ('follow up', 'update remarks'). 20-40 words, specific to THIS call's gaps.",errors:""},
   {field:"Buying intent",instruction:"i=1 only for genuine positive purchase interest in this call's comment/status; else i=0.",errors:""}
@@ -126,7 +127,8 @@ STATUS vs COMMENT
 Comments win. Emit 0 only for clear -ve comment vs +ve status. Emit 1 only for clear +ve comment vs -ve status. Neutral / not-connected comments are NOT mismatches.
 
 CONNECTED GATING
-If k is No or "", do not demand l/rq/b unless a run check explicitly requires it.
+Codes 3, 4, 5, and 7 are ALLOWED ONLY when k=Yes.
+If k is No or "", NEVER emit 3, 4, 5, or 7 — even if l/rq/b are empty, "**", ".", or junk.
 
 STYLE — OBSERVATION (o) AND RECOMMENDATION (r)
 o = auditor judgment about data quality / process gaps / mismatches. It must NOT copy, trim, or paraphrase Comments (c). Bad o examples: restating "customer visited", "wants 2BHK Whitefield". Good o examples: "Connected call note is non-descriptive; requirement captured as visit jargon; budget missing." / "Status says Interested but comment shows clear rejection — polarity mismatch."
@@ -368,6 +370,7 @@ export function parseWorkbook(arrayBuffer,rawSettings=DEFAULT_SETTINGS){
         totalFollowups:records.length,
         dayCallCount:dayCalls.length,
         dayCallIndex:callIndex+1,
+        connected:call.connected||"",
         location:call.location,
         requirement:call.requirement,
         parameter:call.parameter,
@@ -567,8 +570,12 @@ export async function auditBatch(apiKey,rawSettings,batch,signal,log,onUsage){
   return batch.map(lead=>{
     const ai=byId.get(lead.leadId);
     const aiCodes=Array.isArray(ai.e)?ai.e.map(code=>maps.resolve(code)).filter(code=>allowed.has(code)):[];
-    // If deterministic already flagged empty (4), drop conflicting wrong (7) from model.
-    const merged=unique([...lead.deterministicErrors,...aiCodes]);
+    // Connected-only field errors must never stick when Connected is not Yes (AI sometimes ignores gating).
+    const connectedOnly=new Set(["3","4","5","7"]);
+    const connectedYes=lead.staticValues.connected==="Yes";
+    const filteredAi=connectedYes?aiCodes:aiCodes.filter(code=>!connectedOnly.has(code));
+    const filteredDet=connectedYes?lead.deterministicErrors:lead.deterministicErrors.filter(code=>!connectedOnly.has(code));
+    const merged=unique([...filteredDet,...filteredAi]);
     const codes=merged.includes("4")?merged.filter(code=>code!=="7"):merged;
     const labels=codes.map(code=>maps.labelOf(code)).filter(Boolean);
     const intent=Number(ai.i)===1||clean(ai.i)==="1"||norm(ai.i)==="yes"?"Yes":"No";
