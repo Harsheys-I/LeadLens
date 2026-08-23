@@ -1,4 +1,4 @@
-export const APP_VERSION = "2.6.0";
+export const APP_VERSION = "2.6.1";
 /** Bump when default AI rules / field defaults must refresh existing localStorage settings. */
 export const SETTINGS_SEED = 7;
 
@@ -829,20 +829,29 @@ function finalizeRecommendation(aiText,row,errors,q){
 
 async function requestAudit(apiKey,settings,leads,signal,log,onUsage){
   const modelInput=leads.map(lead=>({id:lead.leadId,...lead.auditContext}));
+  const model=String(settings.model||"").trim();
+  const modelKey=model.toLowerCase();
+  // gpt-5 / o-series reject max_tokens (and often temperature); use max_completion_tokens.
+  const modernCompletionLimit=/^(gpt-5|o[1-9]|chatgpt-4o)/.test(modelKey)||modelKey.includes("gpt-5");
+  const completionBudget=Math.max(500,leads.length*140);
+  const body={
+    model,
+    prompt_cache_key:promptCacheKey(settings),
+    messages:[
+      {role:"system",content:buildPrompt(settings)},
+      {role:"user",content:`Audit ${leads.length} call(s). Echo each id. c=full history; reg+fu=first-talk SLA; o=QA analysis not comment copy; r=specific coaching.\n${JSON.stringify({L:modelInput})}`}
+    ],
+    response_format:{type:"json_schema",json_schema:{name:"ll_audit",strict:true,schema:responseSchema}}
+  };
+  if(modernCompletionLimit)body.max_completion_tokens=completionBudget;
+  else{
+    body.temperature=0;
+    body.max_tokens=completionBudget;
+  }
   const response=await fetch("https://api.openai.com/v1/chat/completions",{
     method:"POST",signal,
     headers:{"Content-Type":"application/json","Authorization":`Bearer ${apiKey}`},
-    body:JSON.stringify({
-      model:settings.model,
-      temperature:0,
-      max_tokens:Math.max(500,leads.length*140),
-      prompt_cache_key:promptCacheKey(settings),
-      messages:[
-        {role:"system",content:buildPrompt(settings)},
-        {role:"user",content:`Audit ${leads.length} call(s). Echo each id. c=full history; reg+fu=first-talk SLA; o=QA analysis not comment copy; r=specific coaching.\n${JSON.stringify({L:modelInput})}`}
-      ],
-      response_format:{type:"json_schema",json_schema:{name:"ll_audit",strict:true,schema:responseSchema}}
-    })
+    body:JSON.stringify(body)
   });
   if(!response.ok){
     let detail="";

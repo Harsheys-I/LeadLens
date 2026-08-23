@@ -1,5 +1,5 @@
 {
-  "version": "2.6.0",
+  "version": "2.6.1",
   "name": "LeadLens",
-  "notes": "Smarter history status + 30min first-talk SLA; progress moves on any API response; Leads/Calls/Audited metrics"
+  "notes": "gpt-5 / nano: use max_completion_tokens; cache-bust assets"
 }
