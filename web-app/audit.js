@@ -1,10 +1,12 @@
-export const APP_VERSION = "2.5.5";
+export const APP_VERSION = "2.6.0";
 /** Bump when default AI rules / field defaults must refresh existing localStorage settings. */
-export const SETTINGS_SEED = 6;
+export const SETTINGS_SEED = 7;
 
 export const ERROR_TYPES = [
   "Comment displaying -ve, but Lead Status is +ve",
   "Comment displaying +ve, but Lead Status is -ve",
+  "Lead Status not reflecting Comment History",
+  "Missed 30min talk before",
   "Followup Date is Missed",
   "Customer Location is empty",
   "Customer Requirement is empty",
@@ -15,10 +17,14 @@ export const ERROR_TYPES = [
 export const HIGH_SEVERITY_ERRORS = new Set([
   "Comment displaying -ve, but Lead Status is +ve",
   "Comment displaying +ve, but Lead Status is -ve",
+  "Lead Status not reflecting Comment History",
+  "Missed 30min talk before",
   "Followup Date is Missed",
   "Customer Location is empty",
   "Customer Requirement is set wrong"
 ]);
+const STATUS_HISTORY_ERROR = "Lead Status not reflecting Comment History";
+const MISSED_30MIN_ERROR = "Missed 30min talk before";
 const CONNECTED_ONLY_ERRORS = new Set([
   "Customer Location is empty",
   "Customer Requirement is empty",

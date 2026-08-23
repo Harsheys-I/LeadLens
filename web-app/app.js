@@ -1,5 +1,5 @@
-import {putJob,getJob,getJobs,deleteJob,clearJobs,loadSettings,saveSettings,getApiKey,apiKeyIsRemembered,saveApiKey,forgetApiKey} from "./db.js";
-import {APP_VERSION,DEFAULT_SETTINGS,DEFAULT_OUTPUT_FIELDS,SETTINGS_SEED,normalizeSettings,normalizeInputFields,slugFieldId,parseWorkbook,auditBatch,downloadWorkbook} from "./audit.js";
+import {APP_VERSION,DEFAULT_SETTINGS,DEFAULT_OUTPUT_FIELDS,SETTINGS_SEED,normalizeSettings,normalizeInputFields,slugFieldId,parseWorkbook,auditBatch,downloadWorkbook} from "./audit.js?v=2.6.0";
+import {putJob,getJob,getJobs,deleteJob,clearJobs,loadSettings,saveSettings,getApiKey,apiKeyIsRemembered,saveApiKey,forgetApiKey} from "./db.js?v=2.6.0";
 
 const $=id=>document.getElementById(id);
 const ids=["file-input","drop-zone","file-list","validation","start-audit","page-title","key-state","run-name","pause-run","download-result","progress-label","progress-percent","progress-bar","metric-leads","metric-excel-rows","metric-calls","metric-batch","metric-completed","metric-status","metric-input-tokens","metric-cached-tokens","metric-output-tokens","metric-duration","metric-cost","live-log","clear-console","history-list","clear-history","api-key","remember-key","toggle-key","save-key","forget-key","key-message","batch-size","concurrency","model","input-field-config","add-input-field","ai-field-config","rule-config","add-rule","output-field-config","yes-values","no-values","additional-instructions","input-price","cached-price","output-price","save-settings","reset-settings","settings-message","toast","mobile-menu","active-job-switch","sort-field","sort-direction","app-version","export-settings","import-settings","import-settings-file","update-banner","update-banner-text","reload-app"];
@@ -893,15 +893,21 @@ function persistSortFromForm(){
 els["sort-field"].onchange=persistSortFromForm;
 els["sort-direction"].onchange=persistSortFromForm;
 els["reload-app"]?.addEventListener("click",async()=>{
-  if("serviceWorker" in navigator){
-    const regs=await navigator.serviceWorker.getRegistrations();
-    await Promise.all(regs.map(reg=>reg.unregister()));
-  }
-  if(window.caches){
-    const keys=await caches.keys();
-    await Promise.all(keys.map(key=>caches.delete(key)));
-  }
-  location.reload();
+  try{
+    if("serviceWorker" in navigator){
+      const regs=await navigator.serviceWorker.getRegistrations();
+      await Promise.all(regs.map(reg=>reg.unregister()));
+    }
+    if(window.caches){
+      const keys=await caches.keys();
+      await Promise.all(keys.map(key=>caches.delete(key)));
+    }
+  }catch{/* continue to forced navigation */}
+  // Bust HTML + module cache; plain reload often reuses stale app.js/audit.js.
+  const url=new URL(location.href);
+  url.searchParams.set("v",APP_VERSION);
+  url.searchParams.set("_",String(Date.now()));
+  location.replace(url.toString());
 });
 
 window.addEventListener("beforeunload",event=>{
@@ -916,4 +922,7 @@ restoreFromStorage();
 checkForUpdate();
 setInterval(()=>{if(currentJob?.status==="running")renderProgress(currentJob);},1000);
 setInterval(checkForUpdate,5*60*1000);
-if("serviceWorker" in navigator)navigator.serviceWorker.register("./service-worker.js").catch(()=>{});
+// Do not re-register a service worker — it only caused sticky "update" banners.
+if("serviceWorker" in navigator){
+  navigator.serviceWorker.getRegistrations().then(regs=>Promise.all(regs.map(reg=>reg.unregister()))).catch(()=>{});
+}
