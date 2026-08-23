@@ -50,7 +50,7 @@
         <div class="progress-panel">
           <div class="progress-copy"><strong id="progress-label">Waiting for a file</strong><span id="progress-percent">0%</span></div>
           <div class="progress-track"><div id="progress-bar" class="progress-bar"></div></div>
-          <div class="metrics"><div><span>Leads</span><strong id="metric-leads">—</strong></div><div><span>Batch</span><strong id="metric-batch">—</strong></div><div><span>Completed</span><strong id="metric-completed">—</strong></div><div><span>Status</span><strong id="metric-status">Idle</strong></div><div><span>Input tokens</span><strong id="metric-input-tokens">—</strong></div><div><span>Cached input</span><strong id="metric-cached-tokens">—</strong></div><div><span>Output tokens</span><strong id="metric-output-tokens">—</strong></div></div>
+          <div class="metrics"><div><span>Leads</span><strong id="metric-leads">—</strong></div><div><span>Batch</span><strong id="metric-batch">—</strong></div><div><span>Completed</span><strong id="metric-completed">—</strong></div><div><span>Status</span><strong id="metric-status">Idle</strong></div><div><span>Input tokens</span><strong id="metric-input-tokens">—</strong></div><div><span>Cached input</span><strong id="metric-cached-tokens">—</strong></div><div><span>Output tokens</span><strong id="metric-output-tokens">—</strong></div><div><span>Run time</span><strong id="metric-duration">—</strong></div><div><span>Run cost</span><strong id="metric-cost">—</strong></div></div>
         </div>
         <div class="console-panel"><div class="panel-head"><div><span class="live-dot"></span><strong>Live log</strong></div><button id="clear-console" class="text-button">Clear view</button></div><div id="live-log" class="log-list"><div class="empty-state">Run activity will appear here.</div></div></div>
       </section>
@@ -61,19 +61,22 @@
       </section>
 
       <section id="view-settings" class="view">
-        <div class="settings-grid">
+        <div class="settings-grid settings-layout">
           <form id="settings-form" class="settings-card">
             <div class="card-title"><h2>OpenAI connection</h2><p>Your key is held by this browser and sent only to OpenAI during an audit. It is never part of the GitHub Pages deployment.</p></div>
             <label>API key<div class="input-row"><input id="api-key" type="password" autocomplete="off" placeholder="sk-…"><button id="toggle-key" type="button" class="secondary-button">Show</button></div></label>
             <label class="check-row"><input id="remember-key" type="checkbox"><span>Remember on this device <small>Uses this browser's local storage.</small></span></label>
             <div class="inline-actions"><button id="save-key" type="button" class="primary-button">Save key</button><button id="forget-key" type="button" class="text-button">Forget key</button><span id="key-message" class="form-message"></span></div>
           </form>
-          <form class="settings-card">
-            <div class="card-title"><h2>Run configuration</h2><p>Applied to new audits.</p></div>
-            <div class="field-grid"><label>Batch size<input id="batch-size" type="number" min="1" max="50" value="20"></label><label>Model<input id="model" type="text" value="gpt-4o-mini"></label></div>
-            <label>System prompt<textarea id="system-prompt" rows="16"></textarea></label>
-            <div class="inline-actions"><button id="save-settings" type="button" class="primary-button">Save settings</button><button id="reset-settings" type="button" class="text-button">Restore defaults</button><span id="settings-message" class="form-message"></span></div>
-          </form>
+          <div class="settings-stack">
+            <section class="settings-card"><div class="card-title"><h2>Run configuration</h2><p>Applied to new audits.</p></div><div class="field-grid"><label>Batch size<input id="batch-size" type="number" min="1" max="50" value="20"></label><label>Model<input id="model" type="text" value="gpt-4o-mini"></label></div></section>
+            <section class="settings-card"><div class="card-title"><h2>Input Excel fields</h2><p>Edit header aliases to match exports. Invalid Indian mobiles are excluded before AI processing.</p></div><div id="input-field-config" class="config-list"></div></section>
+            <section class="settings-card"><div class="card-title"><h2>Fields sent to AI</h2><p>Latest call is the default. Switch on “All history” for individual fields when needed.</p></div><div id="ai-field-config" class="config-list"></div><div class="field-grid"><label>Connected = Yes values<input id="yes-values" type="text"></label><label>Connected = No values<input id="no-values" type="text"></label></div></section>
+            <section class="settings-card"><div class="card-title"><h2>AI audit rules</h2><p>Add instructions and the exact errors the AI may select. Deterministic data checks are always enforced.</p></div><div id="rule-config" class="rule-list"></div><button id="add-rule" type="button" class="secondary-button">Add AI rule</button><label>Additional instructions<textarea id="additional-instructions" rows="5" placeholder="Optional instructions for the auditor"></textarea></label></section>
+            <section class="settings-card"><div class="card-title"><h2>Output Excel fields</h2><p>Select columns to include. Downloading a previous audit uses this current selection.</p></div><div id="output-field-config" class="config-list output-list"></div></section>
+            <section class="settings-card"><div class="card-title"><h2>Cost settings</h2><p>Enter your own rates per 1 million tokens. These are used for the console’s estimated run cost.</p></div><div class="field-grid pricing-grid"><label>Input rate<input id="input-price" type="number" min="0" step="0.000001"></label><label>Cached input rate<input id="cached-price" type="number" min="0" step="0.000001"></label><label>Output rate<input id="output-price" type="number" min="0" step="0.000001"></label></div></section>
+            <div class="inline-actions settings-actions"><button id="save-settings" type="button" class="primary-button">Save settings</button><button id="reset-settings" type="button" class="text-button">Restore defaults</button><span id="settings-message" class="form-message"></span></div>
+          </div>
         </div>
       </section>
     </main>

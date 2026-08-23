@@ -13,6 +13,14 @@ The lead history is sent directly from the browser to the OpenAI API for analysi
 
 The audit request keeps the stable system instructions at the beginning and puts each batch's unique lead data afterward, which allows OpenAI's automatic prompt caching to reuse the repeated prefix when eligible. The console reports input, cached-input, and output token counts; only the cached portion receives cached-input pricing, and unique lead data still consumes normal input tokens.
 
+## Latest-call audit rules
+
+- Rows are grouped by Project Name + valid Indian mobile number. Only 10-digit numbers beginning with 6–9 are processed.
+- By default, AI receives only the latest call’s Lead Status, Comments, Next Followup Date, Customer Location, Customer Requirement, Estimated Budget, and derived Connected value. Individual AI fields can be switched to all-history in Settings.
+- The four configured project/location exceptions are blanked only in the AI context; the exported Customer Location remains the original latest value.
+- Missed follow-up, empty connected-call data, and missing Analysis Parameter are verified in the browser. AI checks comment/status alignment, comment quality, buying intent, observation, and recommendation.
+- The Settings page controls Excel header aliases, AI fields, AI rules and allowable errors, output columns, Connected Yes/No values, batch size, and cost rates per million tokens.
+
 ## Preview before publishing
 
 For a local preview only, serve the repository root so module imports and the service worker work correctly:
