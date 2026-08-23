@@ -1,5 +1,5 @@
 {
-  "version": "2.6.1",
+  "version": "2.6.2",
   "name": "LeadLens",
-  "notes": "gpt-5 / nano: use max_completion_tokens; cache-bust assets"
+  "notes": "gpt-5-nano: reasoning_effort=minimal + higher max_completion_tokens so JSON is not empty"
 }

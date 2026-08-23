@@ -1,4 +1,4 @@
-export const APP_VERSION = "2.6.1";
+export const APP_VERSION = "2.6.2";
 /** Bump when default AI rules / field defaults must refresh existing localStorage settings. */
 export const SETTINGS_SEED = 7;
 
@@ -827,13 +827,30 @@ function finalizeRecommendation(aiText,row,errors,q){
   return clipped;
 }
 
+function isGpt5Family(modelKey){
+  return /^(gpt-5|o[1-9])/.test(modelKey)||modelKey.includes("gpt-5")||/^o[1-9]/.test(modelKey);
+}
+function extractMessageContent(choice){
+  const message=choice?.message||{};
+  if(typeof message.content==="string"&&message.content.trim())return message.content;
+  if(Array.isArray(message.content)){
+    const text=message.content.map(part=>typeof part==="string"?part:(part?.text||part?.content||"")).join("").trim();
+    if(text)return text;
+  }
+  if(typeof message.refusal==="string"&&message.refusal.trim())return null;
+  return"";
+}
 async function requestAudit(apiKey,settings,leads,signal,log,onUsage){
   const modelInput=leads.map(lead=>({id:lead.leadId,...lead.auditContext}));
   const model=String(settings.model||"").trim();
   const modelKey=model.toLowerCase();
   // gpt-5 / o-series reject max_tokens (and often temperature); use max_completion_tokens.
-  const modernCompletionLimit=/^(gpt-5|o[1-9]|chatgpt-4o)/.test(modelKey)||modelKey.includes("gpt-5");
-  const completionBudget=Math.max(500,leads.length*140);
+  // Reasoning tokens count against that budget — too low ⇒ empty content with finish_reason=length.
+  const modernCompletionLimit=isGpt5Family(modelKey)||modelKey.startsWith("chatgpt-4o");
+  const visibleOut=Math.max(800,leads.length*160);
+  const completionBudget=modernCompletionLimit
+    ?Math.max(12000,visibleOut+8000)
+    :Math.max(500,visibleOut);
   const body={
     model,
     prompt_cache_key:promptCacheKey(settings),
@@ -843,8 +860,11 @@ async function requestAudit(apiKey,settings,leads,signal,log,onUsage){
     ],
     response_format:{type:"json_schema",json_schema:{name:"ll_audit",strict:true,schema:responseSchema}}
   };
-  if(modernCompletionLimit)body.max_completion_tokens=completionBudget;
-  else{
+  if(modernCompletionLimit){
+    body.max_completion_tokens=completionBudget;
+    // Keep reasoning cheap so budget remains for the JSON audit payload.
+    body.reasoning_effort="minimal";
+  }else{
     body.temperature=0;
     body.max_tokens=completionBudget;
   }
@@ -856,17 +876,52 @@ async function requestAudit(apiKey,settings,leads,signal,log,onUsage){
   if(!response.ok){
     let detail="";
     try{detail=(await response.json()).error?.message||"";}catch{/* ignore */}
+    // Older accounts / models may reject reasoning_effort — retry once without it.
+    if(modernCompletionLimit&&/reasoning_effort|unsupported parameter/i.test(detail||"")){
+      delete body.reasoning_effort;
+      const retry=await fetch("https://api.openai.com/v1/chat/completions",{
+        method:"POST",signal,
+        headers:{"Content-Type":"application/json","Authorization":`Bearer ${apiKey}`},
+        body:JSON.stringify(body)
+      });
+      if(!retry.ok){
+        let retryDetail="";
+        try{retryDetail=(await retry.json()).error?.message||"";}catch{/* ignore */}
+        throw new Error(`OpenAI ${retry.status}: ${retryDetail||retry.statusText}`);
+      }
+      return finalizeAuditResponse(await retry.json(),leads,onUsage,log);
+    }
     throw new Error(`OpenAI ${response.status}: ${detail||response.statusText}`);
   }
-  const data=await response.json(),usage=data.usage;
+  return finalizeAuditResponse(await response.json(),leads,onUsage,log);
+}
+function finalizeAuditResponse(data,leads,onUsage,log){
+  const usage=data.usage;
   const input=usage?.prompt_tokens??usage?.input_tokens??0;
   const cached=usage?.prompt_tokens_details?.cached_tokens??usage?.input_tokens_details?.cached_tokens??0;
   const output=usage?.completion_tokens??usage?.output_tokens??0;
+  const reasoning=usage?.completion_tokens_details?.reasoning_tokens??usage?.output_tokens_details?.reasoning_tokens??0;
   if(usage&&onUsage)onUsage({input,cached,output});
-  if(usage&&log)log(`Tokens: ${input} in (${cached} cached, ${Math.max(0,input-cached)} billable), ${output} out.`,"info");
-  const content=data.choices?.[0]?.message?.content;
-  if(!content)throw new Error("OpenAI returned no audit content.");
-  const parsed=JSON.parse(content);
+  if(usage&&log){
+    const extra=reasoning?` · reasoning ${Number(reasoning).toLocaleString()}`:"";
+    log(`Tokens: ${input} in (${cached} cached, ${Math.max(0,input-cached)} billable), ${output} out${extra}.`,"info");
+  }
+  const choice=data.choices?.[0];
+  const content=extractMessageContent(choice);
+  if(!content){
+    const finish=choice?.finish_reason||data.status||"unknown";
+    const refusal=choice?.message?.refusal;
+    if(refusal)throw new Error(`OpenAI refused: ${refusal}`);
+    if(finish==="length"||reasoning>=output){
+      throw new Error(`OpenAI returned no audit content (finish=${finish}, output=${output}, reasoning=${reasoning}). Reasoning used the token budget — raise max completion or use reasoning_effort=minimal.`);
+    }
+    throw new Error(`OpenAI returned no audit content (finish=${finish}, output=${output}).`);
+  }
+  let parsed;
+  try{parsed=JSON.parse(content);}
+  catch{
+    throw new Error("OpenAI returned non-JSON audit content.");
+  }
   if(!Array.isArray(parsed.a))throw new Error("OpenAI response did not contain results array.");
   return parsed.a;
 }
