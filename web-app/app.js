@@ -1,8 +1,8 @@
 import {putJob,getJob,getJobs,deleteJob,clearJobs,loadSettings,saveSettings,getApiKey,apiKeyIsRemembered,saveApiKey,forgetApiKey} from "./db.js";
-import {DEFAULT_SETTINGS,normalizeSettings,parseWorkbook,auditBatch,downloadWorkbook} from "./audit.js";
+import {APP_VERSION,DEFAULT_SETTINGS,normalizeSettings,parseWorkbook,auditBatch,downloadWorkbook} from "./audit.js";
 
 const $=id=>document.getElementById(id);
-const ids=["file-input","drop-zone","file-list","validation","start-audit","page-title","key-state","run-name","pause-run","download-result","progress-label","progress-percent","progress-bar","metric-leads","metric-batch","metric-completed","metric-status","metric-input-tokens","metric-cached-tokens","metric-output-tokens","metric-duration","metric-cost","live-log","clear-console","history-list","clear-history","api-key","remember-key","toggle-key","save-key","forget-key","key-message","batch-size","concurrency","model","input-field-config","ai-field-config","rule-config","add-rule","output-field-config","yes-values","no-values","additional-instructions","input-price","cached-price","output-price","save-settings","reset-settings","settings-message","toast","mobile-menu","active-job-switch"];
+const ids=["file-input","drop-zone","file-list","validation","start-audit","page-title","key-state","run-name","pause-run","download-result","progress-label","progress-percent","progress-bar","metric-leads","metric-batch","metric-completed","metric-status","metric-input-tokens","metric-cached-tokens","metric-output-tokens","metric-duration","metric-cost","live-log","clear-console","history-list","clear-history","api-key","remember-key","toggle-key","save-key","forget-key","key-message","batch-size","concurrency","model","input-field-config","ai-field-config","rule-config","add-rule","output-field-config","yes-values","no-values","additional-instructions","input-price","cached-price","output-price","save-settings","reset-settings","settings-message","toast","mobile-menu","active-job-switch","sort-field","sort-direction","app-version","export-settings","import-settings","import-settings-file","update-banner","update-banner-text","reload-app"];
 const els=Object.fromEntries(ids.map(id=>[id,$(id)]));
 const titles={new:"New audit",console:"Run console",history:"History",settings:"Settings"};
 const ENGINE_VERSION="latest-call-v2";
@@ -28,7 +28,7 @@ function showView(name){
   if(name==="settings")renderSettings();
   if(name==="console")refreshJobSwitcher();
 }
-function toast(message){els.toast.textContent=message;els.toast.classList.add("show");clearTimeout(toast.timer);toast.timer=setTimeout(()=>els.toast.classList.remove("show"),2800);}
+function toast(message){els.toast.textContent=message;els.toast.classList.add("show");clearTimeout(toast.timer);toast.timer=setTimeout(()=>els.toast.classList.remove("show"),3200);}
 function updateKeyState(){const ready=Boolean(getApiKey());els["key-state"].textContent=ready?"API key ready":"API key not set";els["key-state"].classList.toggle("ready",ready);}
 function timeText(iso){return new Intl.DateTimeFormat(undefined,{dateStyle:"medium",timeStyle:"short"}).format(new Date(iso));}
 function addLog(job,message,level="info"){
@@ -67,15 +67,16 @@ function renderProgress(job){
   const total=job.totalLeads||0,done=job.results?.length||0,pct=total?Math.round(done/total*100):0;
   const batchSize=job.settings?.batchSize||1,batches=Math.ceil(total/batchSize),usage=job.tokenUsage||{};
   const concurrency=job.settings?.concurrency||1;
+  const billable=Math.max(0,number(usage.input)-number(usage.cached));
   els["run-name"].textContent=job.fileName||"No active audit";
-  els["progress-label"].textContent=job.status==="completed"?"Audit complete":job.status==="running"?`Auditing with ${concurrency} parallel request${concurrency>1?"s":""}…`:job.status==="paused"?"Audit paused — ready to resume":job.status==="failed"?"Audit stopped — saved work is safe":"Waiting for a file";
+  els["progress-label"].textContent=job.status==="completed"?"Audit complete":job.status==="running"?`Keeping ${concurrency} batch request${concurrency>1?"s":""} in flight…`:job.status==="paused"?"Audit paused — ready to resume":job.status==="failed"?"Audit stopped — saved work is safe":"Waiting for a file";
   els["progress-percent"].textContent=`${pct}%`;
   els["progress-bar"].style.width=`${pct}%`;
   els["metric-leads"].textContent=total||"—";
   els["metric-batch"].textContent=total?`${Math.min((job.nextBatch||0)+1,batches)} / ${batches}`:"—";
   els["metric-completed"].textContent=total?`${done} / ${total}`:"—";
   els["metric-status"].textContent=job.status?job.status[0].toUpperCase()+job.status.slice(1):"Idle";
-  els["metric-input-tokens"].textContent=number(usage.input).toLocaleString();
+  els["metric-input-tokens"].textContent=`${number(usage.input).toLocaleString()} (${billable.toLocaleString()} billable)`;
   els["metric-cached-tokens"].textContent=number(usage.cached).toLocaleString();
   els["metric-output-tokens"].textContent=number(usage.output).toLocaleString();
   els["metric-duration"].textContent=durationText(elapsed(job));
@@ -186,6 +187,25 @@ async function handleFiles(fileList){
   if(errors.length)toast(`${errors.length} file(s) skipped.`);
 }
 
+async function commitBatch(job,index,rows){
+  await withJobSave(job.id,async()=>{
+    job.pendingBatches=job.pendingBatches||{};
+    job.pendingBatches[String(index)]=rows;
+    while(job.pendingBatches[String(job.nextBatch)]){
+      const ready=job.pendingBatches[String(job.nextBatch)];
+      job.results.push(...ready);
+      delete job.pendingBatches[String(job.nextBatch)];
+      job.nextBatch+=1;
+      job.updatedAt=timestamp();
+      addLog(job,`Batch ${job.nextBatch} checkpoint saved. ${job.results.length}/${job.totalLeads} leads complete.`);
+      await putJob(job);
+      if(currentJob?.id===job.id)renderProgress(job);
+    }
+    job.updatedAt=timestamp();
+    await putJob(job);
+  });
+}
+
 async function runJob(job){
   if(controllers.has(job.id)){toast("That audit is already running.");return;}
   const key=getApiKey();
@@ -199,15 +219,37 @@ async function runJob(job){
   job.runStartedAt=timestamp();
   job.tokenUsage=job.tokenUsage||{input:0,cached:0,output:0};
   job.elapsedMs=job.elapsedMs||0;
+  job.pendingBatches=job.pendingBatches||{};
   displayLogs=true;
   const concurrency=Math.min(8,Math.max(1,Number(job.settings.concurrency)||1));
-  addLog(job,`Run started: latest-call AI audit, batch size ${job.settings.batchSize}, parallel batches ${concurrency}, model ${job.settings.model}.`);
+  addLog(job,`Run started: continuous pool of ${concurrency} parallel batch${concurrency>1?"es":""}, batch size ${job.settings.batchSize}, model ${job.settings.model}, app ${APP_VERSION}.`);
   await putJob(job);
   if(!currentJob||currentJob.id===job.id||!controllers.has(currentJob.id))renderProgress(job);
   showView("console");
 
   const batchSize=job.settings.batchSize;
   const totalBatches=Math.ceil(job.leads.length/batchSize);
+  const pending=job.pendingBatches||{};
+  const queue=[];
+  for(let index=0;index<totalBatches;index++){
+    if(index<job.nextBatch)continue;
+    if(pending[String(index)])continue;
+    queue.push(index);
+  }
+
+  // Flush any already-pending out-of-order batches from a prior pause.
+  await withJobSave(job.id,async()=>{
+    job.pendingBatches=job.pendingBatches||{};
+    while(job.pendingBatches[String(job.nextBatch)]){
+      job.results.push(...job.pendingBatches[String(job.nextBatch)]);
+      delete job.pendingBatches[String(job.nextBatch)];
+      job.nextBatch+=1;
+      job.updatedAt=timestamp();
+      addLog(job,`Batch ${job.nextBatch} checkpoint saved. ${job.results.length}/${job.totalLeads} leads complete.`);
+      await putJob(job);
+      if(currentJob?.id===job.id)renderProgress(job);
+    }
+  });
 
   const persistUsage=usage=>{
     job.tokenUsage.input+=usage.input;
@@ -216,39 +258,48 @@ async function runJob(job){
     if(currentJob?.id===job.id)renderProgress(job);
   };
 
-  try{
-    while(job.nextBatch<totalBatches){
-      if(controller.signal.aborted)throw new DOMException("Aborted","AbortError");
-      const waveStart=job.nextBatch;
-      const waveSize=Math.min(concurrency,totalBatches-waveStart);
-      const indexes=Array.from({length:waveSize},(_,i)=>waveStart+i);
-      addLog(job,waveSize>1
-        ?`Sending parallel wave: batches ${indexes[0]+1}–${indexes.at(-1)+1} of ${totalBatches}.`
-        :`Sending batch ${indexes[0]+1}/${totalBatches} (${job.leads.slice(indexes[0]*batchSize,(indexes[0]+1)*batchSize).length} leads).`);
+  let fatalError=null;
+  const workers=Array.from({length:Math.min(concurrency,Math.max(1,queue.length||1))},async()=>{
+    while(queue.length&&!fatalError&&!controller.signal.aborted){
+      const index=queue.shift();
+      if(index===undefined)return;
+      const batch=job.leads.slice(index*batchSize,(index+1)*batchSize);
+      addLog(job,`Sending batch ${index+1}/${totalBatches} (${batch.length} leads). In-flight pool active.`);
       if(currentJob?.id===job.id)renderProgress(job);
-
-      const settled=await Promise.allSettled(indexes.map(index=>{
-        const batch=job.leads.slice(index*batchSize,(index+1)*batchSize);
-        return auditBatch(key,job.settings,batch,controller.signal,(message,level)=>addLog(job,message,level),persistUsage);
-      }));
-
-      await withJobSave(job.id,async()=>{
-        for(let i=0;i<settled.length;i++){
-          const outcome=settled[i];
-          if(outcome.status==="rejected")throw outcome.reason;
-          job.results.push(...outcome.value);
-          job.nextBatch=indexes[i]+1;
-          job.updatedAt=timestamp();
-          addLog(job,`Batch ${indexes[i]+1} checkpoint saved. ${job.results.length}/${job.totalLeads} leads complete.`);
-          await putJob(job);
-          if(currentJob?.id===job.id)renderProgress(job);
+      try{
+        const rows=await auditBatch(key,job.settings,batch,controller.signal,(message,level)=>addLog(job,message,level),persistUsage);
+        await commitBatch(job,index,rows);
+      }catch(error){
+        if(error.name==="AbortError"){
+          fatalError=error;
+          queue.length=0;
+          return;
         }
-      });
+        fatalError=error;
+        queue.length=0;
+        controller.abort();
+      }
     }
+  });
+
+  try{
+    if(queue.length)await Promise.all(workers);
+    else await withJobSave(job.id,async()=>{
+      while(job.pendingBatches?.[String(job.nextBatch)]){
+        job.results.push(...job.pendingBatches[String(job.nextBatch)]);
+        delete job.pendingBatches[String(job.nextBatch)];
+        job.nextBatch+=1;
+        await putJob(job);
+      }
+    });
+    if(fatalError)throw fatalError;
+    if(job.nextBatch<totalBatches)throw new Error("Audit stopped before all batches finished. Resume to continue.");
     job.status="completed";
+    job.pendingBatches={};
     stopClock(job);
     job.updatedAt=timestamp();
-    addLog(job,`Audit complete in ${durationText(job.elapsedMs)}. Estimated cost: ${estimatedCost(job).toFixed(4)}. Cached input tokens: ${number(job.tokenUsage.cached).toLocaleString()}.`,"success");
+    const billable=Math.max(0,number(job.tokenUsage.input)-number(job.tokenUsage.cached));
+    addLog(job,`Audit complete in ${durationText(job.elapsedMs)}. Cost est. ${estimatedCost(job).toFixed(4)}. Cached ${number(job.tokenUsage.cached).toLocaleString()} · billable input ${billable.toLocaleString()} · output ${number(job.tokenUsage.output).toLocaleString()}.`,"success");
     await putJob(job);
     if(currentJob?.id===job.id)renderProgress(job);
     toast(`${job.fileName}: audit complete.`);
@@ -256,7 +307,7 @@ async function runJob(job){
     stopClock(job);
     if(error.name==="AbortError"){
       job.status="paused";
-      addLog(job,"Audit paused. Completed batches, token usage and logs are saved on this device.","warn");
+      addLog(job,"Audit paused. Completed + pending batch checkpoints are saved on this device.","warn");
     }else{
       job.status="failed";
       job.error=error.message;
@@ -277,6 +328,7 @@ async function startNew(){
     const job={
       id:crypto.randomUUID(),
       engineVersion:ENGINE_VERSION,
+      appVersion:APP_VERSION,
       fileName:file.fileName,
       sheetName:file.sheetName,
       createdAt:timestamp(),
@@ -284,6 +336,7 @@ async function startNew(){
       status:"queued",
       totalLeads:file.leads.length,
       nextBatch:0,
+      pendingBatches:{},
       leads:file.leads,
       results:[],
       logs:[],
@@ -302,7 +355,6 @@ async function startNew(){
   currentJob=jobs[0];
   renderProgress(jobs[0]);
   showView("console");
-  // Separate audits in parallel — files are never joined.
   await Promise.all(jobs.map(job=>runJob(job)));
 }
 
@@ -393,14 +445,14 @@ function renderAiFields(){
   }
 }
 function ruleOptions(current){
-  const options=["Lead Status + Comments",...settings.aiFields.map(field=>field.label)];
+  const options=["Lead Status + Comments",...settings.aiFields.map(field=>field.label),"Comment quality","Buying intent"];
   if(current&&!options.includes(current))options.push(current);
   return options;
 }
 function renderRules(){
   els["rule-config"].replaceChildren();
   for(let index=0;index<settings.rules.length;index++){
-    const rule=settings.rules[index],row=configRow("rule-row"),field=document.createElement("select"),instruction=document.createElement("textarea"),errors=input("text",rule.errors,"Possible errors"),remove=document.createElement("button");
+    const rule=settings.rules[index],row=configRow("rule-row"),field=document.createElement("select"),instruction=document.createElement("textarea"),errors=input("text",rule.errors,"Possible error codes"),remove=document.createElement("button");
     field.dataset.ruleField=index;
     instruction.dataset.ruleInstruction=index;
     errors.dataset.ruleErrors=index;
@@ -414,7 +466,7 @@ function renderRules(){
     instruction.value=rule.instruction||"";
     instruction.rows=3;
     instruction.placeholder="What should the AI validate?";
-    errors.placeholder="Possible errors, separated by commas";
+    errors.placeholder="Error codes, e.g. 0,1 (not full sentences)";
     remove.type="button";
     remove.className="text-button";
     remove.textContent="Remove";
@@ -434,6 +486,20 @@ function renderOutputFields(){
     els["output-field-config"].append(row);
   }
 }
+function renderSortFields(){
+  const select=els["sort-field"];
+  if(!select)return;
+  const current=settings.sort?.field||"project";
+  select.replaceChildren();
+  for(const field of settings.outputFields){
+    const option=document.createElement("option");
+    option.value=field.id;
+    option.textContent=field.label;
+    option.selected=field.id===current;
+    select.append(option);
+  }
+  els["sort-direction"].value=settings.sort?.direction==="desc"?"desc":"asc";
+}
 function renderSettings(){
   settings=normalizeSettings(settings);
   els["batch-size"].value=settings.batchSize;
@@ -447,10 +513,12 @@ function renderSettings(){
   els["output-price"].value=settings.pricing.output;
   els["api-key"].value=getApiKey();
   els["remember-key"].checked=apiKeyIsRemembered();
+  if(els["app-version"])els["app-version"].textContent=APP_VERSION;
   renderInputFields();
   renderAiFields();
   renderRules();
   renderOutputFields();
+  renderSortFields();
   updateKeyState();
 }
 function collectSettings(){
@@ -462,6 +530,7 @@ function collectSettings(){
   next.noValues=els["no-values"].value.trim();
   next.additionalInstructions=els["additional-instructions"].value.trim();
   next.pricing={input:number(els["input-price"].value),cached:number(els["cached-price"].value),output:number(els["output-price"].value)};
+  next.sort={field:els["sort-field"]?.value||"project",direction:els["sort-direction"]?.value==="desc"?"desc":"asc"};
   next.inputFields=next.inputFields.map(field=>({...field,enabled:field.required||Boolean(document.querySelector(`[data-input-id="${field.id}"]`)?.checked),aliases:document.querySelector(`[data-alias-id="${field.id}"]`)?.value.trim()||field.aliases}));
   next.aiFields=next.aiFields.map(field=>({...field,enabled:Boolean(document.querySelector(`[data-ai-id="${field.id}"]`)?.checked),history:Boolean(document.querySelector(`[data-history-id="${field.id}"]`)?.checked)}));
   next.outputFields=next.outputFields.map(field=>({...field,enabled:Boolean(document.querySelector(`[data-output-id="${field.id}"]`)?.checked)}));
@@ -470,6 +539,40 @@ function collectSettings(){
     return{field:field.value,instruction:document.querySelector(`[data-rule-instruction="${index}"]`)?.value.trim()||"",errors:document.querySelector(`[data-rule-errors="${index}"]`)?.value.trim()||""};
   });
   return normalizeSettings(next);
+}
+
+function exportSettings(){
+  const payload={
+    format:"leadlens-settings",
+    version:APP_VERSION,
+    exportedAt:timestamp(),
+    settings:collectSettings()
+  };
+  const blob=new Blob([JSON.stringify(payload,null,2)],{type:"application/json"});
+  const url=URL.createObjectURL(blob);
+  const link=document.createElement("a");
+  link.href=url;
+  link.download=`leadlens-settings-${APP_VERSION}.json`;
+  link.click();
+  URL.revokeObjectURL(url);
+  els["settings-message"].textContent="Settings exported (API key is not included).";
+}
+
+async function importSettingsFile(file){
+  if(!file)return;
+  try{
+    const parsed=JSON.parse(await file.text());
+    const incoming=parsed.settings||parsed;
+    settings=normalizeSettings(incoming);
+    saveSettings(settings);
+    renderSettings();
+    els["settings-message"].textContent=`Settings imported from JSON${parsed.version?` (file v${parsed.version})`:""}.`;
+    toast("Settings imported.");
+  }catch(error){
+    els["settings-message"].textContent=`Import failed: ${error.message}`;
+  }finally{
+    els["import-settings-file"].value="";
+  }
 }
 
 async function restoreFromStorage(){
@@ -492,6 +595,23 @@ async function restoreFromStorage(){
     renderProgress(preferred);
     if(["paused","failed"].includes(preferred.status))toast("Restored saved audit progress. Resume when ready.");
   }
+}
+
+function showUpdateBanner(latest){
+  if(!els["update-banner"])return;
+  els["update-banner"].classList.remove("hidden");
+  els["update-banner-text"].innerHTML=`LeadLens <strong>v${latest}</strong> is available (you are on <strong>v${APP_VERSION}</strong>). Hard-reload to update: Windows/Linux <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>R</kbd> · Mac <kbd>Cmd</kbd>+<kbd>Shift</kbd>+<kbd>R</kbd>. Or use the button.`;
+}
+async function checkForUpdate(){
+  if(els["app-version"])els["app-version"].textContent=APP_VERSION;
+  try{
+    const response=await fetch(`./version.json?t=${Date.now()}`,{cache:"no-store"});
+    if(!response.ok)return;
+    const data=await response.json();
+    const latest=String(data.version||"").trim();
+    if(latest&&latest!==APP_VERSION)showUpdateBanner(latest);
+    else if(els["update-banner"])els["update-banner"].classList.add("hidden");
+  }catch{/* offline or first local open */}
 }
 
 document.querySelectorAll(".nav-item").forEach(button=>button.addEventListener("click",()=>showView(button.dataset.view)));
@@ -538,10 +658,24 @@ els["save-settings"].onclick=()=>{
   if(!next.outputFields.some(field=>field.enabled)){els["settings-message"].textContent="Select at least one output Excel field.";return;}
   settings=next;
   saveSettings(settings);
-  els["settings-message"].textContent="Settings saved. New audits will use them; downloads use the current output selection.";
+  els["settings-message"].textContent="Settings saved. New audits will use them; downloads use the current output selection & sort.";
   renderSettings();
 };
 els["reset-settings"].onclick=()=>{settings=normalizeSettings(DEFAULT_SETTINGS);saveSettings(settings);renderSettings();els["settings-message"].textContent="Defaults restored.";};
+els["export-settings"].onclick=exportSettings;
+els["import-settings"].onclick=()=>els["import-settings-file"].click();
+els["import-settings-file"].onchange=event=>importSettingsFile(event.target.files?.[0]);
+els["reload-app"]?.addEventListener("click",async()=>{
+  if("serviceWorker" in navigator){
+    const regs=await navigator.serviceWorker.getRegistrations();
+    await Promise.all(regs.map(reg=>reg.unregister()));
+  }
+  if(window.caches){
+    const keys=await caches.keys();
+    await Promise.all(keys.map(key=>caches.delete(key)));
+  }
+  location.reload();
+});
 
 window.addEventListener("beforeunload",event=>{
   if(!controllers.size)return;
@@ -552,5 +686,7 @@ window.addEventListener("beforeunload",event=>{
 renderSettings();
 renderHistory();
 restoreFromStorage();
+checkForUpdate();
 setInterval(()=>{if(currentJob?.status==="running")renderProgress(currentJob);},1000);
+setInterval(checkForUpdate,5*60*1000);
 if("serviceWorker" in navigator)navigator.serviceWorker.register("./service-worker.js").catch(()=>{});

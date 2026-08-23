@@ -1,0 +1,5 @@
+{
+  "version": "2.3.0",
+  "name": "LeadLens",
+  "notes": "Continuous parallel pool, error codes, compact tokens, configurable sort, settings import/export, update banner"
+}
