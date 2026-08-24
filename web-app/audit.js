@@ -1,6 +1,6 @@
-export const APP_VERSION = "2.6.3";
+export const APP_VERSION = "2.6.4";
 /** Bump when default AI rules / field defaults must refresh existing localStorage settings. */
-export const SETTINGS_SEED = 7;
+export const SETTINGS_SEED = 8;
 
 export const ERROR_TYPES = [
   "Comment displaying -ve, but Lead Status is +ve",
@@ -79,8 +79,8 @@ export const LEAD_STATUS_LADDER = [
 ];
 const STATUS_LADDER_TEXT = LEAD_STATUS_LADDER.map(item=>item.label).join(" > ") + " (highest → lowest)";
 export const DEFAULT_OUTPUT_FIELDS = [
-  {id:"project",label:"Project Name",enabled:true},{id:"mobile",label:"Mobile Number",enabled:true},
-  {id:"callDate",label:"Lead Update Date",enabled:true},{id:"dayCallIndex",label:"Call # on Day",enabled:true},
+  {id:"mobile",label:"Mobile Number",enabled:true},{id:"project",label:"Project Name",enabled:true},
+  {id:"callDate",label:"Lead Update Date",enabled:true},
   {id:"registration",label:"Lead Registration Date",enabled:true},
   {id:"telecaller",label:"Telecaller Name",enabled:true},{id:"status",label:"Lead Status",enabled:true},{id:"comments",label:"Comments",enabled:true},
   {id:"next",label:"Next Followup Date",enabled:true},{id:"totalFollowups",label:"Total Followups",enabled:true},{id:"dayCallCount",label:"Calls on Latest Day",enabled:true},
@@ -345,12 +345,13 @@ export function normalizeInputFields(saved,seedFresh=false){
 export function normalizeOutputFields(saved,seedFresh=false){
   const defaults=clone(DEFAULT_OUTPUT_FIELDS);
   const defaultById=new Map(defaults.map(field=>[field.id,field]));
+  const removedIds=new Set(["dayCallIndex"]); // dropped columns — strip from saved settings
   if(!Array.isArray(saved)||!saved.length)return defaults;
   const used=new Set();
   const out=[];
   for(const field of saved){
     const id=clean(field.id);
-    if(!id||used.has(id))continue;
+    if(!id||used.has(id)||removedIds.has(id))continue;
     used.add(id);
     const base=defaultById.get(id);
     out.push({
@@ -369,6 +370,13 @@ export function normalizeOutputFields(saved,seedFresh=false){
     }
     out.push(clone(def));
     used.add(def.id);
+  }
+  // Mobile + Project first so lead identity is obvious in Settings and Excel.
+  if(seedFresh){
+    const leadIds=["mobile","project"];
+    const leadRows=leadIds.map(id=>out.find(field=>field.id===id)).filter(Boolean);
+    const rest=out.filter(field=>!leadIds.includes(field.id));
+    return[...leadRows,...rest];
   }
   return out;
 }
@@ -440,6 +448,7 @@ export function normalizeSettings(saved={}){
     if(comments)comments.history=true;
     const dayCount=merged.outputFields.find(field=>field.id==="dayCallCount");
     if(dayCount)dayCount.label="Calls on Latest Day";
+    if(merged.sort?.field==="dayCallIndex")merged.sort.field="callDate";
   }
   // Comments history is required for trajectory checks — always on.
   const commentsField=merged.aiFields.find(field=>field.id==="comments");
@@ -449,7 +458,7 @@ export function normalizeSettings(saved={}){
   // Force Lead Update Date ascending on first upgrade to seed 4; keep user sort afterward.
   if(seedFresh&&previousSeed<4)merged.sort={field:"callDate",direction:"asc"};
   else merged.sort={...DEFAULT_SETTINGS.sort,...(saved.sort||{})};
-  if(!merged.outputFields.some(field=>field.id===merged.sort.field))merged.sort.field="callDate";
+  if(!merged.outputFields.some(field=>field.id===merged.sort.field)||merged.sort.field==="dayCallIndex")merged.sort.field="callDate";
   merged.sort.direction=merged.sort.direction==="desc"?"desc":"asc";
   const concurrency=Number(merged.concurrency);
   merged.concurrency=Number.isInteger(concurrency)?Math.min(20,Math.max(1,concurrency)):DEFAULT_SETTINGS.concurrency;
@@ -912,11 +921,17 @@ export async function auditBatch(apiKey,rawSettings,batch,signal,log,onUsage){
 
 export function selectedOutputFields(rawSettings){
   const settings=normalizeSettings(rawSettings);
-  const enabled=settings.outputFields.filter(field=>field.enabled!==false);
+  const enabled=settings.outputFields.filter(field=>field.enabled!==false&&field.id!=="dayCallIndex");
+  // Lead identity columns first (Mobile, Project), then active sort column, then the rest.
+  const leadIds=["mobile","project"];
+  const leadCols=leadIds.map(id=>enabled.find(field=>field.id===id)).filter(Boolean);
+  const rest=enabled.filter(field=>!leadIds.includes(field.id));
   const sortId=settings.sort?.field;
-  const primary=enabled.find(field=>field.id===sortId);
-  if(!primary)return enabled;
-  return[primary,...enabled.filter(field=>field.id!==sortId)];
+  if(sortId&&!leadIds.includes(sortId)){
+    const primary=rest.find(field=>field.id===sortId);
+    if(primary)return[...leadCols,primary,...rest.filter(field=>field.id!==sortId)];
+  }
+  return[...leadCols,...rest];
 }
 
 const DATE_SORT_FIELDS=new Set(["registration","next","update","callDate"]);
@@ -926,26 +941,38 @@ function sortValue(row,fieldId){
     const date=parseDate(raw);
     return date?date.valueOf():Number.NEGATIVE_INFINITY;
   }
-  if(fieldId==="totalFollowups"||fieldId==="commentQuality"||fieldId==="dayCallIndex"||fieldId==="dayCallCount")return Number(raw)||0;
+  if(fieldId==="totalFollowups"||fieldId==="commentQuality"||fieldId==="dayCallCount")return Number(raw)||0;
   return String(raw??"").toLocaleLowerCase();
+}
+function leadIdentityKey(row){
+  return`${String(row?.mobile??"").trim().toLowerCase()}\u0001${String(row?.project??"").trim().toLowerCase()}`;
 }
 export function sortResults(rows,rawSettings=DEFAULT_SETTINGS){
   const settings=normalizeSettings(rawSettings);
-  const field=settings.sort.field||"project";
+  const field=settings.sort.field||"callDate";
   const dir=settings.sort.direction==="desc"?-1:1;
   return[...(rows||[])].sort((a,b)=>{
-    const av=sortValue(a,field),bv=sortValue(b,field);
-    let cmp=0;
-    if(typeof av==="number"&&typeof bv==="number")cmp=av===bv?0:av<bv?-1:1;
-    else cmp=String(av).localeCompare(String(bv),undefined,{numeric:true,sensitivity:"base"});
-    if(cmp)return cmp*dir;
+    const mobileCmp=String(a.mobile??"").localeCompare(String(b.mobile??""),undefined,{numeric:true});
+    const projectCmp=String(a.project??"").localeCompare(String(b.project??""),undefined,{numeric:true,sensitivity:"base"});
+    // Always keep the same Mobile+Project contiguous so Excel can group the lead.
+    if(field==="mobile"){
+      if(mobileCmp)return mobileCmp*dir;
+      if(projectCmp)return projectCmp;
+    }else if(field==="project"){
+      if(projectCmp)return projectCmp*dir;
+      if(mobileCmp)return mobileCmp;
+    }else{
+      if(mobileCmp)return mobileCmp;
+      if(projectCmp)return projectCmp;
+      const av=sortValue(a,field),bv=sortValue(b,field);
+      let cmp=0;
+      if(typeof av==="number"&&typeof bv==="number")cmp=av===bv?0:av<bv?-1:1;
+      else cmp=String(av).localeCompare(String(bv),undefined,{numeric:true,sensitivity:"base"});
+      if(cmp)return cmp*dir;
+    }
     const dateCmp=(parseDate(a.callDate)?.valueOf()??0)-(parseDate(b.callDate)?.valueOf()??0);
     if(dateCmp)return dateCmp;
-    const idx=(Number(a.dayCallIndex)||0)-(Number(b.dayCallIndex)||0);
-    if(idx)return idx;
-    const mobileCmp=String(a.mobile??"").localeCompare(String(b.mobile??""),undefined,{numeric:true});
-    if(mobileCmp)return mobileCmp;
-    return String(a.project??"").localeCompare(String(b.project??""),undefined,{numeric:true,sensitivity:"base"});
+    return(Number(a.dayCallIndex)||0)-(Number(b.dayCallIndex)||0);
   });
 }
 
@@ -954,11 +981,27 @@ export function downloadWorkbook(job,currentSettings){
   const fields=selectedOutputFields(settings);
   if(!fields.length)throw new Error("Select at least one output field in Settings.");
   const rows=sortResults(job.results||[],settings);
-  // Every audited call row stays self-contained (Mobile + Project on every row).
-  // Merging the sort column blanked follow-up rows and looked like broken lead splits.
   const data=rows.map(row=>Object.fromEntries(fields.map(field=>[field.label,row[field.id]??""])));
   const sheet=XLSX.utils.json_to_sheet(data,{header:fields.map(field=>field.label)});
   sheet["!cols"]=fields.map(field=>({wch:Math.min(48,Math.max(14,field.label.length+2,...data.slice(0,100).map(row=>String(row[field.label]??"").length+2)))}));
+  // Merge Mobile + Project across contiguous rows of the same lead (same Mobile+Project).
+  const mobileCol=fields.findIndex(field=>field.id==="mobile");
+  const projectCol=fields.findIndex(field=>field.id==="project");
+  const groupCols=[mobileCol,projectCol].filter(col=>col>=0);
+  if(groupCols.length&&rows.length>1){
+    sheet["!merges"]=sheet["!merges"]||[];
+    let start=0;
+    for(let i=1;i<=rows.length;i++){
+      const same=i<rows.length&&leadIdentityKey(rows[i])===leadIdentityKey(rows[start]);
+      if(same)continue;
+      if(i-start>1){
+        for(const col of groupCols){
+          sheet["!merges"].push({s:{r:start+1,c:col},e:{r:i,c:col}});
+        }
+      }
+      start=i;
+    }
+  }
   const book=XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(book,sheet,"Audit Data");
   const stamp=new Date().toISOString().slice(0,19).replace(/[:T]/g,"-");

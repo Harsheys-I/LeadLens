@@ -1,5 +1,5 @@
 {
-  "version": "2.6.3",
+  "version": "2.6.4",
   "name": "LeadLens",
-  "notes": "Export: stop merging sort column so Mobile/Project stay on every call row"
+  "notes": "Export groups Mobile+Project per lead; removed Call # on Day"
 }
