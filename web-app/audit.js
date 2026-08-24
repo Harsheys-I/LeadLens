@@ -1,4 +1,4 @@
-export const APP_VERSION = "3.2.1";
+export const APP_VERSION = "3.2.2";
 /** Bump when default AI rules / field defaults must refresh existing localStorage settings. */
 export const SETTINGS_SEED = 12;
 
@@ -154,7 +154,7 @@ export function buildChatCompletionBody(model,{temperature,maxTokens,messages,..
 
 /* Large stable prefix FIRST so OpenAI prompt caching can activate (>=1024 tokens;
    some models need closer to 2048). Run-specific rules come after; lead data last. */
-const CACHE_HANDBOOK = `LeadLens QA v3.2.1 — stable cacheable auditor handbook. Evidence only. Never invent facts, dates, budgets, locations, or prior calls.
+const CACHE_HANDBOOK = `LeadLens QA v3.2.2 — stable cacheable auditor handbook. Evidence only. Never invent facts, dates, budgets, locations, or prior calls.
 
 PURPOSE
 You audit Indian real-estate telecalling follow-up notes. Judge only the supplied fields for THIS call id. Optional day[] lists sibling calls on the same latest calendar day — context only; still return one result for THIS id.
@@ -537,11 +537,11 @@ export function normalizeSettings(saved={}){
 }
 
 /**
- * Rough estimate of total audit seconds (gpt-4o-mini calibrated, slightly conservative).
- * Considers batch size + parallel batches and audited-call weight per round.
+ * Rough wall-clock audit seconds (gpt-4o-mini). Parallel batches share one "round".
+ * Calibrated to observed ~1–3s/request with high concurrency — not per-row latency.
  */
-const RUN_BASE_SECONDS_PER_BATCH=10;  // model + network latency per request
-const RUN_SECONDS_PER_AUDIT=1.8;      // marginal cost per audited call inside a batch
+const RUN_BASE_SECONDS_PER_BATCH=3.5;
+const RUN_SECONDS_PER_AUDIT=0.18;
 export function estimateRunSeconds(rawSettings,leadCount,auditCount){
   const settings=normalizeSettings(rawSettings);
   const leads=Math.max(0,Math.floor(Number(leadCount)||0));
@@ -557,14 +557,13 @@ export function estimateRunSeconds(rawSettings,leadCount,auditCount){
 }
 
 /**
- * gpt-5-nano review pass: reasoning + 100–500 word write-up.
- * Scales lightly with audited-row / summary size. Prefer slightly conservative.
+ * gpt-5-nano review pass on a compact summary (one request) — typically a few seconds.
  */
-const REVIEW_PASS_BASE_SECONDS=42;
-const REVIEW_PASS_SECONDS_PER_ROW=0.12;
+const REVIEW_PASS_BASE_SECONDS=9;
+const REVIEW_PASS_SECONDS_PER_ROW=0.02;
 export function estimateReviewPassSeconds(resultRows=0){
   const rows=Math.max(0,Math.floor(Number(resultRows)||0));
-  return Math.max(35,Math.round(REVIEW_PASS_BASE_SECONDS+rows*REVIEW_PASS_SECONDS_PER_ROW));
+  return Math.max(5,Math.round(REVIEW_PASS_BASE_SECONDS+rows*REVIEW_PASS_SECONDS_PER_ROW));
 }
 /** @deprecated Prefer estimateReviewPassSeconds(rows); kept as a typical mid-size default. */
 export const REVIEW_PASS_SECONDS = estimateReviewPassSeconds(80);

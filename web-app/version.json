@@ -1,5 +1,5 @@
 ﻿{
-  "version": "3.2.1",
+  "version": "3.2.2",
   "name": "LeadLens",
-  "notes": "Fix update banner falsely offering older builds; keep PDF reports; canonical 8 error types from 3.2.0."
+  "notes": "Fix runaway ETA: progress-based remaining (no early rate blow-up); recalibrate audit/review time constants to real gpt-4o-mini / gpt-5-nano speeds."
 }

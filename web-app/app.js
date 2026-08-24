@@ -1,5 +1,5 @@
-import {APP_VERSION,DEFAULT_SETTINGS,DEFAULT_OUTPUT_FIELDS,SETTINGS_SEED,MAX_BATCH_SIZE,MAX_CONCURRENCY,normalizeSettings,normalizeInputFields,slugFieldId,parseWorkbook,auditBatch,downloadWorkbook,downloadReviewPack,splitLeadsByTelecaller,splitResultsByTelecaller,requestTelecallerReview,estimateRunSeconds,estimateReviewRunSeconds,estimateReviewPassSeconds,estimatePooledSeconds,estimateCombinedReviewSessionSeconds,validateApiKey} from "./audit.js?v=3.2.1";
-import {putJob,getJob,getJobs,deleteJob,clearJobs,loadSettings,saveSettings,getApiKey,apiKeyIsRemembered,saveApiKey,forgetApiKey} from "./db.js?v=3.2.1";
+import {APP_VERSION,DEFAULT_SETTINGS,DEFAULT_OUTPUT_FIELDS,SETTINGS_SEED,MAX_BATCH_SIZE,MAX_CONCURRENCY,normalizeSettings,normalizeInputFields,slugFieldId,parseWorkbook,auditBatch,downloadWorkbook,downloadReviewPack,splitLeadsByTelecaller,splitResultsByTelecaller,requestTelecallerReview,estimateRunSeconds,estimateReviewRunSeconds,estimateReviewPassSeconds,estimatePooledSeconds,estimateCombinedReviewSessionSeconds,validateApiKey} from "./audit.js?v=3.2.2";
+import {putJob,getJob,getJobs,deleteJob,clearJobs,loadSettings,saveSettings,getApiKey,apiKeyIsRemembered,saveApiKey,forgetApiKey} from "./db.js?v=3.2.2";
 
 const $=id=>document.getElementById(id);
 const ids=["file-input","drop-zone","file-list","validation","start-audit","page-title","key-state","run-name","pause-run","download-result","progress-label","progress-percent","progress-bar","metric-leads","metric-excel-rows","metric-calls","metric-batch","metric-completed","metric-status","metric-input-tokens","metric-cached-tokens","metric-output-tokens","metric-duration","metric-eta","metric-cost","live-log","clear-console","history-list","clear-history","api-key","remember-key","toggle-key","save-key","forget-key","key-message","batch-size","concurrency","model","review-model","input-field-config","add-input-field","ai-field-config","rule-config","add-rule","output-field-config","yes-values","no-values","additional-instructions","input-price","cached-price","output-price","review-input-price","review-cached-price","review-output-price","save-settings","reset-settings","settings-message","toast","mobile-menu","active-job-switch","sort-field","sort-direction","app-version","export-settings","import-settings","import-settings-file","update-banner","update-banner-text","reload-app","key-modal","onboard-key","onboard-toggle","onboard-remember","onboard-message","onboard-save","onboard-skip","sidebar-version","sidebar-notes","review-drop-zone","review-file-input","review-drop-hint","review-file-list","review-validation","start-review","review-run-panel","review-aggregate","review-cards","review-download-panel","download-review-pdf","download-review-excel","review-open-console"];
@@ -187,21 +187,25 @@ function jobRemainingSeconds(job){
   const s=job.settings||settings;
   const target=job.totalLeads||0;
   const done=auditedDoneCount(job);
+  const totalEst=Math.max(1,jobEstimateSeconds(job));
   if(job.reviewOnly){
     const est=estimateReviewPassSeconds(target||job.results?.length||0);
     if(job.status==="queued"||job.status==="paused")return est;
-    return Math.max(3,Math.round(est-Math.min(est*0.9,elapsed(job)/1000)));
+    // Do not let ETA climb as wall clock grows — subtract elapsed, floor at 1s.
+    return Math.max(1,Math.round(est-elapsed(job)/1000));
   }
   const reviewEst=job.mode==="telecaller-review"?estimateReviewPassSeconds(target):0;
   if(job.status==="reviewing"){
-    return Math.max(3,Math.round(reviewEst-Math.min(reviewEst*0.9,elapsed(job)/1000)));
+    return Math.max(1,Math.round(reviewEst-elapsed(job)/1000));
   }
   const auditEst=estimateRunSeconds(s,uniqueLeadCount(job),target);
-  let auditRem=auditEst;
-  if(target&&done>0&&elapsed(job)>2000){
-    auditRem=((elapsed(job)/1000)/done)*Math.max(0,target-done);
-  }else if(target){
-    auditRem=auditEst*(1-Math.min(done,target)/target);
+  const frac=target?Math.min(1,Math.max(0,done/target)):0;
+  // Progress-based remaining (stable). Avoid elapsed/done rate — early done=1 makes ETA explode and rise.
+  let auditRem=auditEst*(1-frac);
+  if(target&&done>=Math.max(3,Math.ceil(target*0.2))&&elapsed(job)>2500){
+    const rateRem=((elapsed(job)/1000)/done)*Math.max(0,target-done);
+    // Prefer the lower of static progress vs observed rate; never above static remaining.
+    auditRem=Math.min(auditRem,rateRem);
   }
   let rem=auditRem+(job.mode==="telecaller-review"?reviewEst:0);
   if(job.mode==="telecaller-review-parent"){
@@ -209,7 +213,8 @@ function jobRemainingSeconds(job){
     const per=estimateReviewPassSeconds(Math.ceil((target||0)/n));
     rem=auditRem+estimatePooledSeconds(Array(n).fill(per),REVIEW_JOB_CONCURRENCY);
   }
-  return Math.max(1,Math.round(rem));
+  // Cap so a bad extrapolation cannot exceed the original session estimate.
+  return Math.max(1,Math.round(Math.min(rem,totalEst*(1-frac*0.95))));
 }
 function sessionWallMs(jobs){
   let start=Infinity,end=0,anyLive=false;
