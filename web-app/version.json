@@ -1,5 +1,5 @@
 ﻿{
-  "version": "3.0.3",
+  "version": "3.0.4",
   "name": "LeadLens",
-  "notes": "Combined Review: audit whole Excel once, then up to 10 parallel TeleCaller reviews (no re-audit). Separate: audit+review per file, same pool."
+  "notes": "Review UX: live Combined audit progress, Total Time Taken, recalibrated pool-aware ETAs (gpt-4o-mini + gpt-5-nano)."
 }

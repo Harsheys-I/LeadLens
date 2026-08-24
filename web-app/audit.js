@@ -1,4 +1,4 @@
-export const APP_VERSION = "3.0.3";
+export const APP_VERSION = "3.0.4";
 /** Bump when default AI rules / field defaults must refresh existing localStorage settings. */
 export const SETTINGS_SEED = 11;
 
@@ -150,7 +150,7 @@ export function buildChatCompletionBody(model,{temperature,maxTokens,messages,..
 
 /* Large stable prefix FIRST so OpenAI prompt caching can activate (>=1024 tokens;
    some models need closer to 2048). Run-specific rules come after; lead data last. */
-const CACHE_HANDBOOK = `LeadLens QA v3.0.3 — stable cacheable auditor handbook. Evidence only. Never invent facts, dates, budgets, locations, or prior calls.
+const CACHE_HANDBOOK = `LeadLens QA v3.0.4 — stable cacheable auditor handbook. Evidence only. Never invent facts, dates, budgets, locations, or prior calls.
 
 PURPOSE
 You audit Indian real-estate telecalling follow-up notes. Judge only the supplied fields for THIS call id. Optional day[] lists sibling calls on the same latest calendar day — context only; still return one result for THIS id.
@@ -535,12 +535,11 @@ export function normalizeSettings(saved={}){
 }
 
 /**
- * Rough estimate of total run seconds. Considers batch size + parallel batches
- * (how many API rounds are needed) and the number of leads / audited calls
- * (how heavy each round is). Returns 0 when there is nothing to audit.
+ * Rough estimate of total audit seconds (gpt-4o-mini calibrated, slightly conservative).
+ * Considers batch size + parallel batches and audited-call weight per round.
  */
-const RUN_BASE_SECONDS_PER_BATCH=6;   // model + network latency per request
-const RUN_SECONDS_PER_AUDIT=1.2;      // marginal cost per audited call inside a batch
+const RUN_BASE_SECONDS_PER_BATCH=10;  // model + network latency per request
+const RUN_SECONDS_PER_AUDIT=1.8;      // marginal cost per audited call inside a batch
 export function estimateRunSeconds(rawSettings,leadCount,auditCount){
   const settings=normalizeSettings(rawSettings);
   const leads=Math.max(0,Math.floor(Number(leadCount)||0));
@@ -555,11 +554,54 @@ export function estimateRunSeconds(rawSettings,leadCount,auditCount){
   return Math.max(1,Math.round(rounds*secondsPerBatch));
 }
 
-/** Small fixed overhead for the second TeleCaller review pass after audit. */
-export const REVIEW_PASS_SECONDS = 12;
+/**
+ * gpt-5-nano review pass: reasoning + 100–500 word write-up.
+ * Scales lightly with audited-row / summary size. Prefer slightly conservative.
+ */
+const REVIEW_PASS_BASE_SECONDS=42;
+const REVIEW_PASS_SECONDS_PER_ROW=0.12;
+export function estimateReviewPassSeconds(resultRows=0){
+  const rows=Math.max(0,Math.floor(Number(resultRows)||0));
+  return Math.max(35,Math.round(REVIEW_PASS_BASE_SECONDS+rows*REVIEW_PASS_SECONDS_PER_ROW));
+}
+/** @deprecated Prefer estimateReviewPassSeconds(rows); kept as a typical mid-size default. */
+export const REVIEW_PASS_SECONDS = estimateReviewPassSeconds(80);
+
+/** Audit + one TeleCaller review pass (Separate-file job, or legacy single-file estimate). */
 export function estimateReviewRunSeconds(rawSettings,leadCount,auditCount){
   const audit=estimateRunSeconds(rawSettings,leadCount,auditCount);
-  return audit?audit+REVIEW_PASS_SECONDS:0;
+  if(!audit)return 0;
+  return audit+estimateReviewPassSeconds(auditCount||leadCount);
+}
+
+/**
+ * Wall time for N jobs on a fixed worker pool (greedy: longest jobs first into least-loaded lane).
+ * Used for Combined review waves and Separate multi-file pools (max REVIEW_JOB_CONCURRENCY).
+ */
+export function estimatePooledSeconds(jobSecondsList,poolSize=10){
+  const pool=Math.max(1,Math.floor(Number(poolSize)||1));
+  const sorted=[...(jobSecondsList||[])]
+    .map(value=>Math.max(0,Number(value)||0))
+    .filter(value=>value>0)
+    .sort((a,b)=>b-a);
+  if(!sorted.length)return 0;
+  const lanes=Array(Math.min(pool,sorted.length)).fill(0);
+  for(const sec of sorted){
+    let minI=0;
+    for(let i=1;i<lanes.length;i++)if(lanes[i]<lanes[minI])minI=i;
+    lanes[minI]+=sec;
+  }
+  return Math.max(1,Math.round(Math.max(...lanes)));
+}
+
+/** Combined session: one full-file audit + pooled TeleCaller reviews (no per-telecaller re-audit). */
+export function estimateCombinedReviewSessionSeconds(rawSettings,leadCount,auditCount,telecallerCallCounts,poolSize=10){
+  const audit=estimateRunSeconds(rawSettings,leadCount,auditCount);
+  const counts=Array.isArray(telecallerCallCounts)&&telecallerCallCounts.length
+    ?telecallerCallCounts
+    :[auditCount||leadCount||0];
+  const reviewSecs=counts.map(count=>estimateReviewPassSeconds(count));
+  return audit+estimatePooledSeconds(reviewSecs,poolSize);
 }
 
 /**
