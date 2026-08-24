@@ -1,8 +1,8 @@
-import {APP_VERSION,DEFAULT_SETTINGS,DEFAULT_OUTPUT_FIELDS,SETTINGS_SEED,MAX_BATCH_SIZE,MAX_CONCURRENCY,normalizeSettings,normalizeInputFields,slugFieldId,parseWorkbook,auditBatch,downloadWorkbook,downloadReviewPack,splitLeadsByTelecaller,splitResultsByTelecaller,requestTelecallerReview,estimateRunSeconds,estimateReviewRunSeconds,estimateReviewPassSeconds,estimatePooledSeconds,estimateCombinedReviewSessionSeconds,validateApiKey} from "./audit.js?v=3.0.4";
-import {putJob,getJob,getJobs,deleteJob,clearJobs,loadSettings,saveSettings,getApiKey,apiKeyIsRemembered,saveApiKey,forgetApiKey} from "./db.js?v=3.0.4";
+import {APP_VERSION,DEFAULT_SETTINGS,DEFAULT_OUTPUT_FIELDS,SETTINGS_SEED,MAX_BATCH_SIZE,MAX_CONCURRENCY,normalizeSettings,normalizeInputFields,slugFieldId,parseWorkbook,auditBatch,downloadWorkbook,downloadReviewPack,splitLeadsByTelecaller,splitResultsByTelecaller,requestTelecallerReview,estimateRunSeconds,estimateReviewRunSeconds,estimateReviewPassSeconds,estimatePooledSeconds,estimateCombinedReviewSessionSeconds,validateApiKey} from "./audit.js?v=3.1.0";
+import {putJob,getJob,getJobs,deleteJob,clearJobs,loadSettings,saveSettings,getApiKey,apiKeyIsRemembered,saveApiKey,forgetApiKey} from "./db.js?v=3.1.0";
 
 const $=id=>document.getElementById(id);
-const ids=["file-input","drop-zone","file-list","validation","start-audit","page-title","key-state","run-name","pause-run","download-result","progress-label","progress-percent","progress-bar","metric-leads","metric-excel-rows","metric-calls","metric-batch","metric-completed","metric-status","metric-input-tokens","metric-cached-tokens","metric-output-tokens","metric-duration","metric-eta","metric-cost","live-log","clear-console","history-list","clear-history","api-key","remember-key","toggle-key","save-key","forget-key","key-message","batch-size","concurrency","model","review-model","input-field-config","add-input-field","ai-field-config","rule-config","add-rule","output-field-config","yes-values","no-values","additional-instructions","input-price","cached-price","output-price","review-input-price","review-cached-price","review-output-price","save-settings","reset-settings","settings-message","toast","mobile-menu","active-job-switch","sort-field","sort-direction","app-version","export-settings","import-settings","import-settings-file","update-banner","update-banner-text","reload-app","key-modal","onboard-key","onboard-toggle","onboard-remember","onboard-message","onboard-save","onboard-skip","sidebar-version","sidebar-notes","review-drop-zone","review-file-input","review-drop-hint","review-file-list","review-validation","start-review","review-run-panel","review-aggregate","review-cards","review-download-panel","download-review-txt","download-review-excel","review-open-console"];
+const ids=["file-input","drop-zone","file-list","validation","start-audit","page-title","key-state","run-name","pause-run","download-result","progress-label","progress-percent","progress-bar","metric-leads","metric-excel-rows","metric-calls","metric-batch","metric-completed","metric-status","metric-input-tokens","metric-cached-tokens","metric-output-tokens","metric-duration","metric-eta","metric-cost","live-log","clear-console","history-list","clear-history","api-key","remember-key","toggle-key","save-key","forget-key","key-message","batch-size","concurrency","model","review-model","input-field-config","add-input-field","ai-field-config","rule-config","add-rule","output-field-config","yes-values","no-values","additional-instructions","input-price","cached-price","output-price","review-input-price","review-cached-price","review-output-price","save-settings","reset-settings","settings-message","toast","mobile-menu","active-job-switch","sort-field","sort-direction","app-version","export-settings","import-settings","import-settings-file","update-banner","update-banner-text","reload-app","key-modal","onboard-key","onboard-toggle","onboard-remember","onboard-message","onboard-save","onboard-skip","sidebar-version","sidebar-notes","review-drop-zone","review-file-input","review-drop-hint","review-file-list","review-validation","start-review","review-run-panel","review-aggregate","review-cards","review-download-panel","download-review-pdf","download-review-excel","review-open-console"];
 const els=Object.fromEntries(ids.map(id=>[id,$(id)]));
 const titles={new:"New audit",review:"TelleCaller Review",console:"Run console",history:"History",settings:"Settings"};
 const ENGINE_VERSION="latest-day-v7";
@@ -529,6 +529,7 @@ async function runJob(job,{navigate=true}={}){
         scheduleReviewProgress();
         const review=await requestTelecallerReview(key,job.settings,job,controller.signal,(message,level)=>addLog(job,message,level));
         job.reviewText=review.reviewText;
+        job.reviewReport=review.reviewReport||null;
         job.reviewStatus="completed";
         job.reviewModel=review.model;
         job.reviewTokenUsage={
@@ -789,6 +790,7 @@ function createReviewJob({fileName,parentFileName,sheetName,telecallerName,leads
     tokenUsage:{input:0,cached:0,output:0},
     reviewTokenUsage:{input:0,cached:0,output:0},
     reviewText:"",
+    reviewReport:null,
     reviewStatus:"pending",
     elapsedMs:0,
     pricing:deepCopy(settings.pricing),
@@ -827,6 +829,7 @@ function createReviewOnlyJob({parentJobId,parentFileName,sheetName,telecallerNam
     tokenUsage:{input:0,cached:0,output:0},
     reviewTokenUsage:{input:0,cached:0,output:0},
     reviewText:"",
+    reviewReport:null,
     reviewStatus:"pending",
     elapsedMs:0,
     pricing:deepCopy(settings.pricing),
@@ -1348,15 +1351,15 @@ async function renderReviewProgress(){
     const allDone=sessionDone;
     if(ready.length&&allDone){
       downloads.classList.remove("hidden");
-      els["download-review-txt"].disabled=false;
+      els["download-review-pdf"].disabled=false;
       els["download-review-excel"].disabled=false;
     }else if(ready.length){
       downloads.classList.remove("hidden");
-      els["download-review-txt"].disabled=false;
+      els["download-review-pdf"].disabled=false;
       els["download-review-excel"].disabled=false;
     }else{
       downloads.classList.add("hidden");
-      els["download-review-txt"].disabled=true;
+      els["download-review-pdf"].disabled=true;
       els["download-review-excel"].disabled=true;
     }
   }
@@ -1372,7 +1375,7 @@ async function downloadReviewArtifact(artifact){
     settings=live;
     saveSettings(settings);
     await downloadReviewPack(ready,live,{packing:getReviewPacking(),artifact});
-    toast(artifact==="txt"?"Review TXT downloaded.":"Audit Excel downloaded.");
+    toast(artifact==="pdf"?"Performance report PDF downloaded.":"Audit Excel downloaded.");
   }catch(error){toast(error.message);}
 }
 
@@ -1412,13 +1415,13 @@ async function renderHistory(){
       if(job.mode==="telecaller-review"){
         const reviewBtn=document.createElement("button");
         reviewBtn.className="primary-button";
-        reviewBtn.textContent="Download review";
+        reviewBtn.textContent="Download report";
         reviewBtn.onclick=async()=>{
           try{
             const live=collectSettings();
             settings=live;saveSettings(settings);
             await downloadReviewPack([job],live,{packing:"separate",artifact:"both"});
-            toast("Review TXT + Excel downloaded.");
+            toast("Performance report PDF + Excel downloaded.");
           }catch(error){toast(error.message);}
         };
         actions.append(reviewBtn);
@@ -1798,7 +1801,7 @@ if(els["review-drop-zone"]){
 }
 if(els["review-file-input"])els["review-file-input"].onchange=event=>handleReviewFiles(event.target.files,{append:reviewFormat==="separate"&&reviewQueueRunning});
 if(els["start-review"])els["start-review"].onclick=startReview;
-if(els["download-review-txt"])els["download-review-txt"].onclick=()=>downloadReviewArtifact("txt");
+if(els["download-review-pdf"])els["download-review-pdf"].onclick=()=>downloadReviewArtifact("pdf");
 if(els["download-review-excel"])els["download-review-excel"].onclick=()=>downloadReviewArtifact("excel");
 if(els["review-open-console"])els["review-open-console"].onclick=()=>{
   if(currentJob){displayLogs=true;renderProgress(currentJob);}

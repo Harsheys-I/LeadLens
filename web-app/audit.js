@@ -1,62 +1,63 @@
-export const APP_VERSION = "3.0.4";
+export const APP_VERSION = "3.2.0";
 /** Bump when default AI rules / field defaults must refresh existing localStorage settings. */
-export const SETTINGS_SEED = 11;
+export const SETTINGS_SEED = 12;
 
 /** Settings limits — batch size is leads per request; concurrency is parallel requests. */
 export const MAX_BATCH_SIZE = 20;
 export const MAX_CONCURRENCY = 50;
 
 export const ERROR_TYPES = [
-  "Comment displaying -ve, but Lead Status is +ve",
-  "Comment displaying +ve, but Lead Status is -ve",
-  "Lead Status not reflecting Comment History",
-  "Missed 30min talk before",
+  "Lead Status Not Aligned With Comments",
+  "Fresh Call TAT Missed",
   "Follow-up Missed",
-  "Lead Update not matching prior Follow-up",
-  "Customer Location is empty",
-  "Customer Requirement is empty",
-  "Estimated Budget is empty",
-  "Analysis Parameter is Empty",
-  "Customer Requirement is set wrong"
+  "Estimate Budget Empty",
+  "Customer Requirement Empty",
+  "Customer Location Empty",
+  "Analysis Parameter Empty",
+  "Incorrect Customer Requirement"
 ];
 export const HIGH_SEVERITY_ERRORS = new Set([
-  "Comment displaying -ve, but Lead Status is +ve",
-  "Comment displaying +ve, but Lead Status is -ve",
-  "Lead Status not reflecting Comment History",
-  "Missed 30min talk before",
+  "Lead Status Not Aligned With Comments",
+  "Fresh Call TAT Missed",
   "Follow-up Missed",
-  "Lead Update not matching prior Follow-up",
-  "Customer Location is empty",
-  "Customer Requirement is set wrong"
+  "Customer Location Empty",
+  "Incorrect Customer Requirement"
 ]);
-const STATUS_HISTORY_ERROR = "Lead Status not reflecting Comment History";
-const MISSED_30MIN_ERROR = "Missed 30min talk before";
+const STATUS_HISTORY_ERROR = "Lead Status Not Aligned With Comments";
+const MISSED_30MIN_ERROR = "Fresh Call TAT Missed";
 const FOLLOWUP_MISSED_ERROR = "Follow-up Missed";
-const FOLLOWUP_TIMING_ERROR = "Lead Update not matching prior Follow-up";
+const EMPTY_LOCATION = "Customer Location Empty";
+const EMPTY_REQUIREMENT = "Customer Requirement Empty";
+const EMPTY_BUDGET = "Estimate Budget Empty";
+const EMPTY_PARAMETER = "Analysis Parameter Empty";
+const WRONG_REQUIREMENT = "Incorrect Customer Requirement";
 const CONNECTED_ONLY_ERRORS = new Set([
-  "Customer Location is empty",
-  "Customer Requirement is empty",
-  "Estimated Budget is empty",
-  "Customer Requirement is set wrong"
+  EMPTY_LOCATION,
+  EMPTY_REQUIREMENT,
+  EMPTY_BUDGET,
+  WRONG_REQUIREMENT
 ]);
-const EMPTY_REQUIREMENT = "Customer Requirement is empty";
-const WRONG_REQUIREMENT = "Customer Requirement is set wrong";
 /** Old numeric codes → labels (ignored in prompts; kept only to normalize leftover saved settings). */
 const LEGACY_ERROR_CODES = {
-  "0":"Comment displaying -ve, but Lead Status is +ve",
-  "1":"Comment displaying +ve, but Lead Status is -ve",
-  "2":"Follow-up Missed",
-  "3":"Customer Location is empty",
-  "4":"Customer Requirement is empty",
-  "5":"Estimated Budget is empty",
-  "6":"Analysis Parameter is Empty",
-  "7":"Customer Requirement is set wrong"
+  "2":FOLLOWUP_MISSED_ERROR,
+  "3":EMPTY_LOCATION,
+  "4":EMPTY_REQUIREMENT,
+  "5":EMPTY_BUDGET,
+  "6":EMPTY_PARAMETER,
+  "7":WRONG_REQUIREMENT
 };
 /** Renamed / alias labels → canonical ERROR_TYPES text. */
 const LEGACY_ERROR_LABELS = {
   "followup date is missed": FOLLOWUP_MISSED_ERROR,
   "follow up date is missed": FOLLOWUP_MISSED_ERROR,
-  "follow-up date is missed": FOLLOWUP_MISSED_ERROR
+  "follow-up date is missed": FOLLOWUP_MISSED_ERROR,
+  "lead status not reflecting comment history": STATUS_HISTORY_ERROR,
+  "missed 30min talk before": MISSED_30MIN_ERROR,
+  "customer location is empty": EMPTY_LOCATION,
+  "customer requirement is empty": EMPTY_REQUIREMENT,
+  "estimated budget is empty": EMPTY_BUDGET,
+  "analysis parameter is empty": EMPTY_PARAMETER,
+  "customer requirement is set wrong": WRONG_REQUIREMENT
 };
 export const AI_FIELD_KEYS = {status:"s",comments:"c",next:"n",location:"l",requirement:"rq",budget:"b",connected:"k"};
 
@@ -105,12 +106,12 @@ export const DEFAULT_OUTPUT_FIELDS = [
   {id:"buyingIntent",label:"Buying Intent",enabled:true},{id:"observation",label:"AI Observation",enabled:true},{id:"recommendation",label:"AI Recommendation",enabled:true}
 ];
 export const DEFAULT_RULES = [
-  {field:"Lead Status + Comments",instruction:`Allowed Lead Status labels only (case-insensitive): Prospect, Hot, Warm, Cold, Beyond Budget, Lost. Heat ladder highest→lowest: ${STATUS_LADDER_TEXT}. c is ALWAYS the FULL chronological comment history (oldest→newest). HARD RULE — all-RNR / not connected: if EVERY non-empty comment in c is RNR-like (RNR, CNP, busy, ringing, WhatsApp follow-up/WA FU, no answer, switched off) AND k=No, then s MUST be lesser than Warm (only Cold, Beyond Budget, or Lost). If s is Warm, Hot, or Prospect in that case → emit "${STATUS_HISTORY_ERROR}". Trajectory: if early comments were highly positive but later entries cool to RNR/neutral/negative, s must step down; more than 2 continuous trailing RNR-like notes ⇒ s cannot be Prospect — emit "${STATUS_HISTORY_ERROR}". Opposite warm-up with cold status ⇒ same error. Also emit polarity mismatches "Comment displaying -ve, but Lead Status is +ve" / "Comment displaying +ve, but Lead Status is -ve" when appropriate.`,errors:`${STATUS_HISTORY_ERROR} | Comment displaying -ve, but Lead Status is +ve | Comment displaying +ve, but Lead Status is -ve`},
+  {field:"Lead Status + Comments",instruction:`Allowed Lead Status labels only (case-insensitive): Prospect, Hot, Warm, Cold, Beyond Budget, Lost. Heat ladder highest→lowest: ${STATUS_LADDER_TEXT}. c is ALWAYS the FULL chronological comment history (oldest→newest). HARD RULE — all-RNR / not connected: if EVERY non-empty comment in c is RNR-like (RNR, CNP, busy, ringing, WhatsApp follow-up/WA FU, no answer, switched off) AND k=No, then s MUST be lesser than Warm (only Cold, Beyond Budget, or Lost). If s is Warm, Hot, or Prospect in that case → emit "${STATUS_HISTORY_ERROR}". Trajectory: if early comments were highly positive but later entries cool to RNR/neutral/negative, s must step down; more than 2 continuous trailing RNR-like notes ⇒ s cannot be Prospect — emit "${STATUS_HISTORY_ERROR}". Opposite warm-up with cold status ⇒ same error. Do not emit any other status/comment polarity labels.`,errors:STATUS_HISTORY_ERROR},
   {field:"First talk SLA",instruction:`Inputs reg = Lead Registration DateTime, fu = FIRST Lead Update DateTime after near-duplicate filtering (oldest call, NOT the latest). Only when reg has a clock time AND falls between 09:30 and 17:00 inclusive: fu must be within 30 minutes after reg. If fu is missing, earlier than reg, or more than 30 minutes later → emit "${MISSED_30MIN_ERROR}". If reg is outside 09:30–17:00, or reg is date-only (no usable time), do nothing for this check.`,errors:MISSED_30MIN_ERROR},
-  {field:"Prior follow-up timing",instruction:`Inputs u = THIS call's Lead Update DateTime, pn = previous call's Next Followup DateTime (empty if this is the first call). When pn is present and BOTH u and pn include HH:MM clock times: u must be within ±5 minutes of pn. If |u − pn| > 5 minutes → emit "${FOLLOWUP_TIMING_ERROR}". If pn is blank, or either value is date-only without usable time, skip the ±5min check (do not invent a match). Separately: if n (this call's Next Followup) is a past calendar date before today → emit "${FOLLOWUP_MISSED_ERROR}".`,errors:`${FOLLOWUP_TIMING_ERROR} | ${FOLLOWUP_MISSED_ERROR}`},
+  {field:"Follow-up Missed",instruction:`If n (this call's Next Followup) is a past calendar date before today → emit "${FOLLOWUP_MISSED_ERROR}". Do not emit any other follow-up timing errors.`,errors:FOLLOWUP_MISSED_ERROR},
   {field:"Comment quality",instruction:"Score q strictly. q must reflect how well Comments capture the real telecaller–customer conversation (need, budget, location preference, objection, decision-maker, next step). One-word/CRM crumbs like visited/RNR/CNP/busy/followup = q 0-2 max. Generic connected notes without customer detail = q <=4. Only rich descriptive talk earns 8-10. When c is an array, score THIS call's latest comment (last entry), using earlier entries only as context.",errors:""},
   {field:"Customer Requirement",instruction:`Only review the Customer Requirement when the call actually connected (Connected / k = Yes). On a connected call, rq should describe what the customer genuinely wants — for example a home configuration (2BHK/3BHK/plot), a budget, a preferred location/locality, facing, or a possession timeline. If rq is blank or only a placeholder such as ".", "-", "**", "NA" or "nil", raise "${EMPTY_REQUIREMENT}". If rq instead holds call notes or jargon rather than a real need — for example RNR, CNP, Visited, Site visit, Busy, Follow-up, Callback, Interested/Not interested — raise "${WRONG_REQUIREMENT}". When the call did not connect (Connected / k = No or blank), leave the requirement alone and never raise either of these two errors.`,errors:`${EMPTY_REQUIREMENT} | ${WRONG_REQUIREMENT}`},
-  {field:"AI Observation",instruction:"o is a QA judgment, NOT a rewrite of Comments. Forbidden: copying, lightly shortening, or paraphrasing c. Required: name what is missing/wrong/strong for audit (e.g. thin note, status too high for all-RNR/not-connected, missed first-talk SLA, update vs prior follow-up timing, missing budget on connected call). 18-28 words.",errors:""},
+  {field:"AI Observation",instruction:"o is a QA judgment, NOT a rewrite of Comments. Forbidden: copying, lightly shortening, or paraphrasing c. Required: name what is missing/wrong/strong for audit (e.g. thin note, status too high for all-RNR/not-connected, missed first-talk SLA, missing budget on connected call). 18-28 words.",errors:""},
   {field:"AI Recommendation",instruction:"r must be a concrete telecaller coaching action: what to ask/capture/correct on the next call (fields, questions, status fix down/up the Prospect→Lost ladder, follow-up discipline). Not vague ('follow up', 'update remarks'). 20-40 words, specific to THIS call's gaps.",errors:""},
   {field:"Buying intent",instruction:"i=1 only for genuine positive purchase interest in THIS call's latest comment/status; else i=0. Earlier history alone does not set i=1 if the latest comment cooled. All-RNR / k=No ⇒ i=0.",errors:""}
 ];
@@ -150,7 +151,7 @@ export function buildChatCompletionBody(model,{temperature,maxTokens,messages,..
 
 /* Large stable prefix FIRST so OpenAI prompt caching can activate (>=1024 tokens;
    some models need closer to 2048). Run-specific rules come after; lead data last. */
-const CACHE_HANDBOOK = `LeadLens QA v3.0.4 — stable cacheable auditor handbook. Evidence only. Never invent facts, dates, budgets, locations, or prior calls.
+const CACHE_HANDBOOK = `LeadLens QA v3.1.0 — stable cacheable auditor handbook. Evidence only. Never invent facts, dates, budgets, locations, or prior calls.
 
 PURPOSE
 You audit Indian real-estate telecalling follow-up notes. Judge only the supplied fields for THIS call id. Optional day[] lists sibling calls on the same latest calendar day — context only; still return one result for THIS id.
@@ -730,31 +731,95 @@ export function buildReviewSummary(job){
   };
 }
 
+const reviewResponseSchema={
+  type:"object",additionalProperties:false,
+  required:["headline","summary","strengths","risks","coachingFocus"],
+  properties:{
+    headline:{type:"string"},
+    summary:{type:"string"},
+    strengths:{type:"array",items:{type:"string"}},
+    risks:{type:"array",items:{type:"string"}},
+    coachingFocus:{type:"array",items:{type:"string"}}
+  }
+};
+
+/** Normalize model JSON (or plain text) into reviewText + reviewReport. */
+export function parseReviewModelContent(raw){
+  const text=clean(raw);
+  if(!text)return{reviewText:"",reviewReport:null};
+  let parsed=null;
+  try{
+    parsed=JSON.parse(text);
+  }catch{
+    const fenced=text.match(/```(?:json)?\s*([\s\S]*?)```/i);
+    if(fenced){
+      try{parsed=JSON.parse(fenced[1].trim());}catch{/* plain text */}
+    }else{
+      const start=text.indexOf("{");
+      const end=text.lastIndexOf("}");
+      if(start>=0&&end>start){
+        try{parsed=JSON.parse(text.slice(start,end+1));}catch{/* plain text */}
+      }
+    }
+  }
+  if(parsed&&typeof parsed==="object"&&!Array.isArray(parsed)){
+    const asList=value=>{
+      if(Array.isArray(value))return value.map(item=>clean(item)).filter(Boolean);
+      if(typeof value==="string"&&clean(value))return[clean(value)];
+      return[];
+    };
+    const summary=clean(parsed.summary||parsed.reviewText||parsed.narrative||"");
+    const reviewReport={
+      headline:clean(parsed.headline||parsed.title||""),
+      summary:summary||text,
+      strengths:asList(parsed.strengths||parsed.strength),
+      risks:asList(parsed.risks||parsed.risk||parsed.concerns),
+      coachingFocus:asList(parsed.coachingFocus||parsed.coaching_focus||parsed.coaching||parsed.focus)
+    };
+    return{reviewText:reviewReport.summary,reviewReport};
+  }
+  return{
+    reviewText:text,
+    reviewReport:{headline:"",summary:text,strengths:[],risks:[],coachingFocus:[]}
+  };
+}
+
 /**
- * Second AI pass: 100–500 word plain-text TeleCaller review for managers.
+ * Second AI pass: structured TeleCaller review for managers (PDF report).
  * Uses settings.reviewModel (default gpt-5-nano). Does not change audit results.
  */
 export async function requestTelecallerReview(apiKey,rawSettings,job,signal,log){
   const settings=normalizeSettings(rawSettings);
   const model=settings.reviewModel||DEFAULT_SETTINGS.reviewModel;
   const summary=buildReviewSummary(job);
-  const system=`You are a telecalling QA coach writing for a sales manager. Using only the supplied audit summary, write a plain-text TeleCaller performance review between 100 and 500 words. Cover comment quality, error patterns, strengths, and coaching focus. No markdown, no bullet lists required, no JSON, no invented leads or quotes beyond the samples.`;
-  const user=`TeleCaller review request.\nSummary JSON:\n${JSON.stringify(summary)}`;
-  // Higher max for reasoning models (thinking tokens + 100–500 word review).
+  const system=`You are a telecalling QA coach writing for a sales manager. Using only the supplied audit summary, return JSON with keys: headline (short), summary (100–500 words plain prose coach narrative), strengths (string array), risks (string array), coachingFocus (string array). Cover comment quality, error patterns, strengths, and coaching focus. No markdown in summary. No invented leads or quotes beyond the samples.`;
+  const user=`TeleCaller review request. Respond with JSON only.\nSummary JSON:\n${JSON.stringify(summary)}`;
+  // Higher max for reasoning models (thinking tokens + structured review).
   const reviewBody=buildChatCompletionBody(model,{
       temperature:0.3,
       maxTokens:4000,
       messages:[
         {role:"system",content:system},
         {role:"user",content:user}
-      ]
+      ],
+      response_format:{type:"json_schema",json_schema:{name:"ll_telecaller_review",strict:true,schema:reviewResponseSchema}}
     });
   if(log)log(`Review API params (${model}): keys=${Object.keys(reviewBody).join(",")} · max_tokens=${"max_tokens" in reviewBody} · max_completion_tokens=${"max_completion_tokens" in reviewBody} · temperature=${"temperature" in reviewBody}`,"info");
-  const response=await fetch("https://api.openai.com/v1/chat/completions",{
+  let response=await fetch("https://api.openai.com/v1/chat/completions",{
     method:"POST",signal,
     headers:{"Content-Type":"application/json","Authorization":`Bearer ${apiKey}`},
     body:JSON.stringify(reviewBody)
   });
+  if(!response.ok&&response.status===400){
+    // Some model variants reject json_schema — retry with plain prompt + graceful parse.
+    const{response_format:_omit,...fallbackBody}=reviewBody;
+    if(log)log("Review json_schema rejected — retrying without response_format.","info");
+    response=await fetch("https://api.openai.com/v1/chat/completions",{
+      method:"POST",signal,
+      headers:{"Content-Type":"application/json","Authorization":`Bearer ${apiKey}`},
+      body:JSON.stringify(fallbackBody)
+    });
+  }
   if(!response.ok){
     let detail="";
     try{
@@ -767,6 +832,8 @@ export async function requestTelecallerReview(apiKey,rawSettings,job,signal,log)
   const choice=data.choices?.[0];
   const text=clean(choice?.message?.content||"");
   if(!text)throw new Error(`OpenAI returned an empty TeleCaller review (finish_reason=${choice?.finish_reason||"unknown"}).`);
+  const{reviewText,reviewReport}=parseReviewModelContent(text);
+  if(!reviewText)throw new Error(`OpenAI returned an empty TeleCaller review (finish_reason=${choice?.finish_reason||"unknown"}).`);
   const usage=data.usage||{};
   const tokenUsage={
     input:usage.prompt_tokens??usage.input_tokens??0,
@@ -774,7 +841,7 @@ export async function requestTelecallerReview(apiKey,rawSettings,job,signal,log)
     output:usage.completion_tokens??usage.output_tokens??0
   };
   if(log)log(`Review tokens (${model}): ${tokenUsage.input} in (${tokenUsage.cached} cached), ${tokenUsage.output} out.`,"info");
-  return{reviewText:text,tokenUsage,model};
+  return{reviewText,reviewReport,tokenUsage,model};
 }
 
 /**
@@ -1452,7 +1519,7 @@ export function downloadWorkbook(job,currentSettings){
   XLSX.writeFile(book,`Audit_Data_${stamp}_${settings.sort.field}-${settings.sort.direction}.xlsx`);
 }
 
-/** Merge completed TeleCaller review jobs into one Excel payload + one TXT. */
+/** Merge completed TeleCaller review jobs into one Excel payload (+ legacy text join). */
 export function mergeReviewJobs(jobs){
   const list=(jobs||[]).filter(Boolean);
   const results=list.flatMap(job=>job.results||[]);
@@ -1485,13 +1552,337 @@ export function downloadBlobFile(blob,filename){
   triggerBlobDownload(blob,filename);
 }
 
-/** Download review TXT + audit Excel for one or many jobs according to packing. */
+const PDF_BRAND={
+  green:"#12372a",
+  green2:"#1f5d45",
+  mint:"#dff4e8",
+  amber:"#c57924",
+  red:"#a33a32",
+  ink:"#17211d",
+  muted:"#6c7771",
+  line:"#dfe5e1",
+  paper:"#f4f6f3",
+  white:"#ffffff"
+};
+
+function requirePdfLibs(){
+  const jsPDF=window.jspdf?.jsPDF;
+  if(typeof jsPDF!=="function")throw new Error("jsPDF failed to load. Check your network connection and reload.");
+  if(typeof window.Chart!=="function")throw new Error("Chart.js failed to load. Check your network connection and reload.");
+  return{jsPDF,Chart:window.Chart};
+}
+
+function jobReviewReport(job){
+  if(job?.reviewReport&&typeof job.reviewReport==="object"){
+    return{
+      headline:clean(job.reviewReport.headline||""),
+      summary:clean(job.reviewReport.summary||job.reviewText||""),
+      strengths:Array.isArray(job.reviewReport.strengths)?job.reviewReport.strengths.map(clean).filter(Boolean):[],
+      risks:Array.isArray(job.reviewReport.risks)?job.reviewReport.risks.map(clean).filter(Boolean):[],
+      coachingFocus:Array.isArray(job.reviewReport.coachingFocus)?job.reviewReport.coachingFocus.map(clean).filter(Boolean):[]
+    };
+  }
+  const summary=clean(job?.reviewText||"");
+  return{headline:"",summary,strengths:[],risks:[],coachingFocus:[]};
+}
+
+function pdfHexRgb(hex){
+  const h=String(hex||"").replace("#","");
+  return{
+    r:parseInt(h.slice(0,2),16),
+    g:parseInt(h.slice(2,4),16),
+    b:parseInt(h.slice(4,6),16)
+  };
+}
+
+function pdfSetFill(doc,hex){
+  const{r,g,b}=pdfHexRgb(hex);
+  doc.setFillColor(r,g,b);
+}
+function pdfSetDraw(doc,hex){
+  const{r,g,b}=pdfHexRgb(hex);
+  doc.setDrawColor(r,g,b);
+}
+function pdfSetText(doc,hex){
+  const{r,g,b}=pdfHexRgb(hex);
+  doc.setTextColor(r,g,b);
+}
+
+function pdfWrap(doc,text,maxWidth){
+  return doc.splitTextToSize(String(text||""),maxWidth);
+}
+
+function pdfEnsureSpace(doc,y,need,marginBottom){
+  const pageH=doc.internal.pageSize.getHeight();
+  if(y+need<=pageH-marginBottom)return y;
+  doc.addPage();
+  return 18;
+}
+
+async function renderOffscreenChart(Chart,type,data,options,width,height){
+  const canvas=document.createElement("canvas");
+  canvas.width=width;
+  canvas.height=height;
+  canvas.style.cssText="position:fixed;left:-9999px;top:0;width:"+width+"px;height:"+height+"px;pointer-events:none;opacity:0;";
+  document.body.appendChild(canvas);
+  const chart=new Chart(canvas,{
+    type,
+    data,
+    options:{
+      ...options,
+      responsive:false,
+      animation:false,
+      devicePixelRatio:2
+    }
+  });
+  await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));
+  const url=canvas.toDataURL("image/png");
+  chart.destroy();
+  canvas.remove();
+  return url;
+}
+
+async function buildReviewChartImages(Chart,metrics){
+  const qualityLabels=Object.keys(metrics.qualityDistribution||{});
+  const qualityValues=qualityLabels.map(key=>Number(metrics.qualityDistribution[key])||0);
+  const errorLabels=(metrics.errorTallies||[]).slice(0,8).map(item=>item.label.length>36?item.label.slice(0,34)+"…":item.label);
+  const errorValues=(metrics.errorTallies||[]).slice(0,8).map(item=>item.count);
+  const severityLabels=["NONE","MEDIUM","HIGH"];
+  const severityValues=severityLabels.map(key=>Number(metrics.severityMix?.[key])||0);
+  const commonPlugins={legend:{display:false},title:{display:false},tooltip:{enabled:false}};
+  const [qualityImg,errorsImg,severityImg]=await Promise.all([
+    renderOffscreenChart(Chart,"bar",{
+      labels:qualityLabels,
+      datasets:[{data:qualityValues,backgroundColor:PDF_BRAND.green2,borderWidth:0,borderRadius:3}]
+    },{
+      plugins:commonPlugins,
+      scales:{
+        x:{ticks:{color:PDF_BRAND.muted,font:{size:10}},grid:{display:false}},
+        y:{beginAtZero:true,ticks:{precision:0,color:PDF_BRAND.muted,font:{size:10}},grid:{color:PDF_BRAND.line}}
+      }
+    },520,260),
+    renderOffscreenChart(Chart,"bar",{
+      labels:errorLabels.length?errorLabels:["No errors"],
+      datasets:[{data:errorValues.length?errorValues:[0],backgroundColor:PDF_BRAND.amber,borderWidth:0,borderRadius:3}]
+    },{
+      indexAxis:"y",
+      plugins:commonPlugins,
+      scales:{
+        x:{beginAtZero:true,ticks:{precision:0,color:PDF_BRAND.muted,font:{size:9}},grid:{color:PDF_BRAND.line}},
+        y:{ticks:{color:PDF_BRAND.ink,font:{size:8}},grid:{display:false}}
+      }
+    },520,260),
+    renderOffscreenChart(Chart,"doughnut",{
+      labels:severityLabels,
+      datasets:[{data:severityValues,backgroundColor:[PDF_BRAND.green2,PDF_BRAND.amber,PDF_BRAND.red],borderWidth:2,borderColor:"#ffffff"}]
+    },{
+      plugins:{
+        legend:{display:true,position:"bottom",labels:{color:PDF_BRAND.ink,boxWidth:10,font:{size:10}}},
+        title:{display:false},
+        tooltip:{enabled:false}
+      }
+    },320,260)
+  ]);
+  return{qualityImg,errorsImg,severityImg};
+}
+
+function scorePercents(metrics){
+  const audited=Math.max(1,Number(metrics.auditedRows)||0);
+  const high=Number(metrics.severityMix?.HIGH)||0;
+  const medium=Number(metrics.severityMix?.MEDIUM)||0;
+  const errorRows=high+medium;
+  const intentYes=Number(metrics.buyingIntentMix?.Yes)||0;
+  return{
+    avgQuality:Number(metrics.avgCommentQuality)||0,
+    errorRate:Math.round((errorRows/audited)*1000)/10,
+    highSeverity:Math.round((high/audited)*1000)/10,
+    buyingIntent:Math.round((intentYes/audited)*1000)/10
+  };
+}
+
+async function drawTelecallerReviewPage(doc,Chart,job,{isFirstPage=true}={}){
+  const marginX=16;
+  const marginBottom=16;
+  const pageW=doc.internal.pageSize.getWidth();
+  const contentW=pageW-marginX*2;
+  if(!isFirstPage)doc.addPage();
+  const startPage=doc.getNumberOfPages();
+
+  const metrics=buildReviewSummary(job);
+  const report=jobReviewReport(job);
+  const scores=scorePercents(metrics);
+  const runDate=job.updatedAt||job.createdAt||new Date().toISOString();
+  const runLabel=(()=>{
+    const d=new Date(runDate);
+    return Number.isNaN(d.valueOf())?String(runDate):d.toLocaleString(undefined,{dateStyle:"medium",timeStyle:"short"});
+  })();
+
+  // Header band
+  pdfSetFill(doc,PDF_BRAND.green);
+  doc.rect(0,0,pageW,28, "F");
+  pdfSetText(doc,PDF_BRAND.white);
+  doc.setFont("helvetica","bold");
+  doc.setFontSize(14);
+  doc.text("LeadLens",marginX,12);
+  doc.setFont("helvetica","normal");
+  doc.setFontSize(10);
+  doc.text("TeleCaller Performance Report",marginX,20);
+  doc.setFontSize(9);
+  doc.text(String(metrics.telecallerName||"Unknown"),pageW-marginX,12,{align:"right"});
+  doc.text(runLabel,pageW-marginX,20,{align:"right"});
+
+  let y=34;
+  pdfSetText(doc,PDF_BRAND.muted);
+  doc.setFontSize(9);
+  doc.text(`Leads ${Number(metrics.leadCount||0).toLocaleString()}  ·  Calls ${Number(metrics.callCount||0).toLocaleString()}  ·  Audited ${Number(metrics.auditedRows||0).toLocaleString()}`,marginX,y);
+  y+=6;
+
+  if(report.headline){
+    pdfSetText(doc,PDF_BRAND.ink);
+    doc.setFont("helvetica","bold");
+    doc.setFontSize(11);
+    const headlineLines=pdfWrap(doc,report.headline,contentW);
+    doc.text(headlineLines,marginX,y);
+    y+=headlineLines.length*5+2;
+    doc.setFont("helvetica","normal");
+  }
+
+  // Score strip
+  const scoreCards=[
+    {label:"Avg comment quality",value:String(scores.avgQuality)},
+    {label:"Error rate",value:`${scores.errorRate}%`},
+    {label:"High-severity",value:`${scores.highSeverity}%`},
+    {label:"Buying intent",value:`${scores.buyingIntent}%`}
+  ];
+  const gap=4;
+  const cardW=(contentW-(scoreCards.length-1)*gap)/scoreCards.length;
+  const cardH=16;
+  scoreCards.forEach((card,i)=>{
+    const x=marginX+i*(cardW+gap);
+    pdfSetFill(doc,PDF_BRAND.mint);
+    doc.roundedRect(x,y,cardW,cardH,2,2,"F");
+    pdfSetText(doc,PDF_BRAND.muted);
+    doc.setFontSize(7);
+    doc.text(card.label,x+3,y+5.5);
+    pdfSetText(doc,PDF_BRAND.green);
+    doc.setFont("helvetica","bold");
+    doc.setFontSize(12);
+    doc.text(card.value,x+3,y+12.5);
+    doc.setFont("helvetica","normal");
+  });
+  y+=cardH+8;
+
+  // Charts
+  const charts=await buildReviewChartImages(Chart,metrics);
+  const chartH=42;
+  const leftW=contentW*0.48;
+  const midW=contentW*0.48;
+  pdfSetText(doc,PDF_BRAND.ink);
+  doc.setFont("helvetica","bold");
+  doc.setFontSize(9);
+  doc.text("Comment quality distribution",marginX,y);
+  doc.text("Top error types",marginX+leftW+4,y);
+  y+=3;
+  doc.addImage(charts.qualityImg,"PNG",marginX,y,leftW,chartH);
+  doc.addImage(charts.errorsImg,"PNG",marginX+leftW+4,y,midW,chartH);
+  y+=chartH+8;
+
+  y=pdfEnsureSpace(doc,y,55,marginBottom);
+  doc.setFont("helvetica","bold");
+  doc.setFontSize(9);
+  pdfSetText(doc,PDF_BRAND.ink);
+  doc.text("Severity mix",marginX,y);
+  y+=3;
+  const sevW=Math.min(70,contentW*0.4);
+  doc.addImage(charts.severityImg,"PNG",marginX,y,sevW,48);
+  y+=52;
+
+  // Narrative
+  y=pdfEnsureSpace(doc,y,24,marginBottom);
+  pdfSetFill(doc,PDF_BRAND.green);
+  doc.rect(marginX,y,2.2,5,"F");
+  pdfSetText(doc,PDF_BRAND.ink);
+  doc.setFont("helvetica","bold");
+  doc.setFontSize(10);
+  doc.text("Coach summary",marginX+5,y+4);
+  y+=9;
+  doc.setFont("helvetica","normal");
+  doc.setFontSize(9);
+  pdfSetText(doc,PDF_BRAND.ink);
+  const summaryLines=pdfWrap(doc,report.summary||"(No review generated.)",contentW);
+  for(const line of summaryLines){
+    y=pdfEnsureSpace(doc,y,5,marginBottom);
+    doc.text(line,marginX,y);
+    y+=4.4;
+  }
+  y+=4;
+
+  const writeBulletSection=(title,items)=>{
+    const list=items?.length?items:["None noted from this audit pass."];
+    y=pdfEnsureSpace(doc,y,14,marginBottom);
+    pdfSetFill(doc,PDF_BRAND.green);
+    doc.rect(marginX,y,2.2,5,"F");
+    pdfSetText(doc,PDF_BRAND.ink);
+    doc.setFont("helvetica","bold");
+    doc.setFontSize(10);
+    doc.text(title,marginX+5,y+4);
+    y+=8;
+    doc.setFont("helvetica","normal");
+    doc.setFontSize(9);
+    for(const item of list){
+      const lines=pdfWrap(doc,`•  ${item}`,contentW-2);
+      for(const line of lines){
+        y=pdfEnsureSpace(doc,y,5,marginBottom);
+        doc.text(line,marginX,y);
+        y+=4.4;
+      }
+      y+=1;
+    }
+    y+=3;
+  };
+
+  writeBulletSection("Strengths",report.strengths);
+  writeBulletSection("Risks",report.risks);
+  writeBulletSection("Coaching focus",report.coachingFocus);
+
+  const endPage=doc.getNumberOfPages();
+  const pageH=doc.internal.pageSize.getHeight();
+  for(let p=startPage;p<=endPage;p++){
+    doc.setPage(p);
+    pdfSetDraw(doc,PDF_BRAND.line);
+    doc.setLineWidth(0.2);
+    doc.line(marginX,pageH-10,pageW-marginX,pageH-10);
+    pdfSetText(doc,PDF_BRAND.muted);
+    doc.setFontSize(7);
+    doc.text(`LeadLens ${APP_VERSION} · Confidential management report`,marginX,pageH-6);
+    doc.text(`${metrics.telecallerName||"TeleCaller"} · ${p}`,pageW-marginX,pageH-6,{align:"right"});
+  }
+}
+
+/** Build a multi-page TeleCaller performance PDF (one section/page set per job). */
+export async function buildReviewPdfBlob(jobs){
+  const list=(jobs||[]).filter(job=>job&&(job.results?.length||job.reviewText||job.reviewReport));
+  if(!list.length)throw new Error("No completed TeleCaller reviews to export as PDF.");
+  const{jsPDF,Chart}=requirePdfLibs();
+  const doc=new jsPDF({orientation:"portrait",unit:"mm",format:"a4"});
+  for(let i=0;i<list.length;i++){
+    await drawTelecallerReviewPage(doc,Chart,list[i],{isFirstPage:i===0});
+  }
+  return doc.output("blob");
+}
+
+export async function downloadReviewPdf(jobs,filename){
+  const blob=await buildReviewPdfBlob(jobs);
+  downloadBlobFile(blob,filename);
+}
+
+/** Download review PDF + audit Excel for one or many jobs according to packing. */
 export async function downloadReviewPack(jobs,currentSettings,{packing="combined",artifact="both"}={}){
-  const list=(jobs||[]).filter(job=>job&&(job.results?.length||job.reviewText));
+  const list=(jobs||[]).filter(job=>job&&(job.results?.length||job.reviewText||job.reviewReport));
   if(!list.length)throw new Error("No completed TeleCaller reviews to download.");
   const settings=normalizeSettings(currentSettings);
   const stamp=stampFile();
-  const wantTxt=artifact==="both"||artifact==="txt";
+  const wantPdf=artifact==="both"||artifact==="pdf"||artifact==="txt";
   const wantExcel=artifact==="both"||artifact==="excel";
   const sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms));
 
@@ -1499,7 +1890,7 @@ export async function downloadReviewPack(jobs,currentSettings,{packing="combined
     for(let i=0;i<list.length;i++){
       const job=list[i];
       const part=sanitizeFilePart(job.telecallerName||job.fileName||`TeleCaller_${i+1}`);
-      if(wantTxt)downloadTextFile(job.reviewText||"(No review generated.)",`Review_${part}_${stamp}.txt`);
+      if(wantPdf)await downloadReviewPdf([job],`Review_${part}_${stamp}.pdf`);
       if(wantExcel){
         const blob=buildWorkbookBlob(job,settings);
         downloadBlobFile(blob,`Audit_${part}_${stamp}_${settings.sort.field}-${settings.sort.direction}.xlsx`);
@@ -1510,7 +1901,7 @@ export async function downloadReviewPack(jobs,currentSettings,{packing="combined
   }
 
   const merged=mergeReviewJobs(list);
-  if(wantTxt)downloadTextFile(merged.reviewText,`TeleCaller_Reviews_${stamp}.txt`);
+  if(wantPdf)await downloadReviewPdf(list,`TeleCaller_Reviews_${stamp}.pdf`);
   if(wantExcel){
     const blob=buildWorkbookBlob(merged.job,settings);
     downloadBlobFile(blob,`Audit_Data_${stamp}_${settings.sort.field}-${settings.sort.direction}.xlsx`);

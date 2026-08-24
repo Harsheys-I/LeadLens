@@ -7,9 +7,11 @@
   <meta name="description" content="Private, browser-based AI telecalling audit engine">
   <title>LeadLens Audit</title>
   <link rel="manifest" href="manifest.webmanifest">
-  <link rel="stylesheet" href="styles.css?v=3.0.4">
+  <link rel="stylesheet" href="styles.css?v=3.1.0">
   <script defer src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-  <script type="module" src="app.js?v=3.0.4"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+  <script type="module" src="app.js?v=3.1.0"></script>
 </head>
 <body>
   <div id="update-banner" class="update-banner hidden" role="status">
@@ -26,7 +28,7 @@
         <button class="nav-item" data-view="history"><span>◷</span>History</button>
         <button class="nav-item" data-view="settings"><span>⚙</span>Settings</button>
       </nav>
-      <div class="privacy-note"><strong id="sidebar-version">v3.0.4</strong><span id="sidebar-notes">Review UX: live Combined audit progress, Total Time Taken, recalibrated pool-aware ETAs (gpt-4o-mini + gpt-5-nano).</span></div>
+      <div class="privacy-note"><strong id="sidebar-version">v3.1.0</strong><span id="sidebar-notes">TeleCaller PDF performance reports: score strip, charts, coach summary + structured coaching; PDF replaces TXT as primary review download.</span></div>
     </aside>
 
     <main>
@@ -48,7 +50,7 @@
       </section>
 
       <section id="view-review" class="view">
-        <div class="intro"><h2>Review every TeleCaller.</h2><p>Upload a team export or separate files. LeadLens audits each TeleCaller, then writes a manager-facing review with a second AI pass.</p></div>
+        <div class="intro"><h2>Review every TeleCaller.</h2><p>Upload a team export or separate files. LeadLens audits each TeleCaller, then writes a manager-facing PDF performance report with a second AI pass.</p></div>
         <div class="format-toggle" role="group" aria-label="Upload format">
           <button type="button" class="format-option active" data-review-format="combined">Combined Excel</button>
           <button type="button" class="format-option" data-review-format="separate">Separate files</button>
@@ -69,13 +71,13 @@
           <div id="review-aggregate" class="review-aggregate hidden"></div>
           <div id="review-cards" class="review-cards"></div>
           <div id="review-download-panel" class="review-download-panel hidden">
-            <div class="card-title"><h2>Downloads</h2><p>Pack review text and audit Excel as one set or one set per TeleCaller.</p></div>
+            <div class="card-title"><h2>Downloads</h2><p>Pack the PDF performance report and audit Excel as one set or one set per TeleCaller.</p></div>
             <div class="packing-toggle" role="radiogroup" aria-label="Download packing">
               <label class="check-row packing-option"><input type="radio" name="review-packing" value="combined" checked><span>All in one</span></label>
               <label class="check-row packing-option"><input type="radio" name="review-packing" value="separate"><span>Separate per TeleCaller</span></label>
             </div>
             <div class="inline-actions review-download-actions">
-              <button id="download-review-txt" type="button" class="primary-button" disabled>Download review (TXT)</button>
+              <button id="download-review-pdf" type="button" class="primary-button" disabled>Download report (PDF)</button>
               <button id="download-review-excel" type="button" class="secondary-button" disabled>Download audit Excel</button>
             </div>
           </div>

@@ -1,5 +1,5 @@
 ﻿{
-  "version": "3.0.4",
+  "version": "3.1.0",
   "name": "LeadLens",
-  "notes": "Review UX: live Combined audit progress, Total Time Taken, recalibrated pool-aware ETAs (gpt-4o-mini + gpt-5-nano)."
+  "notes": "TeleCaller PDF performance reports: score strip, charts, coach summary + structured coaching; PDF replaces TXT as primary review download."
 }
