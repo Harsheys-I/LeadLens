@@ -7,11 +7,10 @@
   <meta name="description" content="Private, browser-based AI telecalling audit engine">
   <title>LeadLens Audit</title>
   <link rel="manifest" href="manifest.webmanifest">
-  <link rel="stylesheet" href="styles.css?v=3.4.1">
+  <link rel="stylesheet" href="styles.css?v=3.5.0">
   <script defer src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-  <script defer src="https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js"></script>
-  <script defer src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
-  <script type="module" src="app.js?v=3.4.1"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+  <script type="module" src="app.js?v=3.5.0"></script>
 </head>
 <body>
   <div id="update-banner" class="update-banner hidden" role="status">
@@ -28,7 +27,7 @@
         <button class="nav-item" data-view="history"><span>◷</span>History</button>
         <button class="nav-item" data-view="settings"><span>⚙</span>Settings</button>
       </nav>
-      <div class="privacy-note"><strong id="sidebar-version">v3.4.1</strong><span id="sidebar-notes">New Audit keeps live progress on-page — no auto-open Run Console.</span></div>
+      <div class="privacy-note"><strong id="sidebar-version">v3.5.0</strong><span id="sidebar-notes">TeleCaller Review downloads a finished Excel dashboard (slicers + charts).</span></div>
     </aside>
 
     <main>
@@ -65,14 +64,14 @@
       </section>
 
       <section id="view-review" class="view">
-        <div class="intro"><h2>Review every TeleCaller.</h2><p><strong>Excel RAW</strong> detects TeleCallers, audits the whole file, then builds PDFs. <strong>Excel Audit</strong> skips AI — upload an already-audited workbook, split by TeleCaller, and build PDFs.</p></div>
+        <div class="intro"><h2>Review every TeleCaller.</h2><p><strong>Excel RAW</strong> detects TeleCallers, audits the whole file, then builds a dashboard workbook. <strong>Excel Audit</strong> skips AI — upload an already-audited workbook, split by TeleCaller, and download the dashboard.</p></div>
         <div class="format-toggle" role="group" aria-label="Upload format">
           <button type="button" class="format-option active" data-review-format="raw">Excel RAW</button>
           <button type="button" class="format-option" data-review-format="audit">Excel Audit</button>
         </div>
         <div id="review-drop-zone" class="drop-zone" role="button" tabindex="0" aria-label="Upload Excel for TeleCaller review">
           <input id="review-file-input" type="file" accept=".xlsx,.xls,.xlsm" hidden>
-          <div class="upload-icon">⇧</div><h3>Drop Excel here</h3><p id="review-drop-hint">CRM / RAW export · auto-detect TeleCallers · audit then PDF · XLSX, XLS or XLSM</p>
+          <div class="upload-icon">⇧</div><h3>Drop Excel here</h3><p id="review-drop-hint">CRM / RAW export · auto-detect TeleCallers · audit then Excel dashboard · XLSX, XLS or XLSM</p>
         </div>
         <div id="review-file-list" class="file-list hidden"></div>
         <div id="review-validation" class="validation hidden" role="status"></div>
@@ -86,13 +85,13 @@
           <div id="review-aggregate" class="review-aggregate hidden"></div>
           <div id="review-cards" class="review-cards"></div>
           <div id="review-download-panel" class="review-download-panel hidden">
-            <div class="card-title"><h2>Downloads</h2><p>Pack the PDF performance report and audit Excel as one set or one set per TeleCaller.</p></div>
+            <div class="card-title"><h2>Downloads</h2><p>Download the finished Excel dashboard (Raw Data + charts). Optionally also download audit Excel. Use slicers to filter TeleCallers.</p></div>
             <div class="packing-toggle" role="radiogroup" aria-label="Download packing">
               <label class="check-row packing-option"><input type="radio" name="review-packing" value="combined" checked><span>All in one</span></label>
               <label class="check-row packing-option"><input type="radio" name="review-packing" value="separate"><span>Separate per TeleCaller</span></label>
             </div>
             <div class="inline-actions review-download-actions">
-              <button id="download-review-pdf" type="button" class="primary-button" disabled>Download report (PDF)</button>
+              <button id="download-review-dashboard" type="button" class="primary-button" disabled>Download dashboard (Excel)</button>
               <button id="download-review-excel" type="button" class="secondary-button" disabled>Download audit Excel</button>
             </div>
           </div>
@@ -149,7 +148,7 @@
                 <label>Audit cached ₹ / 1M<input id="cached-price" type="number" min="0" step="0.000001"></label>
                 <label>Audit output ₹ / 1M<input id="output-price" type="number" min="0" step="0.000001"></label>
               </div>
-              <p class="hint-copy">Console cost uses audit rates. TeleCaller PDFs are built from audit metrics (no separate review-model pass).</p>
+              <p class="hint-copy">Console cost uses audit rates. TeleCaller dashboards are built from audit metrics (no separate review-model pass).</p>
             </section>
 
             <section class="settings-card">

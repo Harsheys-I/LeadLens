@@ -15,6 +15,7 @@ wheels/
 *.xlsx
 *.xls
 *.xlsm
+!web-app/templates/telecalling-lead-audit.xlsx
 Audit_Data*.csv
 Audit_Data*.json
 checkpoint.json

@@ -1,4 +1,6 @@
-export const APP_VERSION = "3.4.1";
+import {buildTelecallerDashboardBlob} from "./dashboard-export.js?v=3.5.0";
+
+export const APP_VERSION = "3.5.0";
 /** Bump when default AI rules / field defaults must refresh existing localStorage settings. */
 export const SETTINGS_SEED = 12;
 
@@ -154,7 +156,7 @@ export function buildChatCompletionBody(model,{temperature,maxTokens,messages,..
 
 /* Large stable prefix FIRST so OpenAI prompt caching can activate (>=1024 tokens;
    some models need closer to 2048). Run-specific rules come after; lead data last. */
-const CACHE_HANDBOOK = `LeadLens QA v3.4.1 — stable cacheable auditor handbook. Evidence only. Never invent facts, dates, budgets, locations, or prior calls.
+const CACHE_HANDBOOK = `LeadLens QA v3.5.0 — stable cacheable auditor handbook. Evidence only. Never invent facts, dates, budgets, locations, or prior calls.
 
 PURPOSE
 You audit Indian real-estate telecalling follow-up notes. Judge only the supplied fields for THIS call id. Optional day[] lists sibling calls on the same latest calendar day — context only; still return one result for THIS id.
@@ -1935,13 +1937,21 @@ export async function downloadReviewPdf(jobs,filename){
   downloadBlobFile(blob,filename);
 }
 
-/** Download review PDF + audit Excel for one or many jobs according to packing. */
+export async function downloadTelecallerDashboard(jobs,filename){
+  const list=(jobs||[]).filter(job=>job&&job.results?.length);
+  if(!list.length)throw new Error("No completed TeleCaller audits to export as dashboard.");
+  const results=list.flatMap(job=>job.results||[]);
+  const blob=await buildTelecallerDashboardBlob(results,{highSeverityErrors:HIGH_SEVERITY_ERRORS});
+  downloadBlobFile(blob,filename||`TeleCaller_Dashboard_${stampFile()}.xlsx`);
+}
+
+/** Download dashboard Excel and/or audit Excel for one or many jobs according to packing. */
 export async function downloadReviewPack(jobs,currentSettings,{packing="combined",artifact="both"}={}){
   const list=(jobs||[]).filter(job=>job&&job.results?.length);
   if(!list.length)throw new Error("No completed TeleCaller audits to download.");
   const settings=normalizeSettings(currentSettings);
   const stamp=stampFile();
-  const wantPdf=artifact==="both"||artifact==="pdf"||artifact==="txt";
+  const wantDash=artifact==="both"||artifact==="pdf"||artifact==="txt"||artifact==="dashboard";
   const wantExcel=artifact==="both"||artifact==="excel";
   const sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms));
 
@@ -1949,7 +1959,7 @@ export async function downloadReviewPack(jobs,currentSettings,{packing="combined
     for(let i=0;i<list.length;i++){
       const job=list[i];
       const part=sanitizeFilePart(job.telecallerName||job.fileName||`TeleCaller_${i+1}`);
-      if(wantPdf)await downloadReviewPdf([job],`Review_${part}_${stamp}.pdf`);
+      if(wantDash)await downloadTelecallerDashboard([job],`Dashboard_${part}_${stamp}.xlsx`);
       if(wantExcel){
         const blob=buildWorkbookBlob(job,settings);
         downloadBlobFile(blob,`Audit_${part}_${stamp}_${settings.sort.field}-${settings.sort.direction}.xlsx`);
@@ -1959,9 +1969,9 @@ export async function downloadReviewPack(jobs,currentSettings,{packing="combined
     return;
   }
 
-  const merged=mergeReviewJobs(list);
-  if(wantPdf)await downloadReviewPdf(list,`TeleCaller_Reviews_${stamp}.pdf`);
+  if(wantDash)await downloadTelecallerDashboard(list,`TeleCaller_Dashboard_${stamp}.xlsx`);
   if(wantExcel){
+    const merged=mergeReviewJobs(list);
     const blob=buildWorkbookBlob(merged.job,settings);
     downloadBlobFile(blob,`Audit_Data_${stamp}_${settings.sort.field}-${settings.sort.direction}.xlsx`);
   }

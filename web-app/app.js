@@ -1,8 +1,8 @@
-import {APP_VERSION,DEFAULT_SETTINGS,DEFAULT_OUTPUT_FIELDS,SETTINGS_SEED,MAX_BATCH_SIZE,MAX_CONCURRENCY,normalizeSettings,normalizeInputFields,slugFieldId,parseWorkbook,parseAuditedWorkbook,auditBatch,downloadWorkbook,downloadReviewPack,splitLeadsByTelecaller,splitResultsByTelecaller,validateApiKey} from "./audit.js?v=3.4.1";
-import {putJob,getJob,getJobs,deleteJob,clearJobs,loadSettings,saveSettings,getApiKey,apiKeyIsRemembered,saveApiKey,forgetApiKey} from "./db.js?v=3.4.1";
+import {APP_VERSION,DEFAULT_SETTINGS,DEFAULT_OUTPUT_FIELDS,SETTINGS_SEED,MAX_BATCH_SIZE,MAX_CONCURRENCY,normalizeSettings,normalizeInputFields,slugFieldId,parseWorkbook,parseAuditedWorkbook,auditBatch,downloadWorkbook,downloadReviewPack,splitLeadsByTelecaller,splitResultsByTelecaller,validateApiKey} from "./audit.js?v=3.5.0";
+import {putJob,getJob,getJobs,deleteJob,clearJobs,loadSettings,saveSettings,getApiKey,apiKeyIsRemembered,saveApiKey,forgetApiKey} from "./db.js?v=3.5.0";
 
 const $=id=>document.getElementById(id);
-const ids=["file-input","drop-zone","file-list","validation","start-audit","page-title","key-state","run-name","pause-run","download-result","progress-label","progress-percent","progress-bar","metric-leads","metric-excel-rows","metric-calls","metric-batch","metric-completed","metric-status","metric-input-tokens","metric-cached-tokens","metric-output-tokens","metric-duration","metric-cost","live-log","clear-console","history-list","clear-history","api-key","remember-key","toggle-key","save-key","forget-key","key-message","batch-size","concurrency","model","input-field-config","add-input-field","ai-field-config","rule-config","add-rule","output-field-config","yes-values","no-values","additional-instructions","input-price","cached-price","output-price","save-settings","reset-settings","settings-message","toast","mobile-menu","active-job-switch","sort-field","sort-direction","app-version","export-settings","import-settings","import-settings-file","update-banner","update-banner-text","reload-app","key-modal","onboard-key","onboard-toggle","onboard-remember","onboard-message","onboard-save","onboard-skip","sidebar-version","sidebar-notes","review-drop-zone","review-file-input","review-drop-hint","review-file-list","review-validation","start-review","review-run-panel","review-aggregate","review-cards","review-download-panel","download-review-pdf","download-review-excel","review-open-console","audit-run-panel","audit-aggregate","audit-cards","audit-download-panel","download-audit-excel","audit-open-console"];
+const ids=["file-input","drop-zone","file-list","validation","start-audit","page-title","key-state","run-name","pause-run","download-result","progress-label","progress-percent","progress-bar","metric-leads","metric-excel-rows","metric-calls","metric-batch","metric-completed","metric-status","metric-input-tokens","metric-cached-tokens","metric-output-tokens","metric-duration","metric-cost","live-log","clear-console","history-list","clear-history","api-key","remember-key","toggle-key","save-key","forget-key","key-message","batch-size","concurrency","model","input-field-config","add-input-field","ai-field-config","rule-config","add-rule","output-field-config","yes-values","no-values","additional-instructions","input-price","cached-price","output-price","save-settings","reset-settings","settings-message","toast","mobile-menu","active-job-switch","sort-field","sort-direction","app-version","export-settings","import-settings","import-settings-file","update-banner","update-banner-text","reload-app","key-modal","onboard-key","onboard-toggle","onboard-remember","onboard-message","onboard-save","onboard-skip","sidebar-version","sidebar-notes","review-drop-zone","review-file-input","review-drop-hint","review-file-list","review-validation","start-review","review-run-panel","review-aggregate","review-cards","review-download-panel","download-review-dashboard","download-review-excel","review-open-console","audit-run-panel","audit-aggregate","audit-cards","audit-download-panel","download-audit-excel","audit-open-console"];
 const els=Object.fromEntries(ids.map(id=>[id,$(id)]));
 const titles={new:"New audit",review:"TelleCaller Review",console:"Run console",history:"History",settings:"Settings"};
 const ENGINE_VERSION="latest-day-v7";
@@ -207,7 +207,7 @@ function renderProgress(job){
   const pendingLeft=Object.keys(job.pendingBatches||{}).length;
   els["run-name"].textContent=job.fileName||"No active audit";
   els["progress-label"].textContent=job.status==="completed"
-    ?(job.mode==="telecaller-review"?"TeleCaller report ready":job.mode==="telecaller-review-parent"?(job.sourceFormat==="audit"?"Excel Audit complete — PDF reports ready":"Excel RAW audit complete — PDF reports ready"):"Audit complete")
+    ?(job.mode==="telecaller-review"?"TeleCaller report ready":job.mode==="telecaller-review-parent"?(job.sourceFormat==="audit"?"Excel Audit complete — dashboard ready":"Excel RAW audit complete — dashboard ready"):"Audit complete")
     :job.status==="reviewing"
     ?"Building TeleCaller report…"
     :job.status==="running"
@@ -396,7 +396,7 @@ async function runJob(job,{navigate=false}={}){
   displayLogs=true;
   const concurrency=Math.min(MAX_CONCURRENCY,Math.max(1,Number(job.settings.concurrency)||1));
   if(reviewOnly){
-    addLog(job,`TeleCaller report: ${job.telecallerName||job.fileName} · ${job.results.length} audited rows · PDF from audit metrics · app ${APP_VERSION}.`);
+    addLog(job,`TeleCaller report: ${job.telecallerName||job.fileName} · ${job.results.length} audited rows · Excel dashboard from audit metrics · app ${APP_VERSION}.`);
   }else{
     addLog(job,`Run started: live pool of ${concurrency} (next batch fires the instant one frees a slot), batch size ${job.settings.batchSize} leads, model ${job.settings.model}, app ${APP_VERSION}. Checkpoints stay in order — later batches may finish API first and wait.`);
   }
@@ -482,11 +482,11 @@ async function runJob(job,{navigate=false}={}){
 
     if(isReview){
       job.reviewStatus="skipped";
-      addLog(job,"Audit complete — TeleCaller PDF will use audit metrics.","success");
+      addLog(job,"Audit complete — TeleCaller dashboard will use audit metrics.","success");
     }
 
     if(isParent){
-      addLog(job,"Excel RAW audit complete — splitting by TeleCaller for PDF reports…","success");
+      addLog(job,"Excel RAW audit complete — splitting by TeleCaller for dashboard export…","success");
       await spawnCombinedReviewChildren(job);
     }
 
@@ -794,7 +794,7 @@ function createReviewOnlyJob({parentJobId,parentFileName,sheetName,telecallerNam
 }
 
 /**
- * After Combined parent audit: split results by telecaller into completed report jobs (PDF from audit metrics — no AI review queue).
+ * After Combined parent audit: split results by telecaller into completed report jobs (Excel dashboard from audit metrics — no AI review queue).
  */
 async function spawnCombinedReviewChildren(parentJob){
   if(Array.isArray(parentJob.childReviewIds)&&parentJob.childReviewIds.length){
@@ -816,7 +816,7 @@ async function spawnCombinedReviewChildren(parentJob){
     return;
   }
   const splits=splitResultsByTelecaller(parentJob.results||[]);
-  if(!splits.length)throw new Error("No TeleCaller groups found for the PDF report.");
+  if(!splits.length)throw new Error("No TeleCaller groups found for the dashboard.");
   const leadSplits=splitLeadsByTelecaller(parentJob.leads||[]);
   const leadsByName=new Map(leadSplits.map(item=>[item.telecallerName.toLowerCase(),item.leads]));
   const children=[];
@@ -845,9 +845,9 @@ async function spawnCombinedReviewChildren(parentJob){
   parentJob.updatedAt=timestamp();
   await putJob(parentJob);
   saveReviewSessionIds();
-  addLog(parentJob,`Split into ${children.length} TeleCaller PDF report${children.length===1?"":"s"} (audit metrics only — no AI review pass).`,"success");
+  addLog(parentJob,`Split into ${children.length} TeleCaller dashboard${children.length===1?"":"s"} (audit metrics only — no AI review pass).`,"success");
   scheduleReviewProgress();
-  toast(`${children.length} TeleCaller report${children.length===1?"":"s"} ready for PDF download.`);
+  toast(`${children.length} TeleCaller report${children.length===1?"":"s"} ready for dashboard download.`);
 }
 
 function setReviewFormat(format){
@@ -857,8 +857,8 @@ function setReviewFormat(format){
   });
   if(els["review-drop-hint"]){
     els["review-drop-hint"].textContent=reviewFormat==="raw"
-      ?"CRM / RAW export · auto-detect TeleCallers · audit whole file · then PDF · XLSX, XLS or XLSM"
-      :"Already-audited LeadLens Excel · skip AI · split by TeleCaller · PDF · XLSX, XLS or XLSM";
+      ?"CRM / RAW export · auto-detect TeleCallers · audit whole file · then Excel dashboard · XLSX, XLS or XLSM"
+      :"Already-audited LeadLens Excel · skip AI · split by TeleCaller · Excel dashboard · XLSX, XLS or XLSM";
   }
   if(els["review-file-input"])els["review-file-input"].multiple=false;
   // Switching formats clears the other mode's staged file.
@@ -1123,18 +1123,18 @@ function updateReviewValidation(){
   const multi=splits.length>1;
   const poolNote=reviewFormat==="raw"
     ?(multi
-      ?` · ${splits.length} TeleCallers detected · audit whole file, then PDF per TeleCaller`
-      :` · single TeleCaller · audit whole file, then PDF`)
+      ?` · ${splits.length} TeleCallers detected · audit whole file, then dashboard`
+      :` · single TeleCaller · audit whole file, then dashboard`)
     :(multi
-      ?` · ${splits.length} TeleCallers · skip AI · PDF per TeleCaller`
-      :` · skip AI · build PDF`);
+      ?` · ${splits.length} TeleCallers · skip AI · dashboard`
+      :` · skip AI · build dashboard`);
   summary.textContent=`${leads.toLocaleString()} leads · ${Number(calls).toLocaleString()} rows${poolNote}`;
   box.append(summary);
   if(telecallerMissing)notes.push("Telecaller Name column is required to split reports. Map aliases in Settings if the header differs.");
   if(unknownBuckets)notes.push(`${unknownBuckets} TeleCaller bucket(s) have blank names and will run as Unknown.`);
   if(reviewFormat==="raw"&&file.looksAudited)notes.push("This file looks already audited. Switch to Excel Audit to skip the AI pass, or continue RAW to re-audit.");
   if(reviewFormat==="audit"&&(file.missingColumns||[]).length){
-    notes.push(`Optional audit columns missing: ${(file.missingColumns||[]).join(", ")}. PDFs still build from whatever scores/errors are present.`);
+    notes.push(`Optional audit columns missing: ${(file.missingColumns||[]).join(", ")}. Dashboard still builds from whatever scores/errors are present.`);
   }
   const missing=new Set(),unknown=new Set();
   for(const label of file.missingColumns||[]){
@@ -1252,18 +1252,18 @@ async function startReview(){
     els["review-run-panel"]?.classList.remove("hidden");
     currentJob=parent;
     renderProgress(parent);
-    addLog(parent,`Excel Audit: ${file.results.length} audited rows · ${splits.length} TeleCaller group${splits.length===1?"":"s"} · skipping AI · building PDFs.`,"success");
+    addLog(parent,`Excel Audit: ${file.results.length} audited rows · ${splits.length} TeleCaller group${splits.length===1?"":"s"} · skipping AI · building dashboard.`,"success");
     try{
       await spawnCombinedReviewChildren(parent);
       parent.status="completed";
       stopClock(parent);
       parent.finishedAt=timestamp();
       parent.updatedAt=timestamp();
-      addLog(parent,`Excel Audit complete — ${parent.childReviewIds?.length||0} TeleCaller PDF report(s) ready.`,"success");
+      addLog(parent,`Excel Audit complete — ${parent.childReviewIds?.length||0} TeleCaller dashboard(s) ready.`,"success");
       await putJob(parent);
       if(currentJob?.id===parent.id)renderProgress(parent);
       scheduleReviewProgress();
-      toast("TeleCaller PDF reports ready.");
+      toast("TeleCaller dashboard ready.");
     }catch(error){
       parent.status="failed";
       parent.error=error.message||String(error);
@@ -1278,7 +1278,7 @@ async function startReview(){
     return;
   }
 
-  // Excel RAW — audit entire workbook, then split PDFs
+  // Excel RAW — audit entire workbook, then split dashboards
   if(!file.leads?.length){toast("No leads found to audit.");return;}
   const splits=file.splitPreview||splitLeadsByTelecaller(file.leads||[]);
   if(!splits.length){toast("No TeleCaller groups found.");return;}
@@ -1306,7 +1306,7 @@ async function startReview(){
   els["review-run-panel"]?.classList.remove("hidden");
   currentJob=parent;
   renderProgress(parent);
-  addLog(parent,`Excel RAW: ${splits.length} TeleCaller${splits.length===1?"":"s"} detected · auditing entire file (${file.leads.length} rows) before PDF split.`,"success");
+  addLog(parent,`Excel RAW: ${splits.length} TeleCaller${splits.length===1?"":"s"} detected · auditing entire file (${file.leads.length} rows) before dashboard split.`,"success");
   scheduleReviewProgress();
   reviewQueue.push(parent);
   drainReviewQueue();
@@ -1556,15 +1556,15 @@ async function renderReviewProgress(){
     const allDone=sessionDone;
     if(ready.length&&allDone){
       downloads.classList.remove("hidden");
-      els["download-review-pdf"].disabled=false;
+      els["download-review-dashboard"].disabled=false;
       els["download-review-excel"].disabled=false;
     }else if(ready.length){
       downloads.classList.remove("hidden");
-      els["download-review-pdf"].disabled=false;
+      els["download-review-dashboard"].disabled=false;
       els["download-review-excel"].disabled=false;
     }else{
       downloads.classList.add("hidden");
-      els["download-review-pdf"].disabled=true;
+      els["download-review-dashboard"].disabled=true;
       els["download-review-excel"].disabled=true;
     }
   }
@@ -1573,14 +1573,14 @@ async function renderReviewProgress(){
 async function downloadReviewArtifact(artifact){
   try{
     const jobs=await getReviewSessionJobs();
-    // Exclude combined parent audit — children hold per-telecaller result subsets for PDF/Excel.
+    // Exclude combined parent audit — children hold per-telecaller result subsets for dashboard/Excel.
     const ready=jobs.filter(job=>job.mode==="telecaller-review"&&job.status==="completed"&&job.results?.length);
     if(!ready.length){toast("No completed reviews yet.");return;}
     const live=collectSettings();
     settings=live;
     saveSettings(settings);
     await downloadReviewPack(ready,live,{packing:getReviewPacking(),artifact});
-    toast(artifact==="pdf"?"Performance report PDF downloaded.":"Audit Excel downloaded.");
+    toast(artifact==="dashboard"?"Dashboard Excel downloaded.":"Audit Excel downloaded.");
   }catch(error){toast(error.message);}
 }
 
@@ -1620,13 +1620,13 @@ async function renderHistory(){
       if(job.mode==="telecaller-review"){
         const reviewBtn=document.createElement("button");
         reviewBtn.className="primary-button";
-        reviewBtn.textContent="Download report";
+        reviewBtn.textContent="Download dashboard";
         reviewBtn.onclick=async()=>{
           try{
             const live=collectSettings();
             settings=live;saveSettings(settings);
-            await downloadReviewPack([job],live,{packing:"separate",artifact:"both"});
-            toast("Performance report PDF + Excel downloaded.");
+            await downloadReviewPack([job],live,{packing:"separate",artifact:"dashboard"});
+            toast("Dashboard Excel downloaded.");
           }catch(error){toast(error.message);}
         };
         actions.append(reviewBtn);
@@ -2018,7 +2018,7 @@ if(els["review-drop-zone"]){
 }
 if(els["review-file-input"])els["review-file-input"].onchange=event=>handleReviewFiles(event.target.files);
 if(els["start-review"])els["start-review"].onclick=startReview;
-if(els["download-review-pdf"])els["download-review-pdf"].onclick=()=>downloadReviewArtifact("pdf");
+if(els["download-review-dashboard"])els["download-review-dashboard"].onclick=()=>downloadReviewArtifact("dashboard");
 if(els["download-review-excel"])els["download-review-excel"].onclick=()=>downloadReviewArtifact("excel");
 if(els["review-open-console"])els["review-open-console"].onclick=()=>{
   if(currentJob){displayLogs=true;renderProgress(currentJob);}

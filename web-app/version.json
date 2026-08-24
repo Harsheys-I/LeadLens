@@ -1,5 +1,5 @@
 ﻿{
-  "version": "3.4.1",
+  "version": "3.5.0",
   "name": "LeadLens",
-  "notes": "New Audit keeps live progress on-page — no auto-open Run Console."
+  "notes": "TeleCaller Review downloads a finished Excel dashboard (slicers + charts)."
 }
