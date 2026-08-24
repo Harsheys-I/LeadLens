@@ -1,5 +1,5 @@
-{
-  "version": "2.8.0",
+﻿{
+  "version": "3.0.0",
   "name": "LeadLens",
-  "notes": "Fix invalid-mobile fill-down/project poison; skip SLA on date-only updates; preserve real failures over AbortError; strip false empty-location on exception cities; bare visited no longer status-history; safer checkpoints, retries, and Excel export"
+  "notes": "Major release: TelleCaller Review Mode — split combined Excel by telecaller, second gpt-5-nano review pass, combined or separate TXT+Excel downloads"
 }

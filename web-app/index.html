@@ -7,9 +7,9 @@
   <meta name="description" content="Private, browser-based AI telecalling audit engine">
   <title>LeadLens Audit</title>
   <link rel="manifest" href="manifest.webmanifest">
-  <link rel="stylesheet" href="styles.css?v=2.8.0">
+  <link rel="stylesheet" href="styles.css?v=3.0.0">
   <script defer src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-  <script type="module" src="app.js?v=2.8.0"></script>
+  <script type="module" src="app.js?v=3.0.0"></script>
 </head>
 <body>
   <div id="update-banner" class="update-banner hidden" role="status">
@@ -21,11 +21,12 @@
       <a class="brand" href="#new" aria-label="LeadLens home"><span class="brand-mark">L</span><span>LeadLens</span></a>
       <nav aria-label="Primary navigation">
         <button class="nav-item active" data-view="new"><span>＋</span>New audit</button>
+        <button class="nav-item" data-view="review"><span>◎</span>TelleCaller Review</button>
         <button class="nav-item" data-view="console"><span>⌁</span>Run console</button>
         <button class="nav-item" data-view="history"><span>◷</span>History</button>
         <button class="nav-item" data-view="settings"><span>⚙</span>Settings</button>
       </nav>
-      <div class="privacy-note"><strong id="sidebar-version">v2.8.0</strong><span id="sidebar-notes">Fix invalid-mobile fill-down/project poison; skip SLA on date-only updates; preserve real failures over AbortError; strip false empty-location on exception cities; bare visited no longer status-history; safer checkpoints, retries, and Excel export</span></div>
+      <div class="privacy-note"><strong id="sidebar-version">v3.0.0</strong><span id="sidebar-notes">TelleCaller Review Mode: split combined Excel by telecaller, second gpt-5-nano review pass, combined or separate TXT+Excel downloads</span></div>
     </aside>
 
     <main>
@@ -44,6 +45,41 @@
         <div id="file-list" class="file-list hidden"></div>
         <div id="validation" class="validation hidden" role="status"></div>
         <div class="action-row"><button id="start-audit" class="primary-button" disabled>Start audit <span>→</span></button></div>
+      </section>
+
+      <section id="view-review" class="view">
+        <div class="intro"><h2>Review every TeleCaller.</h2><p>Upload a team export or separate files. LeadLens audits each TeleCaller, then writes a manager-facing review with a second AI pass.</p></div>
+        <div class="format-toggle" role="group" aria-label="Upload format">
+          <button type="button" class="format-option active" data-review-format="combined">Combined Excel</button>
+          <button type="button" class="format-option" data-review-format="separate">Separate files</button>
+        </div>
+        <div id="review-drop-zone" class="drop-zone" role="button" tabindex="0" aria-label="Upload Excel for TeleCaller review">
+          <input id="review-file-input" type="file" accept=".xlsx,.xls,.xlsm" multiple hidden>
+          <div class="upload-icon">⇧</div><h3>Drop Excel here</h3><p id="review-drop-hint">Combined team export · XLSX, XLS or XLSM · split by Telecaller Name in the browser</p>
+        </div>
+        <div id="review-file-list" class="file-list hidden"></div>
+        <div id="review-validation" class="validation hidden" role="status"></div>
+        <div class="action-row"><button id="start-review" class="primary-button" disabled>Start review <span>→</span></button></div>
+
+        <div id="review-run-panel" class="review-run-panel hidden">
+          <div class="section-head">
+            <div><h2>Live review</h2><p>Progress stays here — open Run console only if you need full logs.</p></div>
+            <button id="review-open-console" type="button" class="text-button">Open Run console</button>
+          </div>
+          <div id="review-aggregate" class="review-aggregate hidden"></div>
+          <div id="review-cards" class="review-cards"></div>
+          <div id="review-download-panel" class="review-download-panel hidden">
+            <div class="card-title"><h2>Downloads</h2><p>Pack review text and audit Excel as one set or one set per TeleCaller.</p></div>
+            <div class="packing-toggle" role="radiogroup" aria-label="Download packing">
+              <label class="check-row packing-option"><input type="radio" name="review-packing" value="combined" checked><span>All in one</span></label>
+              <label class="check-row packing-option"><input type="radio" name="review-packing" value="separate"><span>Separate per TeleCaller</span></label>
+            </div>
+            <div class="inline-actions review-download-actions">
+              <button id="download-review-txt" type="button" class="primary-button" disabled>Download review (TXT)</button>
+              <button id="download-review-excel" type="button" class="secondary-button" disabled>Download audit Excel</button>
+            </div>
+          </div>
+        </div>
       </section>
 
       <section id="view-console" class="view">
@@ -89,7 +125,8 @@
               <div class="field-grid run-grid">
                 <label>Batch size (leads)<input id="batch-size" type="number" min="1" max="20" value="20"></label>
                 <label>Parallel batches<input id="concurrency" type="number" min="1" max="50" value="2"></label>
-                <label>Model<input id="model" type="text" value="gpt-4o-mini"></label>
+                <label>Audit model<input id="model" type="text" value="gpt-4o-mini"></label>
+                <label>Review model<input id="review-model" type="text" value="gpt-5-nano"></label>
               </div>
               <div class="field-grid pricing-grid settings-subgrid">
                 <label>Input rate / 1M<input id="input-price" type="number" min="0" step="0.000001"></label>

@@ -1,14 +1,20 @@
-import {APP_VERSION,DEFAULT_SETTINGS,DEFAULT_OUTPUT_FIELDS,SETTINGS_SEED,MAX_BATCH_SIZE,MAX_CONCURRENCY,normalizeSettings,normalizeInputFields,slugFieldId,parseWorkbook,auditBatch,downloadWorkbook,estimateRunSeconds,validateApiKey} from "./audit.js?v=2.8.0";
-import {putJob,getJob,getJobs,deleteJob,clearJobs,loadSettings,saveSettings,getApiKey,apiKeyIsRemembered,saveApiKey,forgetApiKey} from "./db.js?v=2.8.0";
+import {APP_VERSION,DEFAULT_SETTINGS,DEFAULT_OUTPUT_FIELDS,SETTINGS_SEED,MAX_BATCH_SIZE,MAX_CONCURRENCY,normalizeSettings,normalizeInputFields,slugFieldId,parseWorkbook,auditBatch,downloadWorkbook,downloadReviewPack,splitLeadsByTelecaller,requestTelecallerReview,estimateRunSeconds,estimateReviewRunSeconds,validateApiKey} from "./audit.js?v=3.0.0";
+import {putJob,getJob,getJobs,deleteJob,clearJobs,loadSettings,saveSettings,getApiKey,apiKeyIsRemembered,saveApiKey,forgetApiKey} from "./db.js?v=3.0.0";
 
 const $=id=>document.getElementById(id);
-const ids=["file-input","drop-zone","file-list","validation","start-audit","page-title","key-state","run-name","pause-run","download-result","progress-label","progress-percent","progress-bar","metric-leads","metric-excel-rows","metric-calls","metric-batch","metric-completed","metric-status","metric-input-tokens","metric-cached-tokens","metric-output-tokens","metric-duration","metric-eta","metric-cost","live-log","clear-console","history-list","clear-history","api-key","remember-key","toggle-key","save-key","forget-key","key-message","batch-size","concurrency","model","input-field-config","add-input-field","ai-field-config","rule-config","add-rule","output-field-config","yes-values","no-values","additional-instructions","input-price","cached-price","output-price","save-settings","reset-settings","settings-message","toast","mobile-menu","active-job-switch","sort-field","sort-direction","app-version","export-settings","import-settings","import-settings-file","update-banner","update-banner-text","reload-app","key-modal","onboard-key","onboard-toggle","onboard-remember","onboard-message","onboard-save","onboard-skip","sidebar-version","sidebar-notes"];
+const ids=["file-input","drop-zone","file-list","validation","start-audit","page-title","key-state","run-name","pause-run","download-result","progress-label","progress-percent","progress-bar","metric-leads","metric-excel-rows","metric-calls","metric-batch","metric-completed","metric-status","metric-input-tokens","metric-cached-tokens","metric-output-tokens","metric-duration","metric-eta","metric-cost","live-log","clear-console","history-list","clear-history","api-key","remember-key","toggle-key","save-key","forget-key","key-message","batch-size","concurrency","model","review-model","input-field-config","add-input-field","ai-field-config","rule-config","add-rule","output-field-config","yes-values","no-values","additional-instructions","input-price","cached-price","output-price","save-settings","reset-settings","settings-message","toast","mobile-menu","active-job-switch","sort-field","sort-direction","app-version","export-settings","import-settings","import-settings-file","update-banner","update-banner-text","reload-app","key-modal","onboard-key","onboard-toggle","onboard-remember","onboard-message","onboard-save","onboard-skip","sidebar-version","sidebar-notes","review-drop-zone","review-file-input","review-drop-hint","review-file-list","review-validation","start-review","review-run-panel","review-aggregate","review-cards","review-download-panel","download-review-txt","download-review-excel","review-open-console"];
 const els=Object.fromEntries(ids.map(id=>[id,$(id)]));
-const titles={new:"New audit",console:"Run console",history:"History",settings:"Settings"};
+const titles={new:"New audit",review:"TelleCaller Review",console:"Run console",history:"History",settings:"Settings"};
 const ENGINE_VERSION="latest-day-v7";
 const ACTIVE_JOB_KEY="leadlens.activeJobId";
+const REVIEW_SESSION_KEY="leadlens.reviewSessionIds";
 
 let parsedFiles=[],currentJob=null,displayLogs=true;
+let reviewFormat="combined";
+let reviewParsedFiles=[];
+let reviewSessionIds=[];
+let reviewQueue=[];
+let reviewQueueRunning=false;
 const controllers=new Map();
 const saveChains=new Map();
 const loadedSettings=loadSettings(DEFAULT_SETTINGS);
@@ -21,6 +27,11 @@ const number=value=>Number.isFinite(Number(value))?Number(value):0;
 const timestamp=()=>new Date().toISOString();
 const setActiveJobId=id=>{if(id)sessionStorage.setItem(ACTIVE_JOB_KEY,id);else sessionStorage.removeItem(ACTIVE_JOB_KEY);};
 const getActiveJobId=()=>sessionStorage.getItem(ACTIVE_JOB_KEY)||"";
+const saveReviewSessionIds=()=>sessionStorage.setItem(REVIEW_SESSION_KEY,JSON.stringify(reviewSessionIds));
+const loadReviewSessionIds=()=>{
+  try{const parsed=JSON.parse(sessionStorage.getItem(REVIEW_SESSION_KEY)||"[]");reviewSessionIds=Array.isArray(parsed)?parsed.filter(Boolean):[];}
+  catch{reviewSessionIds=[];}
+};
 
 function showView(name){
   document.querySelectorAll(".view").forEach(view=>view.classList.toggle("active",view.id===`view-${name}`));
@@ -30,6 +41,7 @@ function showView(name){
   if(name==="history")renderHistory();
   if(name==="settings")renderSettings();
   if(name==="console")refreshJobSwitcher();
+  if(name==="review")renderReviewProgress();
 }
 function toast(message){els.toast.textContent=message;els.toast.classList.add("show");clearTimeout(toast.timer);toast.timer=setTimeout(()=>els.toast.classList.remove("show"),3200);}
 function updateKeyState(){const ready=Boolean(getApiKey());els["key-state"].textContent=ready?"API key ready":"API key not set";els["key-state"].classList.toggle("ready",ready);}
@@ -139,7 +151,9 @@ function renderProgress(job){
   const billable=Math.max(0,number(usage.input)-number(usage.cached));
   const pendingLeft=Object.keys(job.pendingBatches||{}).length;
   els["run-name"].textContent=job.fileName||"No active audit";
-  els["progress-label"].textContent=job.status==="completed"?"Audit complete":job.status==="running"
+  els["progress-label"].textContent=job.status==="completed"?(job.mode==="telecaller-review"?"Review complete":"Audit complete"):job.status==="reviewing"
+    ?`Writing TeleCaller review with ${job.settings?.reviewModel||settings.reviewModel||"gpt-5-nano"}…`
+    :job.status==="running"
     ?`Keeping ${concurrency} batch request${concurrency>1?"s":""} in flight${pendingLeft?` · ${pendingLeft} batch(es) waiting to checkpoint`:""}…`
     :job.status==="paused"?"Audit paused — ready to resume":job.status==="failed"?"Audit stopped — saved work is safe":"Waiting for a file";
   els["progress-percent"].textContent=`${pct}%`;
@@ -155,22 +169,24 @@ function renderProgress(job){
   els["metric-output-tokens"].textContent=number(usage.output).toLocaleString();
   els["metric-duration"].textContent=durationText(elapsed(job));
   if(els["metric-eta"]){
-    const est=estimateRunSeconds(job.settings||settings,uniqueLeadCount(job),job.totalLeads);
+    const estFn=job.mode==="telecaller-review"?estimateReviewRunSeconds:estimateRunSeconds;
+    const est=estFn(job.settings||settings,uniqueLeadCount(job),job.totalLeads);
     els["metric-eta"].textContent=est?`~${durationText(est*1000)}`:"—";
   }
   els["metric-cost"].textContent=estimatedCost(job).toFixed(4);
-  els["pause-run"].disabled=!(["running","paused","failed"].includes(job.status));
-  els["pause-run"].textContent=job.status==="running"?"Pause":"Resume";
+  els["pause-run"].disabled=!(["running","reviewing","paused","failed"].includes(job.status));
+  els["pause-run"].textContent=job.status==="running"||job.status==="reviewing"?"Pause":"Resume";
   els["download-result"].disabled=job.status!=="completed";
   renderLogs(job);
   refreshJobSwitcher();
+  if(job.mode==="telecaller-review")scheduleReviewProgress();
 }
 
 async function refreshJobSwitcher(){
   const switcher=els["active-job-switch"];
   if(!switcher)return;
   const jobs=await getJobs();
-  const live=jobs.filter(job=>["running","paused","failed","queued","completed"].includes(job.status)&&job.engineVersion===ENGINE_VERSION).slice(0,12);
+  const live=jobs.filter(job=>["running","reviewing","paused","failed","queued","completed"].includes(job.status)&&job.engineVersion===ENGINE_VERSION).slice(0,12);
   switcher.replaceChildren();
   if(live.length<=1){switcher.classList.add("hidden");return;}
   switcher.classList.remove("hidden");
@@ -219,6 +235,7 @@ function clearPendingPersist(jobId){
 }
 
 function throttleProgress(job){
+  if(job?.mode==="telecaller-review")scheduleReviewProgress();
   if(currentJob?.id!==job.id)return;
   if(throttleProgress._timer)return;
   throttleProgress._timer=setTimeout(()=>{
@@ -287,28 +304,32 @@ async function flushPendingBatches(job){
   });
 }
 
-async function runJob(job){
+async function runJob(job,{navigate=true}={}){
   if(controllers.has(job.id)){toast("That audit is already running.");return;}
   const key=getApiKey();
   if(!key){showView("settings");toast("Add an OpenAI API key first.");return;}
   if(!/^sk-[A-Za-z0-9_-]{20,}$/.test(key)){showView("settings");toast("That does not look like an OpenAI API key.");return;}
 
+  const isReview=job.mode==="telecaller-review";
+  const shouldNavigate=navigate&&!isReview;
   const controller=new AbortController();
   controllers.set(job.id,controller);
   job.status="running";
   job.error="";
   job.runStartedAt=timestamp();
   job.tokenUsage=job.tokenUsage||{input:0,cached:0,output:0};
+  job.reviewTokenUsage=job.reviewTokenUsage||{input:0,cached:0,output:0};
   job.elapsedMs=job.elapsedMs||0;
   job.pendingBatches=job.pendingBatches||{};
   job.results=Array.isArray(job.results)?job.results:[];
   job.leads=Array.isArray(job.leads)?job.leads:[];
   displayLogs=true;
   const concurrency=Math.min(MAX_CONCURRENCY,Math.max(1,Number(job.settings.concurrency)||1));
-  addLog(job,`Run started: live pool of ${concurrency} (next batch fires the instant one frees a slot), batch size ${job.settings.batchSize} leads, model ${job.settings.model}, app ${APP_VERSION}. Checkpoints stay in order — later batches may finish API first and wait.`);
+  addLog(job,`Run started: live pool of ${concurrency} (next batch fires the instant one frees a slot), batch size ${job.settings.batchSize} leads, model ${job.settings.model}${isReview?`, review model ${job.settings.reviewModel||settings.reviewModel}`:""}, app ${APP_VERSION}. Checkpoints stay in order — later batches may finish API first and wait.`);
   await putJob(job);
   if(!currentJob||currentJob.id===job.id||!controllers.has(currentJob.id))renderProgress(job);
-  showView("console");
+  if(shouldNavigate)showView("console");
+  if(isReview)scheduleReviewProgress();
 
   const batchSize=Math.max(1,Number(job.settings.batchSize)||1);
   const leadGroups=groupCallRowsByLead(job.leads);
@@ -379,15 +400,44 @@ async function runJob(job){
     await flushPendingBatches(job);
     if(fatalError)throw fatalError;
     if(job.nextBatch<totalBatches)throw new Error("Audit stopped before all batches finished. Resume to continue.");
+
+    if(isReview){
+      if(!(job.reviewStatus==="completed"&&job.reviewText)){
+        job.status="reviewing";
+        job.updatedAt=timestamp();
+        addLog(job,`Audit finished — starting TeleCaller review with ${job.settings.reviewModel||settings.reviewModel||"gpt-5-nano"}…`);
+        await putJob(job);
+        if(currentJob?.id===job.id)renderProgress(job);
+        scheduleReviewProgress();
+        const review=await requestTelecallerReview(key,job.settings,job,controller.signal,(message,level)=>addLog(job,message,level));
+        job.reviewText=review.reviewText;
+        job.reviewStatus="completed";
+        job.reviewModel=review.model;
+        job.reviewTokenUsage={
+          input:number(job.reviewTokenUsage?.input)+number(review.tokenUsage.input),
+          cached:number(job.reviewTokenUsage?.cached)+number(review.tokenUsage.cached),
+          output:number(job.reviewTokenUsage?.output)+number(review.tokenUsage.output)
+        };
+        // Also fold into tokenUsage for a single console cost number.
+        job.tokenUsage.input+=review.tokenUsage.input;
+        job.tokenUsage.cached+=review.tokenUsage.cached;
+        job.tokenUsage.output+=review.tokenUsage.output;
+        addLog(job,"TeleCaller review written.","success");
+      }else{
+        addLog(job,"TeleCaller review already saved — skipping second pass.");
+      }
+    }
+
     job.status="completed";
     job.pendingBatches={};
     stopClock(job);
     job.updatedAt=timestamp();
     const billable=Math.max(0,number(job.tokenUsage.input)-number(job.tokenUsage.cached));
-    addLog(job,`Audit complete in ${durationText(job.elapsedMs)}. Cost est. ${estimatedCost(job).toFixed(4)}. Cached ${number(job.tokenUsage.cached).toLocaleString()} · billable input ${billable.toLocaleString()} · output ${number(job.tokenUsage.output).toLocaleString()}.`,"success");
+    addLog(job,`${isReview?"Review":"Audit"} complete in ${durationText(job.elapsedMs)}. Cost est. ${estimatedCost(job).toFixed(4)}. Cached ${number(job.tokenUsage.cached).toLocaleString()} · billable input ${billable.toLocaleString()} · output ${number(job.tokenUsage.output).toLocaleString()}.`,"success");
     await putJob(job);
     if(currentJob?.id===job.id)renderProgress(job);
-    toast(`${job.fileName}: audit complete.`);
+    if(isReview)scheduleReviewProgress();
+    toast(`${job.fileName}: ${isReview?"review":"audit"} complete.`);
   }catch(error){
     await Promise.allSettled(checkpointTasks);
     await flushPendingBatches(job).catch(()=>{});
@@ -398,11 +448,13 @@ async function runJob(job){
     }else{
       job.status="failed";
       job.error=error.message;
+      if(isReview&&job.results?.length&&!job.reviewText)job.reviewStatus="failed";
       addLog(job,error.message,"error");
     }
     job.updatedAt=timestamp();
     await putJob(job);
     if(currentJob?.id===job.id)renderProgress(job);
+    if(isReview)scheduleReviewProgress();
   }finally{
     clearPendingPersist(job.id);
     controllers.delete(job.id);
@@ -541,6 +593,443 @@ async function startNew(){
   for(const job of jobs)await runJob(job);
 }
 
+function preferredTelecallerName(file){
+  const fromData=(file.leads||[]).map(lead=>String(lead.staticValues?.telecaller||"").trim()).find(Boolean);
+  if(fromData)return fromData;
+  const base=String(file.fileName||"").replace(/\.(xlsx|xls|xlsm)$/i,"").trim();
+  return base||"Unknown";
+}
+
+function createReviewJob({fileName,parentFileName,sheetName,telecallerName,leads,leadCount,callCount,rowCount,latestDayCalls}){
+  return{
+    id:crypto.randomUUID(),
+    engineVersion:ENGINE_VERSION,
+    appVersion:APP_VERSION,
+    mode:"telecaller-review",
+    fileName,
+    parentFileName:parentFileName||fileName,
+    sheetName:sheetName||"",
+    telecallerName:telecallerName||"Unknown",
+    createdAt:timestamp(),
+    updatedAt:timestamp(),
+    status:"queued",
+    totalLeads:leads.length,
+    leadCount:leadCount||0,
+    callCount:callCount||leads.length,
+    latestDayCalls:latestDayCalls||leads.length,
+    rowCount:rowCount||leads.length,
+    nextBatch:0,
+    pendingBatches:{},
+    leads,
+    results:[],
+    logs:[],
+    tokenUsage:{input:0,cached:0,output:0},
+    reviewTokenUsage:{input:0,cached:0,output:0},
+    reviewText:"",
+    reviewStatus:"pending",
+    elapsedMs:0,
+    pricing:deepCopy(settings.pricing),
+    settings:deepCopy(settings)
+  };
+}
+
+function setReviewFormat(format){
+  reviewFormat=format==="separate"?"separate":"combined";
+  document.querySelectorAll("[data-review-format]").forEach(button=>{
+    button.classList.toggle("active",button.dataset.reviewFormat===reviewFormat);
+  });
+  if(els["review-drop-hint"]){
+    els["review-drop-hint"].textContent=reviewFormat==="combined"
+      ?"Combined team export · XLSX, XLS or XLSM · split by Telecaller Name in the browser"
+      :"One workbook per TeleCaller · add more while the queue runs · XLSX, XLS or XLSM";
+  }
+  if(els["review-file-input"])els["review-file-input"].multiple=reviewFormat==="separate";
+  // Combined mode keeps a single file; switching clears the other format's staging list.
+  if(reviewFormat==="combined"&&reviewParsedFiles.length>1)reviewParsedFiles=reviewParsedFiles.slice(0,1);
+  renderReviewFileList();
+  updateReviewValidation();
+}
+
+function getReviewPacking(){
+  const checked=document.querySelector('input[name="review-packing"]:checked');
+  return checked?.value==="separate"?"separate":"combined";
+}
+
+function scheduleReviewProgress(){
+  if(scheduleReviewProgress._timer)return;
+  scheduleReviewProgress._timer=setTimeout(()=>{
+    scheduleReviewProgress._timer=null;
+    renderReviewProgress();
+  },150);
+}
+
+function renderReviewFileList(){
+  const list=els["review-file-list"];
+  if(!list)return;
+  list.replaceChildren();
+  if(!reviewParsedFiles.length){
+    list.classList.add("hidden");
+    if(els["start-review"]&&!reviewQueueRunning)els["start-review"].disabled=true;
+    return;
+  }
+  list.classList.remove("hidden");
+  for(const [index,file] of reviewParsedFiles.entries()){
+    const card=document.createElement("div");
+    card.className="file-card";
+    const left=document.createElement("div");
+    const icon=document.createElement("span");
+    icon.className="file-icon";
+    icon.textContent="X";
+    const copy=document.createElement("div");
+    const title=document.createElement("strong");
+    title.textContent=file.fileName;
+    const meta=document.createElement("p");
+    if(file.splitPreview?.length){
+      meta.textContent=`${file.splitPreview.length} TeleCaller${file.splitPreview.length===1?"":"s"} · ${(file.leadCount??0).toLocaleString()} leads · ${(file.callCount??file.leads?.length??0).toLocaleString()} calls`;
+    }else{
+      meta.textContent=`${preferredTelecallerName(file)} · ${(file.leadCount??0).toLocaleString()} leads · ${(file.callCount??file.leads?.length??0).toLocaleString()} calls`;
+    }
+    copy.append(title,meta);
+    left.append(icon,copy);
+    const remove=document.createElement("button");
+    remove.className="text-button";
+    remove.textContent="Remove";
+    remove.onclick=()=>{reviewParsedFiles.splice(index,1);renderReviewFileList();updateReviewValidation();};
+    card.append(left,remove);
+    list.append(card);
+  }
+  if(els["start-review"])els["start-review"].disabled=false;
+}
+
+function updateReviewValidation(){
+  const box=els["review-validation"];
+  if(!box)return;
+  box.replaceChildren();
+  if(!reviewParsedFiles.length){box.className="validation hidden";return;}
+  const notes=[];
+  let leads=0,calls=0,est=0,unknownBuckets=0,telecallerMissing=false;
+  for(const file of reviewParsedFiles){
+    leads+=file.leadCount||0;
+    calls+=file.callCount||file.leads?.length||0;
+    if(reviewFormat==="combined"){
+      const splits=file.splitPreview||splitLeadsByTelecaller(file.leads||[]);
+      file.splitPreview=splits;
+      if(!splits.length)telecallerMissing=true;
+      unknownBuckets+=splits.filter(item=>item.unknown).length;
+      if((file.missingColumns||[]).some(label=>/telecaller/i.test(label)))telecallerMissing=true;
+      for(const split of splits)est+=estimateReviewRunSeconds(settings,split.leadCount,split.latestDayCalls);
+    }else{
+      est+=estimateReviewRunSeconds(settings,file.leadCount||0,file.latestDayCalls||file.leads?.length||0);
+    }
+  }
+  const summary=document.createElement("div");
+  const prefix=reviewParsedFiles.length>1?`${reviewParsedFiles.length} files · `:"";
+  summary.textContent=`${prefix}${leads.toLocaleString()} leads · ${calls.toLocaleString()} calls · ~${durationText(est*1000)} estimated (audit + review)`;
+  box.append(summary);
+  if(reviewFormat==="combined"&&telecallerMissing)notes.push("Telecaller Name column is required for Combined Excel. Map aliases in Settings if the header differs.");
+  if(unknownBuckets)notes.push(`${unknownBuckets} TeleCaller bucket(s) have blank names and will run as Unknown.`);
+  const missing=new Set(),unknown=new Set();
+  for(const file of reviewParsedFiles){
+    for(const label of file.missingColumns||[])missing.add(label);
+    for(const header of file.unknownHeaders||[])unknown.add(header);
+  }
+  if(missing.size)notes.push(`Missing enabled Settings columns: ${[...missing].join(", ")}.`);
+  if(unknown.size)notes.push(`Unmapped headers: ${[...unknown].join(", ")}.`);
+  if(notes.length){
+    box.className="validation warn";
+    for(const text of notes){
+      const note=document.createElement("div");
+      note.className="validation-note";
+      note.textContent=text;
+      box.append(note);
+    }
+  }else{
+    box.className="validation";
+  }
+}
+
+async function handleReviewFiles(fileList,{append=false}={}){
+  const files=[...fileList||[]].filter(file=>/\.(xlsx|xls|xlsm)$/i.test(file.name));
+  if(!files.length){toast("Choose Excel workbook(s).");return;}
+  const box=els["review-validation"];
+  box.className="validation";
+  box.classList.remove("hidden");
+  box.textContent=`Reading ${files.length} workbook${files.length>1?"s":""}…`;
+  const next=[];
+  const errors=[];
+  for(const file of files){
+    try{
+      const parsed=parseWorkbook(await file.arrayBuffer(),settings);
+      const entry={...parsed,fileName:file.name,fileSize:file.size};
+      if(reviewFormat==="combined")entry.splitPreview=splitLeadsByTelecaller(parsed.leads||[]);
+      next.push(entry);
+    }catch(error){
+      errors.push(`${file.name}: ${error.message}`);
+    }
+  }
+  if(!next.length){
+    box.className="validation error";
+    box.textContent=errors.join(" ");
+    if(!append)els["start-review"].disabled=true;
+    return;
+  }
+  if(reviewFormat==="combined"){
+    reviewParsedFiles=[next[0]];
+    if(next.length>1)toast("Combined mode uses the first file only.");
+  }else if(append||reviewQueueRunning||reviewParsedFiles.length){
+    reviewParsedFiles=[...reviewParsedFiles,...next];
+  }else{
+    reviewParsedFiles=next;
+  }
+  renderReviewFileList();
+  updateReviewValidation();
+  if(errors.length)toast(`${errors.length} file(s) skipped.`);
+
+  // Separate mode: enqueue additional jobs while the queue is live.
+  if(reviewFormat==="separate"&&reviewQueueRunning&&next.length){
+    await enqueueSeparateReviewFiles(next);
+    // Keep any files that were staged before this drop out of the auto-enqueue set.
+    reviewParsedFiles=reviewParsedFiles.filter(file=>!next.includes(file));
+    renderReviewFileList();
+    updateReviewValidation();
+    if(els["review-file-input"])els["review-file-input"].value="";
+  }
+}
+
+async function enqueueSeparateReviewFiles(files){
+  const jobs=[];
+  for(const file of files){
+    const telecallerName=preferredTelecallerName(file);
+    const job=createReviewJob({
+      fileName:file.fileName,
+      parentFileName:file.fileName,
+      sheetName:file.sheetName,
+      telecallerName,
+      leads:file.leads,
+      leadCount:file.leadCount||0,
+      callCount:file.callCount||file.leads.length,
+      rowCount:file.rowCount||0,
+      latestDayCalls:file.latestDayCalls||file.leads.length
+    });
+    await putJob(job);
+    jobs.push(job);
+    if(!reviewSessionIds.includes(job.id))reviewSessionIds.push(job.id);
+  }
+  saveReviewSessionIds();
+  reviewQueue.push(...jobs);
+  scheduleReviewProgress();
+  drainReviewQueue();
+}
+
+async function startReview(){
+  if(reviewFormat==="combined"){
+    if(!reviewParsedFiles.length)return;
+    const file=reviewParsedFiles[0];
+    const splits=file.splitPreview||splitLeadsByTelecaller(file.leads||[]);
+    if(!splits.length){toast("No TeleCaller groups found.");return;}
+    const hasTelecallerColumn=!(file.missingColumns||[]).some(label=>/telecaller/i.test(label));
+    // Soft-block only when every name is Unknown AND the column was missing.
+    if(!hasTelecallerColumn&&splits.every(item=>item.unknown)){
+      toast("Combined Excel needs a Telecaller Name column.");
+      return;
+    }
+    reviewSessionIds=[];
+    reviewQueue=[];
+    const jobs=[];
+    for(const split of splits){
+      const job=createReviewJob({
+        fileName:`${file.fileName} · ${split.telecallerName}`,
+        parentFileName:file.fileName,
+        sheetName:file.sheetName,
+        telecallerName:split.telecallerName,
+        leads:split.leads,
+        leadCount:split.leadCount,
+        callCount:split.callCount,
+        rowCount:split.callCount,
+        latestDayCalls:split.latestDayCalls
+      });
+      await putJob(job);
+      jobs.push(job);
+      reviewSessionIds.push(job.id);
+    }
+    saveReviewSessionIds();
+    reviewParsedFiles=[];
+    renderReviewFileList();
+    updateReviewValidation();
+    if(els["review-file-input"])els["review-file-input"].value="";
+    els["review-run-panel"]?.classList.remove("hidden");
+    currentJob=jobs[0];
+    renderProgress(jobs[0]);
+    scheduleReviewProgress();
+    // Stay on Review view — do not jump to Run console.
+    reviewQueue.push(...jobs);
+    drainReviewQueue();
+    return;
+  }
+
+  // Separate files
+  if(!reviewParsedFiles.length&&!reviewQueueRunning)return;
+  if(reviewParsedFiles.length){
+    if(!reviewQueueRunning){reviewSessionIds=[];reviewQueue=[];}
+    await enqueueSeparateReviewFiles(reviewParsedFiles);
+    reviewParsedFiles=[];
+    renderReviewFileList();
+    updateReviewValidation();
+    if(els["review-file-input"])els["review-file-input"].value="";
+  }
+  els["review-run-panel"]?.classList.remove("hidden");
+  scheduleReviewProgress();
+}
+
+async function drainReviewQueue(){
+  if(reviewQueueRunning)return;
+  reviewQueueRunning=true;
+  if(els["start-review"]&&reviewFormat==="separate")els["start-review"].textContent="Add to queue →";
+  try{
+    while(reviewQueue.length){
+      const job=reviewQueue.shift();
+      const fresh=await getJob(job.id)||job;
+      currentJob=fresh;
+      await runJob(fresh,{navigate:false});
+      scheduleReviewProgress();
+    }
+  }finally{
+    reviewQueueRunning=false;
+    if(els["start-review"])els["start-review"].textContent="Start review →";
+    scheduleReviewProgress();
+  }
+}
+
+async function getReviewSessionJobs(){
+  if(!reviewSessionIds.length)loadReviewSessionIds();
+  const jobs=[];
+  for(const id of reviewSessionIds){
+    const job=await getJob(id);
+    if(job)jobs.push(job);
+  }
+  return jobs;
+}
+
+async function renderReviewProgress(){
+  const panel=els["review-run-panel"];
+  const cards=els["review-cards"];
+  const aggregate=els["review-aggregate"];
+  const downloads=els["review-download-panel"];
+  if(!panel||!cards)return;
+  const jobs=await getReviewSessionJobs();
+  if(!jobs.length){
+    if(!reviewQueueRunning)panel.classList.add("hidden");
+    return;
+  }
+  panel.classList.remove("hidden");
+  cards.replaceChildren();
+  let totalLeads=0,totalCalls=0,totalDone=0,totalTarget=0,totalCost=0,totalEta=0;
+  let completed=0;
+  for(const job of jobs){
+    const done=auditedDoneCount(job);
+    const target=job.totalLeads||0;
+    const pct=target?Math.round(Math.min(done,target)/target*100):job.status==="completed"?100:job.status==="reviewing"?99:0;
+    totalLeads+=uniqueLeadCount(job)||0;
+    totalCalls+=Number(job.callCount)||0;
+    totalDone+=done;
+    totalTarget+=target;
+    totalCost+=estimatedCost(job);
+    totalEta+=estimateReviewRunSeconds(job.settings||settings,uniqueLeadCount(job),job.totalLeads);
+    if(job.status==="completed")completed++;
+
+    const card=document.createElement("article");
+    card.className="review-card";
+    const head=document.createElement("div");
+    head.className="review-card-head";
+    const title=document.createElement("strong");
+    title.textContent=job.telecallerName||job.fileName;
+    const status=document.createElement("span");
+    status.className=`status ${job.status}`;
+    status.textContent=job.status==="reviewing"?"reviewing":job.status;
+    head.append(title,status);
+    const track=document.createElement("div");
+    track.className="progress-track";
+    const bar=document.createElement("div");
+    bar.className="progress-bar";
+    bar.style.width=`${pct}%`;
+    track.append(bar);
+    const metrics=document.createElement("div");
+    metrics.className="review-card-metrics";
+    const cells=[
+      ["Leads",String(uniqueLeadCount(job)||"—")],
+      ["Calls",job.callCount!=null?Number(job.callCount).toLocaleString():"—"],
+      ["Audited",target?`${done} / ${target}`:"—"],
+      ["ETA / Cost",`~${durationText(estimateReviewRunSeconds(job.settings||settings,uniqueLeadCount(job),job.totalLeads)*1000)} · ${estimatedCost(job).toFixed(4)}`]
+    ];
+    for(const [label,value] of cells){
+      const cell=document.createElement("div");
+      const span=document.createElement("span");
+      span.textContent=label;
+      const strong=document.createElement("strong");
+      strong.textContent=value;
+      cell.append(span,strong);
+      metrics.append(cell);
+    }
+    card.append(head,track,metrics);
+    cards.append(card);
+  }
+
+  if(aggregate){
+    if(jobs.length>1){
+      aggregate.classList.remove("hidden");
+      aggregate.replaceChildren();
+      const items=[
+        ["TeleCallers",`${completed} / ${jobs.length}`],
+        ["Leads",totalLeads.toLocaleString()],
+        ["Audited",totalTarget?`${totalDone} / ${totalTarget}`:"—"],
+        ["ETA / Cost",`~${durationText(totalEta*1000)} · ${totalCost.toFixed(4)}`]
+      ];
+      for(const [label,value] of items){
+        const cell=document.createElement("div");
+        const span=document.createElement("span");
+        span.textContent=label;
+        const strong=document.createElement("strong");
+        strong.textContent=value;
+        cell.append(span,strong);
+        aggregate.append(cell);
+      }
+    }else{
+      aggregate.classList.add("hidden");
+    }
+  }
+
+  if(downloads){
+    const ready=jobs.filter(job=>job.status==="completed"&&job.reviewText);
+    const allDone=jobs.every(job=>["completed","failed"].includes(job.status))&&!reviewQueueRunning;
+    if(ready.length&&allDone){
+      downloads.classList.remove("hidden");
+      els["download-review-txt"].disabled=false;
+      els["download-review-excel"].disabled=false;
+    }else if(ready.length){
+      downloads.classList.remove("hidden");
+      els["download-review-txt"].disabled=false;
+      els["download-review-excel"].disabled=false;
+    }else{
+      downloads.classList.add("hidden");
+      els["download-review-txt"].disabled=true;
+      els["download-review-excel"].disabled=true;
+    }
+  }
+}
+
+async function downloadReviewArtifact(artifact){
+  try{
+    const jobs=await getReviewSessionJobs();
+    const ready=jobs.filter(job=>job.status==="completed");
+    if(!ready.length){toast("No completed reviews yet.");return;}
+    const live=collectSettings();
+    settings=live;
+    saveSettings(settings);
+    await downloadReviewPack(ready,live,{packing:getReviewPacking(),artifact});
+    toast(artifact==="txt"?"Review TXT downloaded.":"Audit Excel downloaded.");
+  }catch(error){toast(error.message);}
+}
+
 function download(job){
   try{
     const live=collectSettings();
@@ -565,7 +1054,7 @@ async function renderHistory(){
     meta.className="history-meta";
     meta.textContent=legacy
       ?`${timeText(job.createdAt)} · previous engine result — upload the file and run it again for v2 rules.`
-      :`${timeText(job.createdAt)} · ${uniqueLeadCount(job)} leads · ${job.callCount??job.rowCount??"—"} calls · ${auditedDoneCount(job)}/${job.totalLeads} audited · ${durationText(job.elapsedMs||0)} · cost ${estimatedCost(job).toFixed(4)} · cached ${number(job.tokenUsage?.cached).toLocaleString()}`;
+      :`${timeText(job.createdAt)} · ${job.mode==="telecaller-review"?`Review · ${job.telecallerName||"TeleCaller"} · `:""}${uniqueLeadCount(job)} leads · ${job.callCount??job.rowCount??"—"} calls · ${auditedDoneCount(job)}/${job.totalLeads} audited · ${durationText(job.elapsedMs||0)} · cost ${estimatedCost(job).toFixed(4)} · cached ${number(job.tokenUsage?.cached).toLocaleString()}`;
     info.append(title,document.createTextNode(" "),status,meta);
     actions.className="history-actions";
     const view=document.createElement("button");
@@ -574,11 +1063,26 @@ async function renderHistory(){
     view.onclick=()=>{displayLogs=true;renderProgress(job);showView("console");};
     actions.append(view);
     if(job.status==="completed"&&!legacy){
-      const button=document.createElement("button");
-      button.className="primary-button";
-      button.textContent="Download";
-      button.onclick=()=>download(job);
-      actions.append(button);
+      if(job.mode==="telecaller-review"){
+        const reviewBtn=document.createElement("button");
+        reviewBtn.className="primary-button";
+        reviewBtn.textContent="Download review";
+        reviewBtn.onclick=async()=>{
+          try{
+            const live=collectSettings();
+            settings=live;saveSettings(settings);
+            await downloadReviewPack([job],live,{packing:"separate",artifact:"both"});
+            toast("Review TXT + Excel downloaded.");
+          }catch(error){toast(error.message);}
+        };
+        actions.append(reviewBtn);
+      }else{
+        const button=document.createElement("button");
+        button.className="primary-button";
+        button.textContent="Download";
+        button.onclick=()=>download(job);
+        actions.append(button);
+      }
     }else if(!legacy){
       const resume=document.createElement("button");
       resume.className="primary-button";
@@ -762,6 +1266,7 @@ function renderSettings(){
   els["batch-size"].value=settings.batchSize;
   els.concurrency.value=settings.concurrency;
   els.model.value=settings.model;
+  if(els["review-model"])els["review-model"].value=settings.reviewModel||"gpt-5-nano";
   els["yes-values"].value=settings.yesValues;
   els["no-values"].value=settings.noValues;
   els["additional-instructions"].value=settings.additionalInstructions;
@@ -783,6 +1288,7 @@ function collectSettings(){
   next.batchSize=Number(els["batch-size"].value);
   next.concurrency=Number(els.concurrency.value);
   next.model=els.model.value.trim();
+  if(els["review-model"])next.reviewModel=els["review-model"].value.trim();
   next.yesValues=els["yes-values"].value.trim();
   next.noValues=els["no-values"].value.trim();
   next.additionalInstructions=els["additional-instructions"].value.trim();
@@ -851,7 +1357,7 @@ async function restoreFromStorage(){
   const jobs=await getJobs();
   let changed=false;
   for(const job of jobs){
-    if(job.status==="running"){
+    if(job.status==="running"||job.status==="reviewing"){
       stopClock(job);
       job.status="paused";
       job.updatedAt=timestamp();
@@ -866,6 +1372,10 @@ async function restoreFromStorage(){
   if(preferred){
     renderProgress(preferred);
     if(["paused","failed"].includes(preferred.status))toast("Restored saved audit progress. Resume when ready.");
+  }
+  if(reviewSessionIds.length){
+    els["review-run-panel"]?.classList.remove("hidden");
+    scheduleReviewProgress();
   }
 }
 
@@ -916,11 +1426,31 @@ els["drop-zone"].addEventListener("drop",event=>handleFiles(event.dataTransfer.f
 els["start-audit"].onclick=startNew;
 els["pause-run"].onclick=async()=>{
   if(!currentJob)return;
-  if(currentJob.status==="running")controllers.get(currentJob.id)?.abort();
-  else await runJob(await getJob(currentJob.id));
+  if(currentJob.status==="running"||currentJob.status==="reviewing")controllers.get(currentJob.id)?.abort();
+  else await runJob(await getJob(currentJob.id),{navigate:currentJob.mode!=="telecaller-review"});
 };
 els["download-result"].onclick=()=>currentJob&&download(currentJob);
 els["clear-console"].onclick=()=>{displayLogs=false;renderLogs(currentJob);};
+
+document.querySelectorAll("[data-review-format]").forEach(button=>{
+  button.addEventListener("click",()=>setReviewFormat(button.dataset.reviewFormat));
+});
+if(els["review-drop-zone"]){
+  els["review-drop-zone"].onclick=()=>els["review-file-input"].click();
+  els["review-drop-zone"].onkeydown=event=>{if(["Enter"," "].includes(event.key))els["review-file-input"].click();};
+  for(const event of ["dragenter","dragover"])els["review-drop-zone"].addEventListener(event,e=>{e.preventDefault();els["review-drop-zone"].classList.add("dragover");});
+  for(const event of ["dragleave","drop"])els["review-drop-zone"].addEventListener(event,e=>{e.preventDefault();els["review-drop-zone"].classList.remove("dragover");});
+  els["review-drop-zone"].addEventListener("drop",event=>handleReviewFiles(event.dataTransfer.files,{append:reviewFormat==="separate"&&reviewQueueRunning}));
+}
+if(els["review-file-input"])els["review-file-input"].onchange=event=>handleReviewFiles(event.target.files,{append:reviewFormat==="separate"&&reviewQueueRunning});
+if(els["start-review"])els["start-review"].onclick=startReview;
+if(els["download-review-txt"])els["download-review-txt"].onclick=()=>downloadReviewArtifact("txt");
+if(els["download-review-excel"])els["download-review-excel"].onclick=()=>downloadReviewArtifact("excel");
+if(els["review-open-console"])els["review-open-console"].onclick=()=>{
+  if(currentJob){displayLogs=true;renderProgress(currentJob);}
+  showView("console");
+};
+
 els["clear-history"].onclick=async()=>{
   if(controllers.size){toast("Pause all running audits before clearing history.");return;}
   if(confirm("Delete all locally stored audits, checkpoints, token history and logs?")){
@@ -962,6 +1492,7 @@ els["save-settings"].onclick=()=>{
   if(!Number.isInteger(rawConcurrency)||rawConcurrency<1||rawConcurrency>MAX_CONCURRENCY){els["settings-message"].textContent=`Parallel batches must be 1–${MAX_CONCURRENCY}.`;return;}
   const next=collectSettings();
   if(!next.model){els["settings-message"].textContent="Enter a model name.";return;}
+  if(!next.reviewModel){els["settings-message"].textContent="Enter a review model name.";return;}
   if(!next.outputFields.some(field=>field.enabled)){els["settings-message"].textContent="Select at least one output Excel field.";return;}
   settings=next;
   saveSettings(settings);
@@ -1005,10 +1536,15 @@ window.addEventListener("beforeunload",event=>{
 
 renderSettings();
 renderHistory();
+loadReviewSessionIds();
+setReviewFormat("combined");
 restoreFromStorage();
 checkForUpdate();
 maybePromptForApiKey();
-setInterval(()=>{if(currentJob?.status==="running")renderProgress(currentJob);},1000);
+setInterval(()=>{
+  if(currentJob?.status==="running"||currentJob?.status==="reviewing")renderProgress(currentJob);
+  if(reviewSessionIds.length)scheduleReviewProgress();
+},1000);
 setInterval(checkForUpdate,5*60*1000);
 // Do not re-register a service worker — it only caused sticky "update" banners.
 if("serviceWorker" in navigator){

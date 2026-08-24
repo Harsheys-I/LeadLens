@@ -1,4 +1,4 @@
-export const APP_VERSION = "2.8.0";
+export const APP_VERSION = "3.0.0";
 /** Bump when default AI rules / field defaults must refresh existing localStorage settings. */
 export const SETTINGS_SEED = 10;
 
@@ -115,7 +115,7 @@ export const DEFAULT_RULES = [
   {field:"Buying intent",instruction:"i=1 only for genuine positive purchase interest in THIS call's latest comment/status; else i=0. Earlier history alone does not set i=1 if the latest comment cooled. All-RNR / k=No ⇒ i=0.",errors:""}
 ];
 export const DEFAULT_SETTINGS = {
-  batchSize:20,concurrency:2,model:"gpt-4o-mini",
+  batchSize:20,concurrency:2,model:"gpt-4o-mini",reviewModel:"gpt-5-nano",
   inputFields:DEFAULT_INPUT_FIELDS,aiFields:DEFAULT_AI_FIELDS,outputFields:DEFAULT_OUTPUT_FIELDS,rules:DEFAULT_RULES,
   yesValues:"Booked In Other GPP Project, Booked in other project, Channel Partner Enquiry, Cross Pitched to Other GPP Project, Didnt Disclose, Immediate Possession, In Progress, Inventory Issue, Investment, Location Mismatch, Looking for commercial property, Not Interested, Plan Dropped, Pre Launch, Price mismatch, Property Mismatch, Site Visited",
   noValues:"1st RNR, 2nd RNR, 3rd RNR, Call Disconnected, Continues RNR, Duplicate Lead, Junk Lead, Marketing Enquiry, RNR, Re-Open, Wrong Number",
@@ -126,7 +126,7 @@ export const DEFAULT_SETTINGS = {
 
 /* Large stable prefix FIRST so OpenAI prompt caching can activate (>=1024 tokens;
    some models need closer to 2048). Run-specific rules come after; lead data last. */
-const CACHE_HANDBOOK = `LeadLens QA v2.8.0 — stable cacheable auditor handbook. Evidence only. Never invent facts, dates, budgets, locations, or prior calls.
+const CACHE_HANDBOOK = `LeadLens QA v3.0.0 — stable cacheable auditor handbook. Evidence only. Never invent facts, dates, budgets, locations, or prior calls.
 
 PURPOSE
 You audit Indian real-estate telecalling follow-up notes. Judge only the supplied fields for THIS call id. Optional day[] lists sibling calls on the same latest calendar day — context only; still return one result for THIS id.
@@ -498,6 +498,8 @@ export function normalizeSettings(saved={}){
   merged.concurrency=Number.isInteger(concurrency)?Math.min(MAX_CONCURRENCY,Math.max(1,concurrency)):DEFAULT_SETTINGS.concurrency;
   const batchSize=Number(merged.batchSize);
   merged.batchSize=Number.isInteger(batchSize)?Math.min(MAX_BATCH_SIZE,Math.max(1,batchSize)):DEFAULT_SETTINGS.batchSize;
+  merged.model=String(merged.model||"").trim()||DEFAULT_SETTINGS.model;
+  merged.reviewModel=String(merged.reviewModel||"").trim()||DEFAULT_SETTINGS.reviewModel;
   const maps=buildErrorMaps(merged);
   merged.rules=normalizeRuleErrors(merged.rules,maps);
   return merged;
@@ -522,6 +524,149 @@ export function estimateRunSeconds(rawSettings,leadCount,auditCount){
   const auditsPerBatch=audits/batches;
   const secondsPerBatch=RUN_BASE_SECONDS_PER_BATCH+RUN_SECONDS_PER_AUDIT*auditsPerBatch;
   return Math.max(1,Math.round(rounds*secondsPerBatch));
+}
+
+/** Small fixed overhead for the second TeleCaller review pass after audit. */
+export const REVIEW_PASS_SECONDS = 12;
+export function estimateReviewRunSeconds(rawSettings,leadCount,auditCount){
+  const audit=estimateRunSeconds(rawSettings,leadCount,auditCount);
+  return audit?audit+REVIEW_PASS_SECONDS:0;
+}
+
+/**
+ * Partition audited call-rows by Telecaller Name (in memory).
+ * Blank / missing names bucket as "Unknown". Case-insensitive grouping; display name preserved.
+ */
+export function splitLeadsByTelecaller(leads){
+  const buckets=new Map();
+  for(const lead of leads||[]){
+    const raw=clean(lead?.staticValues?.telecaller??lead?.telecaller??"");
+    const display=raw||"Unknown";
+    const key=norm(display)||"unknown";
+    if(!buckets.has(key))buckets.set(key,{telecallerName:display,leads:[],unknown:!raw});
+    const bucket=buckets.get(key);
+    bucket.leads.push(lead);
+    if(!raw)bucket.unknown=true;
+    // Prefer a non-empty display casing if we started with Unknown then got a name (shouldn't happen).
+    if(raw&&bucket.telecallerName==="Unknown")bucket.telecallerName=display;
+  }
+  return[...buckets.values()].map(bucket=>{
+    const groupIds=new Set();
+    for(const lead of bucket.leads){
+      if(lead.groupId)groupIds.add(lead.groupId);
+      else groupIds.add(`${lead.staticValues?.project||""} | ${lead.staticValues?.mobile||""}`);
+    }
+    return{
+      telecallerName:bucket.telecallerName,
+      leads:bucket.leads,
+      leadCount:groupIds.size,
+      callCount:bucket.leads.length,
+      latestDayCalls:bucket.leads.length,
+      unknown:Boolean(bucket.unknown)
+    };
+  }).sort((a,b)=>a.telecallerName.localeCompare(b.telecallerName,undefined,{sensitivity:"base"}));
+}
+
+function sanitizeFilePart(name){
+  return String(name||"Unknown").trim().replace(/[<>:"/\\|?*\u0000-\u001f]+/g,"_").replace(/\s+/g,"_").slice(0,80)||"Unknown";
+}
+
+/** Compact manager-facing summary from audit results (not raw Excel). */
+export function buildReviewSummary(job){
+  const rows=job.results||[];
+  const qualities=[];
+  const qualityBuckets={"0-2":0,"3-4":0,"5-6":0,"7-8":0,"9-10":0};
+  const errorTallies={};
+  const severityMix={NONE:0,MEDIUM:0,HIGH:0};
+  const intentMix={Yes:0,No:0};
+  const observations=[];
+  const recommendations=[];
+  for(const row of rows){
+    const q=Number(row.commentQuality);
+    if(Number.isFinite(q)){
+      qualities.push(q);
+      if(q<=2)qualityBuckets["0-2"]++;
+      else if(q<=4)qualityBuckets["3-4"]++;
+      else if(q<=6)qualityBuckets["5-6"]++;
+      else if(q<=8)qualityBuckets["7-8"]++;
+      else qualityBuckets["9-10"]++;
+    }
+    const severity=String(row.errorSeverity||"NONE").toUpperCase();
+    if(severity in severityMix)severityMix[severity]++;
+    else severityMix.MEDIUM++;
+    const intent=String(row.buyingIntent||"No");
+    if(intent==="Yes")intentMix.Yes++;else intentMix.No++;
+    const rawErrors=String(row.errorTypes||"").trim();
+    if(rawErrors&&!/^none$/i.test(rawErrors)){
+      // Labels themselves contain commas, so match known types instead of splitting.
+      let matched=false;
+      for(const label of ERROR_TYPES){
+        if(rawErrors.includes(label)){
+          errorTallies[label]=(errorTallies[label]||0)+1;
+          matched=true;
+        }
+      }
+      if(!matched)errorTallies[rawErrors]=(errorTallies[rawErrors]||0)+1;
+    }
+    if(observations.length<12&&clean(row.observation))observations.push(clean(row.observation));
+    if(recommendations.length<12&&clean(row.recommendation))recommendations.push(clean(row.recommendation));
+  }
+  const avgQuality=qualities.length?Math.round((qualities.reduce((sum,n)=>sum+n,0)/qualities.length)*10)/10:0;
+  const topErrors=Object.entries(errorTallies).sort((a,b)=>b[1]-a[1]).slice(0,12).map(([label,count])=>({label,count}));
+  return{
+    telecallerName:job.telecallerName||job.fileName||"Unknown",
+    leadCount:job.leadCount||0,
+    callCount:job.callCount||rows.length,
+    auditedRows:rows.length,
+    avgCommentQuality:avgQuality,
+    qualityDistribution:qualityBuckets,
+    errorTallies:topErrors,
+    severityMix,
+    buyingIntentMix:intentMix,
+    sampleObservations:observations,
+    sampleRecommendations:recommendations
+  };
+}
+
+/**
+ * Second AI pass: 100–500 word plain-text TeleCaller review for managers.
+ * Uses settings.reviewModel (default gpt-5-nano). Does not change audit results.
+ */
+export async function requestTelecallerReview(apiKey,rawSettings,job,signal,log){
+  const settings=normalizeSettings(rawSettings);
+  const model=settings.reviewModel||DEFAULT_SETTINGS.reviewModel;
+  const summary=buildReviewSummary(job);
+  const system=`You are a telecalling QA coach writing for a sales manager. Using only the supplied audit summary, write a plain-text TeleCaller performance review between 100 and 500 words. Cover comment quality, error patterns, strengths, and coaching focus. No markdown, no bullet lists required, no JSON, no invented leads or quotes beyond the samples.`;
+  const user=`TeleCaller review request.\nSummary JSON:\n${JSON.stringify(summary)}`;
+  const response=await fetch("https://api.openai.com/v1/chat/completions",{
+    method:"POST",signal,
+    headers:{"Content-Type":"application/json","Authorization":`Bearer ${apiKey}`},
+    body:JSON.stringify({
+      model,
+      temperature:0.3,
+      max_tokens:900,
+      messages:[
+        {role:"system",content:system},
+        {role:"user",content:user}
+      ]
+    })
+  });
+  if(!response.ok){
+    let detail="";
+    try{detail=(await response.json()).error?.message||"";}catch{/* ignore */}
+    throw new Error(`OpenAI review ${response.status}: ${detail||response.statusText}`);
+  }
+  const data=await response.json();
+  const text=clean(data.choices?.[0]?.message?.content||"");
+  if(!text)throw new Error("OpenAI returned an empty TeleCaller review.");
+  const usage=data.usage||{};
+  const tokenUsage={
+    input:usage.prompt_tokens??usage.input_tokens??0,
+    cached:usage.prompt_tokens_details?.cached_tokens??usage.input_tokens_details?.cached_tokens??0,
+    output:usage.completion_tokens??usage.output_tokens??0
+  };
+  if(log)log(`Review tokens (${model}): ${tokenUsage.input} in (${tokenUsage.cached} cached), ${tokenUsage.output} out.`,"info");
+  return{reviewText:text,tokenUsage,model};
 }
 
 /**
@@ -1140,7 +1285,22 @@ function sanitizeExcelCell(value){
   // Neutralize formula / CSV injection when Excel opens the download.
   return/^[=+\-@\t\r]/.test(text)?`'${text}`:text;
 }
-export function downloadWorkbook(job,currentSettings){
+
+function stampFile(){
+  return new Date().toISOString().slice(0,19).replace(/[:T]/g,"-");
+}
+
+function triggerBlobDownload(blob,filename){
+  const url=URL.createObjectURL(blob);
+  const link=document.createElement("a");
+  link.href=url;
+  link.download=filename;
+  link.click();
+  URL.revokeObjectURL(url);
+}
+
+/** Build an audit workbook (SheetJS book) from job results. */
+export function buildWorkbookBook(job,currentSettings){
   const settings=normalizeSettings(currentSettings);
   const fields=selectedOutputFields(settings);
   if(!fields.length)throw new Error("Select at least one output field in Settings.");
@@ -1148,7 +1308,6 @@ export function downloadWorkbook(job,currentSettings){
   const data=rows.map(row=>Object.fromEntries(fields.map(field=>[field.label,sanitizeExcelCell(row[field.id]??"")])));
   const sheet=XLSX.utils.json_to_sheet(data,{header:fields.map(field=>field.label)});
   sheet["!cols"]=fields.map(field=>({wch:Math.min(48,Math.max(14,field.label.length+2,...data.slice(0,100).map(row=>String(row[field.label]??"").length+2)))}));
-  // Merge Mobile + Project across contiguous rows of the same lead (same Mobile+Project).
   const mobileCol=fields.findIndex(field=>field.id==="mobile");
   const projectCol=fields.findIndex(field=>field.id==="project");
   const groupCols=[mobileCol,projectCol].filter(col=>col>=0);
@@ -1168,6 +1327,81 @@ export function downloadWorkbook(job,currentSettings){
   }
   const book=XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(book,sheet,"Audit Data");
-  const stamp=new Date().toISOString().slice(0,19).replace(/[:T]/g,"-");
+  return{book,settings,stamp:stampFile()};
+}
+
+export function buildWorkbookBlob(job,currentSettings){
+  const{book}=buildWorkbookBook(job,currentSettings);
+  const buffer=XLSX.write(book,{bookType:"xlsx",type:"array"});
+  return new Blob([buffer],{type:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"});
+}
+
+export function downloadWorkbook(job,currentSettings){
+  const{book,settings,stamp}=buildWorkbookBook(job,currentSettings);
   XLSX.writeFile(book,`Audit_Data_${stamp}_${settings.sort.field}-${settings.sort.direction}.xlsx`);
+}
+
+/** Merge completed TeleCaller review jobs into one Excel payload + one TXT. */
+export function mergeReviewJobs(jobs){
+  const list=(jobs||[]).filter(Boolean);
+  const results=list.flatMap(job=>job.results||[]);
+  const reviewText=list.map(job=>{
+    const name=job.telecallerName||job.fileName||"Unknown";
+    const body=clean(job.reviewText)||"(No review generated.)";
+    return`=== TeleCaller: ${name} ===\n\n${body}`;
+  }).join("\n\n");
+  const base=list[0]||{};
+  return{
+    results,
+    reviewText,
+    job:{
+      ...base,
+      fileName:"TeleCaller_Reviews_combined",
+      telecallerName:"Combined",
+      results,
+      reviewText,
+      leadCount:list.reduce((sum,job)=>sum+(Number(job.leadCount)||0),0),
+      callCount:list.reduce((sum,job)=>sum+(Number(job.callCount)||0),0)
+    }
+  };
+}
+
+export function downloadTextFile(text,filename){
+  triggerBlobDownload(new Blob([String(text??"")],{type:"text/plain;charset=utf-8"}),filename);
+}
+
+export function downloadBlobFile(blob,filename){
+  triggerBlobDownload(blob,filename);
+}
+
+/** Download review TXT + audit Excel for one or many jobs according to packing. */
+export async function downloadReviewPack(jobs,currentSettings,{packing="combined",artifact="both"}={}){
+  const list=(jobs||[]).filter(job=>job&&(job.results?.length||job.reviewText));
+  if(!list.length)throw new Error("No completed TeleCaller reviews to download.");
+  const settings=normalizeSettings(currentSettings);
+  const stamp=stampFile();
+  const wantTxt=artifact==="both"||artifact==="txt";
+  const wantExcel=artifact==="both"||artifact==="excel";
+  const sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms));
+
+  if(packing==="separate"){
+    for(let i=0;i<list.length;i++){
+      const job=list[i];
+      const part=sanitizeFilePart(job.telecallerName||job.fileName||`TeleCaller_${i+1}`);
+      if(wantTxt)downloadTextFile(job.reviewText||"(No review generated.)",`Review_${part}_${stamp}.txt`);
+      if(wantExcel){
+        const blob=buildWorkbookBlob(job,settings);
+        downloadBlobFile(blob,`Audit_${part}_${stamp}_${settings.sort.field}-${settings.sort.direction}.xlsx`);
+      }
+      if(i<list.length-1)await sleep(300);
+    }
+    return;
+  }
+
+  const merged=mergeReviewJobs(list);
+  if(wantTxt)downloadTextFile(merged.reviewText,`TeleCaller_Reviews_${stamp}.txt`);
+  if(wantExcel){
+    const blob=buildWorkbookBlob(merged.job,settings);
+    downloadBlobFile(blob,`Audit_Data_${stamp}_${settings.sort.field}-${settings.sort.direction}.xlsx`);
+  }
 }
