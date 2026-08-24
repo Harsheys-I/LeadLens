@@ -1,5 +1,5 @@
-import {APP_VERSION,DEFAULT_SETTINGS,DEFAULT_OUTPUT_FIELDS,SETTINGS_SEED,MAX_BATCH_SIZE,MAX_CONCURRENCY,normalizeSettings,normalizeInputFields,slugFieldId,parseWorkbook,auditBatch,downloadWorkbook,downloadReviewPack,splitLeadsByTelecaller,splitResultsByTelecaller,requestTelecallerReview,estimateRunSeconds,estimateReviewRunSeconds,estimateReviewPassSeconds,estimatePooledSeconds,estimateCombinedReviewSessionSeconds,validateApiKey} from "./audit.js?v=3.2.0";
-import {putJob,getJob,getJobs,deleteJob,clearJobs,loadSettings,saveSettings,getApiKey,apiKeyIsRemembered,saveApiKey,forgetApiKey} from "./db.js?v=3.2.0";
+import {APP_VERSION,DEFAULT_SETTINGS,DEFAULT_OUTPUT_FIELDS,SETTINGS_SEED,MAX_BATCH_SIZE,MAX_CONCURRENCY,normalizeSettings,normalizeInputFields,slugFieldId,parseWorkbook,auditBatch,downloadWorkbook,downloadReviewPack,splitLeadsByTelecaller,splitResultsByTelecaller,requestTelecallerReview,estimateRunSeconds,estimateReviewRunSeconds,estimateReviewPassSeconds,estimatePooledSeconds,estimateCombinedReviewSessionSeconds,validateApiKey} from "./audit.js?v=3.2.1";
+import {putJob,getJob,getJobs,deleteJob,clearJobs,loadSettings,saveSettings,getApiKey,apiKeyIsRemembered,saveApiKey,forgetApiKey} from "./db.js?v=3.2.1";
 
 const $=id=>document.getElementById(id);
 const ids=["file-input","drop-zone","file-list","validation","start-audit","page-title","key-state","run-name","pause-run","download-result","progress-label","progress-percent","progress-bar","metric-leads","metric-excel-rows","metric-calls","metric-batch","metric-completed","metric-status","metric-input-tokens","metric-cached-tokens","metric-output-tokens","metric-duration","metric-eta","metric-cost","live-log","clear-console","history-list","clear-history","api-key","remember-key","toggle-key","save-key","forget-key","key-message","batch-size","concurrency","model","review-model","input-field-config","add-input-field","ai-field-config","rule-config","add-rule","output-field-config","yes-values","no-values","additional-instructions","input-price","cached-price","output-price","review-input-price","review-cached-price","review-output-price","save-settings","reset-settings","settings-message","toast","mobile-menu","active-job-switch","sort-field","sort-direction","app-version","export-settings","import-settings","import-settings-file","update-banner","update-banner-text","reload-app","key-modal","onboard-key","onboard-toggle","onboard-remember","onboard-message","onboard-save","onboard-skip","sidebar-version","sidebar-notes","review-drop-zone","review-file-input","review-drop-hint","review-file-list","review-validation","start-review","review-run-panel","review-aggregate","review-cards","review-download-panel","download-review-pdf","download-review-excel","review-open-console"];
@@ -1756,6 +1756,20 @@ function renderSidebarRelease(version=APP_VERSION,notes=""){
   if(els["sidebar-version"])els["sidebar-version"].textContent=`v${version}`;
   if(els["sidebar-notes"]&&notes)els["sidebar-notes"].textContent=notes;
 }
+/** True when candidate is a higher semver than current (major.minor.patch). */
+function isNewerVersion(candidate,current){
+  const parse=v=>{
+    const m=String(v||"").trim().match(/^(\d+)\.(\d+)\.(\d+)/);
+    return m?[Number(m[1]),Number(m[2]),Number(m[3])]:null;
+  };
+  const a=parse(candidate),b=parse(current);
+  if(!a||!b)return false;
+  for(let i=0;i<3;i++){
+    if(a[i]>b[i])return true;
+    if(a[i]<b[i])return false;
+  }
+  return false;
+}
 async function checkForUpdate(){
   if(els["app-version"])els["app-version"].textContent=APP_VERSION;
   renderSidebarRelease(APP_VERSION);
@@ -1765,8 +1779,12 @@ async function checkForUpdate(){
     const data=await response.json();
     const latest=String(data.version||"").trim();
     const notes=String(data.notes||"").trim();
-    renderSidebarRelease(latest||APP_VERSION,notes);
-    if(latest&&latest!==APP_VERSION)showUpdateBanner(latest);
+    const newer=isNewerVersion(latest,APP_VERSION);
+    const same=latest===APP_VERSION;
+    // Sidebar always reflects the running build. Only adopt remote notes when remote >= current.
+    if(newer||same)renderSidebarRelease(APP_VERSION,notes);
+    else renderSidebarRelease(APP_VERSION);
+    if(newer)showUpdateBanner(latest);
     else if(els["update-banner"])els["update-banner"].classList.add("hidden");
   }catch{/* offline or first local open */}
 }

@@ -1,4 +1,4 @@
-export const APP_VERSION = "3.2.0";
+export const APP_VERSION = "3.2.1";
 /** Bump when default AI rules / field defaults must refresh existing localStorage settings. */
 export const SETTINGS_SEED = 12;
 
@@ -52,7 +52,10 @@ const LEGACY_ERROR_LABELS = {
   "follow up date is missed": FOLLOWUP_MISSED_ERROR,
   "follow-up date is missed": FOLLOWUP_MISSED_ERROR,
   "lead status not reflecting comment history": STATUS_HISTORY_ERROR,
+  "comment displaying -ve, but lead status is +ve": STATUS_HISTORY_ERROR,
+  "comment displaying +ve, but lead status is -ve": STATUS_HISTORY_ERROR,
   "missed 30min talk before": MISSED_30MIN_ERROR,
+  "lead update not matching prior follow-up": FOLLOWUP_MISSED_ERROR,
   "customer location is empty": EMPTY_LOCATION,
   "customer requirement is empty": EMPTY_REQUIREMENT,
   "estimated budget is empty": EMPTY_BUDGET,
@@ -151,7 +154,7 @@ export function buildChatCompletionBody(model,{temperature,maxTokens,messages,..
 
 /* Large stable prefix FIRST so OpenAI prompt caching can activate (>=1024 tokens;
    some models need closer to 2048). Run-specific rules come after; lead data last. */
-const CACHE_HANDBOOK = `LeadLens QA v3.2.0 — stable cacheable auditor handbook. Evidence only. Never invent facts, dates, budgets, locations, or prior calls.
+const CACHE_HANDBOOK = `LeadLens QA v3.2.1 — stable cacheable auditor handbook. Evidence only. Never invent facts, dates, budgets, locations, or prior calls.
 
 PURPOSE
 You audit Indian real-estate telecalling follow-up notes. Judge only the supplied fields for THIS call id. Optional day[] lists sibling calls on the same latest calendar day — context only; still return one result for THIS id.
@@ -1158,7 +1161,7 @@ export function parseWorkbook(arrayBuffer,rawSettings=DEFAULT_SETTINGS){
         groupId,
         staticValues,
         auditContext,
-        deterministicErrors:deterministicErrors(call,aiLocation,{commentHistory,registrationAt,firstUpdateAt,previousFollowupAt})
+        deterministicErrors:deterministicErrors(call,aiLocation,{commentHistory,registrationAt,firstUpdateAt})
       });
     });
   }

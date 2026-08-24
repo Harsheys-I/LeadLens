@@ -1,5 +1,5 @@
 ﻿{
-  "version": "3.2.0",
+  "version": "3.2.1",
   "name": "LeadLens",
-  "notes": "Canonical error types only (8 labels): renamed status/TAT/empty-field messages; removed polarity and prior-follow-up timing errors."
+  "notes": "Fix update banner falsely offering older builds; keep PDF reports; canonical 8 error types from 3.2.0."
 }
