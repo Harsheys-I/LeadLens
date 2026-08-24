@@ -1,13 +1,14 @@
-import {APP_VERSION,DEFAULT_SETTINGS,DEFAULT_OUTPUT_FIELDS,SETTINGS_SEED,MAX_BATCH_SIZE,MAX_CONCURRENCY,normalizeSettings,normalizeInputFields,slugFieldId,parseWorkbook,parseAuditedWorkbook,auditBatch,downloadWorkbook,downloadReviewPack,splitLeadsByTelecaller,splitResultsByTelecaller,validateApiKey} from "./audit.js?v=3.4.0";
-import {putJob,getJob,getJobs,deleteJob,clearJobs,loadSettings,saveSettings,getApiKey,apiKeyIsRemembered,saveApiKey,forgetApiKey} from "./db.js?v=3.4.0";
+import {APP_VERSION,DEFAULT_SETTINGS,DEFAULT_OUTPUT_FIELDS,SETTINGS_SEED,MAX_BATCH_SIZE,MAX_CONCURRENCY,normalizeSettings,normalizeInputFields,slugFieldId,parseWorkbook,parseAuditedWorkbook,auditBatch,downloadWorkbook,downloadReviewPack,splitLeadsByTelecaller,splitResultsByTelecaller,validateApiKey} from "./audit.js?v=3.4.1";
+import {putJob,getJob,getJobs,deleteJob,clearJobs,loadSettings,saveSettings,getApiKey,apiKeyIsRemembered,saveApiKey,forgetApiKey} from "./db.js?v=3.4.1";
 
 const $=id=>document.getElementById(id);
-const ids=["file-input","drop-zone","file-list","validation","start-audit","page-title","key-state","run-name","pause-run","download-result","progress-label","progress-percent","progress-bar","metric-leads","metric-excel-rows","metric-calls","metric-batch","metric-completed","metric-status","metric-input-tokens","metric-cached-tokens","metric-output-tokens","metric-duration","metric-cost","live-log","clear-console","history-list","clear-history","api-key","remember-key","toggle-key","save-key","forget-key","key-message","batch-size","concurrency","model","input-field-config","add-input-field","ai-field-config","rule-config","add-rule","output-field-config","yes-values","no-values","additional-instructions","input-price","cached-price","output-price","save-settings","reset-settings","settings-message","toast","mobile-menu","active-job-switch","sort-field","sort-direction","app-version","export-settings","import-settings","import-settings-file","update-banner","update-banner-text","reload-app","key-modal","onboard-key","onboard-toggle","onboard-remember","onboard-message","onboard-save","onboard-skip","sidebar-version","sidebar-notes","review-drop-zone","review-file-input","review-drop-hint","review-file-list","review-validation","start-review","review-run-panel","review-aggregate","review-cards","review-download-panel","download-review-pdf","download-review-excel","review-open-console"];
+const ids=["file-input","drop-zone","file-list","validation","start-audit","page-title","key-state","run-name","pause-run","download-result","progress-label","progress-percent","progress-bar","metric-leads","metric-excel-rows","metric-calls","metric-batch","metric-completed","metric-status","metric-input-tokens","metric-cached-tokens","metric-output-tokens","metric-duration","metric-cost","live-log","clear-console","history-list","clear-history","api-key","remember-key","toggle-key","save-key","forget-key","key-message","batch-size","concurrency","model","input-field-config","add-input-field","ai-field-config","rule-config","add-rule","output-field-config","yes-values","no-values","additional-instructions","input-price","cached-price","output-price","save-settings","reset-settings","settings-message","toast","mobile-menu","active-job-switch","sort-field","sort-direction","app-version","export-settings","import-settings","import-settings-file","update-banner","update-banner-text","reload-app","key-modal","onboard-key","onboard-toggle","onboard-remember","onboard-message","onboard-save","onboard-skip","sidebar-version","sidebar-notes","review-drop-zone","review-file-input","review-drop-hint","review-file-list","review-validation","start-review","review-run-panel","review-aggregate","review-cards","review-download-panel","download-review-pdf","download-review-excel","review-open-console","audit-run-panel","audit-aggregate","audit-cards","audit-download-panel","download-audit-excel","audit-open-console"];
 const els=Object.fromEntries(ids.map(id=>[id,$(id)]));
 const titles={new:"New audit",review:"TelleCaller Review",console:"Run console",history:"History",settings:"Settings"};
 const ENGINE_VERSION="latest-day-v7";
 const ACTIVE_JOB_KEY="leadlens.activeJobId";
 const REVIEW_SESSION_KEY="leadlens.reviewSessionIds";
+const AUDIT_SESSION_KEY="leadlens.auditSessionIds";
 /** Max TeleCaller review jobs running at once (outer pool). Inner batch pool stays settings.concurrency per job. */
 const REVIEW_JOB_CONCURRENCY=10;
 
@@ -15,9 +16,11 @@ let parsedFiles=[],currentJob=null,displayLogs=true;
 let reviewFormat="raw";
 let reviewParsedFiles=[];
 let reviewSessionIds=[];
+let auditSessionIds=[];
 let reviewQueue=[];
 let reviewQueueRunning=false;
 let reviewActiveCount=0;
+let auditSessionRunning=false;
 /** In-memory job objects for live Review UI (IndexedDB lags behind pendingBatches / clocks). */
 const liveJobs=new Map();
 const controllers=new Map();
@@ -37,6 +40,11 @@ const loadReviewSessionIds=()=>{
   try{const parsed=JSON.parse(sessionStorage.getItem(REVIEW_SESSION_KEY)||"[]");reviewSessionIds=Array.isArray(parsed)?parsed.filter(Boolean):[];}
   catch{reviewSessionIds=[];}
 };
+const saveAuditSessionIds=()=>sessionStorage.setItem(AUDIT_SESSION_KEY,JSON.stringify(auditSessionIds));
+const loadAuditSessionIds=()=>{
+  try{const parsed=JSON.parse(sessionStorage.getItem(AUDIT_SESSION_KEY)||"[]");auditSessionIds=Array.isArray(parsed)?parsed.filter(Boolean):[];}
+  catch{auditSessionIds=[];}
+};
 
 function showView(name){
   document.querySelectorAll(".view").forEach(view=>view.classList.toggle("active",view.id===`view-${name}`));
@@ -47,6 +55,7 @@ function showView(name){
   if(name==="settings")renderSettings();
   if(name==="console")refreshJobSwitcher();
   if(name==="review")renderReviewProgress();
+  if(name==="new")renderAuditProgress();
 }
 function toast(message){els.toast.textContent=message;els.toast.classList.add("show");clearTimeout(toast.timer);toast.timer=setTimeout(()=>els.toast.classList.remove("show"),3200);}
 function updateKeyState(){const ready=Boolean(getApiKey());els["key-state"].textContent=ready?"API key ready":"API key not set";els["key-state"].classList.toggle("ready",ready);}
@@ -223,6 +232,7 @@ function renderProgress(job){
   renderLogs(job);
   refreshJobSwitcher();
   if(job.mode==="telecaller-review"||job.mode==="telecaller-review-parent")scheduleReviewProgress();
+  else if(auditSessionIds.includes(job.id))scheduleAuditProgress();
 }
 
 async function refreshJobSwitcher(){
@@ -289,6 +299,7 @@ function clearPendingPersist(jobId){
 
 function throttleProgress(job){
   if(job?.mode==="telecaller-review"||job?.mode==="telecaller-review-parent")scheduleReviewProgress();
+  else if(job&&auditSessionIds.includes(job.id))scheduleAuditProgress();
   if(currentJob?.id!==job.id)return;
   if(throttleProgress._timer)return;
   throttleProgress._timer=setTimeout(()=>{
@@ -357,7 +368,7 @@ async function flushPendingBatches(job){
   });
 }
 
-async function runJob(job,{navigate=true}={}){
+async function runJob(job,{navigate=false}={}){
   if(controllers.has(job.id)){toast("That audit is already running.");return;}
   const key=getApiKey();
   if(!key){showView("settings");toast("Add an OpenAI API key first.");return;}
@@ -367,6 +378,7 @@ async function runJob(job,{navigate=true}={}){
   const isParent=job.mode==="telecaller-review-parent";
   const reviewOnly=Boolean(job.reviewOnly);
   const shouldNavigate=navigate&&!isReview&&!isParent;
+  const isNewAuditSession=auditSessionIds.includes(job.id);
   const controller=new AbortController();
   controllers.set(job.id,controller);
   liveJobs.set(job.id,job);
@@ -394,6 +406,7 @@ async function runJob(job,{navigate=true}={}){
   if(currentJob?.id===job.id||((!isReview||isParent)&&(!currentJob||!controllers.has(currentJob.id))))renderProgress(job);
   if(shouldNavigate)showView("console");
   if(isReview||isParent)scheduleReviewProgress();
+  if(isNewAuditSession)scheduleAuditProgress();
 
   const batchSize=Math.max(1,Number(job.settings.batchSize)||1);
   const leadGroups=reviewOnly?[]:groupCallRowsByLead(job.leads);
@@ -487,6 +500,7 @@ async function runJob(job,{navigate=true}={}){
     await putJob(job);
     if(currentJob?.id===job.id)renderProgress(job);
     if(isReview||isParent)scheduleReviewProgress();
+    if(isNewAuditSession)scheduleAuditProgress();
     toast(`${job.fileName}: ${isParent||isReview?"report":"audit"} complete.`);
   }catch(error){
     await Promise.allSettled(checkpointTasks);
@@ -506,6 +520,7 @@ async function runJob(job,{navigate=true}={}){
     await putJob(job);
     if(currentJob?.id===job.id)renderProgress(job);
     if(isReview||isParent)scheduleReviewProgress();
+    if(isNewAuditSession)scheduleAuditProgress();
   }finally{
     clearPendingPersist(job.id);
     controllers.delete(job.id);
@@ -603,12 +618,16 @@ async function handleFiles(fileList){
 
 async function startNew(){
   if(!parsedFiles.length)return;
+  const key=getApiKey();
+  if(!key){showView("settings");toast("Add an OpenAI API key first.");return;}
   const jobs=[];
+  auditSessionIds=[];
   for(const file of parsedFiles){
     const job={
       id:crypto.randomUUID(),
       engineVersion:ENGINE_VERSION,
       appVersion:APP_VERSION,
+      mode:"audit",
       fileName:file.fileName,
       sheetName:file.sheetName,
       createdAt:timestamp(),
@@ -631,18 +650,29 @@ async function startNew(){
       settings:deepCopy(settings)
     };
     await putJob(job);
+    liveJobs.set(job.id,job);
     jobs.push(job);
+    auditSessionIds.push(job.id);
   }
+  saveAuditSessionIds();
   parsedFiles=[];
   renderFileList();
   updateValidationSummary();
   els["file-input"].value="";
   currentJob=jobs[0];
+  setActiveJobId(jobs[0].id);
   renderProgress(jobs[0]);
-  showView("console");
-  // Run files one after another so concurrency stays within the per-job limit
-  // (parallel files would multiply OpenAI requests and trip rate limits).
-  for(const job of jobs)await runJob(job);
+  els["audit-run-panel"]?.classList.remove("hidden");
+  auditSessionRunning=true;
+  scheduleAuditProgress();
+  // Stay on New audit — do not auto-open Run console.
+  // Run files one after another so concurrency stays within the per-job limit.
+  try{
+    for(const job of jobs)await runJob(job,{navigate:false});
+  }finally{
+    auditSessionRunning=false;
+    scheduleAuditProgress();
+  }
 }
 
 function preferredTelecallerName(file){
@@ -848,6 +878,188 @@ function scheduleReviewProgress(){
     scheduleReviewProgress._timer=null;
     renderReviewProgress();
   },150);
+}
+
+function scheduleAuditProgress(){
+  if(scheduleAuditProgress._timer)return;
+  scheduleAuditProgress._timer=setTimeout(()=>{
+    scheduleAuditProgress._timer=null;
+    renderAuditProgress();
+  },150);
+}
+
+async function getAuditSessionJobs(){
+  if(!auditSessionIds.length)loadAuditSessionIds();
+  const jobs=[];
+  for(const id of auditSessionIds){
+    const live=liveJobs.get(id);
+    if(live){jobs.push(live);continue;}
+    const job=await getJob(id);
+    if(job){
+      liveJobs.set(job.id,job);
+      jobs.push(job);
+    }
+  }
+  return jobs;
+}
+
+async function renderAuditProgress(){
+  const panel=els["audit-run-panel"];
+  const cards=els["audit-cards"];
+  const aggregate=els["audit-aggregate"];
+  const downloads=els["audit-download-panel"];
+  if(!panel||!cards)return;
+  const jobs=await getAuditSessionJobs();
+  if(!jobs.length){
+    if(!auditSessionRunning)panel.classList.add("hidden");
+    return;
+  }
+  panel.classList.remove("hidden");
+  cards.replaceChildren();
+  let totalLeads=0,totalCalls=0,totalDone=0,totalTarget=0,totalCost=0,completed=0,failed=0;
+  for(const job of jobs){
+    totalLeads+=uniqueLeadCount(job)||0;
+    totalCalls+=Number(job.callCount)||0;
+    totalDone+=auditedDoneCount(job);
+    totalTarget+=job.totalLeads||0;
+    totalCost+=estimatedCost(job);
+    if(job.status==="completed")completed++;
+    if(job.status==="failed")failed++;
+  }
+  const sessionDone=jobs.every(job=>["completed","failed"].includes(job.status))&&!auditSessionRunning;
+  const wallMs=sessionWallMs(jobs);
+
+  for(const job of jobs){
+    const done=auditedDoneCount(job);
+    const target=job.totalLeads||0;
+    const pct=target?Math.round(Math.min(done,target)/target*100):job.status==="completed"?100:0;
+    const jobElapsed=elapsed(job);
+    const card=document.createElement("article");
+    card.className=`review-card${job.status==="failed"?" is-failed":""}`;
+    card.tabIndex=0;
+    card.setAttribute("role","button");
+    card.title="Open Run console logs for this file";
+    const openConsole=()=>{displayLogs=true;renderProgress(job);showView("console");};
+    card.onclick=openConsole;
+    card.onkeydown=event=>{if(event.key==="Enter"||event.key===" "){event.preventDefault();openConsole();}};
+    const head=document.createElement("div");
+    head.className="review-card-head";
+    const title=document.createElement("strong");
+    title.textContent=job.fileName||"Audit";
+    const status=document.createElement("span");
+    status.className=`status ${job.status}`;
+    status.textContent=job.status;
+    head.append(title,status);
+    const track=document.createElement("div");
+    track.className="progress-track";
+    const bar=document.createElement("div");
+    bar.className="progress-bar";
+    bar.style.width=`${pct}%`;
+    track.append(bar);
+    const metrics=document.createElement("div");
+    metrics.className="review-card-metrics";
+    const timeLabel=job.status==="completed"||job.status==="failed"?"Time":"Elapsed";
+    const timeValue=durationText((job.status==="completed"||job.status==="failed")?(job.elapsedMs||jobElapsed):jobElapsed);
+    for(const [label,value] of [
+      ["Leads",String(uniqueLeadCount(job)||"—")],
+      ["Calls",job.callCount!=null?Number(job.callCount).toLocaleString():"—"],
+      ["Audited",target?`${done} / ${target}`:"—"],
+      [timeLabel,timeValue],
+      ["Cost",estimatedCost(job).toFixed(4)]
+    ]){
+      const cell=document.createElement("div");
+      const span=document.createElement("span");
+      span.textContent=label;
+      const strong=document.createElement("strong");
+      strong.textContent=value;
+      cell.append(span,strong);
+      metrics.append(cell);
+    }
+    card.append(head,track,metrics);
+    if(job.status==="failed"&&job.error){
+      const err=document.createElement("p");
+      err.className="review-card-error";
+      err.textContent=job.error;
+      card.append(err);
+      const retryRow=document.createElement("div");
+      retryRow.className="review-card-actions";
+      const retry=document.createElement("button");
+      retry.type="button";
+      retry.className="secondary-button";
+      retry.textContent="Retry";
+      retry.onclick=async event=>{
+        event.stopPropagation();
+        if(controllers.has(job.id)){toast("That audit is already running.");return;}
+        auditSessionRunning=true;
+        try{await runJob(job,{navigate:false});}
+        finally{auditSessionRunning=false;scheduleAuditProgress();}
+      };
+      const view=document.createElement("button");
+      view.type="button";
+      view.className="text-button";
+      view.textContent="View logs";
+      view.onclick=event=>{event.stopPropagation();openConsole();};
+      retryRow.append(retry,view);
+      card.append(retryRow);
+    }
+    if(job.status==="completed"&&job.results?.length){
+      const actions=document.createElement("div");
+      actions.className="review-card-actions";
+      const dl=document.createElement("button");
+      dl.type="button";
+      dl.className="primary-button";
+      dl.textContent="Download Excel";
+      dl.onclick=event=>{event.stopPropagation();download(job);};
+      actions.append(dl);
+      card.append(actions);
+    }
+    cards.append(card);
+  }
+
+  if(aggregate){
+    aggregate.classList.remove("hidden");
+    aggregate.replaceChildren();
+    for(const [label,value] of [
+      ["Files",`${completed} / ${jobs.length}${failed?` · ${failed} failed`:""}`],
+      ["Leads",totalLeads.toLocaleString()],
+      ["Audited",totalTarget?`${totalDone} / ${totalTarget}`:"—"],
+      [sessionDone?"Total Time Taken":"Elapsed",wallMs?durationText(wallMs):"—"],
+      ["Cost",totalCost.toFixed(4)]
+    ]){
+      const cell=document.createElement("div");
+      const span=document.createElement("span");
+      span.textContent=label;
+      const strong=document.createElement("strong");
+      strong.textContent=value;
+      if(label==="Total Time Taken")strong.className="total-time-taken";
+      cell.append(span,strong);
+      aggregate.append(cell);
+    }
+  }
+
+  if(downloads){
+    const ready=jobs.filter(job=>job.status==="completed"&&job.results?.length);
+    if(ready.length){
+      downloads.classList.remove("hidden");
+      if(els["download-audit-excel"])els["download-audit-excel"].disabled=false;
+    }else{
+      downloads.classList.add("hidden");
+      if(els["download-audit-excel"])els["download-audit-excel"].disabled=true;
+    }
+  }
+}
+
+async function downloadAuditSessionExcel(){
+  try{
+    const jobs=await getAuditSessionJobs();
+    const ready=jobs.filter(job=>job.status==="completed"&&job.results?.length);
+    if(!ready.length){toast("No completed audits yet.");return;}
+    const live=collectSettings();
+    settings=live;
+    saveSettings(settings);
+    for(const job of ready)download(job);
+    toast(ready.length===1?"Audit Excel downloaded.":`${ready.length} audit Excel files downloaded.`);
+  }catch(error){toast(error.message);}
 }
 
 function renderReviewFileList(){
@@ -1717,6 +1929,10 @@ async function restoreFromStorage(){
     els["review-run-panel"]?.classList.remove("hidden");
     scheduleReviewProgress();
   }
+  if(auditSessionIds.length){
+    els["audit-run-panel"]?.classList.remove("hidden");
+    scheduleAuditProgress();
+  }
 }
 
 function showUpdateBanner(latest){
@@ -1785,7 +2001,7 @@ els["start-audit"].onclick=startNew;
 els["pause-run"].onclick=async()=>{
   if(!currentJob)return;
   if(currentJob.status==="running"||currentJob.status==="reviewing")controllers.get(currentJob.id)?.abort();
-  else await runJob(await getJob(currentJob.id),{navigate:currentJob.mode!=="telecaller-review"&&currentJob.mode!=="telecaller-review-parent"});
+  else await runJob(await getJob(currentJob.id),{navigate:false});
 };
 els["download-result"].onclick=()=>currentJob&&download(currentJob);
 els["clear-console"].onclick=()=>{displayLogs=false;renderLogs(currentJob);};
@@ -1808,6 +2024,11 @@ if(els["review-open-console"])els["review-open-console"].onclick=()=>{
   if(currentJob){displayLogs=true;renderProgress(currentJob);}
   showView("console");
 };
+if(els["audit-open-console"])els["audit-open-console"].onclick=()=>{
+  if(currentJob){displayLogs=true;renderProgress(currentJob);}
+  showView("console");
+};
+if(els["download-audit-excel"])els["download-audit-excel"].onclick=()=>downloadAuditSessionExcel();
 
 els["clear-history"].onclick=async()=>{
   if(controllers.size){toast("Pause all running audits before clearing history.");return;}
@@ -1894,6 +2115,7 @@ window.addEventListener("beforeunload",event=>{
 renderSettings();
 renderHistory();
 loadReviewSessionIds();
+loadAuditSessionIds();
 setReviewFormat("raw");
 restoreFromStorage();
 checkForUpdate();
@@ -1901,6 +2123,7 @@ maybePromptForApiKey();
 setInterval(()=>{
   if(currentJob?.status==="running"||currentJob?.status==="reviewing")renderProgress(currentJob);
   if(reviewSessionIds.length)scheduleReviewProgress();
+  if(auditSessionIds.length)scheduleAuditProgress();
 },1000);
 setInterval(checkForUpdate,5*60*1000);
 // Do not re-register a service worker — it only caused sticky "update" banners.

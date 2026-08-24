@@ -7,11 +7,11 @@
   <meta name="description" content="Private, browser-based AI telecalling audit engine">
   <title>LeadLens Audit</title>
   <link rel="manifest" href="manifest.webmanifest">
-  <link rel="stylesheet" href="styles.css?v=3.4.0">
+  <link rel="stylesheet" href="styles.css?v=3.4.1">
   <script defer src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
-  <script type="module" src="app.js?v=3.4.0"></script>
+  <script type="module" src="app.js?v=3.4.1"></script>
 </head>
 <body>
   <div id="update-banner" class="update-banner hidden" role="status">
@@ -28,7 +28,7 @@
         <button class="nav-item" data-view="history"><span>◷</span>History</button>
         <button class="nav-item" data-view="settings"><span>⚙</span>Settings</button>
       </nav>
-      <div class="privacy-note"><strong id="sidebar-version">v3.4.0</strong><span id="sidebar-notes">TeleCaller Review formats: Excel RAW (detect + audit + PDF) and Excel Audit (skip AI, split + PDF).</span></div>
+      <div class="privacy-note"><strong id="sidebar-version">v3.4.1</strong><span id="sidebar-notes">New Audit keeps live progress on-page — no auto-open Run Console.</span></div>
     </aside>
 
     <main>
@@ -47,6 +47,21 @@
         <div id="file-list" class="file-list hidden"></div>
         <div id="validation" class="validation hidden" role="status"></div>
         <div class="action-row"><button id="start-audit" class="primary-button" disabled>Start audit <span>→</span></button></div>
+
+        <div id="audit-run-panel" class="review-run-panel hidden">
+          <div class="section-head">
+            <div><h2>Live review</h2><p>Progress stays here — open Run console only if you need full logs.</p></div>
+            <button id="audit-open-console" type="button" class="text-button">Open Run console</button>
+          </div>
+          <div id="audit-aggregate" class="review-aggregate hidden"></div>
+          <div id="audit-cards" class="review-cards"></div>
+          <div id="audit-download-panel" class="review-download-panel hidden">
+            <div class="card-title"><h2>Downloads</h2><p>Download the audited Excel when a file finishes.</p></div>
+            <div class="inline-actions review-download-actions">
+              <button id="download-audit-excel" type="button" class="primary-button" disabled>Download audit Excel</button>
+            </div>
+          </div>
+        </div>
       </section>
 
       <section id="view-review" class="view">

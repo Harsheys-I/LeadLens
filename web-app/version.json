@@ -1,5 +1,5 @@
 ﻿{
-  "version": "3.4.0",
+  "version": "3.4.1",
   "name": "LeadLens",
-  "notes": "TeleCaller Review formats: Excel RAW (detect + audit + PDF) and Excel Audit (skip AI, split + PDF)."
+  "notes": "New Audit keeps live progress on-page — no auto-open Run Console."
 }
