@@ -7,11 +7,11 @@
   <meta name="description" content="Private, browser-based AI telecalling audit engine">
   <title>LeadLens Audit</title>
   <link rel="manifest" href="manifest.webmanifest">
-  <link rel="stylesheet" href="styles.css?v=3.2.2">
+  <link rel="stylesheet" href="styles.css?v=3.2.3">
   <script defer src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
-  <script type="module" src="app.js?v=3.2.2"></script>
+  <script type="module" src="app.js?v=3.2.3"></script>
 </head>
 <body>
   <div id="update-banner" class="update-banner hidden" role="status">
@@ -28,7 +28,7 @@
         <button class="nav-item" data-view="history"><span>◷</span>History</button>
         <button class="nav-item" data-view="settings"><span>⚙</span>Settings</button>
       </nav>
-      <div class="privacy-note"><strong id="sidebar-version">v3.2.2</strong><span id="sidebar-notes">Fix runaway ETA: progress-based remaining (no early rate blow-up); recalibrate audit/review time constants to real gpt-4o-mini / gpt-5-nano speeds.</span></div>
+      <div class="privacy-note"><strong id="sidebar-version">v3.2.3</strong><span id="sidebar-notes">Surface Combined TeleCaller review failures on parent Run Console logs, failed cards with error + retry, and job switcher.</span></div>
     </aside>
 
     <main>

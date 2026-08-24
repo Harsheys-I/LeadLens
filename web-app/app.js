@@ -1,5 +1,5 @@
-import {APP_VERSION,DEFAULT_SETTINGS,DEFAULT_OUTPUT_FIELDS,SETTINGS_SEED,MAX_BATCH_SIZE,MAX_CONCURRENCY,normalizeSettings,normalizeInputFields,slugFieldId,parseWorkbook,auditBatch,downloadWorkbook,downloadReviewPack,splitLeadsByTelecaller,splitResultsByTelecaller,requestTelecallerReview,estimateRunSeconds,estimateReviewRunSeconds,estimateReviewPassSeconds,estimatePooledSeconds,estimateCombinedReviewSessionSeconds,validateApiKey} from "./audit.js?v=3.2.2";
-import {putJob,getJob,getJobs,deleteJob,clearJobs,loadSettings,saveSettings,getApiKey,apiKeyIsRemembered,saveApiKey,forgetApiKey} from "./db.js?v=3.2.2";
+import {APP_VERSION,DEFAULT_SETTINGS,DEFAULT_OUTPUT_FIELDS,SETTINGS_SEED,MAX_BATCH_SIZE,MAX_CONCURRENCY,normalizeSettings,normalizeInputFields,slugFieldId,parseWorkbook,auditBatch,downloadWorkbook,downloadReviewPack,splitLeadsByTelecaller,splitResultsByTelecaller,requestTelecallerReview,estimateRunSeconds,estimateReviewRunSeconds,estimateReviewPassSeconds,estimatePooledSeconds,estimateCombinedReviewSessionSeconds,validateApiKey} from "./audit.js?v=3.2.3";
+import {putJob,getJob,getJobs,deleteJob,clearJobs,loadSettings,saveSettings,getApiKey,apiKeyIsRemembered,saveApiKey,forgetApiKey} from "./db.js?v=3.2.3";
 
 const $=id=>document.getElementById(id);
 const ids=["file-input","drop-zone","file-list","validation","start-audit","page-title","key-state","run-name","pause-run","download-result","progress-label","progress-percent","progress-bar","metric-leads","metric-excel-rows","metric-calls","metric-batch","metric-completed","metric-status","metric-input-tokens","metric-cached-tokens","metric-output-tokens","metric-duration","metric-eta","metric-cost","live-log","clear-console","history-list","clear-history","api-key","remember-key","toggle-key","save-key","forget-key","key-message","batch-size","concurrency","model","review-model","input-field-config","add-input-field","ai-field-config","rule-config","add-rule","output-field-config","yes-values","no-values","additional-instructions","input-price","cached-price","output-price","review-input-price","review-cached-price","review-output-price","save-settings","reset-settings","settings-message","toast","mobile-menu","active-job-switch","sort-field","sort-direction","app-version","export-settings","import-settings","import-settings-file","update-banner","update-banner-text","reload-app","key-modal","onboard-key","onboard-toggle","onboard-remember","onboard-message","onboard-save","onboard-skip","sidebar-version","sidebar-notes","review-drop-zone","review-file-input","review-drop-hint","review-file-list","review-validation","start-review","review-run-panel","review-aggregate","review-cards","review-download-panel","download-review-pdf","download-review-excel","review-open-console"];
@@ -295,18 +295,28 @@ async function refreshJobSwitcher(){
   const switcher=els["active-job-switch"];
   if(!switcher)return;
   const jobs=await getJobs();
-  const live=jobs.filter(job=>["running","reviewing","paused","failed","queued","completed"].includes(job.status)&&job.engineVersion===ENGINE_VERSION).slice(0,12);
+  const ranked=jobs
+    .filter(job=>["running","reviewing","paused","failed","queued","completed"].includes(job.status)&&job.engineVersion===ENGINE_VERSION)
+    .sort((a,b)=>{
+      const rank=job=>({failed:0,running:1,reviewing:1,paused:2,queued:3,completed:4}[job.status]??5);
+      const d=rank(a)-rank(b);
+      if(d)return d;
+      return String(b.updatedAt||"").localeCompare(String(a.updatedAt||""));
+    })
+    .slice(0,40);
   switcher.replaceChildren();
-  if(live.length<=1){switcher.classList.add("hidden");return;}
+  if(ranked.length<=1){switcher.classList.add("hidden");return;}
   switcher.classList.remove("hidden");
   const label=document.createElement("span");
-  label.textContent="Active file";
+  label.textContent="Active run";
   const select=document.createElement("select");
   select.setAttribute("aria-label","Switch active audit");
-  for(const job of live){
+  for(const job of ranked){
     const option=document.createElement("option");
     option.value=job.id;
-    option.textContent=`${job.fileName} (${job.status})`;
+    const who=job.telecallerName||job.fileName||"run";
+    const kind=job.mode==="telecaller-review-parent"?"Combined audit":job.mode==="telecaller-review"?(job.reviewOnly?"Review":"Review"):"Audit";
+    option.textContent=`${kind} · ${who} (${job.status}${job.status==="failed"&&job.error?`: ${String(job.error).slice(0,48)}`:""})`;
     option.selected=job.id===(currentJob?.id||getActiveJobId());
     select.append(option);
   }
@@ -577,9 +587,10 @@ async function runJob(job,{navigate=true}={}){
       addLog(job,"Audit paused. Completed + pending batch checkpoints are saved on this device.","warn");
     }else{
       job.status="failed";
-      job.error=error.message;
+      job.error=error.message||String(error);
       if(isReview&&job.results?.length&&!job.reviewText)job.reviewStatus="failed";
-      addLog(job,error.message,"error");
+      addLog(job,`FAILED: ${job.error}`,"error");
+      if(job.telecallerName)addLog(job,`TeleCaller “${job.telecallerName}” review did not finish. Open this run in the job switcher for the full log.`,"error");
     }
     job.updatedAt=timestamp();
     await putJob(job);
@@ -1181,6 +1192,24 @@ function drainReviewQueue(){
         liveJobs.set(fresh.id,fresh);
         if(currentJob?.id===queued.id)currentJob=fresh;
         await runJob(fresh,{navigate:false});
+        // Parent Combined audit stays as currentJob — mirror child failures onto the parent log
+        // so Run Console still shows why a TeleCaller failed without hunting the switcher.
+        const finished=liveJobs.get(fresh.id)||await getJob(fresh.id)||fresh;
+        if(finished.status==="failed"){
+          const reason=finished.error||"Unknown error";
+          const who=finished.telecallerName||finished.fileName||"TeleCaller";
+          if(finished.parentJobId){
+            const parent=liveJobs.get(finished.parentJobId)||await getJob(finished.parentJobId);
+            if(parent){
+              addLog(parent,`TeleCaller review FAILED · ${who}: ${reason}`,"error");
+              parent.updatedAt=timestamp();
+              await putJob(parent);
+              liveJobs.set(parent.id,parent);
+              if(currentJob?.id===parent.id){displayLogs=true;renderProgress(parent);}
+            }
+          }
+          toast(`Review failed · ${who}`);
+        }
       }finally{
         reviewActiveCount--;
         scheduleReviewProgress();
@@ -1263,13 +1292,19 @@ async function renderReviewProgress(){
     const done=auditedDoneCount(job);
     const target=job.totalLeads||0;
     const pct=job.reviewOnly
-      ?(job.status==="completed"?100:job.status==="reviewing"?70:job.status==="running"?40:job.reviewText?100:5)
+      ?(job.status==="completed"?100:job.status==="reviewing"?70:job.status==="running"?40:job.status==="failed"?100:job.reviewText?100:5)
       :(target?Math.round(Math.min(done,target)/target*100):job.status==="completed"?100:job.status==="reviewing"?99:0);
     const remSec=jobRemainingSeconds(job);
     const jobElapsed=elapsed(job);
 
     const card=document.createElement("article");
-    card.className=`review-card${job.mode==="telecaller-review-parent"?" combined-audit":""}`;
+    card.className=`review-card${job.mode==="telecaller-review-parent"?" combined-audit":""}${job.status==="failed"?" is-failed":""}`;
+    card.tabIndex=0;
+    card.setAttribute("role","button");
+    card.title="Open Run console logs for this TeleCaller";
+    const openConsole=()=>{displayLogs=true;renderProgress(job);showView("console");};
+    card.onclick=openConsole;
+    card.onkeydown=event=>{if(event.key==="Enter"||event.key===" "){event.preventDefault();openConsole();}};
     const head=document.createElement("div");
     head.className="review-card-head";
     const title=document.createElement("strong");
@@ -1290,10 +1325,10 @@ async function renderReviewProgress(){
     track.append(bar);
     const metrics=document.createElement("div");
     metrics.className="review-card-metrics";
-    const timeLabel=job.status==="completed"?"Time":"Elapsed";
-    const timeValue=durationText(job.status==="completed"?(job.elapsedMs||jobElapsed):jobElapsed);
-    const etaLabel=job.status==="completed"?"Done":"ETA left";
-    const etaValue=job.status==="completed"?"—":(remSec?`~${durationText(remSec*1000)}`:"—");
+    const timeLabel=job.status==="completed"||job.status==="failed"?"Time":"Elapsed";
+    const timeValue=durationText((job.status==="completed"||job.status==="failed")?(job.elapsedMs||jobElapsed):jobElapsed);
+    const etaLabel=job.status==="completed"?"Done":job.status==="failed"?"Failed":"ETA left";
+    const etaValue=job.status==="completed"||job.status==="failed"?"—":(remSec?`~${durationText(remSec*1000)}`:"—");
     const cells=[
       ["Leads",String(uniqueLeadCount(job)||"—")],
       ["Calls",job.callCount!=null?Number(job.callCount).toLocaleString():"—"],
@@ -1311,6 +1346,33 @@ async function renderReviewProgress(){
       metrics.append(cell);
     }
     card.append(head,track,metrics);
+    if(job.status==="failed"&&job.error){
+      const err=document.createElement("p");
+      err.className="review-card-error";
+      err.textContent=job.error;
+      card.append(err);
+      const retryRow=document.createElement("div");
+      retryRow.className="review-card-actions";
+      const retry=document.createElement("button");
+      retry.type="button";
+      retry.className="secondary-button";
+      retry.textContent="Retry review";
+      retry.onclick=async event=>{
+        event.stopPropagation();
+        if(controllers.has(job.id)){toast("That review is already running.");return;}
+        reviewQueue.unshift(job);
+        toast(`Re-queued ${job.telecallerName||job.fileName}`);
+        drainReviewQueue();
+        scheduleReviewProgress();
+      };
+      const view=document.createElement("button");
+      view.type="button";
+      view.className="text-button";
+      view.textContent="View logs";
+      view.onclick=event=>{event.stopPropagation();openConsole();};
+      retryRow.append(retry,view);
+      card.append(retryRow);
+    }
     cards.append(card);
   }
 
@@ -1324,12 +1386,13 @@ async function renderReviewProgress(){
     const teleDone=reviewJobs.length
       ?reviewJobs.filter(job=>job.status==="completed"&&job.reviewText).length
       :completed;
+    const teleFailed=reviewJobs.filter(job=>job.status==="failed").length;
     const timeLabel=sessionDone?"Total Time Taken":"ETA left / Cost";
     const timeValue=sessionDone
       ?durationText(wallMs)
       :`~${durationText(remainingSec*1000)} · ${totalCost.toFixed(4)}`;
     const items=[
-      ["TeleCallers",`${teleDone} / ${teleTotal}`],
+      ["TeleCallers",`${teleDone} / ${teleTotal}${teleFailed?` · ${teleFailed} failed`:""}`],
       ["Leads",totalLeads.toLocaleString()],
       ["Audited",totalTarget?`${totalDone} / ${totalTarget}`:"—"],
       [timeLabel,timeValue]

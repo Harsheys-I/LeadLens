@@ -74,14 +74,18 @@ body .review-aggregate span{font-size:12px;color:var(--muted)}
 body .review-aggregate strong{font-size:18px}
 body .review-aggregate strong.total-time-taken{color:var(--green-2);font-size:20px}
 body .review-cards{display:grid;gap:12px}
-body .review-card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:16px 18px;box-shadow:var(--shadow);display:grid;gap:12px}
-body .review-card.combined-audit{border-color:#9bb7a8;background:linear-gradient(180deg,#f7fbf8 0%,#fff 48%)}
+body .review-card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:16px 18px;box-shadow:var(--shadow);display:grid;gap:12px;cursor:pointer}
+body .review-card:hover{border-color:#9bb7a8}
+body .review-card.is-failed{border-color:#e2b4b0;background:linear-gradient(180deg,#fff8f7 0%,#fff 55%)}
+body .review-card.combined-audit{border-color:#9bb7a8;background:linear-gradient(180deg,#f7fbf8 0%,#fff 48%);cursor:pointer}
 body .review-card-head{display:flex;align-items:center;justify-content:space-between;gap:12px}
 body .review-card-head strong{font-size:16px}
 body .review-card .progress-track{margin:0}
 body .review-card-metrics{display:grid;grid-template-columns:repeat(auto-fit,minmax(90px,1fr));gap:10px}
 body .review-card-metrics span{display:block;font-size:11px;color:var(--muted)}
 body .review-card-metrics strong{font-size:14px}
+body .review-card-error{margin:0;padding:10px 12px;border-radius:10px;background:#fceceb;color:var(--red);font-size:13px;line-height:1.4;word-break:break-word}
+body .review-card-actions{display:flex;flex-wrap:wrap;gap:10px;align-items:center}
 body .review-download-panel{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:20px 22px;box-shadow:var(--shadow)}
 body .packing-toggle{display:flex;flex-wrap:wrap;gap:16px;margin:8px 0 16px}
 body .packing-option{margin:0!important}

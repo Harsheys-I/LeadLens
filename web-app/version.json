@@ -1,5 +1,5 @@
 ﻿{
-  "version": "3.2.2",
+  "version": "3.2.3",
   "name": "LeadLens",
-  "notes": "Fix runaway ETA: progress-based remaining (no early rate blow-up); recalibrate audit/review time constants to real gpt-4o-mini / gpt-5-nano speeds."
+  "notes": "Surface Combined TeleCaller review failures on parent Run Console logs, failed cards with error + retry, and job switcher."
 }
