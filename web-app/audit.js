@@ -1,13 +1,14 @@
-export const APP_VERSION = "2.6.4";
+export const APP_VERSION = "2.6.5";
 /** Bump when default AI rules / field defaults must refresh existing localStorage settings. */
-export const SETTINGS_SEED = 8;
+export const SETTINGS_SEED = 9;
 
 export const ERROR_TYPES = [
   "Comment displaying -ve, but Lead Status is +ve",
   "Comment displaying +ve, but Lead Status is -ve",
   "Lead Status not reflecting Comment History",
   "Missed 30min talk before",
-  "Followup Date is Missed",
+  "Follow-up Missed",
+  "Lead Update not matching prior Follow-up",
   "Customer Location is empty",
   "Customer Requirement is empty",
   "Estimated Budget is empty",
@@ -19,12 +20,15 @@ export const HIGH_SEVERITY_ERRORS = new Set([
   "Comment displaying +ve, but Lead Status is -ve",
   "Lead Status not reflecting Comment History",
   "Missed 30min talk before",
-  "Followup Date is Missed",
+  "Follow-up Missed",
+  "Lead Update not matching prior Follow-up",
   "Customer Location is empty",
   "Customer Requirement is set wrong"
 ]);
 const STATUS_HISTORY_ERROR = "Lead Status not reflecting Comment History";
 const MISSED_30MIN_ERROR = "Missed 30min talk before";
+const FOLLOWUP_MISSED_ERROR = "Follow-up Missed";
+const FOLLOWUP_TIMING_ERROR = "Lead Update not matching prior Follow-up";
 const CONNECTED_ONLY_ERRORS = new Set([
   "Customer Location is empty",
   "Customer Requirement is empty",
@@ -37,12 +41,18 @@ const WRONG_REQUIREMENT = "Customer Requirement is set wrong";
 const LEGACY_ERROR_CODES = {
   "0":"Comment displaying -ve, but Lead Status is +ve",
   "1":"Comment displaying +ve, but Lead Status is -ve",
-  "2":"Followup Date is Missed",
+  "2":"Follow-up Missed",
   "3":"Customer Location is empty",
   "4":"Customer Requirement is empty",
   "5":"Estimated Budget is empty",
   "6":"Analysis Parameter is Empty",
   "7":"Customer Requirement is set wrong"
+};
+/** Renamed / alias labels → canonical ERROR_TYPES text. */
+const LEGACY_ERROR_LABELS = {
+  "followup date is missed": FOLLOWUP_MISSED_ERROR,
+  "follow up date is missed": FOLLOWUP_MISSED_ERROR,
+  "follow-up date is missed": FOLLOWUP_MISSED_ERROR
 };
 export const AI_FIELD_KEYS = {status:"s",comments:"c",next:"n",location:"l",requirement:"rq",budget:"b",connected:"k"};
 
@@ -91,13 +101,14 @@ export const DEFAULT_OUTPUT_FIELDS = [
   {id:"buyingIntent",label:"Buying Intent",enabled:true},{id:"observation",label:"AI Observation",enabled:true},{id:"recommendation",label:"AI Recommendation",enabled:true}
 ];
 export const DEFAULT_RULES = [
-  {field:"Lead Status + Comments",instruction:`Allowed Lead Status labels only (case-insensitive): Prospect, Hot, Warm, Cold, Beyond Budget, Lost. Heat ladder highest→lowest: ${STATUS_LADDER_TEXT}. c is ALWAYS the FULL chronological comment history (oldest→newest) — read EVERY entry before judging CURRENT s. Trajectory matters: if early comments were highly positive but later entries cool to RNR/CNP/WhatsApp-followup/neutral/negative, s must step down the ladder (e.g. Prospect → Warm); keeping Prospect/Hot is wrong. HARD RULE: more than 2 continuous trailing RNR-like notes (RNR, CNP, busy, ringing, WhatsApp follow-up/WA FU, no answer, switched off) ⇒ s cannot be Prospect — emit "Lead Status not reflecting Comment History". Same in reverse: history warms from cold/RNR to clear positive interest but s stays Cold/Beyond Budget/Lost ⇒ emit "Lead Status not reflecting Comment History". Also emit "Comment displaying -ve, but Lead Status is +ve" / "Comment displaying +ve, but Lead Status is -ve" for clear latest-tone polarity mismatches. RNR/CNP/busy alone never upgrades status. Neutral admin notes with no polarity shift are not mismatches.`,errors:"Lead Status not reflecting Comment History | Comment displaying -ve, but Lead Status is +ve | Comment displaying +ve, but Lead Status is -ve"},
-  {field:"First talk SLA",instruction:"Inputs reg = Lead Registration DateTime, fu = FIRST Lead Update DateTime after near-duplicate filtering (oldest call, NOT the latest). Only when reg has a clock time AND falls between 09:30 and 17:00 inclusive: fu must be within 30 minutes after reg. If fu is missing, earlier than reg, or more than 30 minutes later → emit \"Missed 30min talk before\". If reg is outside 09:30–17:00, or reg is date-only (no usable time), do nothing for this check.",errors:"Missed 30min talk before"},
+  {field:"Lead Status + Comments",instruction:`Allowed Lead Status labels only (case-insensitive): Prospect, Hot, Warm, Cold, Beyond Budget, Lost. Heat ladder highest→lowest: ${STATUS_LADDER_TEXT}. c is ALWAYS the FULL chronological comment history (oldest→newest). HARD RULE — all-RNR / not connected: if EVERY non-empty comment in c is RNR-like (RNR, CNP, busy, ringing, WhatsApp follow-up/WA FU, no answer, switched off) AND k=No, then s MUST be lesser than Warm (only Cold, Beyond Budget, or Lost). If s is Warm, Hot, or Prospect in that case → emit "${STATUS_HISTORY_ERROR}". Trajectory: if early comments were highly positive but later entries cool to RNR/neutral/negative, s must step down; more than 2 continuous trailing RNR-like notes ⇒ s cannot be Prospect — emit "${STATUS_HISTORY_ERROR}". Opposite warm-up with cold status ⇒ same error. Also emit polarity mismatches "Comment displaying -ve, but Lead Status is +ve" / "Comment displaying +ve, but Lead Status is -ve" when appropriate.`,errors:`${STATUS_HISTORY_ERROR} | Comment displaying -ve, but Lead Status is +ve | Comment displaying +ve, but Lead Status is -ve`},
+  {field:"First talk SLA",instruction:`Inputs reg = Lead Registration DateTime, fu = FIRST Lead Update DateTime after near-duplicate filtering (oldest call, NOT the latest). Only when reg has a clock time AND falls between 09:30 and 17:00 inclusive: fu must be within 30 minutes after reg. If fu is missing, earlier than reg, or more than 30 minutes later → emit "${MISSED_30MIN_ERROR}". If reg is outside 09:30–17:00, or reg is date-only (no usable time), do nothing for this check.`,errors:MISSED_30MIN_ERROR},
+  {field:"Prior follow-up timing",instruction:`Inputs u = THIS call's Lead Update DateTime, pn = previous call's Next Followup DateTime (empty if this is the first call). When pn is present and BOTH u and pn include HH:MM clock times: u must be within ±5 minutes of pn. If |u − pn| > 5 minutes → emit "${FOLLOWUP_TIMING_ERROR}". If pn is blank, or either value is date-only without usable time, skip the ±5min check (do not invent a match). Separately: if n (this call's Next Followup) is a past calendar date before today → emit "${FOLLOWUP_MISSED_ERROR}".`,errors:`${FOLLOWUP_TIMING_ERROR} | ${FOLLOWUP_MISSED_ERROR}`},
   {field:"Comment quality",instruction:"Score q strictly. q must reflect how well Comments capture the real telecaller–customer conversation (need, budget, location preference, objection, decision-maker, next step). One-word/CRM crumbs like visited/RNR/CNP/busy/followup = q 0-2 max. Generic connected notes without customer detail = q <=4. Only rich descriptive talk earns 8-10. When c is an array, score THIS call's latest comment (last entry), using earlier entries only as context.",errors:""},
   {field:"Customer Requirement",instruction:`ONLY when k=Yes: rq must be a real customer requirement. Empty/placeholder (., -, **, NA) => "${EMPTY_REQUIREMENT}". Call jargon (RNR, Visited, etc.) => "${WRONG_REQUIREMENT}". If k is No or blank, NEVER emit those requirement errors.`,errors:`${EMPTY_REQUIREMENT} | ${WRONG_REQUIREMENT}`},
-  {field:"AI Observation",instruction:"o is a QA judgment, NOT a rewrite of Comments. Forbidden: copying, lightly shortening, or paraphrasing c. Required: name what is missing/wrong/strong for audit (e.g. thin note, rq junk, status mismatch vs full history, missed first-talk SLA, missing budget on connected call). 18-28 words.",errors:""},
+  {field:"AI Observation",instruction:"o is a QA judgment, NOT a rewrite of Comments. Forbidden: copying, lightly shortening, or paraphrasing c. Required: name what is missing/wrong/strong for audit (e.g. thin note, status too high for all-RNR/not-connected, missed first-talk SLA, update vs prior follow-up timing, missing budget on connected call). 18-28 words.",errors:""},
   {field:"AI Recommendation",instruction:"r must be a concrete telecaller coaching action: what to ask/capture/correct on the next call (fields, questions, status fix down/up the Prospect→Lost ladder, follow-up discipline). Not vague ('follow up', 'update remarks'). 20-40 words, specific to THIS call's gaps.",errors:""},
-  {field:"Buying intent",instruction:"i=1 only for genuine positive purchase interest in THIS call's latest comment/status; else i=0. Earlier history alone does not set i=1 if the latest comment cooled.",errors:""}
+  {field:"Buying intent",instruction:"i=1 only for genuine positive purchase interest in THIS call's latest comment/status; else i=0. Earlier history alone does not set i=1 if the latest comment cooled. All-RNR / k=No ⇒ i=0.",errors:""}
 ];
 export const DEFAULT_SETTINGS = {
   batchSize:20,concurrency:2,model:"gpt-4o-mini",
@@ -110,7 +121,7 @@ export const DEFAULT_SETTINGS = {
 
 /* Large stable prefix FIRST so OpenAI prompt caching can activate (>=1024 tokens;
    some models need closer to 2048). Run-specific rules come after; lead data last. */
-const CACHE_HANDBOOK = `LeadLens QA v2.6.0 — stable cacheable auditor handbook. Evidence only. Never invent facts, dates, budgets, locations, or prior calls.
+const CACHE_HANDBOOK = `LeadLens QA v2.6.5 — stable cacheable auditor handbook. Evidence only. Never invent facts, dates, budgets, locations, or prior calls.
 
 PURPOSE
 You audit Indian real-estate telecalling follow-up notes. Judge only the supplied fields for THIS call id. Optional day[] lists sibling calls on the same latest calendar day — context only; still return one result for THIS id.
@@ -119,7 +130,9 @@ INPUT CONTRACT
 - id: opaque lead/call id. Echo it exactly. Never invent or drop ids.
 - s: Lead Status on THIS call
 - c: Comments — ALWAYS full chronological history array for the lead (oldest→newest). Status trajectory uses the entire array; q/i focus on the last entry
-- n: Next Followup Date (DD/MM/YYYY or "")
+- n: Next Followup Date for THIS call (DD/MM/YYYY or DD/MM/YYYY HH:MM or "")
+- u: THIS call's Lead Update DateTime
+- pn: previous call's Next Followup DateTime (empty on the lead's first call)
 - l: Customer Location (may already be blanked for known project exceptions — do not restore)
 - rq: Customer Requirement
 - b: Estimated Budget
@@ -143,7 +156,8 @@ ERROR TYPES (emit exact labels only — no codes, no paraphrases)
 - Comment displaying +ve, but Lead Status is -ve
 - Lead Status not reflecting Comment History
 - Missed 30min talk before
-- Followup Date is Missed
+- Follow-up Missed
+- Lead Update not matching prior Follow-up
 - Customer Location is empty
 - Customer Requirement is empty
 - Estimated Budget is empty
@@ -168,17 +182,17 @@ Placeholder-only (., -, NA, nil) on connected call => "Customer Requirement is e
 
 BUYING INTENT i
 i=1 only for genuine purchase interest (site visit interest, options request, active shortlist, budget toward buy).
-i=0 for CNP/busy/NI/wrong number/neutral admin/no interest signal.
+i=0 for CNP/busy/NI/wrong number/neutral admin/no interest signal. All-RNR history with k=No ⇒ i=0.
 
 STATUS vs FULL COMMENT HISTORY
 Allowed Lead Status labels (case-insensitive): Prospect, Hot, Warm, Cold, Beyond Budget, Lost.
 Heat ladder highest→lowest: Prospect > Hot > Warm > Cold > Beyond Budget > Lost.
-c is the full chronological timeline — read ALL entries, then judge CURRENT s against the trajectory and the latest meaningful tone.
-If early comments were hot/positive but later notes cool to RNR/CNP/WhatsApp-followup/neutral/negative, s must decrease (Prospect should become Warm or lower). Keeping Prospect after a cooled timeline is wrong.
-HARD RULE: more than 2 continuous trailing RNR-like notes (RNR, CNP, busy, ringing, no answer, switched off, WhatsApp follow-up / WA FU) ⇒ s cannot be Prospect — emit "Lead Status not reflecting Comment History".
+c is the full chronological timeline — read ALL entries, then judge CURRENT s.
+HARD RULE — all RNR + not connected: if every non-empty comment in c is RNR-like (RNR, CNP, busy, ringing, no answer, switched off, WhatsApp follow-up / WA FU) AND k=No, then s MUST be lesser than Warm (Cold, Beyond Budget, or Lost only). Warm/Hot/Prospect in that case → emit "Lead Status not reflecting Comment History".
+If early comments were hot/positive but later notes cool to RNR/neutral/negative, s must decrease. More than 2 continuous trailing RNR-like notes ⇒ s cannot be Prospect — emit "Lead Status not reflecting Comment History".
 Opposite: history warms from cold/RNR to clear positive interest but s stays Cold/Beyond Budget/Lost ⇒ emit "Lead Status not reflecting Comment History".
-Also emit "Comment displaying -ve, but Lead Status is +ve" when status is too hot vs latest comments, and "Comment displaying +ve, but Lead Status is -ve" when status is too cold vs clear +ve latest interest.
-RNR/CNP/busy alone does not justify keeping/upgrading to Prospect/Hot. Neutral / not-connected admin notes without polarity shift are NOT mismatches.
+Also emit "Comment displaying -ve, but Lead Status is +ve" / "Comment displaying +ve, but Lead Status is -ve" for clear latest-tone polarity mismatches.
+RNR/CNP/busy alone does not justify keeping/upgrading to Prospect/Hot/Warm when the whole history is RNR and k=No.
 
 FIRST TALK SLA (reg + fu)
 reg = registration datetime; fu = FIRST update datetime (oldest after near-dupe filter), never the latest call.
@@ -186,12 +200,18 @@ ONLY when reg includes a usable clock time AND is between 09:30 and 17:00 inclus
 If fu is blank, before reg, or >30 minutes after reg → emit "Missed 30min talk before".
 If reg is outside 09:30–17:00, or reg is date-only with no clock time, skip this check entirely.
 
+PRIOR FOLLOW-UP TIMING (u + pn) AND OVERDUE n
+u = this call Lead Update DateTime; pn = previous call's Next Followup DateTime ("" if first call).
+When pn is non-empty AND both u and pn include HH:MM: |u − pn| must be ≤ 5 minutes. Otherwise emit "Lead Update not matching prior Follow-up".
+If pn is blank or either value lacks a usable clock time, skip the ±5min check.
+If n (this call next follow-up) is a calendar date before today → emit "Follow-up Missed".
+
 CONNECTED GATING
 "Customer Location is empty", "Customer Requirement is empty", "Estimated Budget is empty", and "Customer Requirement is set wrong" are ALLOWED ONLY when k=Yes.
 If k is No or "", NEVER emit those four — even if l/rq/b are empty, "**", ".", or junk.
 
 STYLE — OBSERVATION (o) AND RECOMMENDATION (r)
-o = auditor judgment about data quality / process gaps / mismatches. It must NOT copy, trim, or paraphrase Comments (c). Bad o examples: restating "customer visited", "wants 2BHK Whitefield". Good o examples: "Connected call note is non-descriptive; requirement captured as visit jargon; budget missing." / "Status still Prospect after three trailing RNRs — history not reflected."
+o = auditor judgment about data quality / process gaps / mismatches. It must NOT copy, trim, or paraphrase Comments (c). Bad o examples: restating "customer visited", "wants 2BHK Whitefield". Good o examples: "All comments are RNR with Connected=No but status still Warm." / "Update time is far from the prior promised follow-up."
 r = specific next-call coaching: what questions to ask, which fields to fill (rq/location/budget), how to correct status, when to call back. Bad r: "Follow up", "Update comments", "Call again". Good r: "On next connected call ask preferred config, micro-market, and budget band; replace rq junk with real requirement; set follow-up date same day."
 Never dump the full comment into o or r. Never restate this handbook.
 
@@ -203,9 +223,11 @@ D) k=Yes, rq="2BHK Whitefield" => rq OK.
 E) day[] siblings present: score/flag THIS call only; siblings are context.
 F) s=Interested, c=customer said not interested stop calling => status -ve/+ve mismatch, i=0.
 G) s=Hot, c=wants 2BHK under 90L Saturday visit => high q, i=1, e:[].
-H) k=No, c=ringing no answer => i=0, usually e:[] from model.
+H) k=No, c all RNR-like, s=Warm => "Lead Status not reflecting Comment History", i=0.
 I) c history [hot interest, RNR, RNR, WA followup] and s=Prospect => "Lead Status not reflecting Comment History".
 J) reg=12/03/2026 10:00, fu=12/03/2026 11:00 => "Missed 30min talk before". reg=12/03/2026 18:00 => skip SLA.
+K) pn=23/08/2026 16:16, u=23/08/2026 15:09 => "Lead Update not matching prior Follow-up". pn=23/08/2026 16:16, u=23/08/2026 16:18 => OK.
+L) n is yesterday's date => "Follow-up Missed".
 
 EDGE CASES
 - Mixed-language comments are valid; judge meaning, not grammar.
@@ -220,7 +242,7 @@ EDGE CASES
 - For Comments history arrays, status must weigh the full timeline then the latest tone; q and i still focus on THIS call's latest comment unless a run check says otherwise.
 
 CACHE STABILITY PAD (identical every request — do not vary)
-LeadLens keeps this handbook byte-stable so automatic prompt caching can reuse the prefix across batches in a run and across nearby reruns. Static instructions stay first; configured run checks follow; unique lead payloads stay last. Routing uses a stable prompt_cache_key derived from model + rules. Parallel workers must warm this prefix once before fanning out. Treat the following checklist as fixed operating procedure: verify id echo, apply q hard caps, distinguish rq empty vs wrong, gate l/rq/b on connected, apply history trajectory + first-talk SLA, keep outputs compact, never invent sibling calls, never merge two ids, never invent error labels, never emit severity, never wrap JSON in fences, never discuss pricing or tokens, never mention cache mechanics in o/r. Repeatable discipline improves audit consistency across telecalling QA shifts, projects, and batch sizes while preserving privacy of customer records inside the browser-only LeadLens workflow.
+LeadLens keeps this handbook byte-stable so automatic prompt caching can reuse the prefix across batches in a run and across nearby reruns. Static instructions stay first; configured run checks follow; unique lead payloads stay last. Routing uses a stable prompt_cache_key derived from model + rules. Parallel workers must warm this prefix once before fanning out. Treat the following checklist as fixed operating procedure: verify id echo, apply q hard caps, distinguish rq empty vs wrong, gate l/rq/b on connected, apply history trajectory + first-talk SLA + prior follow-up ±5min + Follow-up Missed, keep outputs compact, never invent sibling calls, never merge two ids, never invent error labels, never emit severity, never wrap JSON in fences, never discuss pricing or tokens, never mention cache mechanics in o/r. Repeatable discipline improves audit consistency across telecalling QA shifts, projects, and batch sizes while preserving privacy of customer records inside the browser-only LeadLens workflow.
 
 This handbook is identical across batches for prompt caching.`;
 
@@ -391,21 +413,23 @@ export function splitErrorList(value){
 
 export function buildErrorMaps(settings=DEFAULT_SETTINGS){
   const byNorm=new Map(ERROR_TYPES.map(label=>[norm(label),label]));
+  for(const [alias,label] of Object.entries(LEGACY_ERROR_LABELS))byNorm.set(alias,label);
   for(const rule of settings.rules||[]){
     for(const token of splitErrorList(rule.errors)){
-      const legacy=LEGACY_ERROR_CODES[token];
+      const legacy=LEGACY_ERROR_CODES[token]||LEGACY_ERROR_LABELS[norm(token)];
       const label=legacy||token;
-      if(!byNorm.has(norm(label)))byNorm.set(norm(label),label);
+      if(!byNorm.has(norm(label)))byNorm.set(norm(label),ERROR_TYPES.find(item=>norm(item)===norm(label))||label);
     }
   }
   const resolve=token=>{
     const raw=clean(token);
     if(!raw)return"";
     if(LEGACY_ERROR_CODES[raw])return LEGACY_ERROR_CODES[raw];
+    if(LEGACY_ERROR_LABELS[norm(raw)])return LEGACY_ERROR_LABELS[norm(raw)];
     return byNorm.get(norm(raw))||"";
   };
   const allowed=new Set([...byNorm.values()]);
-  return{resolve,allowed,labels:[...allowed]};
+  return{resolve,allowed,labels:[...new Set([...ERROR_TYPES,...allowed])]};
 }
 
 function normalizeRuleErrors(rules,maps){
@@ -509,6 +533,11 @@ function missedThirtyMinTalk(registrationAt,firstUpdateAt){
   const delta=firstUpdateAt.valueOf()-registrationAt.valueOf();
   return delta<0||delta>30*60*1000;
 }
+function followupTimingMismatch(updateAt,previousFollowupAt){
+  if(!updateAt||!previousFollowupAt)return false;
+  if(!hasClockTime(updateAt)||!hasClockTime(previousFollowupAt))return false;
+  return Math.abs(updateAt.valueOf()-previousFollowupAt.valueOf())>5*60*1000;
+}
 function isRnrLikeComment(value){
   const n=norm(value);
   if(!n)return false;
@@ -531,13 +560,22 @@ function trailingRnrStreak(comments){
   }
   return streak;
 }
-function historyStatusErrors(status,comments){
+function allCommentsRnrLike(comments){
+  const list=Array.isArray(comments)?comments.map(clean).filter(Boolean):[clean(comments)].filter(Boolean);
+  return list.length>0&&list.every(isRnrLikeComment);
+}
+function historyStatusErrors(status,comments,connected=""){
   const errors=[];
   const list=Array.isArray(comments)?comments.map(clean).filter(Boolean):[clean(comments)].filter(Boolean);
   if(!list.length)return errors;
   const statusNorm=norm(status);
+  const warmOrHigher=["prospect","hot","warm"];
+  // All RNR-like comments + Connected=No ⇒ status must be lesser than Warm.
+  if(allCommentsRnrLike(list)&&norm(connected)==="no"&&warmOrHigher.includes(statusNorm)){
+    errors.push(STATUS_HISTORY_ERROR);
+  }
   const streak=trailingRnrStreak(list);
-  if(streak>2&&statusNorm==="prospect")errors.push(STATUS_HISTORY_ERROR);
+  if(streak>2&&statusNorm==="prospect"&&!errors.includes(STATUS_HISTORY_ERROR))errors.push(STATUS_HISTORY_ERROR);
   if(["prospect","hot"].includes(statusNorm)&&streak>=2){
     const earlier=list.slice(0,-streak);
     if(earlier.some(item=>isStrongPositiveComment(item)||/\b(interested|hot|prospect|site visit|want)\b/.test(norm(item)))){
@@ -554,10 +592,10 @@ export function indianMobile(value){let digits=clean(value).replace(/\.0$/,"").r
 function fieldColumns(headers,fields){const normalized=headers.map(header=>({header,key:norm(header)}));return Object.fromEntries(fields.filter(field=>field.required||field.enabled!==false).map(field=>{const match=normalized.find(item=>list(field.aliases).includes(item.key));return[field.id,match?.header||""];}));}
 function correctedAiLocation(project,location){const exceptions=new Set(["guru punvaanii eureka|bidadi","guru punvaanii ernika|anekal","guru punvaanii eka|anekal","guru punvaanii elegance|bheemenahalli"]);return exceptions.has(`${norm(project)}|${norm(location)}`)?"":location;}
 function connectedFromParameter(parameter,settings){const value=norm(parameter);if(!value)return"";if(list(settings.yesValues).includes(value)||value==="yes")return"Yes";if(list(settings.noValues).includes(value)||value==="no")return"No";return"";}
-function deterministicErrors(call,aiLocation,{commentHistory=[],registrationAt=null,firstUpdateAt=null}={}){
+function deterministicErrors(call,aiLocation,{commentHistory=[],registrationAt=null,firstUpdateAt=null,previousFollowupAt=null}={}){
   const errors=[];
   const today=new Date();today.setHours(0,0,0,0);
-  if(call.nextDate&&call.nextDate<today)errors.push("Followup Date is Missed");
+  if(call.nextDate&&call.nextDate<today)errors.push(FOLLOWUP_MISSED_ERROR);
   if(isBlankish(call.parameter))errors.push("Analysis Parameter is Empty");
   if(call.connected==="Yes"){
     if(isBlankish(call.location))errors.push("Customer Location is empty");
@@ -566,7 +604,8 @@ function deterministicErrors(call,aiLocation,{commentHistory=[],registrationAt=n
     if(isBlankish(call.budget))errors.push("Estimated Budget is empty");
   }
   if(missedThirtyMinTalk(registrationAt,firstUpdateAt))errors.push(MISSED_30MIN_ERROR);
-  for(const label of historyStatusErrors(call.status,commentHistory.length?commentHistory:[call.comments])){
+  if(followupTimingMismatch(call.updateAt,previousFollowupAt))errors.push(FOLLOWUP_TIMING_ERROR);
+  for(const label of historyStatusErrors(call.status,commentHistory.length?commentHistory:[call.comments],call.connected)){
     if(!errors.includes(label))errors.push(label);
   }
   return errors;
@@ -634,7 +673,9 @@ export function parseWorkbook(arrayBuffer,rawSettings=DEFAULT_SETTINGS){
     values.mobile=lastMobile;values.project=lastProject;
     const updateAt=parseDateTime(values.update);
     const updateDate=updateAt?new Date(updateAt.getFullYear(),updateAt.getMonth(),updateAt.getDate()):parseDate(values.update);
-    const record={...values,rowIndex:index,updateAt,updateDate,nextDate:parseDate(values.next)},key=`${lastProject} | ${lastMobile}`;
+    const nextAt=parseDateTime(values.next);
+    const nextDate=nextAt?new Date(nextAt.getFullYear(),nextAt.getMonth(),nextAt.getDate()):parseDate(values.next);
+    const record={...values,rowIndex:index,updateAt,updateDate,nextAt,nextDate},key=`${lastProject} | ${lastMobile}`;
     if(!grouped.has(key))grouped.set(key,[]);
     grouped.get(key).push(record);
   }
@@ -671,6 +712,9 @@ export function parseWorkbook(arrayBuffer,rawSettings=DEFAULT_SETTINGS){
     dayCalls.forEach((call,callIndex)=>{
       const aiLocation=correctedAiLocation(call.project,call.location);
       const leadUpdateDate=dateText(call.updateAt||call.updateDate||call.update);
+      const recordIndex=records.findIndex(record=>record.rowIndex===call.rowIndex);
+      const previous=recordIndex>0?records[recordIndex-1]:null;
+      const previousFollowupAt=previous?.nextAt||(previous?.nextDate?new Date(previous.nextDate.getFullYear(),previous.nextDate.getMonth(),previous.nextDate.getDate()):null)||null;
       const staticValues={
         project:call.project,
         mobile:call.mobile,
@@ -678,9 +722,9 @@ export function parseWorkbook(arrayBuffer,rawSettings=DEFAULT_SETTINGS){
         telecaller:clean(call.telecaller)||telecaller,
         status:call.status,
         comments:call.comments,
-        next:dateText(call.nextDate||call.next),
-        callDate:leadUpdateDate,
-        update:leadUpdateDate,
+        next:dateTimeText(call.nextAt)||dateText(call.nextDate||call.next),
+        callDate:dateTimeText(call.updateAt)||leadUpdateDate,
+        update:dateTimeText(call.updateAt)||leadUpdateDate,
         totalFollowups:records.length,
         dayCallCount:dayCalls.length,
         dayCallIndex:callIndex+1,
@@ -701,12 +745,15 @@ export function parseWorkbook(arrayBuffer,rawSettings=DEFAULT_SETTINGS){
         const key=AI_FIELD_KEYS[field.id]||field.id;
         // Comments always ship full chronological history for smarter status trajectory.
         if(field.id==="comments")auditContext[key]=commentHistory;
+        else if(field.id==="next")auditContext[key]=dateTimeText(call.nextAt)||dateText(call.nextDate||call.next);
         else auditContext[key]=field.history
           ?records.map(record=>contextValue(field.id,record,correctedAiLocation(record.project,record.location)))
           :contextValue(field.id,call,aiLocation);
       }
       auditContext.reg=dateTimeText(registrationAt)||registration||"";
       auditContext.fu=dateTimeText(firstUpdateAt)||"";
+      auditContext.u=dateTimeText(call.updateAt)||leadUpdateDate||"";
+      auditContext.pn=dateTimeText(previousFollowupAt)||"";
       // Same-day siblings on the latest day are context only; each latest-day call still gets its own result.
       if(daySnapshots.length>1)auditContext.day=daySnapshots;
       leads.push({
@@ -714,7 +761,7 @@ export function parseWorkbook(arrayBuffer,rawSettings=DEFAULT_SETTINGS){
         groupId,
         staticValues,
         auditContext,
-        deterministicErrors:deterministicErrors(call,aiLocation,{commentHistory,registrationAt,firstUpdateAt})
+        deterministicErrors:deterministicErrors(call,aiLocation,{commentHistory,registrationAt,firstUpdateAt,previousFollowupAt})
       });
     });
   }
@@ -801,11 +848,12 @@ function fallbackObservation(row,errors,q){
   if(errors.includes(STATUS_HISTORY_ERROR))bits.push("Lead status does not reflect the full comment history trajectory.");
   else if(errors.some(e=>/Lead Status/i.test(e)))bits.push("Lead status conflicts with comment polarity.");
   if(errors.includes(MISSED_30MIN_ERROR))bits.push("First update missed the 30-minute talk window after daytime registration.");
+  if(errors.includes(FOLLOWUP_TIMING_ERROR))bits.push("Lead update time is not within 5 minutes of the prior promised follow-up.");
   if(errors.includes(EMPTY_REQUIREMENT))bits.push("Connected call has empty/placeholder requirement.");
   if(errors.includes(WRONG_REQUIREMENT))bits.push("Requirement field holds call jargon, not a customer need.");
   if(errors.includes("Customer Location is empty"))bits.push("Connected call missing usable location.");
   if(errors.includes("Estimated Budget is empty"))bits.push("Connected call missing budget.");
-  if(errors.includes("Followup Date is Missed"))bits.push("Follow-up date is already past.");
+  if(errors.includes(FOLLOWUP_MISSED_ERROR))bits.push("Follow-up date is already past.");
   if(errors.includes("Analysis Parameter is Empty"))bits.push("Analysis parameter is blank.");
   if(!bits.length)bits.push("Review note quality and field completeness for this call.");
   return clipWords(bits.join(" "),28);
@@ -813,13 +861,14 @@ function fallbackObservation(row,errors,q){
 function fallbackRecommendation(row,errors,q){
   const bits=[];
   if(q<=4)bits.push("Rewrite remarks with what the customer said: need, locality, budget, objection, and next step.");
-  if(errors.includes(STATUS_HISTORY_ERROR))bits.push("Align Lead Status on the Prospect→Lost ladder to the full comment timeline (step down after repeated RNR).");
+  if(errors.includes(STATUS_HISTORY_ERROR))bits.push("Align Lead Status on the Prospect→Lost ladder to the full comment timeline (all-RNR / not connected must be below Warm).");
   if(errors.includes(MISSED_30MIN_ERROR))bits.push("Call daytime registrations within 30 minutes and log the first update promptly.");
+  if(errors.includes(FOLLOWUP_TIMING_ERROR))bits.push("Call on the promised follow-up time (±5 minutes) and log the Lead Update Date to match.");
   if(errors.includes(WRONG_REQUIREMENT)||errors.includes(EMPTY_REQUIREMENT))bits.push("On next connected call capture a real requirement (config/area), not RNR/Visited/status text.");
   if(errors.includes("Customer Location is empty"))bits.push("Ask and save preferred micro-market/location.");
   if(errors.includes("Estimated Budget is empty"))bits.push("Ask and save budget band before ending the call.");
   if(errors.some(e=>/Lead Status/i.test(e))&&!errors.includes(STATUS_HISTORY_ERROR))bits.push("Align Lead Status on the Prospect→Lost ladder to the latest comment tone.");
-  if(errors.includes("Followup Date is Missed"))bits.push("Call on/before the promised follow-up and set a fresh dated next step.");
+  if(errors.includes(FOLLOWUP_MISSED_ERROR))bits.push("Call on/before the promised follow-up and set a fresh dated next step.");
   if(!bits.length)bits.push("Confirm interest, capture missing fields, and lock a dated next action the same day.");
   return clipWords(bits.join(" "),40);
 }
@@ -848,7 +897,7 @@ async function requestAudit(apiKey,settings,leads,signal,log,onUsage){
       prompt_cache_key:promptCacheKey(settings),
       messages:[
         {role:"system",content:buildPrompt(settings)},
-        {role:"user",content:`Audit ${leads.length} call(s). Echo each id. c=full history; reg+fu=first-talk SLA; o=QA analysis not comment copy; r=specific coaching.\n${JSON.stringify({L:modelInput})}`}
+        {role:"user",content:`Audit ${leads.length} call(s). Echo each id. c=full history; u+pn=±5min prior follow-up; reg+fu=30min first-talk SLA; o=QA analysis not comment copy; r=specific coaching.\n${JSON.stringify({L:modelInput})}`}
       ],
       response_format:{type:"json_schema",json_schema:{name:"ll_audit",strict:true,schema:responseSchema}}
     })

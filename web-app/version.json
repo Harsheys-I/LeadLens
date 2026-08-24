@@ -1,5 +1,5 @@
 {
-  "version": "2.6.4",
+  "version": "2.6.5",
   "name": "LeadLens",
-  "notes": "Export groups Mobile+Project per lead; removed Call # on Day"
+  "notes": "All-RNR+No must be <Warm; prior follow-up ±5min; 30min first talk; Follow-up Missed rename"
 }
