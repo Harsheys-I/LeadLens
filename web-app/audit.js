@@ -1,4 +1,4 @@
-export const APP_VERSION = "3.0.2";
+export const APP_VERSION = "3.0.3";
 /** Bump when default AI rules / field defaults must refresh existing localStorage settings. */
 export const SETTINGS_SEED = 11;
 
@@ -150,7 +150,7 @@ export function buildChatCompletionBody(model,{temperature,maxTokens,messages,..
 
 /* Large stable prefix FIRST so OpenAI prompt caching can activate (>=1024 tokens;
    some models need closer to 2048). Run-specific rules come after; lead data last. */
-const CACHE_HANDBOOK = `LeadLens QA v3.0.2 — stable cacheable auditor handbook. Evidence only. Never invent facts, dates, budgets, locations, or prior calls.
+const CACHE_HANDBOOK = `LeadLens QA v3.0.3 — stable cacheable auditor handbook. Evidence only. Never invent facts, dates, budgets, locations, or prior calls.
 
 PURPOSE
 You audit Indian real-estate telecalling follow-up notes. Judge only the supplied fields for THIS call id. Optional day[] lists sibling calls on the same latest calendar day — context only; still return one result for THIS id.
@@ -591,6 +591,37 @@ export function splitLeadsByTelecaller(leads){
       leadCount:groupIds.size,
       callCount:bucket.leads.length,
       latestDayCalls:bucket.leads.length,
+      unknown:Boolean(bucket.unknown)
+    };
+  }).sort((a,b)=>a.telecallerName.localeCompare(b.telecallerName,undefined,{sensitivity:"base"}));
+}
+
+/**
+ * Partition finished audit result rows by telecaller / telecallerName (post-audit Combined split).
+ * Blank names → Unknown. Does not mutate the parent results array.
+ */
+export function splitResultsByTelecaller(results){
+  const buckets=new Map();
+  for(const row of results||[]){
+    const raw=clean(row?.telecaller??row?.telecallerName??"");
+    const display=raw||"Unknown";
+    const key=norm(display)||"unknown";
+    if(!buckets.has(key))buckets.set(key,{telecallerName:display,results:[],unknown:!raw});
+    const bucket=buckets.get(key);
+    bucket.results.push(row);
+    if(!raw)bucket.unknown=true;
+    if(raw&&bucket.telecallerName==="Unknown")bucket.telecallerName=display;
+  }
+  return[...buckets.values()].map(bucket=>{
+    const leadKeys=new Set();
+    for(const row of bucket.results){
+      leadKeys.add(`${row.project||""} | ${row.mobile||""}`);
+    }
+    return{
+      telecallerName:bucket.telecallerName,
+      results:bucket.results,
+      leadCount:leadKeys.size,
+      callCount:bucket.results.length,
       unknown:Boolean(bucket.unknown)
     };
   }).sort((a,b)=>a.telecallerName.localeCompare(b.telecallerName,undefined,{sensitivity:"base"}));

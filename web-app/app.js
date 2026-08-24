@@ -1,5 +1,5 @@
-import {APP_VERSION,DEFAULT_SETTINGS,DEFAULT_OUTPUT_FIELDS,SETTINGS_SEED,MAX_BATCH_SIZE,MAX_CONCURRENCY,normalizeSettings,normalizeInputFields,slugFieldId,parseWorkbook,auditBatch,downloadWorkbook,downloadReviewPack,splitLeadsByTelecaller,requestTelecallerReview,estimateRunSeconds,estimateReviewRunSeconds,validateApiKey} from "./audit.js?v=3.0.2";
-import {putJob,getJob,getJobs,deleteJob,clearJobs,loadSettings,saveSettings,getApiKey,apiKeyIsRemembered,saveApiKey,forgetApiKey} from "./db.js?v=3.0.2";
+import {APP_VERSION,DEFAULT_SETTINGS,DEFAULT_OUTPUT_FIELDS,SETTINGS_SEED,MAX_BATCH_SIZE,MAX_CONCURRENCY,REVIEW_PASS_SECONDS,normalizeSettings,normalizeInputFields,slugFieldId,parseWorkbook,auditBatch,downloadWorkbook,downloadReviewPack,splitLeadsByTelecaller,splitResultsByTelecaller,requestTelecallerReview,estimateRunSeconds,estimateReviewRunSeconds,validateApiKey} from "./audit.js?v=3.0.3";
+import {putJob,getJob,getJobs,deleteJob,clearJobs,loadSettings,saveSettings,getApiKey,apiKeyIsRemembered,saveApiKey,forgetApiKey} from "./db.js?v=3.0.3";
 
 const $=id=>document.getElementById(id);
 const ids=["file-input","drop-zone","file-list","validation","start-audit","page-title","key-state","run-name","pause-run","download-result","progress-label","progress-percent","progress-bar","metric-leads","metric-excel-rows","metric-calls","metric-batch","metric-completed","metric-status","metric-input-tokens","metric-cached-tokens","metric-output-tokens","metric-duration","metric-eta","metric-cost","live-log","clear-console","history-list","clear-history","api-key","remember-key","toggle-key","save-key","forget-key","key-message","batch-size","concurrency","model","review-model","input-field-config","add-input-field","ai-field-config","rule-config","add-rule","output-field-config","yes-values","no-values","additional-instructions","input-price","cached-price","output-price","review-input-price","review-cached-price","review-output-price","save-settings","reset-settings","settings-message","toast","mobile-menu","active-job-switch","sort-field","sort-direction","app-version","export-settings","import-settings","import-settings-file","update-banner","update-banner-text","reload-app","key-modal","onboard-key","onboard-toggle","onboard-remember","onboard-message","onboard-save","onboard-skip","sidebar-version","sidebar-notes","review-drop-zone","review-file-input","review-drop-hint","review-file-list","review-validation","start-review","review-run-panel","review-aggregate","review-cards","review-download-panel","download-review-txt","download-review-excel","review-open-console"];
@@ -167,10 +167,14 @@ function renderProgress(job){
   const billable=Math.max(0,number(usage.input)-number(usage.cached));
   const pendingLeft=Object.keys(job.pendingBatches||{}).length;
   els["run-name"].textContent=job.fileName||"No active audit";
-  els["progress-label"].textContent=job.status==="completed"?(job.mode==="telecaller-review"?"Review complete":"Audit complete"):job.status==="reviewing"
+  els["progress-label"].textContent=job.status==="completed"
+    ?(job.mode==="telecaller-review"?"Review complete":job.mode==="telecaller-review-parent"?"Combined audit complete — reviews queued":"Audit complete")
+    :job.status==="reviewing"
     ?`Writing TeleCaller review with ${job.settings?.reviewModel||settings.reviewModel||"gpt-5-nano"}…`
     :job.status==="running"
-    ?`Keeping ${concurrency} batch request${concurrency>1?"s":""} in flight${pendingLeft?` · ${pendingLeft} batch(es) waiting to checkpoint`:""}…`
+    ?(job.reviewOnly
+      ?`Preparing TeleCaller review…`
+      :`Keeping ${concurrency} batch request${concurrency>1?"s":""} in flight${pendingLeft?` · ${pendingLeft} batch(es) waiting to checkpoint`:""}…`)
     :job.status==="paused"?"Audit paused — ready to resume":job.status==="failed"?"Audit stopped — saved work is safe":"Waiting for a file";
   els["progress-percent"].textContent=`${pct}%`;
   els["progress-bar"].style.width=`${pct}%`;
@@ -185,8 +189,10 @@ function renderProgress(job){
   els["metric-output-tokens"].textContent=number(usage.output).toLocaleString();
   els["metric-duration"].textContent=durationText(elapsed(job));
   if(els["metric-eta"]){
-    const estFn=job.mode==="telecaller-review"?estimateReviewRunSeconds:estimateRunSeconds;
-    const est=estFn(job.settings||settings,uniqueLeadCount(job),job.totalLeads);
+    const estFn=job.mode==="telecaller-review"||job.mode==="telecaller-review-parent"?estimateReviewRunSeconds:estimateRunSeconds;
+    const est=job.reviewOnly
+      ?REVIEW_PASS_SECONDS
+      :estFn(job.settings||settings,uniqueLeadCount(job),job.totalLeads);
     els["metric-eta"].textContent=est?`~${durationText(est*1000)}`:"—";
   }
   els["metric-cost"].textContent=estimatedCost(job).toFixed(4);
@@ -195,7 +201,7 @@ function renderProgress(job){
   els["download-result"].disabled=job.status!=="completed";
   renderLogs(job);
   refreshJobSwitcher();
-  if(job.mode==="telecaller-review")scheduleReviewProgress();
+  if(job.mode==="telecaller-review"||job.mode==="telecaller-review-parent")scheduleReviewProgress();
 }
 
 async function refreshJobSwitcher(){
@@ -251,7 +257,7 @@ function clearPendingPersist(jobId){
 }
 
 function throttleProgress(job){
-  if(job?.mode==="telecaller-review")scheduleReviewProgress();
+  if(job?.mode==="telecaller-review"||job?.mode==="telecaller-review-parent")scheduleReviewProgress();
   if(currentJob?.id!==job.id)return;
   if(throttleProgress._timer)return;
   throttleProgress._timer=setTimeout(()=>{
@@ -327,7 +333,9 @@ async function runJob(job,{navigate=true}={}){
   if(!/^sk-[A-Za-z0-9_-]{20,}$/.test(key)){showView("settings");toast("That does not look like an OpenAI API key.");return;}
 
   const isReview=job.mode==="telecaller-review";
-  const shouldNavigate=navigate&&!isReview;
+  const isParent=job.mode==="telecaller-review-parent";
+  const reviewOnly=Boolean(job.reviewOnly);
+  const shouldNavigate=navigate&&!isReview&&!isParent;
   const controller=new AbortController();
   controllers.set(job.id,controller);
   job.status="running";
@@ -341,24 +349,30 @@ async function runJob(job,{navigate=true}={}){
   job.leads=Array.isArray(job.leads)?job.leads:[];
   displayLogs=true;
   const concurrency=Math.min(MAX_CONCURRENCY,Math.max(1,Number(job.settings.concurrency)||1));
-  addLog(job,`Run started: live pool of ${concurrency} (next batch fires the instant one frees a slot), batch size ${job.settings.batchSize} leads, model ${job.settings.model}${isReview?`, review model ${job.settings.reviewModel||settings.reviewModel}`:""}, app ${APP_VERSION}. Checkpoints stay in order — later batches may finish API first and wait.`);
+  if(reviewOnly){
+    addLog(job,`Review-only pass: ${job.telecallerName||job.fileName} · ${job.results.length} audited rows · model ${job.settings.reviewModel||settings.reviewModel||"gpt-5-nano"} · app ${APP_VERSION}.`);
+  }else{
+    addLog(job,`Run started: live pool of ${concurrency} (next batch fires the instant one frees a slot), batch size ${job.settings.batchSize} leads, model ${job.settings.model}${isReview||isParent?`, review model ${job.settings.reviewModel||settings.reviewModel}`:""}, app ${APP_VERSION}. Checkpoints stay in order — later batches may finish API first and wait.`);
+  }
   await putJob(job);
   // Reviews: only paint Run Console when this job is already selected (parallel workers must not steal).
-  // Audits: allow switch when no active controller on the current console job.
-  if(currentJob?.id===job.id||(!isReview&&(!currentJob||!controllers.has(currentJob.id))))renderProgress(job);
+  // Audits/parents: allow switch when no active controller on the current console job.
+  if(currentJob?.id===job.id||((!isReview||isParent)&&(!currentJob||!controllers.has(currentJob.id))))renderProgress(job);
   if(shouldNavigate)showView("console");
-  if(isReview)scheduleReviewProgress();
+  if(isReview||isParent)scheduleReviewProgress();
 
   const batchSize=Math.max(1,Number(job.settings.batchSize)||1);
-  const leadGroups=groupCallRowsByLead(job.leads);
+  const leadGroups=reviewOnly?[]:groupCallRowsByLead(job.leads);
   const totalBatches=Math.ceil(leadGroups.length/batchSize);
   const pending=job.pendingBatches||{};
   // Full remaining work pre-queued; workers pull instantly when a slot frees.
   const queue=[];
-  for(let index=0;index<totalBatches;index++){
-    if(index<job.nextBatch)continue;
-    if(pending[String(index)])continue;
-    queue.push(index);
+  if(!reviewOnly){
+    for(let index=0;index<totalBatches;index++){
+      if(index<job.nextBatch)continue;
+      if(pending[String(index)])continue;
+      queue.push(index);
+    }
   }
 
   await flushPendingBatches(job);
@@ -375,7 +389,7 @@ async function runJob(job,{navigate=true}={}){
   let launched=0;
   const quietLogs=concurrency>=4;
 
-  const workers=Array.from({length:Math.min(concurrency,Math.max(queue.length,1))},async()=>{
+  const workers=reviewOnly?[]:Array.from({length:Math.min(concurrency,Math.max(queue.length,1))},async()=>{
     while(!fatalError&&!controller.signal.aborted){
       const index=queue.shift();
       if(index===undefined)return;
@@ -417,13 +431,14 @@ async function runJob(job,{navigate=true}={}){
     await Promise.allSettled(checkpointTasks);
     await flushPendingBatches(job);
     if(fatalError)throw fatalError;
-    if(job.nextBatch<totalBatches)throw new Error("Audit stopped before all batches finished. Resume to continue.");
+    if(!reviewOnly&&job.nextBatch<totalBatches)throw new Error("Audit stopped before all batches finished. Resume to continue.");
 
     if(isReview){
       if(!(job.reviewStatus==="completed"&&job.reviewText)){
+        if(!job.results.length)throw new Error("No audit results available for TeleCaller review.");
         job.status="reviewing";
         job.updatedAt=timestamp();
-        addLog(job,`Audit finished — starting TeleCaller review with ${job.settings.reviewModel||settings.reviewModel||"gpt-5-nano"}…`);
+        addLog(job,`${reviewOnly?"Starting":"Audit finished — starting"} TeleCaller review with ${job.settings.reviewModel||settings.reviewModel||"gpt-5-nano"}…`);
         await putJob(job);
         if(currentJob?.id===job.id)renderProgress(job);
         scheduleReviewProgress();
@@ -436,7 +451,7 @@ async function runJob(job,{navigate=true}={}){
           cached:number(job.reviewTokenUsage?.cached)+number(review.tokenUsage.cached),
           output:number(job.reviewTokenUsage?.output)+number(review.tokenUsage.output)
         };
-        // Also fold into tokenUsage for a single console cost number.
+        // Fold into tokenUsage for console totals; estimatedCost splits audit vs reviewPricing.
         job.tokenUsage.input+=review.tokenUsage.input;
         job.tokenUsage.cached+=review.tokenUsage.cached;
         job.tokenUsage.output+=review.tokenUsage.output;
@@ -446,16 +461,22 @@ async function runJob(job,{navigate=true}={}){
       }
     }
 
+    if(isParent){
+      addLog(job,"Combined audit complete — splitting results by TeleCaller for parallel reviews…","success");
+      await spawnCombinedReviewChildren(job);
+    }
+
     job.status="completed";
     job.pendingBatches={};
     stopClock(job);
     job.updatedAt=timestamp();
     const billable=Math.max(0,number(job.tokenUsage.input)-number(job.tokenUsage.cached));
-    addLog(job,`${isReview?"Review":"Audit"} complete in ${durationText(job.elapsedMs)}. Cost est. ${estimatedCost(job).toFixed(4)}. Cached ${number(job.tokenUsage.cached).toLocaleString()} · billable input ${billable.toLocaleString()} · output ${number(job.tokenUsage.output).toLocaleString()}.`,"success");
+    const label=isParent?"Combined audit":isReview?(reviewOnly?"Review":"Review"):"Audit";
+    addLog(job,`${label} complete in ${durationText(job.elapsedMs)}. Cost est. ${estimatedCost(job).toFixed(4)}. Cached ${number(job.tokenUsage.cached).toLocaleString()} · billable input ${billable.toLocaleString()} · output ${number(job.tokenUsage.output).toLocaleString()}.`,"success");
     await putJob(job);
     if(currentJob?.id===job.id)renderProgress(job);
-    if(isReview)scheduleReviewProgress();
-    toast(`${job.fileName}: ${isReview?"review":"audit"} complete.`);
+    if(isReview||isParent)scheduleReviewProgress();
+    toast(`${job.fileName}: ${isParent?"audit":isReview?"review":"audit"} complete.`);
   }catch(error){
     await Promise.allSettled(checkpointTasks);
     await flushPendingBatches(job).catch(()=>{});
@@ -472,7 +493,7 @@ async function runJob(job,{navigate=true}={}){
     job.updatedAt=timestamp();
     await putJob(job);
     if(currentJob?.id===job.id)renderProgress(job);
-    if(isReview)scheduleReviewProgress();
+    if(isReview||isParent)scheduleReviewProgress();
   }finally{
     clearPendingPersist(job.id);
     controllers.delete(job.id);
@@ -619,12 +640,47 @@ function preferredTelecallerName(file){
   return base||"Unknown";
 }
 
+function createCombinedParentJob(file){
+  return{
+    id:crypto.randomUUID(),
+    engineVersion:ENGINE_VERSION,
+    appVersion:APP_VERSION,
+    mode:"telecaller-review-parent",
+    fileName:file.fileName,
+    parentFileName:file.fileName,
+    sheetName:file.sheetName||"",
+    telecallerName:"Combined audit",
+    createdAt:timestamp(),
+    updatedAt:timestamp(),
+    status:"queued",
+    totalLeads:file.leads.length,
+    leadCount:file.leadCount||0,
+    callCount:file.callCount||file.leads.length,
+    latestDayCalls:file.latestDayCalls||file.leads.length,
+    rowCount:file.rowCount||0,
+    nextBatch:0,
+    pendingBatches:{},
+    leads:file.leads,
+    results:[],
+    logs:[],
+    tokenUsage:{input:0,cached:0,output:0},
+    reviewTokenUsage:{input:0,cached:0,output:0},
+    childReviewIds:[],
+    elapsedMs:0,
+    pricing:deepCopy(settings.pricing),
+    reviewPricing:deepCopy(settings.reviewPricing),
+    settings:deepCopy(settings)
+  };
+}
+
+/** Separate-file unit: audit then review for one workbook / telecaller. */
 function createReviewJob({fileName,parentFileName,sheetName,telecallerName,leads,leadCount,callCount,rowCount,latestDayCalls}){
   return{
     id:crypto.randomUUID(),
     engineVersion:ENGINE_VERSION,
     appVersion:APP_VERSION,
     mode:"telecaller-review",
+    reviewOnly:false,
     fileName,
     parentFileName:parentFileName||fileName,
     sheetName:sheetName||"",
@@ -653,6 +709,93 @@ function createReviewJob({fileName,parentFileName,sheetName,telecallerName,leads
   };
 }
 
+/** Post-audit child: review pass only — never re-audits. */
+function createReviewOnlyJob({parentJobId,parentFileName,sheetName,telecallerName,results,leads,leadCount,callCount}){
+  const rows=Array.isArray(results)?results:[];
+  return{
+    id:crypto.randomUUID(),
+    engineVersion:ENGINE_VERSION,
+    appVersion:APP_VERSION,
+    mode:"telecaller-review",
+    reviewOnly:true,
+    parentJobId:parentJobId||"",
+    fileName:`${parentFileName||"Review"} · ${telecallerName||"Unknown"}`,
+    parentFileName:parentFileName||"",
+    sheetName:sheetName||"",
+    telecallerName:telecallerName||"Unknown",
+    createdAt:timestamp(),
+    updatedAt:timestamp(),
+    status:"queued",
+    totalLeads:rows.length,
+    leadCount:leadCount||0,
+    callCount:callCount||rows.length,
+    latestDayCalls:rows.length,
+    rowCount:rows.length,
+    nextBatch:0,
+    pendingBatches:{},
+    leads:Array.isArray(leads)?leads:[],
+    results:rows,
+    logs:[],
+    tokenUsage:{input:0,cached:0,output:0},
+    reviewTokenUsage:{input:0,cached:0,output:0},
+    reviewText:"",
+    reviewStatus:"pending",
+    elapsedMs:0,
+    pricing:deepCopy(settings.pricing),
+    reviewPricing:deepCopy(settings.reviewPricing),
+    settings:deepCopy(settings)
+  };
+}
+
+/**
+ * After Combined parent audit: split results by telecaller, enqueue review-only children (max 10 parallel via drain).
+ */
+async function spawnCombinedReviewChildren(parentJob){
+  if(Array.isArray(parentJob.childReviewIds)&&parentJob.childReviewIds.length){
+    addLog(parentJob,`Review children already spawned (${parentJob.childReviewIds.length}) — re-queuing incomplete.`);
+    for(const id of parentJob.childReviewIds){
+      const child=await getJob(id);
+      if(child&&!(child.reviewStatus==="completed"&&child.reviewText)&&!controllers.has(child.id)){
+        if(!reviewQueue.some(item=>item.id===child.id))reviewQueue.push(child);
+        if(!reviewSessionIds.includes(child.id))reviewSessionIds.push(child.id);
+      }
+    }
+    saveReviewSessionIds();
+    scheduleReviewProgress();
+    drainReviewQueue();
+    return;
+  }
+  const splits=splitResultsByTelecaller(parentJob.results||[]);
+  if(!splits.length)throw new Error("Combined audit produced no TeleCaller groups to review.");
+  const leadSplits=splitLeadsByTelecaller(parentJob.leads||[]);
+  const leadsByName=new Map(leadSplits.map(item=>[item.telecallerName.toLowerCase(),item.leads]));
+  const children=[];
+  for(const split of splits){
+    const leads=leadsByName.get(String(split.telecallerName||"").toLowerCase())||[];
+    const child=createReviewOnlyJob({
+      parentJobId:parentJob.id,
+      parentFileName:parentJob.parentFileName||parentJob.fileName,
+      sheetName:parentJob.sheetName,
+      telecallerName:split.telecallerName,
+      results:split.results,
+      leads,
+      leadCount:split.leadCount,
+      callCount:split.callCount
+    });
+    await putJob(child);
+    children.push(child);
+    if(!reviewSessionIds.includes(child.id))reviewSessionIds.push(child.id);
+  }
+  parentJob.childReviewIds=children.map(child=>child.id);
+  parentJob.updatedAt=timestamp();
+  await putJob(parentJob);
+  saveReviewSessionIds();
+  reviewQueue.push(...children);
+  addLog(parentJob,`Queued ${children.length} TeleCaller review${children.length===1?"":"s"} (up to ${REVIEW_JOB_CONCURRENCY} in parallel).`);
+  scheduleReviewProgress();
+  drainReviewQueue();
+}
+
 function setReviewFormat(format){
   reviewFormat=format==="separate"?"separate":"combined";
   document.querySelectorAll("[data-review-format]").forEach(button=>{
@@ -660,7 +803,7 @@ function setReviewFormat(format){
   });
   if(els["review-drop-hint"]){
     els["review-drop-hint"].textContent=reviewFormat==="combined"
-      ?"Combined team export · XLSX, XLS or XLSM · split by Telecaller Name in the browser"
+      ?"Combined team export · audited once, then parallel TeleCaller reviews · XLSX, XLS or XLSM"
       :"One workbook per TeleCaller · add more while the queue runs · XLSX, XLS or XLSM";
   }
   if(els["review-file-input"])els["review-file-input"].multiple=reviewFormat==="separate";
@@ -737,7 +880,9 @@ function updateReviewValidation(){
       if(!splits.length)telecallerMissing=true;
       unknownBuckets+=splits.filter(item=>item.unknown).length;
       if((file.missingColumns||[]).some(label=>/telecaller/i.test(label)))telecallerMissing=true;
-      for(const split of splits)est+=estimateReviewRunSeconds(settings,split.leadCount,split.latestDayCalls);
+      // One full-file audit + one review pass per TeleCaller (no per-telecaller re-audit).
+      est+=estimateRunSeconds(settings,file.leadCount||0,file.latestDayCalls||file.leads?.length||0);
+      est+=splits.length*REVIEW_PASS_SECONDS;
     }else{
       est+=estimateReviewRunSeconds(settings,file.leadCount||0,file.latestDayCalls||file.leads?.length||0);
     }
@@ -855,34 +1000,20 @@ async function startReview(){
     }
     reviewSessionIds=[];
     reviewQueue=[];
-    const jobs=[];
-    for(const split of splits){
-      const job=createReviewJob({
-        fileName:`${file.fileName} · ${split.telecallerName}`,
-        parentFileName:file.fileName,
-        sheetName:file.sheetName,
-        telecallerName:split.telecallerName,
-        leads:split.leads,
-        leadCount:split.leadCount,
-        callCount:split.callCount,
-        rowCount:split.callCount,
-        latestDayCalls:split.latestDayCalls
-      });
-      await putJob(job);
-      jobs.push(job);
-      reviewSessionIds.push(job.id);
-    }
+    const parent=createCombinedParentJob(file);
+    await putJob(parent);
+    reviewSessionIds.push(parent.id);
     saveReviewSessionIds();
     reviewParsedFiles=[];
     renderReviewFileList();
     updateReviewValidation();
     if(els["review-file-input"])els["review-file-input"].value="";
     els["review-run-panel"]?.classList.remove("hidden");
-    currentJob=jobs[0];
-    renderProgress(jobs[0]);
+    currentJob=parent;
+    renderProgress(parent);
     scheduleReviewProgress();
-    // Stay on Review view — do not jump to Run console.
-    reviewQueue.push(...jobs);
+    // Audit entire file once; children spawn after audit (parallel reviews only).
+    reviewQueue.push(parent);
     drainReviewQueue();
     return;
   }
@@ -971,19 +1102,47 @@ async function renderReviewProgress(){
   }
   panel.classList.remove("hidden");
   cards.replaceChildren();
+  const parentJobs=jobs.filter(job=>job.mode==="telecaller-review-parent");
+  const reviewJobs=jobs.filter(job=>job.mode==="telecaller-review");
+  const tallyJobs=reviewJobs.length?reviewJobs:jobs;
   let totalLeads=0,totalCalls=0,totalDone=0,totalTarget=0,totalCost=0,totalEta=0;
   let completed=0;
+  // Prefer parent lead totals when present so Combined audit + children are not double-counted.
+  if(parentJobs.length){
+    for(const parent of parentJobs){
+      totalLeads+=uniqueLeadCount(parent)||0;
+      totalCalls+=Number(parent.callCount)||0;
+      totalDone+=auditedDoneCount(parent);
+      totalTarget+=parent.totalLeads||0;
+      totalCost+=estimatedCost(parent);
+      totalEta+=estimateRunSeconds(parent.settings||settings,uniqueLeadCount(parent),parent.totalLeads);
+    }
+    for(const job of reviewJobs){
+      totalCost+=estimatedCost(job);
+      totalEta+=job.reviewOnly?REVIEW_PASS_SECONDS:estimateReviewRunSeconds(job.settings||settings,uniqueLeadCount(job),job.totalLeads);
+      if(job.status==="completed"&&job.reviewText)completed++;
+    }
+  }else{
+    for(const job of tallyJobs){
+      totalLeads+=uniqueLeadCount(job)||0;
+      totalCalls+=Number(job.callCount)||0;
+      totalDone+=auditedDoneCount(job);
+      totalTarget+=job.totalLeads||0;
+      totalCost+=estimatedCost(job);
+      totalEta+=job.reviewOnly?REVIEW_PASS_SECONDS:estimateReviewRunSeconds(job.settings||settings,uniqueLeadCount(job),job.totalLeads);
+      if(job.status==="completed")completed++;
+    }
+  }
+
   for(const job of jobs){
     const done=auditedDoneCount(job);
     const target=job.totalLeads||0;
-    const pct=target?Math.round(Math.min(done,target)/target*100):job.status==="completed"?100:job.status==="reviewing"?99:0;
-    totalLeads+=uniqueLeadCount(job)||0;
-    totalCalls+=Number(job.callCount)||0;
-    totalDone+=done;
-    totalTarget+=target;
-    totalCost+=estimatedCost(job);
-    totalEta+=estimateReviewRunSeconds(job.settings||settings,uniqueLeadCount(job),job.totalLeads);
-    if(job.status==="completed")completed++;
+    const pct=job.reviewOnly
+      ?(job.status==="completed"?100:job.status==="reviewing"?70:job.status==="running"?40:job.reviewText?100:5)
+      :(target?Math.round(Math.min(done,target)/target*100):job.status==="completed"?100:job.status==="reviewing"?99:0);
+    const etaSeconds=job.mode==="telecaller-review-parent"
+      ?estimateRunSeconds(job.settings||settings,uniqueLeadCount(job),job.totalLeads)
+      :(job.reviewOnly?REVIEW_PASS_SECONDS:estimateReviewRunSeconds(job.settings||settings,uniqueLeadCount(job),job.totalLeads));
 
     const card=document.createElement("article");
     card.className="review-card";
@@ -993,7 +1152,9 @@ async function renderReviewProgress(){
     title.textContent=job.telecallerName||job.fileName;
     const status=document.createElement("span");
     status.className=`status ${job.status}`;
-    status.textContent=job.status==="reviewing"?"reviewing":job.status;
+    status.textContent=job.mode==="telecaller-review-parent"&&job.status==="completed"
+      ?"audit done"
+      :(job.status==="reviewing"?"reviewing":job.reviewOnly&&job.status==="running"?"reviewing":job.status);
     head.append(title,status);
     const track=document.createElement("div");
     track.className="progress-track";
@@ -1006,8 +1167,8 @@ async function renderReviewProgress(){
     const cells=[
       ["Leads",String(uniqueLeadCount(job)||"—")],
       ["Calls",job.callCount!=null?Number(job.callCount).toLocaleString():"—"],
-      ["Audited",target?`${done} / ${target}`:"—"],
-      ["ETA / Cost",`~${durationText(estimateReviewRunSeconds(job.settings||settings,uniqueLeadCount(job),job.totalLeads)*1000)} · ${estimatedCost(job).toFixed(4)}`]
+      [job.reviewOnly?"Rows":"Audited",target?`${done} / ${target}`:"—"],
+      ["ETA / Cost",`~${durationText(etaSeconds*1000)} · ${estimatedCost(job).toFixed(4)}`]
     ];
     for(const [label,value] of cells){
       const cell=document.createElement("div");
@@ -1026,8 +1187,12 @@ async function renderReviewProgress(){
     if(jobs.length>1){
       aggregate.classList.remove("hidden");
       aggregate.replaceChildren();
+      const teleTotal=reviewJobs.length||jobs.length;
+      const teleDone=reviewJobs.length
+        ?reviewJobs.filter(job=>job.status==="completed"&&job.reviewText).length
+        :completed;
       const items=[
-        ["TeleCallers",`${completed} / ${jobs.length}`],
+        ["TeleCallers",`${teleDone} / ${teleTotal}`],
         ["Leads",totalLeads.toLocaleString()],
         ["Audited",totalTarget?`${totalDone} / ${totalTarget}`:"—"],
         ["ETA / Cost",`~${durationText(totalEta*1000)} · ${totalCost.toFixed(4)}`]
@@ -1047,7 +1212,7 @@ async function renderReviewProgress(){
   }
 
   if(downloads){
-    const ready=jobs.filter(job=>job.status==="completed"&&job.reviewText);
+    const ready=jobs.filter(job=>job.mode==="telecaller-review"&&job.status==="completed"&&job.reviewText);
     const allDone=jobs.every(job=>["completed","failed"].includes(job.status))&&!reviewQueueRunning;
     if(ready.length&&allDone){
       downloads.classList.remove("hidden");
@@ -1068,7 +1233,8 @@ async function renderReviewProgress(){
 async function downloadReviewArtifact(artifact){
   try{
     const jobs=await getReviewSessionJobs();
-    const ready=jobs.filter(job=>job.status==="completed");
+    // Exclude combined parent audit — children hold per-telecaller reviewText + result subsets.
+    const ready=jobs.filter(job=>job.mode==="telecaller-review"&&job.status==="completed"&&(job.reviewText||job.results?.length));
     if(!ready.length){toast("No completed reviews yet.");return;}
     const live=collectSettings();
     settings=live;
@@ -1102,7 +1268,7 @@ async function renderHistory(){
     meta.className="history-meta";
     meta.textContent=legacy
       ?`${timeText(job.createdAt)} · previous engine result — upload the file and run it again for v2 rules.`
-      :`${timeText(job.createdAt)} · ${job.mode==="telecaller-review"?`Review · ${job.telecallerName||"TeleCaller"} · `:""}${uniqueLeadCount(job)} leads · ${job.callCount??job.rowCount??"—"} calls · ${auditedDoneCount(job)}/${job.totalLeads} audited · ${durationText(job.elapsedMs||0)} · cost ${estimatedCost(job).toFixed(4)} · cached ${number(job.tokenUsage?.cached).toLocaleString()}`;
+      :`${timeText(job.createdAt)} · ${job.mode==="telecaller-review"?`Review · ${job.telecallerName||"TeleCaller"} · `:job.mode==="telecaller-review-parent"?`Combined audit · `:""}${uniqueLeadCount(job)} leads · ${job.callCount??job.rowCount??"—"} calls · ${auditedDoneCount(job)}/${job.totalLeads} audited · ${durationText(job.elapsedMs||0)} · cost ${estimatedCost(job).toFixed(4)} · cached ${number(job.tokenUsage?.cached).toLocaleString()}`;
     info.append(title,document.createTextNode(" "),status,meta);
     actions.className="history-actions";
     const view=document.createElement("button");
@@ -1483,7 +1649,7 @@ els["start-audit"].onclick=startNew;
 els["pause-run"].onclick=async()=>{
   if(!currentJob)return;
   if(currentJob.status==="running"||currentJob.status==="reviewing")controllers.get(currentJob.id)?.abort();
-  else await runJob(await getJob(currentJob.id),{navigate:currentJob.mode!=="telecaller-review"});
+  else await runJob(await getJob(currentJob.id),{navigate:currentJob.mode!=="telecaller-review"&&currentJob.mode!=="telecaller-review-parent"});
 };
 els["download-result"].onclick=()=>currentJob&&download(currentJob);
 els["clear-console"].onclick=()=>{displayLogs=false;renderLogs(currentJob);};
