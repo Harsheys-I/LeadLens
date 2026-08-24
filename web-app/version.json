@@ -1,5 +1,5 @@
 {
-  "version": "2.6.5",
+  "version": "2.7.0",
   "name": "LeadLens",
-  "notes": "All-RNR+No must be <Warm; prior follow-up ±5min; 30min first talk; Follow-up Missed rename"
+  "notes": "Estimated run time; upload column-vs-settings check; new Connected Yes/No defaults; first-run API key onboarding + validation; friendlier requirement rule; batch max 20 / parallel max 50"
 }

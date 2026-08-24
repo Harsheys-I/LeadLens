@@ -7,9 +7,9 @@
   <meta name="description" content="Private, browser-based AI telecalling audit engine">
   <title>LeadLens Audit</title>
   <link rel="manifest" href="manifest.webmanifest">
-  <link rel="stylesheet" href="styles.css?v=2.6.5">
+  <link rel="stylesheet" href="styles.css?v=2.7.0">
   <script defer src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-  <script type="module" src="app.js?v=2.6.5"></script>
+  <script type="module" src="app.js?v=2.7.0"></script>
 </head>
 <body>
   <div id="update-banner" class="update-banner hidden" role="status">
@@ -52,7 +52,7 @@
         <div class="progress-panel">
           <div class="progress-copy"><strong id="progress-label">Waiting for a file</strong><span id="progress-percent">0%</span></div>
           <div class="progress-track"><div id="progress-bar" class="progress-bar"></div></div>
-          <div class="metrics"><div><span>Leads</span><strong id="metric-leads">—</strong></div><div><span>Calls</span><strong id="metric-calls">—</strong></div><div><span>Audited</span><strong id="metric-completed">—</strong></div><div><span>Batch</span><strong id="metric-batch">—</strong></div><div><span>Status</span><strong id="metric-status">Idle</strong></div><div><span>Input tokens</span><strong id="metric-input-tokens">—</strong></div><div><span>Cached input</span><strong id="metric-cached-tokens">—</strong></div><div><span>Output tokens</span><strong id="metric-output-tokens">—</strong></div><div><span>Run time</span><strong id="metric-duration">—</strong></div><div><span>Run cost</span><strong id="metric-cost">—</strong></div></div>
+          <div class="metrics"><div><span>Leads</span><strong id="metric-leads">—</strong></div><div><span>Calls</span><strong id="metric-calls">—</strong></div><div><span>Audited</span><strong id="metric-completed">—</strong></div><div><span>Batch</span><strong id="metric-batch">—</strong></div><div><span>Status</span><strong id="metric-status">Idle</strong></div><div><span>Input tokens</span><strong id="metric-input-tokens">—</strong></div><div><span>Cached input</span><strong id="metric-cached-tokens">—</strong></div><div><span>Output tokens</span><strong id="metric-output-tokens">—</strong></div><div><span>Run time</span><strong id="metric-duration">—</strong></div><div><span>Est. time</span><strong id="metric-eta">—</strong></div><div><span>Run cost</span><strong id="metric-cost">—</strong></div></div>
         </div>
         <div class="console-panel"><div class="panel-head"><div><span class="live-dot"></span><strong>Live log</strong></div><button id="clear-console" class="text-button">Clear view</button></div><div id="live-log" class="log-list"><div class="empty-state">Run activity will appear here.</div></div></div>
       </section>
@@ -85,10 +85,10 @@
             </form>
 
             <section class="settings-card">
-              <div class="card-title"><h2>2 · Run &amp; cost</h2><p>Applied to new audits. <strong>Batch size</strong> is leads per API request (project + mobile). Parallel batches keep multiple requests in flight; checkpoints still save in order.</p></div>
+              <div class="card-title"><h2>2 · Run &amp; cost</h2><p>Applied to new audits. <strong>Batch size</strong> is leads per API request (project + mobile), max 20. <strong>Parallel batches</strong> keep multiple requests in flight (max 50); checkpoints still save in order.</p></div>
               <div class="field-grid run-grid">
-                <label>Batch size (leads)<input id="batch-size" type="number" min="1" max="50" value="20"></label>
-                <label>Parallel batches<input id="concurrency" type="number" min="1" max="20" value="2"></label>
+                <label>Batch size (leads)<input id="batch-size" type="number" min="1" max="20" value="20"></label>
+                <label>Parallel batches<input id="concurrency" type="number" min="1" max="50" value="2"></label>
                 <label>Model<input id="model" type="text" value="gpt-4o-mini"></label>
               </div>
               <div class="field-grid pricing-grid settings-subgrid">
@@ -147,5 +147,20 @@
     </main>
   </div>
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+  <div id="key-modal" class="key-modal hidden" role="dialog" aria-modal="true" aria-labelledby="key-modal-title">
+    <div class="key-modal-card">
+      <p class="eyebrow">GET STARTED</p>
+      <h2 id="key-modal-title">Connect your OpenAI API key</h2>
+      <p class="key-modal-copy">LeadLens runs entirely in your browser. Your key is stored only on this device and sent only to OpenAI when you run an audit. We verify it works before saving — this check does not use any tokens.</p>
+      <label>API key<div class="input-row"><input id="onboard-key" type="password" autocomplete="off" placeholder="sk-…"><button id="onboard-toggle" type="button" class="secondary-button">Show</button></div></label>
+      <label class="check-row"><input id="onboard-remember" type="checkbox"><span>Remember on this device <small>Uses this browser's local storage. Leave off to keep the key only for this session.</small></span></label>
+      <div id="onboard-message" class="form-message" role="status"></div>
+      <div class="inline-actions">
+        <button id="onboard-save" type="button" class="primary-button">Validate &amp; save</button>
+        <button id="onboard-skip" type="button" class="text-button">I'll add it later</button>
+      </div>
+    </div>
+  </div>
 </body>
 </html>

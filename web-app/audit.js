@@ -1,6 +1,10 @@
-export const APP_VERSION = "2.6.5";
+export const APP_VERSION = "2.7.0";
 /** Bump when default AI rules / field defaults must refresh existing localStorage settings. */
-export const SETTINGS_SEED = 9;
+export const SETTINGS_SEED = 10;
+
+/** Settings limits — batch size is leads per request; concurrency is parallel requests. */
+export const MAX_BATCH_SIZE = 20;
+export const MAX_CONCURRENCY = 50;
 
 export const ERROR_TYPES = [
   "Comment displaying -ve, but Lead Status is +ve",
@@ -105,7 +109,7 @@ export const DEFAULT_RULES = [
   {field:"First talk SLA",instruction:`Inputs reg = Lead Registration DateTime, fu = FIRST Lead Update DateTime after near-duplicate filtering (oldest call, NOT the latest). Only when reg has a clock time AND falls between 09:30 and 17:00 inclusive: fu must be within 30 minutes after reg. If fu is missing, earlier than reg, or more than 30 minutes later → emit "${MISSED_30MIN_ERROR}". If reg is outside 09:30–17:00, or reg is date-only (no usable time), do nothing for this check.`,errors:MISSED_30MIN_ERROR},
   {field:"Prior follow-up timing",instruction:`Inputs u = THIS call's Lead Update DateTime, pn = previous call's Next Followup DateTime (empty if this is the first call). When pn is present and BOTH u and pn include HH:MM clock times: u must be within ±5 minutes of pn. If |u − pn| > 5 minutes → emit "${FOLLOWUP_TIMING_ERROR}". If pn is blank, or either value is date-only without usable time, skip the ±5min check (do not invent a match). Separately: if n (this call's Next Followup) is a past calendar date before today → emit "${FOLLOWUP_MISSED_ERROR}".`,errors:`${FOLLOWUP_TIMING_ERROR} | ${FOLLOWUP_MISSED_ERROR}`},
   {field:"Comment quality",instruction:"Score q strictly. q must reflect how well Comments capture the real telecaller–customer conversation (need, budget, location preference, objection, decision-maker, next step). One-word/CRM crumbs like visited/RNR/CNP/busy/followup = q 0-2 max. Generic connected notes without customer detail = q <=4. Only rich descriptive talk earns 8-10. When c is an array, score THIS call's latest comment (last entry), using earlier entries only as context.",errors:""},
-  {field:"Customer Requirement",instruction:`ONLY when k=Yes: rq must be a real customer requirement. Empty/placeholder (., -, **, NA) => "${EMPTY_REQUIREMENT}". Call jargon (RNR, Visited, etc.) => "${WRONG_REQUIREMENT}". If k is No or blank, NEVER emit those requirement errors.`,errors:`${EMPTY_REQUIREMENT} | ${WRONG_REQUIREMENT}`},
+  {field:"Customer Requirement",instruction:`Only review the Customer Requirement when the call actually connected (Connected / k = Yes). On a connected call, rq should describe what the customer genuinely wants — for example a home configuration (2BHK/3BHK/plot), a budget, a preferred location/locality, facing, or a possession timeline. If rq is blank or only a placeholder such as ".", "-", "**", "NA" or "nil", raise "${EMPTY_REQUIREMENT}". If rq instead holds call notes or jargon rather than a real need — for example RNR, CNP, Visited, Site visit, Busy, Follow-up, Callback, Interested/Not interested — raise "${WRONG_REQUIREMENT}". When the call did not connect (Connected / k = No or blank), leave the requirement alone and never raise either of these two errors.`,errors:`${EMPTY_REQUIREMENT} | ${WRONG_REQUIREMENT}`},
   {field:"AI Observation",instruction:"o is a QA judgment, NOT a rewrite of Comments. Forbidden: copying, lightly shortening, or paraphrasing c. Required: name what is missing/wrong/strong for audit (e.g. thin note, status too high for all-RNR/not-connected, missed first-talk SLA, update vs prior follow-up timing, missing budget on connected call). 18-28 words.",errors:""},
   {field:"AI Recommendation",instruction:"r must be a concrete telecaller coaching action: what to ask/capture/correct on the next call (fields, questions, status fix down/up the Prospect→Lost ladder, follow-up discipline). Not vague ('follow up', 'update remarks'). 20-40 words, specific to THIS call's gaps.",errors:""},
   {field:"Buying intent",instruction:"i=1 only for genuine positive purchase interest in THIS call's latest comment/status; else i=0. Earlier history alone does not set i=1 if the latest comment cooled. All-RNR / k=No ⇒ i=0.",errors:""}
@@ -113,7 +117,8 @@ export const DEFAULT_RULES = [
 export const DEFAULT_SETTINGS = {
   batchSize:20,concurrency:2,model:"gpt-4o-mini",
   inputFields:DEFAULT_INPUT_FIELDS,aiFields:DEFAULT_AI_FIELDS,outputFields:DEFAULT_OUTPUT_FIELDS,rules:DEFAULT_RULES,
-  yesValues:"yes, connected, call connected",noValues:"no, not connected, call not connected",
+  yesValues:"Booked In Other GPP Project, Booked in other project, Channel Partner Enquiry, Cross Pitched to Other GPP Project, Didnt Disclose, Immediate Possession, In Progress, Inventory Issue, Investment, Location Mismatch, Looking for commercial property, Not Interested, Plan Dropped, Pre Launch, Price mismatch, Property Mismatch, Site Visited",
+  noValues:"1st RNR, 2nd RNR, 3rd RNR, Call Disconnected, Continues RNR, Duplicate Lead, Junk Lead, Marketing Enquiry, RNR, Re-Open, Wrong Number",
   additionalInstructions:"",
   sort:{field:"callDate",direction:"asc"},
   pricing:{input:0,cached:0,output:0}
@@ -121,7 +126,7 @@ export const DEFAULT_SETTINGS = {
 
 /* Large stable prefix FIRST so OpenAI prompt caching can activate (>=1024 tokens;
    some models need closer to 2048). Run-specific rules come after; lead data last. */
-const CACHE_HANDBOOK = `LeadLens QA v2.6.5 — stable cacheable auditor handbook. Evidence only. Never invent facts, dates, budgets, locations, or prior calls.
+const CACHE_HANDBOOK = `LeadLens QA v2.7.0 — stable cacheable auditor handbook. Evidence only. Never invent facts, dates, budgets, locations, or prior calls.
 
 PURPOSE
 You audit Indian real-estate telecalling follow-up notes. Judge only the supplied fields for THIS call id. Optional day[] lists sibling calls on the same latest calendar day — context only; still return one result for THIS id.
@@ -473,6 +478,9 @@ export function normalizeSettings(saved={}){
     const dayCount=merged.outputFields.find(field=>field.id==="dayCallCount");
     if(dayCount)dayCount.label="Calls on Latest Day";
     if(merged.sort?.field==="dayCallIndex")merged.sort.field="callDate";
+    // Refresh Connected Yes/No disposition lists to the shipped defaults on seed bumps.
+    merged.yesValues=DEFAULT_SETTINGS.yesValues;
+    merged.noValues=DEFAULT_SETTINGS.noValues;
   }
   // Comments history is required for trajectory checks — always on.
   const commentsField=merged.aiFields.find(field=>field.id==="comments");
@@ -485,12 +493,62 @@ export function normalizeSettings(saved={}){
   if(!merged.outputFields.some(field=>field.id===merged.sort.field)||merged.sort.field==="dayCallIndex")merged.sort.field="callDate";
   merged.sort.direction=merged.sort.direction==="desc"?"desc":"asc";
   const concurrency=Number(merged.concurrency);
-  merged.concurrency=Number.isInteger(concurrency)?Math.min(20,Math.max(1,concurrency)):DEFAULT_SETTINGS.concurrency;
+  merged.concurrency=Number.isInteger(concurrency)?Math.min(MAX_CONCURRENCY,Math.max(1,concurrency)):DEFAULT_SETTINGS.concurrency;
   const batchSize=Number(merged.batchSize);
-  merged.batchSize=Number.isInteger(batchSize)?Math.min(50,Math.max(1,batchSize)):DEFAULT_SETTINGS.batchSize;
+  merged.batchSize=Number.isInteger(batchSize)?Math.min(MAX_BATCH_SIZE,Math.max(1,batchSize)):DEFAULT_SETTINGS.batchSize;
   const maps=buildErrorMaps(merged);
   merged.rules=normalizeRuleErrors(merged.rules,maps);
   return merged;
+}
+
+/**
+ * Rough estimate of total run seconds. Considers batch size + parallel batches
+ * (how many API rounds are needed) and the number of leads / audited calls
+ * (how heavy each round is). Returns 0 when there is nothing to audit.
+ */
+const RUN_BASE_SECONDS_PER_BATCH=6;   // model + network latency per request
+const RUN_SECONDS_PER_AUDIT=1.2;      // marginal cost per audited call inside a batch
+export function estimateRunSeconds(rawSettings,leadCount,auditCount){
+  const settings=normalizeSettings(rawSettings);
+  const leads=Math.max(0,Math.floor(Number(leadCount)||0));
+  if(!leads)return 0;
+  const audits=Math.max(leads,Math.floor(Number(auditCount)||0)||leads);
+  const batchSize=Math.max(1,Number(settings.batchSize)||1);
+  const concurrency=Math.max(1,Number(settings.concurrency)||1);
+  const batches=Math.ceil(leads/batchSize);
+  const rounds=Math.ceil(batches/concurrency);
+  const auditsPerBatch=audits/batches;
+  const secondsPerBatch=RUN_BASE_SECONDS_PER_BATCH+RUN_SECONDS_PER_AUDIT*auditsPerBatch;
+  return Math.max(1,Math.round(rounds*secondsPerBatch));
+}
+
+/**
+ * Validate an OpenAI key WITHOUT spending tokens by listing models (a free GET).
+ * A 200 confirms the key is real and active; 401/403 mean invalid/unauthorized.
+ * OpenAI does not expose a plain balance endpoint, so an insufficient-quota state
+ * only surfaces at audit time — this still catches the common "bad/expired key" case.
+ */
+export async function validateApiKey(key,signal){
+  const trimmed=String(key||"").trim();
+  if(!trimmed)return{ok:false,reason:"empty",message:"Enter an OpenAI API key."};
+  if(!/^sk-[A-Za-z0-9_-]{20,}$/.test(trimmed))return{ok:false,reason:"format",message:"That does not look like an OpenAI API key (it should start with \"sk-\")."};
+  try{
+    const response=await fetch("https://api.openai.com/v1/models",{
+      method:"GET",
+      headers:{"Authorization":`Bearer ${trimmed}`},
+      signal
+    });
+    if(response.ok)return{ok:true,message:"Key is valid and active."};
+    let detail="";
+    try{detail=(await response.json())?.error?.message||"";}catch{/* ignore */}
+    if(response.status===401)return{ok:false,reason:"unauthorized",status:401,message:detail||"Invalid API key — OpenAI rejected it (401)."};
+    if(response.status===403)return{ok:false,reason:"forbidden",status:403,message:detail||"This key is not authorized (403)."};
+    if(response.status===429)return{ok:false,reason:"quota",status:429,message:detail||"Key reached a rate/quota limit (429). It may have no remaining balance."};
+    return{ok:false,reason:"http",status:response.status,message:detail||`OpenAI returned ${response.status}.`};
+  }catch(error){
+    if(error?.name==="AbortError")return{ok:false,reason:"aborted",message:"Key check cancelled."};
+    return{ok:false,reason:"network",message:"Could not reach OpenAI to verify the key. Check the internet connection and try again."};
+  }
 }
 
 function parseDate(value){
@@ -659,7 +717,7 @@ export function parseWorkbook(arrayBuffer,rawSettings=DEFAULT_SETTINGS){
   const settings=normalizeSettings(rawSettings),workbook=XLSX.read(arrayBuffer,{type:"array",cellDates:true});
   const candidates=workbook.SheetNames.map(name=>{
     const rows=XLSX.utils.sheet_to_json(workbook.Sheets[name],{defval:"",raw:true}),headers=rows.length?Object.keys(rows[0]):[],columns=fieldColumns(headers,settings.inputFields);
-    return{name,rows,columns,score:Object.values(columns).filter(Boolean).length};
+    return{name,rows,headers,columns,score:Object.values(columns).filter(Boolean).length};
   }).sort((a,b)=>b.score-a.score),selected=candidates[0];
   if(!selected?.columns.mobile||!selected?.columns.project)throw new Error("No sheet contains both Mobile and Project Name. Edit their aliases in Settings if your headers use different names.");
   const grouped=new Map();let lastMobile="",lastProject="",invalidRows=0;
@@ -766,6 +824,19 @@ export function parseWorkbook(arrayBuffer,rawSettings=DEFAULT_SETTINGS){
     });
   }
   if(!leads.length)throw new Error("No valid Indian mobile numbers were found. Only 10-digit Indian mobiles starting with 6, 7, 8 or 9 are processed.");
+  // Compare the chosen sheet's headers against the enabled Settings fields so the UI
+  // can warn when the uploaded file does not match the configured columns.
+  const enabledFields=settings.inputFields.filter(field=>field.required||field.enabled!==false);
+  const expectedColumns=enabledFields.map(field=>({
+    id:field.id,
+    label:field.label,
+    required:Boolean(field.required),
+    header:selected.columns[field.id]||"",
+    matched:Boolean(selected.columns[field.id])
+  }));
+  const missingColumns=expectedColumns.filter(column=>!column.matched).map(column=>column.label);
+  const matchedHeaderKeys=new Set(Object.values(selected.columns).filter(Boolean).map(header=>norm(header)));
+  const unknownHeaders=(selected.headers||[]).filter(header=>clean(header)&&!matchedHeaderKeys.has(norm(header)));
   return{
     sheetName:selected.name,
     leads,
@@ -774,7 +845,10 @@ export function parseWorkbook(arrayBuffer,rawSettings=DEFAULT_SETTINGS){
     callCount:selected.rows.length,
     latestDayCalls:leads.length,
     invalidRows,
-    dedupedRows
+    dedupedRows,
+    expectedColumns,
+    missingColumns,
+    unknownHeaders
   };
 }
 
