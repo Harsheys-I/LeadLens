@@ -61,3 +61,19 @@ body .metrics div:nth-child(5n){border-right:0}
   body .metrics div{border-right:0}
   body .job-switch{flex-direction:column;align-items:stretch}
 }
+body .validation{display:grid;gap:6px}
+body .validation.warn{background:#fdf1e0;color:#8a531a;border:1px solid #f0d9b5}
+body .validation .validation-note{font-size:12px;line-height:1.5;font-weight:500}
+body .key-modal{position:fixed;inset:0;z-index:40;display:flex;align-items:center;justify-content:center;padding:22px;background:rgba(17,33,29,.55);backdrop-filter:blur(4px)}
+body .key-modal.hidden{display:none!important}
+body .key-modal-card{width:100%;max-width:520px;background:var(--panel);border:1px solid var(--line);border-radius:16px;box-shadow:0 24px 60px rgba(23,33,29,.28);padding:28px}
+body .key-modal-card h2{font-family:Georgia,serif;font-weight:500;margin:6px 0 10px;font-size:26px}
+body .key-modal-card .key-modal-copy{margin:0 0 16px;color:var(--muted);font-size:14px;line-height:1.6}
+body .key-modal-card label{display:grid;gap:7px;margin:14px 0;font-size:13px;font-weight:650}
+body .key-modal-card input[type="password"],body .key-modal-card input[type="text"]{width:100%;border:1px solid #cfd8d2;border-radius:9px;background:#fff;padding:10px 11px;color:var(--ink)}
+body .key-modal-card .input-row input{flex:1;min-width:0}
+body .key-modal-card .check-row{display:flex!important;align-items:flex-start;gap:10px}
+body .key-modal-card .check-row input{width:auto}
+body .key-modal-card .check-row small{display:block;color:var(--muted);font-weight:400;margin-top:3px}
+body .key-modal-card .inline-actions{margin-top:16px}
+body .key-modal-card .form-message{min-height:18px}

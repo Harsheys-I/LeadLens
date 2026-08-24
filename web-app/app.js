@@ -1,8 +1,8 @@
-import {APP_VERSION,DEFAULT_SETTINGS,DEFAULT_OUTPUT_FIELDS,SETTINGS_SEED,normalizeSettings,normalizeInputFields,slugFieldId,parseWorkbook,auditBatch,downloadWorkbook} from "./audit.js?v=2.6.5";
-import {putJob,getJob,getJobs,deleteJob,clearJobs,loadSettings,saveSettings,getApiKey,apiKeyIsRemembered,saveApiKey,forgetApiKey} from "./db.js?v=2.6.5";
+import {APP_VERSION,DEFAULT_SETTINGS,DEFAULT_OUTPUT_FIELDS,SETTINGS_SEED,MAX_BATCH_SIZE,MAX_CONCURRENCY,normalizeSettings,normalizeInputFields,slugFieldId,parseWorkbook,auditBatch,downloadWorkbook,estimateRunSeconds,validateApiKey} from "./audit.js?v=2.7.0";
+import {putJob,getJob,getJobs,deleteJob,clearJobs,loadSettings,saveSettings,getApiKey,apiKeyIsRemembered,saveApiKey,forgetApiKey} from "./db.js?v=2.7.0";
 
 const $=id=>document.getElementById(id);
-const ids=["file-input","drop-zone","file-list","validation","start-audit","page-title","key-state","run-name","pause-run","download-result","progress-label","progress-percent","progress-bar","metric-leads","metric-excel-rows","metric-calls","metric-batch","metric-completed","metric-status","metric-input-tokens","metric-cached-tokens","metric-output-tokens","metric-duration","metric-cost","live-log","clear-console","history-list","clear-history","api-key","remember-key","toggle-key","save-key","forget-key","key-message","batch-size","concurrency","model","input-field-config","add-input-field","ai-field-config","rule-config","add-rule","output-field-config","yes-values","no-values","additional-instructions","input-price","cached-price","output-price","save-settings","reset-settings","settings-message","toast","mobile-menu","active-job-switch","sort-field","sort-direction","app-version","export-settings","import-settings","import-settings-file","update-banner","update-banner-text","reload-app"];
+const ids=["file-input","drop-zone","file-list","validation","start-audit","page-title","key-state","run-name","pause-run","download-result","progress-label","progress-percent","progress-bar","metric-leads","metric-excel-rows","metric-calls","metric-batch","metric-completed","metric-status","metric-input-tokens","metric-cached-tokens","metric-output-tokens","metric-duration","metric-eta","metric-cost","live-log","clear-console","history-list","clear-history","api-key","remember-key","toggle-key","save-key","forget-key","key-message","batch-size","concurrency","model","input-field-config","add-input-field","ai-field-config","rule-config","add-rule","output-field-config","yes-values","no-values","additional-instructions","input-price","cached-price","output-price","save-settings","reset-settings","settings-message","toast","mobile-menu","active-job-switch","sort-field","sort-direction","app-version","export-settings","import-settings","import-settings-file","update-banner","update-banner-text","reload-app","key-modal","onboard-key","onboard-toggle","onboard-remember","onboard-message","onboard-save","onboard-skip"];
 const els=Object.fromEntries(ids.map(id=>[id,$(id)]));
 const titles={new:"New audit",console:"Run console",history:"History",settings:"Settings"};
 const ENGINE_VERSION="latest-day-v7";
@@ -33,6 +33,39 @@ function showView(name){
 }
 function toast(message){els.toast.textContent=message;els.toast.classList.add("show");clearTimeout(toast.timer);toast.timer=setTimeout(()=>els.toast.classList.remove("show"),3200);}
 function updateKeyState(){const ready=Boolean(getApiKey());els["key-state"].textContent=ready?"API key ready":"API key not set";els["key-state"].classList.toggle("ready",ready);}
+// Only hard-block a save for these; soft failures (network/quota/other) still save with a caution.
+const BLOCK_KEY_REASONS=new Set(["empty","format","unauthorized","forbidden"]);
+async function validateAndSaveKey(key,remember,messageEl,buttonEl){
+  const trimmed=(key||"").trim();
+  if(!trimmed){if(messageEl)messageEl.textContent="Enter a key.";return false;}
+  if(buttonEl)buttonEl.disabled=true;
+  if(messageEl)messageEl.textContent="Checking key with OpenAI (no tokens used)…";
+  const result=await validateApiKey(trimmed);
+  if(buttonEl)buttonEl.disabled=false;
+  if(!result.ok&&BLOCK_KEY_REASONS.has(result.reason)){
+    if(messageEl)messageEl.textContent=result.message;
+    return false;
+  }
+  saveApiKey(trimmed,Boolean(remember));
+  updateKeyState();
+  if(messageEl){
+    const where=remember?"Saved on this device.":"Saved for this session.";
+    messageEl.textContent=result.ok?`${result.message} ${where}`:`${result.message} Saved anyway — ${where}`;
+  }
+  return true;
+}
+function openKeyModal(){
+  if(!els["key-modal"])return;
+  els["onboard-key"].value="";
+  els["onboard-remember"].checked=false;
+  els["onboard-message"].textContent="";
+  els["onboard-key"].type="password";
+  if(els["onboard-toggle"])els["onboard-toggle"].textContent="Show";
+  els["key-modal"].classList.remove("hidden");
+  setTimeout(()=>els["onboard-key"]?.focus(),60);
+}
+function closeKeyModal(){els["key-modal"]?.classList.add("hidden");}
+function maybePromptForApiKey(){if(!getApiKey())openKeyModal();}
 function timeText(iso){return new Intl.DateTimeFormat(undefined,{dateStyle:"medium",timeStyle:"short"}).format(new Date(iso));}
 function addLog(job,message,level="info"){
   job.logs=job.logs||[];
@@ -121,6 +154,10 @@ function renderProgress(job){
   els["metric-cached-tokens"].textContent=number(usage.cached).toLocaleString();
   els["metric-output-tokens"].textContent=number(usage.output).toLocaleString();
   els["metric-duration"].textContent=durationText(elapsed(job));
+  if(els["metric-eta"]){
+    const est=estimateRunSeconds(job.settings||settings,uniqueLeadCount(job),job.totalLeads);
+    els["metric-eta"].textContent=est?`~${durationText(est*1000)}`:"—";
+  }
   els["metric-cost"].textContent=estimatedCost(job).toFixed(4);
   els["pause-run"].disabled=!(["running","paused","failed"].includes(job.status));
   els["pause-run"].textContent=job.status==="running"?"Pause":"Resume";
@@ -261,7 +298,7 @@ async function runJob(job){
   job.elapsedMs=job.elapsedMs||0;
   job.pendingBatches=job.pendingBatches||{};
   displayLogs=true;
-  const concurrency=Math.min(20,Math.max(1,Number(job.settings.concurrency)||1));
+  const concurrency=Math.min(MAX_CONCURRENCY,Math.max(1,Number(job.settings.concurrency)||1));
   addLog(job,`Run started: live pool of ${concurrency} (next batch fires the instant one frees a slot), batch size ${job.settings.batchSize} leads, model ${job.settings.model}, app ${APP_VERSION}. Checkpoints stay in order — later batches may finish API first and wait.`);
   await putJob(job);
   if(!currentJob||currentJob.id===job.id||!controllers.has(currentJob.id))renderProgress(job);
@@ -395,18 +432,34 @@ function renderFileList(){
 
 function updateValidationSummary(){
   const box=els.validation;
-  if(!parsedFiles.length){box.classList.add("hidden");box.textContent="";return;}
-  box.classList.remove("hidden");
-  box.className="validation";
-  if(parsedFiles.length===1){
-    const file=parsedFiles[0];
-    box.textContent=`${(file.leadCount??0).toLocaleString()} leads · ${(file.callCount??file.rowCount??0).toLocaleString()} calls · ${(file.latestDayCalls??file.leads.length).toLocaleString()} audited`;
-    return;
-  }
+  box.replaceChildren();
+  if(!parsedFiles.length){box.className="validation hidden";return;}
   const leads=parsedFiles.reduce((sum,file)=>sum+(file.leadCount||0),0);
   const calls=parsedFiles.reduce((sum,file)=>sum+(file.callCount||file.rowCount||0),0);
   const latest=parsedFiles.reduce((sum,file)=>sum+(file.latestDayCalls||file.leads?.length||0),0);
-  box.textContent=`${parsedFiles.length} files · ${leads.toLocaleString()} leads · ${calls.toLocaleString()} calls · ${latest.toLocaleString()} audited`;
+  const estSeconds=parsedFiles.reduce((sum,file)=>sum+estimateRunSeconds(settings,file.leadCount||0,file.latestDayCalls||file.leads?.length||0),0);
+  const summary=document.createElement("div");
+  const prefix=parsedFiles.length>1?`${parsedFiles.length} files · `:"";
+  summary.textContent=`${prefix}${leads.toLocaleString()} leads · ${calls.toLocaleString()} calls · ${latest.toLocaleString()} audited · ~${durationText(estSeconds*1000)} estimated`;
+  box.append(summary);
+  // Compare uploaded columns against the enabled Settings fields.
+  const missing=new Set(),unknown=new Set();
+  for(const file of parsedFiles){
+    for(const label of file.missingColumns||[])missing.add(label);
+    for(const header of file.unknownHeaders||[])unknown.add(header);
+  }
+  if(missing.size||unknown.size){
+    box.className="validation warn";
+    const note=document.createElement("div");
+    note.className="validation-note";
+    const parts=[];
+    if(missing.size)parts.push(`Missing from the file for your enabled Settings columns: ${[...missing].join(", ")}.`);
+    if(unknown.size)parts.push(`In the file but not mapped to any Settings column: ${[...unknown].join(", ")}.`);
+    note.textContent=`Column check — ${parts.join(" ")} Adjust aliases in Settings if headers differ.`;
+    box.append(note);
+  }else{
+    box.className="validation";
+  }
 }
 
 async function handleFiles(fileList){
@@ -850,14 +903,15 @@ els["clear-history"].onclick=async()=>{
   }
 };
 els["toggle-key"].onclick=()=>{const hidden=els["api-key"].type==="password";els["api-key"].type=hidden?"text":"password";els["toggle-key"].textContent=hidden?"Hide":"Show";};
-els["save-key"].onclick=()=>{
-  const key=els["api-key"].value.trim();
-  if(!key){els["key-message"].textContent="Enter a key.";return;}
-  saveApiKey(key,els["remember-key"].checked);
-  els["key-message"].textContent=els["remember-key"].checked?"Saved on this device.":"Saved for this browser session.";
-  updateKeyState();
-};
+els["save-key"].onclick=()=>validateAndSaveKey(els["api-key"].value,els["remember-key"].checked,els["key-message"],els["save-key"]);
 els["forget-key"].onclick=()=>{forgetApiKey();els["api-key"].value="";els["remember-key"].checked=false;els["key-message"].textContent="Key removed.";updateKeyState();};
+els["onboard-toggle"]?.addEventListener("click",()=>{const hidden=els["onboard-key"].type==="password";els["onboard-key"].type=hidden?"text":"password";els["onboard-toggle"].textContent=hidden?"Hide":"Show";});
+els["onboard-save"]?.addEventListener("click",async()=>{
+  const saved=await validateAndSaveKey(els["onboard-key"].value,els["onboard-remember"].checked,els["onboard-message"],els["onboard-save"]);
+  if(saved){closeKeyModal();toast("OpenAI key saved.");}
+});
+els["onboard-key"]?.addEventListener("keydown",event=>{if(event.key==="Enter"){event.preventDefault();els["onboard-save"].click();}});
+els["onboard-skip"]?.addEventListener("click",()=>{closeKeyModal();toast("You can add your API key any time in Settings.");});
 els["add-rule"].onclick=()=>{settings=collectSettings();settings.rules.push({field:"Comments",instruction:"",errors:""});renderRules();};
 els["add-input-field"].onclick=()=>{
   settings=collectSettings();
@@ -871,9 +925,13 @@ els["add-input-field"].onclick=()=>{
   renderSortFields();
 };
 els["save-settings"].onclick=()=>{
+  // Validate the raw inputs first — collectSettings() clamps to the limits, which
+  // would otherwise hide out-of-range values from the checks below.
+  const rawBatch=Number(els["batch-size"].value);
+  const rawConcurrency=Number(els.concurrency.value);
+  if(!Number.isInteger(rawBatch)||rawBatch<1||rawBatch>MAX_BATCH_SIZE){els["settings-message"].textContent=`Batch size must be 1–${MAX_BATCH_SIZE}.`;return;}
+  if(!Number.isInteger(rawConcurrency)||rawConcurrency<1||rawConcurrency>MAX_CONCURRENCY){els["settings-message"].textContent=`Parallel batches must be 1–${MAX_CONCURRENCY}.`;return;}
   const next=collectSettings();
-  if(!Number.isInteger(next.batchSize)||next.batchSize<1||next.batchSize>50){els["settings-message"].textContent="Batch size must be 1–50.";return;}
-  if(!Number.isInteger(next.concurrency)||next.concurrency<1||next.concurrency>20){els["settings-message"].textContent="Parallel batches must be 1–20.";return;}
   if(!next.model){els["settings-message"].textContent="Enter a model name.";return;}
   if(!next.outputFields.some(field=>field.enabled)){els["settings-message"].textContent="Select at least one output Excel field.";return;}
   settings=next;
@@ -920,6 +978,7 @@ renderSettings();
 renderHistory();
 restoreFromStorage();
 checkForUpdate();
+maybePromptForApiKey();
 setInterval(()=>{if(currentJob?.status==="running")renderProgress(currentJob);},1000);
 setInterval(checkForUpdate,5*60*1000);
 // Do not re-register a service worker — it only caused sticky "update" banners.
