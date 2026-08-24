@@ -1,5 +1,5 @@
 {
-  "version": "2.6.0",
+  "version": "2.6.3",
   "name": "LeadLens",
-  "notes": "Smarter history status + 30min first-talk SLA; progress moves on any API response; Leads/Calls/Audited metrics"
+  "notes": "Export: stop merging sort column so Mobile/Project stay on every call row"
 }

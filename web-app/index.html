@@ -7,9 +7,9 @@
   <meta name="description" content="Private, browser-based AI telecalling audit engine">
   <title>LeadLens Audit</title>
   <link rel="manifest" href="manifest.webmanifest">
-  <link rel="stylesheet" href="styles.css?v=2.6.0">
+  <link rel="stylesheet" href="styles.css?v=2.6.3">
   <script defer src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-  <script type="module" src="app.js?v=2.6.0"></script>
+  <script type="module" src="app.js?v=2.6.3"></script>
 </head>
 <body>
   <div id="update-banner" class="update-banner hidden" role="status">
@@ -128,7 +128,7 @@
                 <label>Sort by<select id="sort-field"></select></label>
                 <label>Order<select id="sort-direction"><option value="asc">Ascending (A→Z, oldest first)</option><option value="desc">Descending (Z→A, newest first)</option></select></label>
               </div>
-              <p class="hint-copy">Dates (Lead Update Date / Lead Registration / Next Followup) sort chronologically. Default sort is Lead Update Date ascending. Filename includes the active sort. Sort column is exported first.</p>
+              <p class="hint-copy">Dates (Lead Update Date / Lead Registration / Next Followup) sort chronologically. Default sort is Lead Update Date ascending. Filename includes the active sort. Sort column is exported first. Each audited call is a full row (Mobile and Project are never blanked by merges).</p>
             </section>
 
             <section class="settings-card">

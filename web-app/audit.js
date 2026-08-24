@@ -1,4 +1,4 @@
-export const APP_VERSION = "2.6.0";
+export const APP_VERSION = "2.6.3";
 /** Bump when default AI rules / field defaults must refresh existing localStorage settings. */
 export const SETTINGS_SEED = 7;
 
@@ -954,21 +954,11 @@ export function downloadWorkbook(job,currentSettings){
   const fields=selectedOutputFields(settings);
   if(!fields.length)throw new Error("Select at least one output field in Settings.");
   const rows=sortResults(job.results||[],settings);
+  // Every audited call row stays self-contained (Mobile + Project on every row).
+  // Merging the sort column blanked follow-up rows and looked like broken lead splits.
   const data=rows.map(row=>Object.fromEntries(fields.map(field=>[field.label,row[field.id]??""])));
   const sheet=XLSX.utils.json_to_sheet(data,{header:fields.map(field=>field.label)});
   sheet["!cols"]=fields.map(field=>({wch:Math.min(48,Math.max(14,field.label.length+2,...data.slice(0,100).map(row=>String(row[field.label]??"").length+2)))}));
-  // Only merge adjacent cells for the active sort column (so sort order stays visible).
-  const mergeField=fields.find(field=>field.id===settings.sort.field);
-  if(mergeField){
-    const key=mergeField.label,col=fields.findIndex(field=>field.id===mergeField.id);
-    let start=0;
-    for(let i=1;i<=data.length;i++){
-      if(i===data.length||data[i][key]!==data[start][key]){
-        if(i-start>1){sheet["!merges"]=sheet["!merges"]||[];sheet["!merges"].push({s:{r:start+1,c:col},e:{r:i,c:col}});}
-        start=i;
-      }
-    }
-  }
   const book=XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(book,sheet,"Audit Data");
   const stamp=new Date().toISOString().slice(0,19).replace(/[:T]/g,"-");
