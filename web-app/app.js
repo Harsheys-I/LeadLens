@@ -925,9 +925,13 @@ els["add-input-field"].onclick=()=>{
   renderSortFields();
 };
 els["save-settings"].onclick=()=>{
+  // Validate the raw inputs first — collectSettings() clamps to the limits, which
+  // would otherwise hide out-of-range values from the checks below.
+  const rawBatch=Number(els["batch-size"].value);
+  const rawConcurrency=Number(els.concurrency.value);
+  if(!Number.isInteger(rawBatch)||rawBatch<1||rawBatch>MAX_BATCH_SIZE){els["settings-message"].textContent=`Batch size must be 1–${MAX_BATCH_SIZE}.`;return;}
+  if(!Number.isInteger(rawConcurrency)||rawConcurrency<1||rawConcurrency>MAX_CONCURRENCY){els["settings-message"].textContent=`Parallel batches must be 1–${MAX_CONCURRENCY}.`;return;}
   const next=collectSettings();
-  if(!Number.isInteger(next.batchSize)||next.batchSize<1||next.batchSize>MAX_BATCH_SIZE){els["settings-message"].textContent=`Batch size must be 1–${MAX_BATCH_SIZE}.`;return;}
-  if(!Number.isInteger(next.concurrency)||next.concurrency<1||next.concurrency>MAX_CONCURRENCY){els["settings-message"].textContent=`Parallel batches must be 1–${MAX_CONCURRENCY}.`;return;}
   if(!next.model){els["settings-message"].textContent="Enter a model name.";return;}
   if(!next.outputFields.some(field=>field.enabled)){els["settings-message"].textContent="Select at least one output Excel field.";return;}
   settings=next;
