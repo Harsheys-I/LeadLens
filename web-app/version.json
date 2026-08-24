@@ -1,5 +1,5 @@
 ﻿{
-  "version": "3.5.1",
+  "version": "3.5.2",
   "name": "LeadLens",
-  "notes": "TeleCaller Review: aggregate progress + downloads (no per-TeleCaller cards)."
+  "notes": "Excel dashboard: slicer-synced charts, date-only registration, accuracy % formatting."
 }
