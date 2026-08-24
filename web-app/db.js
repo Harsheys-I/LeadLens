@@ -13,11 +13,21 @@ function openDb() {
 async function transact(mode, action) {
   const db = await openDb();
   return new Promise((resolve, reject) => {
+    let settled = false;
+    const finish = (fn, value) => {
+      if (settled) return;
+      settled = true;
+      try { db.close(); } catch { /* already closing */ }
+      fn(value);
+    };
     const tx = db.transaction(STORE, mode);
+    let result;
     const request = action(tx.objectStore(STORE));
-    request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error);
-    tx.oncomplete = () => db.close();
+    request.onsuccess = () => { result = request.result; };
+    request.onerror = () => finish(reject, request.error);
+    tx.oncomplete = () => finish(resolve, result);
+    tx.onabort = () => finish(reject, tx.error || new Error("IndexedDB transaction aborted"));
+    tx.onerror = () => finish(reject, tx.error || request.error);
   });
 }
 

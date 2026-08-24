@@ -1,5 +1,5 @@
-import {APP_VERSION,DEFAULT_SETTINGS,DEFAULT_OUTPUT_FIELDS,SETTINGS_SEED,MAX_BATCH_SIZE,MAX_CONCURRENCY,normalizeSettings,normalizeInputFields,slugFieldId,parseWorkbook,auditBatch,downloadWorkbook,estimateRunSeconds,validateApiKey} from "./audit.js?v=2.7.0";
-import {putJob,getJob,getJobs,deleteJob,clearJobs,loadSettings,saveSettings,getApiKey,apiKeyIsRemembered,saveApiKey,forgetApiKey} from "./db.js?v=2.7.0";
+import {APP_VERSION,DEFAULT_SETTINGS,DEFAULT_OUTPUT_FIELDS,SETTINGS_SEED,MAX_BATCH_SIZE,MAX_CONCURRENCY,normalizeSettings,normalizeInputFields,slugFieldId,parseWorkbook,auditBatch,downloadWorkbook,estimateRunSeconds,validateApiKey} from "./audit.js?v=2.8.0";
+import {putJob,getJob,getJobs,deleteJob,clearJobs,loadSettings,saveSettings,getApiKey,apiKeyIsRemembered,saveApiKey,forgetApiKey} from "./db.js?v=2.8.0";
 
 const $=id=>document.getElementById(id);
 const ids=["file-input","drop-zone","file-list","validation","start-audit","page-title","key-state","run-name","pause-run","download-result","progress-label","progress-percent","progress-bar","metric-leads","metric-excel-rows","metric-calls","metric-batch","metric-completed","metric-status","metric-input-tokens","metric-cached-tokens","metric-output-tokens","metric-duration","metric-eta","metric-cost","live-log","clear-console","history-list","clear-history","api-key","remember-key","toggle-key","save-key","forget-key","key-message","batch-size","concurrency","model","input-field-config","add-input-field","ai-field-config","rule-config","add-rule","output-field-config","yes-values","no-values","additional-instructions","input-price","cached-price","output-price","save-settings","reset-settings","settings-message","toast","mobile-menu","active-job-switch","sort-field","sort-direction","app-version","export-settings","import-settings","import-settings-file","update-banner","update-banner-text","reload-app","key-modal","onboard-key","onboard-toggle","onboard-remember","onboard-message","onboard-save","onboard-skip"];
@@ -205,7 +205,11 @@ function schedulePendingPersist(job){
     withJobSave(job.id,async()=>{
       job.updatedAt=timestamp();
       await putJob(job);
-    }).catch(()=>{});
+    }).catch(error=>{
+      addLog(job,`Could not save pending checkpoint: ${error.message}`,"error");
+      toast("Checkpoint save failed — free disk space or resume after reload.");
+      if(currentJob?.id===job.id)renderProgress(job);
+    });
   },1500));
 }
 function clearPendingPersist(jobId){
@@ -297,6 +301,8 @@ async function runJob(job){
   job.tokenUsage=job.tokenUsage||{input:0,cached:0,output:0};
   job.elapsedMs=job.elapsedMs||0;
   job.pendingBatches=job.pendingBatches||{};
+  job.results=Array.isArray(job.results)?job.results:[];
+  job.leads=Array.isArray(job.leads)?job.leads:[];
   displayLogs=true;
   const concurrency=Math.min(MAX_CONCURRENCY,Math.max(1,Number(job.settings.concurrency)||1));
   addLog(job,`Run started: live pool of ${concurrency} (next batch fires the instant one frees a slot), batch size ${job.settings.batchSize} leads, model ${job.settings.model}, app ${APP_VERSION}. Checkpoints stay in order — later batches may finish API first and wait.`);
@@ -354,7 +360,8 @@ async function runJob(job){
         checkpointTasks.push(commitBatch(job,index,rows));
       }catch(error){
         if(error.name==="AbortError"){
-          fatalError=error;
+          // Keep the original API/root failure; sibling AbortErrors must not flip status to "paused".
+          if(!(fatalError&&fatalError.name!=="AbortError"))fatalError=error;
           queue.length=0;
           return;
         }
@@ -397,6 +404,7 @@ async function runJob(job){
     await putJob(job);
     if(currentJob?.id===job.id)renderProgress(job);
   }finally{
+    clearPendingPersist(job.id);
     controllers.delete(job.id);
   }
 }
@@ -528,7 +536,9 @@ async function startNew(){
   currentJob=jobs[0];
   renderProgress(jobs[0]);
   showView("console");
-  await Promise.all(jobs.map(job=>runJob(job)));
+  // Run files one after another so concurrency stays within the per-job limit
+  // (parallel files would multiply OpenAI requests and trip rate limits).
+  for(const job of jobs)await runJob(job);
 }
 
 function download(job){
@@ -862,7 +872,18 @@ async function restoreFromStorage(){
 function showUpdateBanner(latest){
   if(!els["update-banner"])return;
   els["update-banner"].classList.remove("hidden");
-  els["update-banner-text"].innerHTML=`LeadLens <strong>v${latest}</strong> is available (you are on <strong>v${APP_VERSION}</strong>). Hard-reload to update: Windows/Linux <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>R</kbd> · Mac <kbd>Cmd</kbd>+<kbd>Shift</kbd>+<kbd>R</kbd>. Or use the button.`;
+  const box=els["update-banner-text"];
+  box.replaceChildren();
+  const appendKbd=label=>{const k=document.createElement("kbd");k.textContent=label;box.append(k);};
+  box.append("LeadLens ");
+  const vNew=document.createElement("strong");vNew.textContent=`v${latest}`;box.append(vNew);
+  box.append(" is available (you are on ");
+  const vCur=document.createElement("strong");vCur.textContent=`v${APP_VERSION}`;box.append(vCur);
+  box.append("). Hard-reload to update: Windows/Linux ");
+  appendKbd("Ctrl");box.append("+");appendKbd("Shift");box.append("+");appendKbd("R");
+  box.append(" · Mac ");
+  appendKbd("Cmd");box.append("+");appendKbd("Shift");box.append("+");appendKbd("R");
+  box.append(". Or use the button.");
 }
 async function checkForUpdate(){
   if(els["app-version"])els["app-version"].textContent=APP_VERSION;
@@ -877,6 +898,7 @@ async function checkForUpdate(){
 }
 
 document.querySelectorAll(".nav-item").forEach(button=>button.addEventListener("click",()=>showView(button.dataset.view)));
+document.getElementById("settings-form")?.addEventListener("submit",event=>event.preventDefault());
 els["mobile-menu"].onclick=()=>document.querySelector(".shell").classList.toggle("menu-open");
 els["drop-zone"].onclick=()=>els["file-input"].click();
 els["drop-zone"].onkeydown=event=>{if(["Enter"," "].includes(event.key))els["file-input"].click();};
@@ -958,7 +980,7 @@ els["reload-app"]?.addEventListener("click",async()=>{
     }
     if(window.caches){
       const keys=await caches.keys();
-      await Promise.all(keys.map(key=>caches.delete(key)));
+      await Promise.all(keys.filter(key=>key.startsWith("leadlens-")).map(key=>caches.delete(key)));
     }
   }catch{/* continue to forced navigation */}
   // Bust HTML + module cache; plain reload often reuses stale app.js/audit.js.

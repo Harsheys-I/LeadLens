@@ -1,4 +1,4 @@
-export const APP_VERSION = "2.7.0";
+export const APP_VERSION = "2.8.0";
 /** Bump when default AI rules / field defaults must refresh existing localStorage settings. */
 export const SETTINGS_SEED = 10;
 
@@ -126,7 +126,7 @@ export const DEFAULT_SETTINGS = {
 
 /* Large stable prefix FIRST so OpenAI prompt caching can activate (>=1024 tokens;
    some models need closer to 2048). Run-specific rules come after; lead data last. */
-const CACHE_HANDBOOK = `LeadLens QA v2.7.0 — stable cacheable auditor handbook. Evidence only. Never invent facts, dates, budgets, locations, or prior calls.
+const CACHE_HANDBOOK = `LeadLens QA v2.8.0 — stable cacheable auditor handbook. Evidence only. Never invent facts, dates, budgets, locations, or prior calls.
 
 PURPOSE
 You audit Indian real-estate telecalling follow-up notes. Judge only the supplied fields for THIS call id. Optional day[] lists sibling calls on the same latest calendar day — context only; still return one result for THIS id.
@@ -257,13 +257,15 @@ const clone=value=>JSON.parse(JSON.stringify(value));
 const list=value=>String(value||"").split(",").map(norm).filter(Boolean);
 const firstNonEmpty=values=>values.map(clean).find(Boolean)||"";
 /** Excel exports often write Mobile/Project/Telecaller once, then leave later rows blank. */
-function fillDownWithinGroup(records,fieldId){
+function fillDownWithinGroup(records,fieldId,{backward=true}={}){
   let last="";
   for(const record of records){
     const value=clean(record[fieldId]);
     if(value)last=value;
     else if(last)record[fieldId]=last;
   }
+  // Status is chronological — never leak a later status backward onto earlier blank calls.
+  if(!backward)return;
   const first=firstNonEmpty(records.map(record=>record[fieldId]));
   if(first){
     for(const record of records){
@@ -563,11 +565,20 @@ function parseDateTime(value){
     return new Date(d.y,d.m-1,d.d,d.H||0,d.M||0,Math.floor(d.S||0));
   }
   const s=clean(value);if(!s)return null;
+  // YYYY-MM-DD / YYYY/MM/DD first — otherwise the DD/MM regex can misread year-leading strings.
+  const iso=s.match(/^(\d{4})[\/\-.](\d{1,2})[\/\-.](\d{1,2})(?:[ T]+(\d{1,2}):(\d{2})(?::(\d{2}))?)?/);
+  if(iso){
+    const d=new Date(Number(iso[1]),Number(iso[2])-1,Number(iso[3]),Number(iso[4]||0),Number(iso[5]||0),Number(iso[6]||0));
+    return Number.isNaN(d.valueOf())?null:d;
+  }
   const match=s.match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})(?:[ T]+(\d{1,2}):(\d{2})(?::(\d{2}))?)?/);
   if(match){
-    const year=match[3].length===2?Number(`20${match[3]}`):Number(match[3]);
-    const d=new Date(year,Number(match[2])-1,Number(match[1]),Number(match[4]||0),Number(match[5]||0),Number(match[6]||0));
-    return Number.isNaN(d.valueOf())?null:d;
+    const day=Number(match[1]),month=Number(match[2]),year=match[3].length===2?Number(`20${match[3]}`):Number(match[3]);
+    // Reject impossible months so MM/DD strings do not silently wrap via Date().
+    if(month>=1&&month<=12&&day>=1&&day<=31){
+      const d=new Date(year,month-1,day,Number(match[4]||0),Number(match[5]||0),Number(match[6]||0));
+      if(!Number.isNaN(d.valueOf())&&d.getFullYear()===year&&d.getMonth()===month-1&&d.getDate()===day)return d;
+    }
   }
   const parsed=new Date(s);
   return Number.isNaN(parsed.valueOf())?null:parsed;
@@ -588,6 +599,8 @@ function isBusinessHoursRegistration(d){
 }
 function missedThirtyMinTalk(registrationAt,firstUpdateAt){
   if(!registrationAt||!firstUpdateAt||!isBusinessHoursRegistration(registrationAt))return false;
+  // Date-only Lead Update parses to midnight — skip SLA unless fu has a real clock (matches ±5min rule).
+  if(!hasClockTime(firstUpdateAt))return false;
   const delta=firstUpdateAt.valueOf()-registrationAt.valueOf();
   return delta<0||delta>30*60*1000;
 }
@@ -608,7 +621,10 @@ function isStrongPositiveComment(value){
   const n=norm(value);
   if(!n||isRnrLikeComment(n))return false;
   if(/\b(not interested|\bni\b|don't|dont|do not|no need|stop calling)\b/.test(n))return false;
-  return/\b(interested|site visit|sv done|want(s|ed)?|looking for|budget|2bhk|3bhk|visit(ed)?|call me|send(ing)? details|shortlist|book(ing)?|come(s)? for visit)\b/.test(n);
+  // Bare CRM crumbs (visited/SV alone) are not positive interest — quality caps already treat them as q<=2.
+  if(/^(visited|visit|sv|sv done|site visit|site visited)$/.test(n))return false;
+  return/\b(interested|site visit|sv done|want(s|ed)?|looking for|budget|2bhk|3bhk|call me|send(ing)? details|shortlist|book(ing)?|come(s)? for visit)\b/.test(n)
+    ||(/\bvisit(ed)?\b/.test(n)&&n.split(/\s+/).length>=3);
 }
 function trailingRnrStreak(comments){
   let streak=0;
@@ -723,9 +739,20 @@ export function parseWorkbook(arrayBuffer,rawSettings=DEFAULT_SETTINGS){
   const grouped=new Map();let lastMobile="",lastProject="",invalidRows=0;
   for(let index=0;index<selected.rows.length;index++){
     const row=selected.rows[index],rawMobile=clean(row[selected.columns.mobile]),rawProject=clean(row[selected.columns.project]);
-    if(rawMobile)lastMobile=indianMobile(rawMobile);
+    const normalizedMobile=rawMobile?indianMobile(rawMobile):"";
+    // Invalid non-empty mobile must not wipe fill-down or poison lastProject.
+    if(rawMobile){
+      if(!normalizedMobile){invalidRows++;continue;}
+      lastMobile=normalizedMobile;
+    }
     if(rawProject)lastProject=rawProject;
-    if(!lastMobile||!lastProject){if(rawMobile)invalidRows++;continue;}
+    if(!lastMobile||!lastProject)continue;
+    // Skip rows where every mapped input cell is blank (trailing CRM empties).
+    const mappedEmpty=settings.inputFields.every(field=>{
+      const header=selected.columns[field.id];
+      return!header||!clean(row[header]);
+    });
+    if(mappedEmpty)continue;
     const values={};
     for(const field of settings.inputFields)values[field.id]=clean(row[selected.columns[field.id]]);
     values.mobile=lastMobile;values.project=lastProject;
@@ -746,7 +773,7 @@ export function parseWorkbook(arrayBuffer,rawSettings=DEFAULT_SETTINGS){
     // (CRM exports often write these once, then leave later rows empty).
     fillDownWithinGroup(rawRecords,"telecaller");
     fillDownWithinGroup(rawRecords,"registration");
-    fillDownWithinGroup(rawRecords,"status");
+    fillDownWithinGroup(rawRecords,"status",{backward:false});
     for(const record of rawRecords)record.connected=connectedFromParameter(record.parameter,settings);
     const before=rawRecords.length;
     // Near-dupe filter first; only latest-day rows go to AI/export. Calls metric = Excel rows.
@@ -982,15 +1009,16 @@ async function requestAudit(apiKey,settings,leads,signal,log,onUsage){
     throw new Error(`OpenAI ${response.status}: ${detail||response.statusText}`);
   }
   const data=await response.json(),usage=data.usage;
+  const content=data.choices?.[0]?.message?.content;
+  if(!content)throw new Error("OpenAI returned no audit content.");
+  const parsed=JSON.parse(content);
+  if(!Array.isArray(parsed.a))throw new Error("OpenAI response did not contain results array.");
+  // Count tokens only after a parseable result so soft failures are not double-billed on retry.
   const input=usage?.prompt_tokens??usage?.input_tokens??0;
   const cached=usage?.prompt_tokens_details?.cached_tokens??usage?.input_tokens_details?.cached_tokens??0;
   const output=usage?.completion_tokens??usage?.output_tokens??0;
   if(usage&&onUsage)onUsage({input,cached,output});
   if(usage&&log)log(`Tokens: ${input} in (${cached} cached, ${Math.max(0,input-cached)} billable), ${output} out.`,"info");
-  const content=data.choices?.[0]?.message?.content;
-  if(!content)throw new Error("OpenAI returned no audit content.");
-  const parsed=JSON.parse(content);
-  if(!Array.isArray(parsed.a))throw new Error("OpenAI response did not contain results array.");
   return parsed.a;
 }
 
@@ -1000,31 +1028,37 @@ const severityFromErrors=errors=>!errors.length?"NONE":errors.some(error=>HIGH_S
 export async function auditBatch(apiKey,rawSettings,batch,signal,log,onUsage){
   const settings=normalizeSettings(rawSettings);
   const maps=buildErrorMaps(settings);
-  let result,lastError;
-  for(let attempt=1;attempt<=3;attempt++){
-    try{result=await requestAudit(apiKey,settings,batch,signal,log,onUsage);break;}
-    catch(error){
-      if(error.name==="AbortError")throw error;
-      lastError=error;
-      log(`Attempt ${attempt} failed: ${error.message}`,"error");
-      if(attempt<3)await new Promise(resolve=>setTimeout(resolve,attempt*1500));
+  async function requestWithRetry(leads,label){
+    let result,lastError;
+    for(let attempt=1;attempt<=3;attempt++){
+      try{result=await requestAudit(apiKey,settings,leads,signal,log,onUsage);break;}
+      catch(error){
+        if(error.name==="AbortError")throw error;
+        lastError=error;
+        log(`${label} attempt ${attempt} failed: ${error.message}`,"error");
+        if(attempt<3)await new Promise(resolve=>setTimeout(resolve,attempt*1500));
+      }
     }
+    if(!result)throw lastError;
+    return result;
   }
-  if(!result)throw lastError;
+  const result=await requestWithRetry(batch,"Audit");
   const byId=new Map(result.map(item=>[clean(item.id),item]));
-  let missing=batch.filter(lead=>!byId.has(lead.leadId));
+  let missing=batch.filter(lead=>!byId.has(clean(lead.leadId)));
   if(missing.length){
     log(`Model omitted ${missing.length} lead(s); retrying only those leads.`,"warn");
-    const recovered=await requestAudit(apiKey,settings,missing,signal,log,onUsage);
+    const recovered=await requestWithRetry(missing,"Recovery");
     recovered.forEach(item=>byId.set(clean(item.id),item));
-    missing=batch.filter(lead=>!byId.has(lead.leadId));
+    missing=batch.filter(lead=>!byId.has(clean(lead.leadId)));
   }
   if(missing.length)throw new Error(`OpenAI still omitted ${missing.length} lead(s). Saved batches are safe; resume to retry.`);
   return batch.map(lead=>{
-    const ai=byId.get(lead.leadId);
+    const ai=byId.get(clean(lead.leadId));
     const aiErrors=Array.isArray(ai.e)?ai.e.map(token=>maps.resolve(token)).filter(label=>maps.allowed.has(label)):[];
     const connectedYes=lead.staticValues.connected==="Yes";
-    const filteredAi=connectedYes?aiErrors:aiErrors.filter(label=>!CONNECTED_ONLY_ERRORS.has(label));
+    let filteredAi=connectedYes?aiErrors:aiErrors.filter(label=>!CONNECTED_ONLY_ERRORS.has(label));
+    // Exception projects blank `l` for the model but keep the city in Excel — do not keep AI empty-location.
+    if(!isBlankish(lead.staticValues.location))filteredAi=filteredAi.filter(label=>label!=="Customer Location is empty");
     const filteredDet=connectedYes?lead.deterministicErrors:lead.deterministicErrors.filter(label=>!CONNECTED_ONLY_ERRORS.has(label));
     const merged=unique([...filteredDet,...filteredAi]);
     const errors=merged.includes(EMPTY_REQUIREMENT)?merged.filter(label=>label!==WRONG_REQUIREMENT):merged;
@@ -1061,7 +1095,7 @@ const DATE_SORT_FIELDS=new Set(["registration","next","update","callDate"]);
 function sortValue(row,fieldId){
   const raw=row?.[fieldId];
   if(DATE_SORT_FIELDS.has(fieldId)){
-    const date=parseDate(raw);
+    const date=parseDateTime(raw)||parseDate(raw);
     return date?date.valueOf():Number.NEGATIVE_INFINITY;
   }
   if(fieldId==="totalFollowups"||fieldId==="commentQuality"||fieldId==="dayCallCount")return Number(raw)||0;
@@ -1093,18 +1127,25 @@ export function sortResults(rows,rawSettings=DEFAULT_SETTINGS){
       else cmp=String(av).localeCompare(String(bv),undefined,{numeric:true,sensitivity:"base"});
       if(cmp)return cmp*dir;
     }
-    const dateCmp=(parseDate(a.callDate)?.valueOf()??0)-(parseDate(b.callDate)?.valueOf()??0);
-    if(dateCmp)return dateCmp;
-    return(Number(a.dayCallIndex)||0)-(Number(b.dayCallIndex)||0);
+    const dateCmp=(parseDateTime(a.callDate)?.valueOf()??parseDate(a.callDate)?.valueOf()??0)-(parseDateTime(b.callDate)?.valueOf()??parseDate(b.callDate)?.valueOf()??0);
+    if(dateCmp)return dateCmp*dir;
+    return((Number(a.dayCallIndex)||0)-(Number(b.dayCallIndex)||0))*dir;
   });
 }
 
+function sanitizeExcelCell(value){
+  if(value==null)return"";
+  if(typeof value==="number"&&Number.isFinite(value))return value;
+  const text=String(value);
+  // Neutralize formula / CSV injection when Excel opens the download.
+  return/^[=+\-@\t\r]/.test(text)?`'${text}`:text;
+}
 export function downloadWorkbook(job,currentSettings){
   const settings=normalizeSettings(currentSettings);
   const fields=selectedOutputFields(settings);
   if(!fields.length)throw new Error("Select at least one output field in Settings.");
   const rows=sortResults(job.results||[],settings);
-  const data=rows.map(row=>Object.fromEntries(fields.map(field=>[field.label,row[field.id]??""])));
+  const data=rows.map(row=>Object.fromEntries(fields.map(field=>[field.label,sanitizeExcelCell(row[field.id]??"")])));
   const sheet=XLSX.utils.json_to_sheet(data,{header:fields.map(field=>field.label)});
   sheet["!cols"]=fields.map(field=>({wch:Math.min(48,Math.max(14,field.label.length+2,...data.slice(0,100).map(row=>String(row[field.label]??"").length+2)))}));
   // Merge Mobile + Project across contiguous rows of the same lead (same Mobile+Project).

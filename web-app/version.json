@@ -1,5 +1,5 @@
 {
-  "version": "2.7.0",
+  "version": "2.8.0",
   "name": "LeadLens",
-  "notes": "Estimated run time; upload column-vs-settings check; new Connected Yes/No defaults; first-run API key onboarding + validation; friendlier requirement rule; batch max 20 / parallel max 50"
+  "notes": "Fix invalid-mobile fill-down/project poison; skip SLA on date-only updates; preserve real failures over AbortError; strip false empty-location on exception cities; bare visited no longer status-history; safer checkpoints, retries, and Excel export"
 }
