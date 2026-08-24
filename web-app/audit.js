@@ -1,4 +1,4 @@
-export const APP_VERSION = "3.2.3";
+export const APP_VERSION = "3.4.0";
 /** Bump when default AI rules / field defaults must refresh existing localStorage settings. */
 export const SETTINGS_SEED = 12;
 
@@ -154,7 +154,7 @@ export function buildChatCompletionBody(model,{temperature,maxTokens,messages,..
 
 /* Large stable prefix FIRST so OpenAI prompt caching can activate (>=1024 tokens;
    some models need closer to 2048). Run-specific rules come after; lead data last. */
-const CACHE_HANDBOOK = `LeadLens QA v3.2.3 — stable cacheable auditor handbook. Evidence only. Never invent facts, dates, budgets, locations, or prior calls.
+const CACHE_HANDBOOK = `LeadLens QA v3.4.0 — stable cacheable auditor handbook. Evidence only. Never invent facts, dates, budgets, locations, or prior calls.
 
 PURPOSE
 You audit Indian real-estate telecalling follow-up notes. Judge only the supplied fields for THIS call id. Optional day[] lists sibling calls on the same latest calendar day — context only; still return one result for THIS id.
@@ -537,75 +537,6 @@ export function normalizeSettings(saved={}){
 }
 
 /**
- * Rough wall-clock audit seconds (gpt-4o-mini). Parallel batches share one "round".
- * Calibrated to observed ~1–3s/request with high concurrency — not per-row latency.
- */
-const RUN_BASE_SECONDS_PER_BATCH=3.5;
-const RUN_SECONDS_PER_AUDIT=0.18;
-export function estimateRunSeconds(rawSettings,leadCount,auditCount){
-  const settings=normalizeSettings(rawSettings);
-  const leads=Math.max(0,Math.floor(Number(leadCount)||0));
-  if(!leads)return 0;
-  const audits=Math.max(leads,Math.floor(Number(auditCount)||0)||leads);
-  const batchSize=Math.max(1,Number(settings.batchSize)||1);
-  const concurrency=Math.max(1,Number(settings.concurrency)||1);
-  const batches=Math.ceil(leads/batchSize);
-  const rounds=Math.ceil(batches/concurrency);
-  const auditsPerBatch=audits/batches;
-  const secondsPerBatch=RUN_BASE_SECONDS_PER_BATCH+RUN_SECONDS_PER_AUDIT*auditsPerBatch;
-  return Math.max(1,Math.round(rounds*secondsPerBatch));
-}
-
-/**
- * gpt-5-nano review pass on a compact summary (one request) — typically a few seconds.
- */
-const REVIEW_PASS_BASE_SECONDS=9;
-const REVIEW_PASS_SECONDS_PER_ROW=0.02;
-export function estimateReviewPassSeconds(resultRows=0){
-  const rows=Math.max(0,Math.floor(Number(resultRows)||0));
-  return Math.max(5,Math.round(REVIEW_PASS_BASE_SECONDS+rows*REVIEW_PASS_SECONDS_PER_ROW));
-}
-/** @deprecated Prefer estimateReviewPassSeconds(rows); kept as a typical mid-size default. */
-export const REVIEW_PASS_SECONDS = estimateReviewPassSeconds(80);
-
-/** Audit + one TeleCaller review pass (Separate-file job, or legacy single-file estimate). */
-export function estimateReviewRunSeconds(rawSettings,leadCount,auditCount){
-  const audit=estimateRunSeconds(rawSettings,leadCount,auditCount);
-  if(!audit)return 0;
-  return audit+estimateReviewPassSeconds(auditCount||leadCount);
-}
-
-/**
- * Wall time for N jobs on a fixed worker pool (greedy: longest jobs first into least-loaded lane).
- * Used for Combined review waves and Separate multi-file pools (max REVIEW_JOB_CONCURRENCY).
- */
-export function estimatePooledSeconds(jobSecondsList,poolSize=10){
-  const pool=Math.max(1,Math.floor(Number(poolSize)||1));
-  const sorted=[...(jobSecondsList||[])]
-    .map(value=>Math.max(0,Number(value)||0))
-    .filter(value=>value>0)
-    .sort((a,b)=>b-a);
-  if(!sorted.length)return 0;
-  const lanes=Array(Math.min(pool,sorted.length)).fill(0);
-  for(const sec of sorted){
-    let minI=0;
-    for(let i=1;i<lanes.length;i++)if(lanes[i]<lanes[minI])minI=i;
-    lanes[minI]+=sec;
-  }
-  return Math.max(1,Math.round(Math.max(...lanes)));
-}
-
-/** Combined session: one full-file audit + pooled TeleCaller reviews (no per-telecaller re-audit). */
-export function estimateCombinedReviewSessionSeconds(rawSettings,leadCount,auditCount,telecallerCallCounts,poolSize=10){
-  const audit=estimateRunSeconds(rawSettings,leadCount,auditCount);
-  const counts=Array.isArray(telecallerCallCounts)&&telecallerCallCounts.length
-    ?telecallerCallCounts
-    :[auditCount||leadCount||0];
-  const reviewSecs=counts.map(count=>estimateReviewPassSeconds(count));
-  return audit+estimatePooledSeconds(reviewSecs,poolSize);
-}
-
-/**
  * Partition audited call-rows by Telecaller Name (in memory).
  * Blank / missing names bucket as "Unknown". Case-insensitive grouping; display name preserved.
  */
@@ -729,119 +660,6 @@ export function buildReviewSummary(job){
     sampleObservations:observations,
     sampleRecommendations:recommendations
   };
-}
-
-const reviewResponseSchema={
-  type:"object",additionalProperties:false,
-  required:["headline","summary","strengths","risks","coachingFocus"],
-  properties:{
-    headline:{type:"string"},
-    summary:{type:"string"},
-    strengths:{type:"array",items:{type:"string"}},
-    risks:{type:"array",items:{type:"string"}},
-    coachingFocus:{type:"array",items:{type:"string"}}
-  }
-};
-
-/** Normalize model JSON (or plain text) into reviewText + reviewReport. */
-export function parseReviewModelContent(raw){
-  const text=clean(raw);
-  if(!text)return{reviewText:"",reviewReport:null};
-  let parsed=null;
-  try{
-    parsed=JSON.parse(text);
-  }catch{
-    const fenced=text.match(/```(?:json)?\s*([\s\S]*?)```/i);
-    if(fenced){
-      try{parsed=JSON.parse(fenced[1].trim());}catch{/* plain text */}
-    }else{
-      const start=text.indexOf("{");
-      const end=text.lastIndexOf("}");
-      if(start>=0&&end>start){
-        try{parsed=JSON.parse(text.slice(start,end+1));}catch{/* plain text */}
-      }
-    }
-  }
-  if(parsed&&typeof parsed==="object"&&!Array.isArray(parsed)){
-    const asList=value=>{
-      if(Array.isArray(value))return value.map(item=>clean(item)).filter(Boolean);
-      if(typeof value==="string"&&clean(value))return[clean(value)];
-      return[];
-    };
-    const summary=clean(parsed.summary||parsed.reviewText||parsed.narrative||"");
-    const reviewReport={
-      headline:clean(parsed.headline||parsed.title||""),
-      summary:summary||text,
-      strengths:asList(parsed.strengths||parsed.strength),
-      risks:asList(parsed.risks||parsed.risk||parsed.concerns),
-      coachingFocus:asList(parsed.coachingFocus||parsed.coaching_focus||parsed.coaching||parsed.focus)
-    };
-    return{reviewText:reviewReport.summary,reviewReport};
-  }
-  return{
-    reviewText:text,
-    reviewReport:{headline:"",summary:text,strengths:[],risks:[],coachingFocus:[]}
-  };
-}
-
-/**
- * Second AI pass: structured TeleCaller review for managers (PDF report).
- * Uses settings.reviewModel (default gpt-5-nano). Does not change audit results.
- */
-export async function requestTelecallerReview(apiKey,rawSettings,job,signal,log){
-  const settings=normalizeSettings(rawSettings);
-  const model=settings.reviewModel||DEFAULT_SETTINGS.reviewModel;
-  const summary=buildReviewSummary(job);
-  const system=`You are a telecalling QA coach writing for a sales manager. Using only the supplied audit summary, return JSON with keys: headline (short), summary (100–500 words plain prose coach narrative), strengths (string array), risks (string array), coachingFocus (string array). Cover comment quality, error patterns, strengths, and coaching focus. No markdown in summary. No invented leads or quotes beyond the samples.`;
-  const user=`TeleCaller review request. Respond with JSON only.\nSummary JSON:\n${JSON.stringify(summary)}`;
-  // Higher max for reasoning models (thinking tokens + structured review).
-  const reviewBody=buildChatCompletionBody(model,{
-      temperature:0.3,
-      maxTokens:4000,
-      messages:[
-        {role:"system",content:system},
-        {role:"user",content:user}
-      ],
-      response_format:{type:"json_schema",json_schema:{name:"ll_telecaller_review",strict:true,schema:reviewResponseSchema}}
-    });
-  if(log)log(`Review API params (${model}): keys=${Object.keys(reviewBody).join(",")} · max_tokens=${"max_tokens" in reviewBody} · max_completion_tokens=${"max_completion_tokens" in reviewBody} · temperature=${"temperature" in reviewBody}`,"info");
-  let response=await fetch("https://api.openai.com/v1/chat/completions",{
-    method:"POST",signal,
-    headers:{"Content-Type":"application/json","Authorization":`Bearer ${apiKey}`},
-    body:JSON.stringify(reviewBody)
-  });
-  if(!response.ok&&response.status===400){
-    // Some model variants reject json_schema — retry with plain prompt + graceful parse.
-    const{response_format:_omit,...fallbackBody}=reviewBody;
-    if(log)log("Review json_schema rejected — retrying without response_format.","info");
-    response=await fetch("https://api.openai.com/v1/chat/completions",{
-      method:"POST",signal,
-      headers:{"Content-Type":"application/json","Authorization":`Bearer ${apiKey}`},
-      body:JSON.stringify(fallbackBody)
-    });
-  }
-  if(!response.ok){
-    let detail="";
-    try{
-      const errJson=await response.json();
-      detail=errJson.error?.message||"";
-    }catch{/* ignore */}
-    throw new Error(`OpenAI review ${response.status}: ${detail||response.statusText}`);
-  }
-  const data=await response.json();
-  const choice=data.choices?.[0];
-  const text=clean(choice?.message?.content||"");
-  if(!text)throw new Error(`OpenAI returned an empty TeleCaller review (finish_reason=${choice?.finish_reason||"unknown"}).`);
-  const{reviewText,reviewReport}=parseReviewModelContent(text);
-  if(!reviewText)throw new Error(`OpenAI returned an empty TeleCaller review (finish_reason=${choice?.finish_reason||"unknown"}).`);
-  const usage=data.usage||{};
-  const tokenUsage={
-    input:usage.prompt_tokens??usage.input_tokens??0,
-    cached:usage.prompt_tokens_details?.cached_tokens??usage.input_tokens_details?.cached_tokens??0,
-    output:usage.completion_tokens??usage.output_tokens??0
-  };
-  if(log)log(`Review tokens (${model}): ${tokenUsage.input} in (${tokenUsage.cached} cached), ${tokenUsage.output} out.`,"info");
-  return{reviewText,reviewReport,tokenUsage,model};
 }
 
 /**
@@ -1189,7 +1007,157 @@ export function parseWorkbook(arrayBuffer,rawSettings=DEFAULT_SETTINGS){
     dedupedRows,
     expectedColumns,
     missingColumns,
-    unknownHeaders
+    unknownHeaders,
+    looksAudited:sheetLooksAudited(selected.headers||[])
+  };
+}
+
+function sheetLooksAudited(headers){
+  const keys=(headers||[]).map(header=>norm(header));
+  return keys.some(key=>
+    key.includes("comment quality")||
+    key==="error type(s)"||key==="error types"||key.includes("error type")||
+    key.includes("error severity")||
+    key.includes("buying intent")||
+    key.includes("ai observation")||
+    key.includes("ai recommendation")
+  );
+}
+
+/** Match input + output Excel headers (labels / aliases) for audited workbook import. */
+function auditImportFields(settings){
+  const fields=[];
+  const seen=new Set();
+  for(const field of settings.inputFields||[]){
+    if(!(field.required||field.enabled!==false))continue;
+    seen.add(field.id);
+    fields.push({id:field.id,label:field.label,aliases:field.aliases||field.label,required:Boolean(field.required),enabled:true});
+  }
+  for(const field of settings.outputFields||[]){
+    if(field.enabled===false||seen.has(field.id))continue;
+    seen.add(field.id);
+    fields.push({id:field.id,label:field.label,aliases:`${field.label}, ${field.id}`,required:false,enabled:true});
+  }
+  // Extra aliases for LeadLens download headers / common variants.
+  const extras={
+    callDate:"lead update date, call date, update date",
+    commentQuality:"comment quality score, comment quality, q",
+    errorTypes:"error type(s), error types, errors, e",
+    errorSeverity:"error severity, severity",
+    buyingIntent:"buying intent, intent, i",
+    observation:"ai observation, observation, o",
+    recommendation:"ai recommendation, recommendation, r",
+    telecaller:"telecaller name, tele caller name, agent name"
+  };
+  for(const field of fields){
+    if(extras[field.id])field.aliases=`${field.aliases}, ${extras[field.id]}`;
+  }
+  return fields;
+}
+
+/**
+ * Parse a LeadLens (or compatible) Audit Excel into result rows — no AI.
+ * Requires Mobile + Project and at least one audit column (Comment Quality / Error Type(s) / Severity).
+ */
+export function parseAuditedWorkbook(arrayBuffer,rawSettings=DEFAULT_SETTINGS){
+  if(!window.XLSX)throw new Error("Excel reader failed to load. Check the internet connection and reload.");
+  const settings=normalizeSettings(rawSettings);
+  const workbook=XLSX.read(arrayBuffer,{type:"array",cellDates:true});
+  const importFields=auditImportFields(settings);
+  const candidates=workbook.SheetNames.map(name=>{
+    const rows=XLSX.utils.sheet_to_json(workbook.Sheets[name],{defval:"",raw:true});
+    const headers=rows.length?Object.keys(rows[0]):[];
+    const columns=fieldColumns(headers,importFields);
+    const auditHits=["commentQuality","errorTypes","errorSeverity","buyingIntent","observation","recommendation"]
+      .filter(id=>Boolean(columns[id])).length;
+    const score=Object.values(columns).filter(Boolean).length+auditHits*3;
+    return{name,rows,headers,columns,auditHits,score};
+  }).sort((a,b)=>b.score-a.score);
+  const selected=candidates[0];
+  if(!selected?.columns.mobile||!selected?.columns.project){
+    throw new Error("Excel Audit needs Mobile Number and Project Name columns (same as LeadLens audit download).");
+  }
+  if(selected.auditHits<1&&!sheetLooksAudited(selected.headers)){
+    throw new Error("This file does not look like an Audit Excel. Use Excel RAW to audit a CRM export, or upload a LeadLens audit download.");
+  }
+  const results=[];
+  let lastMobile="",lastProject="";
+  for(let index=0;index<selected.rows.length;index++){
+    const row=selected.rows[index];
+    const rawMobile=clean(row[selected.columns.mobile]);
+    const rawProject=clean(row[selected.columns.project]);
+    const normalizedMobile=rawMobile?indianMobile(rawMobile)||rawMobile:"";
+    if(rawMobile){
+      if(!normalizedMobile)continue;
+      lastMobile=normalizedMobile;
+    }
+    if(rawProject)lastProject=rawProject;
+    if(!lastMobile||!lastProject)continue;
+    const mappedEmpty=importFields.every(field=>{
+      const header=selected.columns[field.id];
+      return!header||!clean(row[header]);
+    });
+    if(mappedEmpty)continue;
+    const result={mobile:lastMobile,project:lastProject};
+    for(const field of importFields){
+      if(field.id==="mobile"||field.id==="project")continue;
+      const header=selected.columns[field.id];
+      if(!header)continue;
+      let value=row[header];
+      if(field.id==="callDate"||field.id==="registration"||field.id==="next"||field.id==="update"){
+        const dt=parseDateTime(value);
+        value=dt?dateTimeText(dt):clean(value);
+      }else if(field.id==="commentQuality"){
+        const q=Number(value);
+        value=Number.isFinite(q)?Math.max(0,Math.min(10,Math.round(q))):0;
+      }else if(field.id==="buyingIntent"){
+        const n=norm(value);
+        value=(n==="yes"||n==="1"||n==="true")?"Yes":"No";
+      }else{
+        value=clean(value);
+      }
+      result[field.id]=value;
+    }
+    if(result.commentQuality===undefined)result.commentQuality=0;
+    if(!result.errorTypes)result.errorTypes="None";
+    if(!result.errorSeverity||!/^(NONE|MEDIUM|HIGH)$/i.test(String(result.errorSeverity))){
+      const labels=String(result.errorTypes||"");
+      const errors=ERROR_TYPES.filter(label=>labels.includes(label));
+      const none=/^none$/i.test(labels)||!errors.length;
+      result.errorSeverity=none?"NONE":errors.some(error=>HIGH_SEVERITY_ERRORS.has(error))?"HIGH":"MEDIUM";
+    }else{
+      result.errorSeverity=String(result.errorSeverity).toUpperCase();
+    }
+    if(!result.buyingIntent)result.buyingIntent="No";
+    if(result.observation===undefined)result.observation="";
+    if(result.recommendation===undefined)result.recommendation="";
+    results.push(result);
+  }
+  if(!results.length)throw new Error("No audited rows could be read from this Excel.");
+  const leadKeys=new Set(results.map(row=>`${row.project||""} | ${row.mobile||""}`));
+  const splitPreview=splitResultsByTelecaller(results);
+  const matchedHeaderKeys=new Set(Object.values(selected.columns).filter(Boolean).map(header=>norm(header)));
+  const unknownHeaders=(selected.headers||[]).filter(header=>clean(header)&&!matchedHeaderKeys.has(norm(header)));
+  const missingAudit=["commentQuality","errorTypes","errorSeverity"].filter(id=>!selected.columns[id]).map(id=>{
+    const field=importFields.find(item=>item.id===id);
+    return field?.label||id;
+  });
+  return{
+    sheetName:selected.name,
+    results,
+    leads:[],
+    rowCount:selected.rows.length,
+    leadCount:leadKeys.size,
+    callCount:results.length,
+    latestDayCalls:results.length,
+    invalidRows:0,
+    dedupedRows:0,
+    expectedColumns:[],
+    missingColumns:missingAudit,
+    unknownHeaders,
+    splitPreview,
+    looksAudited:true,
+    sourceFormat:"audit"
   };
 }
 
@@ -1563,17 +1531,75 @@ function requirePdfLibs(){
 }
 
 function jobReviewReport(job){
-  if(job?.reviewReport&&typeof job.reviewReport==="object"){
-    return{
-      headline:clean(job.reviewReport.headline||""),
-      summary:clean(job.reviewReport.summary||job.reviewText||""),
-      strengths:Array.isArray(job.reviewReport.strengths)?job.reviewReport.strengths.map(clean).filter(Boolean):[],
-      risks:Array.isArray(job.reviewReport.risks)?job.reviewReport.risks.map(clean).filter(Boolean):[],
-      coachingFocus:Array.isArray(job.reviewReport.coachingFocus)?job.reviewReport.coachingFocus.map(clean).filter(Boolean):[]
-    };
+  return buildDeterministicInsights(buildReviewSummary(job));
+}
+
+/** Manager-facing copy derived only from audit tallies (no LLM). */
+export function buildDeterministicInsights(metrics){
+  const audited=Math.max(1,Number(metrics.auditedRows)||0);
+  const avg=Number(metrics.avgCommentQuality)||0;
+  const high=Number(metrics.severityMix?.HIGH)||0;
+  const medium=Number(metrics.severityMix?.MEDIUM)||0;
+  const none=Number(metrics.severityMix?.NONE)||0;
+  const intentYes=Number(metrics.buyingIntentMix?.Yes)||0;
+  const intentPct=Math.round((intentYes/audited)*100);
+  const errorPct=Math.round(((high+medium)/audited)*100);
+  const top=(metrics.errorTallies||[]).slice(0,5);
+  const q=metrics.qualityDistribution||{};
+  const weak=(Number(q["0-2"])||0)+(Number(q["3-4"])||0);
+  const strong=(Number(q["7-8"])||0)+(Number(q["9-10"])||0);
+
+  let headline="Solid telecalling quality with room to tighten process.";
+  if(avg<=3||errorPct>=40)headline="Urgent coaching needed — comment quality and error rate are off track.";
+  else if(avg<=5||errorPct>=25)headline="Mixed performance — strengthen comments and close recurring gaps.";
+  else if(avg>=7&&errorPct<=15)headline="Strong performance — protect quality and scale what works.";
+
+  const summaryParts=[
+    `${metrics.telecallerName||"This TeleCaller"} was scored on ${audited} audited call row${audited===1?"":"s"} (avg comment quality ${avg}/10).`,
+    `${errorPct}% of rows carry a Medium or High severity issue (${high} high · ${medium} medium · ${none} clean).`,
+    `Buying intent flagged on ${intentPct}% of audited rows.`,
+    weak||strong?`Comment quality mix: ${weak} weaker (0–4) vs ${strong} stronger (7–10).`:""
+  ].filter(Boolean);
+  if(top.length){
+    summaryParts.push(`Most frequent error patterns: ${top.map(item=>`${item.label} (${item.count})`).join("; ")}.`);
+  }else{
+    summaryParts.push("No recurring error labels dominated this slice.");
   }
-  const summary=clean(job?.reviewText||"");
-  return{headline:"",summary,strengths:[],risks:[],coachingFocus:[]};
+  summaryParts.push("This report is built from LeadLens audit metrics only (no generative AI narrative).");
+
+  const strengths=[];
+  if(avg>=6)strengths.push(`Average comment quality holds at ${avg}/10.`);
+  if(strong>weak&&strong>0)strengths.push(`More strong comment rows (${strong}) than weak ones (${weak}).`);
+  if(errorPct<=20)strengths.push(`Error rate stays at ${errorPct}% of audited rows.`);
+  if(intentPct>=20)strengths.push(`Buying intent appears on ${intentPct}% of rows — protect those conversations.`);
+  if(!strengths.length)strengths.push("Use the charts below to isolate pockets of acceptable quality.");
+
+  const risks=top.length
+    ?top.map(item=>`${item.label} — ${item.count} row${item.count===1?"":"s"} (${Math.round((item.count/audited)*100)}% of audited).`)
+    :["No dominant error type — review individual High-severity rows in the Excel export."];
+  if(high>0)risks.unshift(`${high} high-severity row${high===1?"":"s"} need manager attention first.`);
+
+  const coachingFocus=[];
+  if(weak>strong)coachingFocus.push("Raise comment depth: need, budget, locality, objection, decision-maker, next step.");
+  for(const item of top.slice(0,3)){
+    if(/location/i.test(item.label))coachingFocus.push("Capture preferred micro-market / location on every connected call.");
+    else if(/requirement/i.test(item.label))coachingFocus.push("Record a real customer requirement — not RNR/visited/status crumbs.");
+    else if(/budget/i.test(item.label))coachingFocus.push("Ask and save budget band before ending connected calls.");
+    else if(/status|aligned|comment/i.test(item.label))coachingFocus.push("Align Lead Status to the latest comment trajectory on the Prospect→Lost ladder.");
+    else if(/tat|fresh|30|follow-up missed|follow up missed/i.test(item.label))coachingFocus.push("Tighten first-talk TAT and follow-up date discipline.");
+    else coachingFocus.push(`Drill on “${item.label}” until it drops in the next cycle.`);
+  }
+  if(!coachingFocus.length)coachingFocus.push("Spot-check High-severity Excel rows and coach from concrete call examples.");
+  // Dedupe while preserving order
+  const seen=new Set();
+  const uniqueFocus=coachingFocus.filter(item=>{
+    const key=norm(item);
+    if(seen.has(key))return false;
+    seen.add(key);
+    return true;
+  }).slice(0,6);
+
+  return{headline,summary:summaryParts.join(" "),strengths,risks,coachingFocus:uniqueFocus};
 }
 
 function pdfHexRgb(hex){
@@ -1691,8 +1717,8 @@ function scorePercents(metrics){
 }
 
 async function drawTelecallerReviewPage(doc,Chart,job,{isFirstPage=true}={}){
-  const marginX=16;
-  const marginBottom=16;
+  const marginX=14;
+  const marginBottom=14;
   const pageW=doc.internal.pageSize.getWidth();
   const contentW=pageW-marginX*2;
   if(!isFirstPage)doc.addPage();
@@ -1709,31 +1735,36 @@ async function drawTelecallerReviewPage(doc,Chart,job,{isFirstPage=true}={}){
 
   // Header band
   pdfSetFill(doc,PDF_BRAND.green);
-  doc.rect(0,0,pageW,28, "F");
+  doc.rect(0,0,pageW,32,"F");
   pdfSetText(doc,PDF_BRAND.white);
   doc.setFont("helvetica","bold");
-  doc.setFontSize(14);
-  doc.text("LeadLens",marginX,12);
+  doc.setFontSize(16);
+  doc.text("LeadLens",marginX,13);
   doc.setFont("helvetica","normal");
   doc.setFontSize(10);
-  doc.text("TeleCaller Performance Report",marginX,20);
-  doc.setFontSize(9);
-  doc.text(String(metrics.telecallerName||"Unknown"),pageW-marginX,12,{align:"right"});
-  doc.text(runLabel,pageW-marginX,20,{align:"right"});
+  doc.text("TeleCaller performance report · audit metrics",marginX,22);
+  doc.setFont("helvetica","bold");
+  doc.setFontSize(11);
+  doc.text(String(metrics.telecallerName||"Unknown"),pageW-marginX,13,{align:"right"});
+  doc.setFont("helvetica","normal");
+  doc.setFontSize(8);
+  doc.text(runLabel,pageW-marginX,21,{align:"right"});
 
-  let y=34;
-  pdfSetText(doc,PDF_BRAND.muted);
+  let y=38;
+  pdfSetFill(doc,PDF_BRAND.paper);
+  doc.roundedRect(marginX,y,contentW,10,2,2,"F");
+  pdfSetText(doc,PDF_BRAND.ink);
   doc.setFontSize(9);
-  doc.text(`Leads ${Number(metrics.leadCount||0).toLocaleString()}  ·  Calls ${Number(metrics.callCount||0).toLocaleString()}  ·  Audited ${Number(metrics.auditedRows||0).toLocaleString()}`,marginX,y);
-  y+=6;
+  doc.text(`Leads ${Number(metrics.leadCount||0).toLocaleString()}   ·   Calls ${Number(metrics.callCount||0).toLocaleString()}   ·   Audited rows ${Number(metrics.auditedRows||0).toLocaleString()}`,marginX+4,y+6.5);
+  y+=14;
 
   if(report.headline){
-    pdfSetText(doc,PDF_BRAND.ink);
+    pdfSetText(doc,PDF_BRAND.green);
     doc.setFont("helvetica","bold");
-    doc.setFontSize(11);
+    doc.setFontSize(12);
     const headlineLines=pdfWrap(doc,report.headline,contentW);
     doc.text(headlineLines,marginX,y);
-    y+=headlineLines.length*5+2;
+    y+=headlineLines.length*5.5+3;
     doc.setFont("helvetica","normal");
   }
 
@@ -1744,72 +1775,85 @@ async function drawTelecallerReviewPage(doc,Chart,job,{isFirstPage=true}={}){
     {label:"High-severity",value:`${scores.highSeverity}%`},
     {label:"Buying intent",value:`${scores.buyingIntent}%`}
   ];
-  const gap=4;
+  const gap=3.5;
   const cardW=(contentW-(scoreCards.length-1)*gap)/scoreCards.length;
-  const cardH=16;
+  const cardH=18;
   scoreCards.forEach((card,i)=>{
     const x=marginX+i*(cardW+gap);
     pdfSetFill(doc,PDF_BRAND.mint);
     doc.roundedRect(x,y,cardW,cardH,2,2,"F");
     pdfSetText(doc,PDF_BRAND.muted);
     doc.setFontSize(7);
-    doc.text(card.label,x+3,y+5.5);
+    doc.text(card.label,x+3,y+6);
     pdfSetText(doc,PDF_BRAND.green);
     doc.setFont("helvetica","bold");
-    doc.setFontSize(12);
-    doc.text(card.value,x+3,y+12.5);
+    doc.setFontSize(13);
+    doc.text(card.value,x+3,y+14);
     doc.setFont("helvetica","normal");
   });
   y+=cardH+8;
 
-  // Charts
+  // Charts — larger
   const charts=await buildReviewChartImages(Chart,metrics);
-  const chartH=42;
-  const leftW=contentW*0.48;
-  const midW=contentW*0.48;
+  const chartH=48;
+  const colGap=4;
+  const leftW=(contentW-colGap)/2;
   pdfSetText(doc,PDF_BRAND.ink);
   doc.setFont("helvetica","bold");
   doc.setFontSize(9);
   doc.text("Comment quality distribution",marginX,y);
-  doc.text("Top error types",marginX+leftW+4,y);
+  doc.text("Top error types",marginX+leftW+colGap,y);
   y+=3;
   doc.addImage(charts.qualityImg,"PNG",marginX,y,leftW,chartH);
-  doc.addImage(charts.errorsImg,"PNG",marginX+leftW+4,y,midW,chartH);
-  y+=chartH+8;
+  doc.addImage(charts.errorsImg,"PNG",marginX+leftW+colGap,y,leftW,chartH);
+  y+=chartH+7;
 
-  y=pdfEnsureSpace(doc,y,55,marginBottom);
+  y=pdfEnsureSpace(doc,y,58,marginBottom);
   doc.setFont("helvetica","bold");
   doc.setFontSize(9);
   pdfSetText(doc,PDF_BRAND.ink);
   doc.text("Severity mix",marginX,y);
+  doc.text("Error frequency table",marginX+72,y);
   y+=3;
-  const sevW=Math.min(70,contentW*0.4);
-  doc.addImage(charts.severityImg,"PNG",marginX,y,sevW,48);
-  y+=52;
+  const sevW=62;
+  doc.addImage(charts.severityImg,"PNG",marginX,y,sevW,50);
 
-  // Narrative
-  y=pdfEnsureSpace(doc,y,24,marginBottom);
+  // Error table beside severity
+  let tableY=y+2;
+  const tableX=marginX+72;
+  const tableW=contentW-72;
   pdfSetFill(doc,PDF_BRAND.green);
-  doc.rect(marginX,y,2.2,5,"F");
-  pdfSetText(doc,PDF_BRAND.ink);
+  doc.rect(tableX,tableY,tableW,6,"F");
+  pdfSetText(doc,PDF_BRAND.white);
+  doc.setFontSize(7);
   doc.setFont("helvetica","bold");
-  doc.setFontSize(10);
-  doc.text("Coach summary",marginX+5,y+4);
-  y+=9;
+  doc.text("Error type",tableX+2,tableY+4);
+  doc.text("Count",tableX+tableW-2,tableY+4,{align:"right"});
+  tableY+=6;
   doc.setFont("helvetica","normal");
-  doc.setFontSize(9);
-  pdfSetText(doc,PDF_BRAND.ink);
-  const summaryLines=pdfWrap(doc,report.summary||"(No review generated.)",contentW);
-  for(const line of summaryLines){
-    y=pdfEnsureSpace(doc,y,5,marginBottom);
-    doc.text(line,marginX,y);
-    y+=4.4;
+  const rows=(metrics.errorTallies||[]).slice(0,8);
+  if(!rows.length){
+    pdfSetFill(doc,PDF_BRAND.paper);
+    doc.rect(tableX,tableY,tableW,6,"F");
+    pdfSetText(doc,PDF_BRAND.muted);
+    doc.text("No error labels in this slice",tableX+2,tableY+4);
+    tableY+=6;
+  }else{
+    rows.forEach((item,idx)=>{
+      pdfSetFill(doc,idx%2?PDF_BRAND.paper:PDF_BRAND.white);
+      doc.rect(tableX,tableY,tableW,6,"F");
+      pdfSetText(doc,PDF_BRAND.ink);
+      const label=item.label.length>42?item.label.slice(0,40)+"…":item.label;
+      doc.text(label,tableX+2,tableY+4);
+      doc.text(String(item.count),tableX+tableW-2,tableY+4,{align:"right"});
+      tableY+=6;
+    });
   }
-  y+=4;
+  y=Math.max(y+52,tableY)+6;
 
   const writeBulletSection=(title,items)=>{
     const list=items?.length?items:["None noted from this audit pass."];
-    y=pdfEnsureSpace(doc,y,14,marginBottom);
+    y=pdfEnsureSpace(doc,y,16,marginBottom);
     pdfSetFill(doc,PDF_BRAND.green);
     doc.rect(marginX,y,2.2,5,"F");
     pdfSetText(doc,PDF_BRAND.ink);
@@ -1831,9 +1875,34 @@ async function drawTelecallerReviewPage(doc,Chart,job,{isFirstPage=true}={}){
     y+=3;
   };
 
+  // Narrative from metrics
+  y=pdfEnsureSpace(doc,y,24,marginBottom);
+  pdfSetFill(doc,PDF_BRAND.green);
+  doc.rect(marginX,y,2.2,5,"F");
+  pdfSetText(doc,PDF_BRAND.ink);
+  doc.setFont("helvetica","bold");
+  doc.setFontSize(10);
+  doc.text("Executive summary",marginX+5,y+4);
+  y+=9;
+  doc.setFont("helvetica","normal");
+  doc.setFontSize(9);
+  pdfSetText(doc,PDF_BRAND.ink);
+  const summaryLines=pdfWrap(doc,report.summary||"No audit metrics available.",contentW);
+  for(const line of summaryLines){
+    y=pdfEnsureSpace(doc,y,5,marginBottom);
+    doc.text(line,marginX,y);
+    y+=4.4;
+  }
+  y+=4;
+
   writeBulletSection("Strengths",report.strengths);
   writeBulletSection("Risks",report.risks);
   writeBulletSection("Coaching focus",report.coachingFocus);
+
+  const samples=(metrics.sampleObservations||[]).slice(0,5);
+  const tips=(metrics.sampleRecommendations||[]).slice(0,5);
+  if(samples.length)writeBulletSection("Sample auditor observations",samples);
+  if(tips.length)writeBulletSection("Sample auditor recommendations",tips);
 
   const endPage=doc.getNumberOfPages();
   const pageH=doc.internal.pageSize.getHeight();
@@ -1844,15 +1913,15 @@ async function drawTelecallerReviewPage(doc,Chart,job,{isFirstPage=true}={}){
     doc.line(marginX,pageH-10,pageW-marginX,pageH-10);
     pdfSetText(doc,PDF_BRAND.muted);
     doc.setFontSize(7);
-    doc.text(`LeadLens ${APP_VERSION} · Confidential management report`,marginX,pageH-6);
+    doc.text(`LeadLens ${APP_VERSION} · Confidential · Audit-metrics report (no generative AI)`,marginX,pageH-6);
     doc.text(`${metrics.telecallerName||"TeleCaller"} · ${p}`,pageW-marginX,pageH-6,{align:"right"});
   }
 }
 
 /** Build a multi-page TeleCaller performance PDF (one section/page set per job). */
 export async function buildReviewPdfBlob(jobs){
-  const list=(jobs||[]).filter(job=>job&&(job.results?.length||job.reviewText||job.reviewReport));
-  if(!list.length)throw new Error("No completed TeleCaller reviews to export as PDF.");
+  const list=(jobs||[]).filter(job=>job&&job.results?.length);
+  if(!list.length)throw new Error("No completed TeleCaller audits to export as PDF.");
   const{jsPDF,Chart}=requirePdfLibs();
   const doc=new jsPDF({orientation:"portrait",unit:"mm",format:"a4"});
   for(let i=0;i<list.length;i++){
@@ -1868,8 +1937,8 @@ export async function downloadReviewPdf(jobs,filename){
 
 /** Download review PDF + audit Excel for one or many jobs according to packing. */
 export async function downloadReviewPack(jobs,currentSettings,{packing="combined",artifact="both"}={}){
-  const list=(jobs||[]).filter(job=>job&&(job.results?.length||job.reviewText||job.reviewReport));
-  if(!list.length)throw new Error("No completed TeleCaller reviews to download.");
+  const list=(jobs||[]).filter(job=>job&&job.results?.length);
+  if(!list.length)throw new Error("No completed TeleCaller audits to download.");
   const settings=normalizeSettings(currentSettings);
   const stamp=stampFile();
   const wantPdf=artifact==="both"||artifact==="pdf"||artifact==="txt";

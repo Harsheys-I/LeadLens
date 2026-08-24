@@ -7,11 +7,11 @@
   <meta name="description" content="Private, browser-based AI telecalling audit engine">
   <title>LeadLens Audit</title>
   <link rel="manifest" href="manifest.webmanifest">
-  <link rel="stylesheet" href="styles.css?v=3.2.3">
+  <link rel="stylesheet" href="styles.css?v=3.4.0">
   <script defer src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
-  <script type="module" src="app.js?v=3.2.3"></script>
+  <script type="module" src="app.js?v=3.4.0"></script>
 </head>
 <body>
   <div id="update-banner" class="update-banner hidden" role="status">
@@ -28,7 +28,7 @@
         <button class="nav-item" data-view="history"><span>◷</span>History</button>
         <button class="nav-item" data-view="settings"><span>⚙</span>Settings</button>
       </nav>
-      <div class="privacy-note"><strong id="sidebar-version">v3.2.3</strong><span id="sidebar-notes">Surface Combined TeleCaller review failures on parent Run Console logs, failed cards with error + retry, and job switcher.</span></div>
+      <div class="privacy-note"><strong id="sidebar-version">v3.4.0</strong><span id="sidebar-notes">TeleCaller Review formats: Excel RAW (detect + audit + PDF) and Excel Audit (skip AI, split + PDF).</span></div>
     </aside>
 
     <main>
@@ -50,14 +50,14 @@
       </section>
 
       <section id="view-review" class="view">
-        <div class="intro"><h2>Review every TeleCaller.</h2><p>Upload a team export or separate files. LeadLens audits each TeleCaller, then writes a manager-facing PDF performance report with a second AI pass.</p></div>
+        <div class="intro"><h2>Review every TeleCaller.</h2><p><strong>Excel RAW</strong> detects TeleCallers, audits the whole file, then builds PDFs. <strong>Excel Audit</strong> skips AI — upload an already-audited workbook, split by TeleCaller, and build PDFs.</p></div>
         <div class="format-toggle" role="group" aria-label="Upload format">
-          <button type="button" class="format-option active" data-review-format="combined">Combined Excel</button>
-          <button type="button" class="format-option" data-review-format="separate">Separate files</button>
+          <button type="button" class="format-option active" data-review-format="raw">Excel RAW</button>
+          <button type="button" class="format-option" data-review-format="audit">Excel Audit</button>
         </div>
         <div id="review-drop-zone" class="drop-zone" role="button" tabindex="0" aria-label="Upload Excel for TeleCaller review">
-          <input id="review-file-input" type="file" accept=".xlsx,.xls,.xlsm" multiple hidden>
-          <div class="upload-icon">⇧</div><h3>Drop Excel here</h3><p id="review-drop-hint">Combined team export · XLSX, XLS or XLSM · split by Telecaller Name in the browser</p>
+          <input id="review-file-input" type="file" accept=".xlsx,.xls,.xlsm" hidden>
+          <div class="upload-icon">⇧</div><h3>Drop Excel here</h3><p id="review-drop-hint">CRM / RAW export · auto-detect TeleCallers · audit then PDF · XLSX, XLS or XLSM</p>
         </div>
         <div id="review-file-list" class="file-list hidden"></div>
         <div id="review-validation" class="validation hidden" role="status"></div>
@@ -90,7 +90,7 @@
         <div class="progress-panel">
           <div class="progress-copy"><strong id="progress-label">Waiting for a file</strong><span id="progress-percent">0%</span></div>
           <div class="progress-track"><div id="progress-bar" class="progress-bar"></div></div>
-          <div class="metrics"><div><span>Leads</span><strong id="metric-leads">—</strong></div><div><span>Calls</span><strong id="metric-calls">—</strong></div><div><span>Audited</span><strong id="metric-completed">—</strong></div><div><span>Batch</span><strong id="metric-batch">—</strong></div><div><span>Status</span><strong id="metric-status">Idle</strong></div><div><span>Input tokens</span><strong id="metric-input-tokens">—</strong></div><div><span>Cached input</span><strong id="metric-cached-tokens">—</strong></div><div><span>Output tokens</span><strong id="metric-output-tokens">—</strong></div><div><span>Run time</span><strong id="metric-duration">—</strong></div><div><span>Est. time</span><strong id="metric-eta">—</strong></div><div><span>Run cost</span><strong id="metric-cost">—</strong></div></div>
+          <div class="metrics"><div><span>Leads</span><strong id="metric-leads">—</strong></div><div><span>Calls</span><strong id="metric-calls">—</strong></div><div><span>Audited</span><strong id="metric-completed">—</strong></div><div><span>Batch</span><strong id="metric-batch">—</strong></div><div><span>Status</span><strong id="metric-status">Idle</strong></div><div><span>Input tokens</span><strong id="metric-input-tokens">—</strong></div><div><span>Cached input</span><strong id="metric-cached-tokens">—</strong></div><div><span>Output tokens</span><strong id="metric-output-tokens">—</strong></div><div><span>Run time</span><strong id="metric-duration">—</strong></div><div><span>Run cost</span><strong id="metric-cost">—</strong></div></div>
         </div>
         <div class="console-panel"><div class="panel-head"><div><span class="live-dot"></span><strong>Live log</strong></div><button id="clear-console" class="text-button">Clear view</button></div><div id="live-log" class="log-list"><div class="empty-state">Run activity will appear here.</div></div></div>
       </section>
@@ -128,19 +128,13 @@
                 <label>Batch size (leads)<input id="batch-size" type="number" min="1" max="20" value="20"></label>
                 <label>Parallel batches<input id="concurrency" type="number" min="1" max="50" value="2"></label>
                 <label>Audit model<input id="model" type="text" value="gpt-4o-mini"></label>
-                <label>Review model<input id="review-model" type="text" value="gpt-5-nano"></label>
               </div>
               <div class="field-grid pricing-grid settings-subgrid">
                 <label>Audit input ₹ / 1M<input id="input-price" type="number" min="0" step="0.000001"></label>
                 <label>Audit cached ₹ / 1M<input id="cached-price" type="number" min="0" step="0.000001"></label>
                 <label>Audit output ₹ / 1M<input id="output-price" type="number" min="0" step="0.000001"></label>
               </div>
-              <div class="field-grid pricing-grid settings-subgrid">
-                <label>Review input ₹ / 1M<input id="review-input-price" type="number" min="0" step="0.000001"></label>
-                <label>Review cached ₹ / 1M<input id="review-cached-price" type="number" min="0" step="0.000001"></label>
-                <label>Review output ₹ / 1M<input id="review-output-price" type="number" min="0" step="0.000001"></label>
-              </div>
-              <p class="hint-copy">Console cost splits audit vs review tokens. Review defaults are gpt-5-nano OpenAI list price ($0.05 / $0.005 / $0.40 per 1M) × ₹87/USD → ₹4.35 / ₹0.435 / ₹34.8.</p>
+              <p class="hint-copy">Console cost uses audit rates. TeleCaller PDFs are built from audit metrics (no separate review-model pass).</p>
             </section>
 
             <section class="settings-card">

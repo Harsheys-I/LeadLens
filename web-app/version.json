@@ -1,5 +1,5 @@
 ﻿{
-  "version": "3.2.3",
+  "version": "3.4.0",
   "name": "LeadLens",
-  "notes": "Surface Combined TeleCaller review failures on parent Run Console logs, failed cards with error + retry, and job switcher."
+  "notes": "TeleCaller Review formats: Excel RAW (detect + audit + PDF) and Excel Audit (skip AI, split + PDF)."
 }
