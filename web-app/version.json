@@ -1,5 +1,5 @@
 ﻿{
-  "version": "3.0.1",
+  "version": "3.0.2",
   "name": "LeadLens",
-  "notes": "Fix gpt-5-nano review API params (max_completion_tokens; omit temperature); separate Review model ₹/1M rates from OpenAI list price; correct split cost estimate"
+  "notes": "Parallel TeleCaller Review: up to 10 review jobs at once (worker pool); remaining queued. Per-job pause/checkpoints unchanged. Removed debug ingest."
 }

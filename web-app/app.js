@@ -1,5 +1,5 @@
-import {APP_VERSION,DEFAULT_SETTINGS,DEFAULT_OUTPUT_FIELDS,SETTINGS_SEED,MAX_BATCH_SIZE,MAX_CONCURRENCY,normalizeSettings,normalizeInputFields,slugFieldId,parseWorkbook,auditBatch,downloadWorkbook,downloadReviewPack,splitLeadsByTelecaller,requestTelecallerReview,estimateRunSeconds,estimateReviewRunSeconds,validateApiKey} from "./audit.js?v=3.0.1";
-import {putJob,getJob,getJobs,deleteJob,clearJobs,loadSettings,saveSettings,getApiKey,apiKeyIsRemembered,saveApiKey,forgetApiKey} from "./db.js?v=3.0.1";
+import {APP_VERSION,DEFAULT_SETTINGS,DEFAULT_OUTPUT_FIELDS,SETTINGS_SEED,MAX_BATCH_SIZE,MAX_CONCURRENCY,normalizeSettings,normalizeInputFields,slugFieldId,parseWorkbook,auditBatch,downloadWorkbook,downloadReviewPack,splitLeadsByTelecaller,requestTelecallerReview,estimateRunSeconds,estimateReviewRunSeconds,validateApiKey} from "./audit.js?v=3.0.2";
+import {putJob,getJob,getJobs,deleteJob,clearJobs,loadSettings,saveSettings,getApiKey,apiKeyIsRemembered,saveApiKey,forgetApiKey} from "./db.js?v=3.0.2";
 
 const $=id=>document.getElementById(id);
 const ids=["file-input","drop-zone","file-list","validation","start-audit","page-title","key-state","run-name","pause-run","download-result","progress-label","progress-percent","progress-bar","metric-leads","metric-excel-rows","metric-calls","metric-batch","metric-completed","metric-status","metric-input-tokens","metric-cached-tokens","metric-output-tokens","metric-duration","metric-eta","metric-cost","live-log","clear-console","history-list","clear-history","api-key","remember-key","toggle-key","save-key","forget-key","key-message","batch-size","concurrency","model","review-model","input-field-config","add-input-field","ai-field-config","rule-config","add-rule","output-field-config","yes-values","no-values","additional-instructions","input-price","cached-price","output-price","review-input-price","review-cached-price","review-output-price","save-settings","reset-settings","settings-message","toast","mobile-menu","active-job-switch","sort-field","sort-direction","app-version","export-settings","import-settings","import-settings-file","update-banner","update-banner-text","reload-app","key-modal","onboard-key","onboard-toggle","onboard-remember","onboard-message","onboard-save","onboard-skip","sidebar-version","sidebar-notes","review-drop-zone","review-file-input","review-drop-hint","review-file-list","review-validation","start-review","review-run-panel","review-aggregate","review-cards","review-download-panel","download-review-txt","download-review-excel","review-open-console"];
@@ -8,6 +8,8 @@ const titles={new:"New audit",review:"TelleCaller Review",console:"Run console",
 const ENGINE_VERSION="latest-day-v7";
 const ACTIVE_JOB_KEY="leadlens.activeJobId";
 const REVIEW_SESSION_KEY="leadlens.reviewSessionIds";
+/** Max TeleCaller review jobs running at once (outer pool). Inner batch pool stays settings.concurrency per job. */
+const REVIEW_JOB_CONCURRENCY=10;
 
 let parsedFiles=[],currentJob=null,displayLogs=true;
 let reviewFormat="combined";
@@ -15,6 +17,7 @@ let reviewParsedFiles=[];
 let reviewSessionIds=[];
 let reviewQueue=[];
 let reviewQueueRunning=false;
+let reviewActiveCount=0;
 const controllers=new Map();
 const saveChains=new Map();
 const loadedSettings=loadSettings(DEFAULT_SETTINGS);
@@ -340,7 +343,9 @@ async function runJob(job,{navigate=true}={}){
   const concurrency=Math.min(MAX_CONCURRENCY,Math.max(1,Number(job.settings.concurrency)||1));
   addLog(job,`Run started: live pool of ${concurrency} (next batch fires the instant one frees a slot), batch size ${job.settings.batchSize} leads, model ${job.settings.model}${isReview?`, review model ${job.settings.reviewModel||settings.reviewModel}`:""}, app ${APP_VERSION}. Checkpoints stay in order — later batches may finish API first and wait.`);
   await putJob(job);
-  if(!currentJob||currentJob.id===job.id||!controllers.has(currentJob.id))renderProgress(job);
+  // Reviews: only paint Run Console when this job is already selected (parallel workers must not steal).
+  // Audits: allow switch when no active controller on the current console job.
+  if(currentJob?.id===job.id||(!isReview&&(!currentJob||!controllers.has(currentJob.id))))renderProgress(job);
   if(shouldNavigate)showView("console");
   if(isReview)scheduleReviewProgress();
 
@@ -416,9 +421,6 @@ async function runJob(job,{navigate=true}={}){
 
     if(isReview){
       if(!(job.reviewStatus==="completed"&&job.reviewText)){
-        // #region agent log
-        fetch('http://127.0.0.1:7797/ingest/f5b1638c-fccc-4fdd-8a81-13d5e23b6f2f',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'d88a1d'},body:JSON.stringify({sessionId:'d88a1d',runId:'pre-fix',hypothesisId:'E',location:'app.js:runJob:review-enter',message:'entering review pass',data:{jobId:job.id,status:job.status,reviewStatus:job.reviewStatus||"",nextBatch:job.nextBatch,totalBatches,resultCount:(job.results||[]).length,hasReviewText:Boolean(job.reviewText)},timestamp:Date.now()})}).catch(()=>{});
-        // #endregion
         job.status="reviewing";
         job.updatedAt=timestamp();
         addLog(job,`Audit finished — starting TeleCaller review with ${job.settings.reviewModel||settings.reviewModel||"gpt-5-nano"}…`);
@@ -899,22 +901,50 @@ async function startReview(){
   scheduleReviewProgress();
 }
 
-async function drainReviewQueue(){
-  if(reviewQueueRunning)return;
-  reviewQueueRunning=true;
-  if(els["start-review"]&&reviewFormat==="separate")els["start-review"].textContent="Add to queue →";
-  try{
-    while(reviewQueue.length){
-      const job=reviewQueue.shift();
-      const fresh=await getJob(job.id)||job;
-      currentJob=fresh;
-      await runJob(fresh,{navigate:false});
-      scheduleReviewProgress();
-    }
-  }finally{
-    reviewQueueRunning=false;
-    if(els["start-review"])els["start-review"].textContent="Start review →";
-    scheduleReviewProgress();
+/**
+ * Outer worker pool: up to REVIEW_JOB_CONCURRENCY TeleCaller jobs in parallel.
+ * Each job keeps its own runJob / AbortController / IndexedDB checkpoints.
+ * Pause in Run Console aborts only currentJob (per-job), not the whole queue.
+ */
+function drainReviewQueue(){
+  if(els["start-review"]&&reviewFormat==="separate"&&(reviewQueue.length||reviewActiveCount)){
+    els["start-review"].textContent="Add to queue →";
+  }
+  if(reviewQueue.length||reviewActiveCount)reviewQueueRunning=true;
+
+  const innerConcurrency=Math.min(MAX_CONCURRENCY,Math.max(1,Number(settings.concurrency)||1));
+  const launching=Math.min(REVIEW_JOB_CONCURRENCY-reviewActiveCount,reviewQueue.length);
+  if(launching>0&&!drainReviewQueue._rateWarned&&(reviewActiveCount+launching)>=REVIEW_JOB_CONCURRENCY&&innerConcurrency>1){
+    console.warn(`LeadLens: up to ${REVIEW_JOB_CONCURRENCY} TeleCaller jobs × ${innerConcurrency} batch concurrency may hit OpenAI rate limits.`);
+    drainReviewQueue._rateWarned=true;
+  }
+
+  while(reviewActiveCount<REVIEW_JOB_CONCURRENCY&&reviewQueue.length){
+    const queued=reviewQueue.shift();
+    if(!queued)break;
+    // Sync claim so the first launched job owns the console before other workers start.
+    if(!currentJob)currentJob=queued;
+    reviewActiveCount++;
+    reviewQueueRunning=true;
+    (async()=>{
+      try{
+        // Fresh IndexedDB copy per worker — never share mutable job state across workers.
+        const fresh=await getJob(queued.id)||queued;
+        if(currentJob?.id===queued.id)currentJob=fresh;
+        await runJob(fresh,{navigate:false});
+      }finally{
+        reviewActiveCount--;
+        scheduleReviewProgress();
+        if(reviewQueue.length){
+          drainReviewQueue();
+        }else if(reviewActiveCount===0){
+          reviewQueueRunning=false;
+          drainReviewQueue._rateWarned=false;
+          if(els["start-review"])els["start-review"].textContent="Start review →";
+          scheduleReviewProgress();
+        }
+      }
+    })();
   }
 }
 

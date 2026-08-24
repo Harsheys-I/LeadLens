@@ -1,4 +1,4 @@
-export const APP_VERSION = "3.0.1";
+export const APP_VERSION = "3.0.2";
 /** Bump when default AI rules / field defaults must refresh existing localStorage settings. */
 export const SETTINGS_SEED = 11;
 
@@ -150,7 +150,7 @@ export function buildChatCompletionBody(model,{temperature,maxTokens,messages,..
 
 /* Large stable prefix FIRST so OpenAI prompt caching can activate (>=1024 tokens;
    some models need closer to 2048). Run-specific rules come after; lead data last. */
-const CACHE_HANDBOOK = `LeadLens QA v3.0.1 — stable cacheable auditor handbook. Evidence only. Never invent facts, dates, budgets, locations, or prior calls.
+const CACHE_HANDBOOK = `LeadLens QA v3.0.2 — stable cacheable auditor handbook. Evidence only. Never invent facts, dates, budgets, locations, or prior calls.
 
 PURPOSE
 You audit Indian real-estate telecalling follow-up notes. Judge only the supplied fields for THIS call id. Optional day[] lists sibling calls on the same latest calendar day — context only; still return one result for THIS id.
@@ -677,9 +677,6 @@ export async function requestTelecallerReview(apiKey,rawSettings,job,signal,log)
       ]
     });
   if(log)log(`Review API params (${model}): keys=${Object.keys(reviewBody).join(",")} · max_tokens=${"max_tokens" in reviewBody} · max_completion_tokens=${"max_completion_tokens" in reviewBody} · temperature=${"temperature" in reviewBody}`,"info");
-  // #region agent log
-  fetch('http://127.0.0.1:7797/ingest/f5b1638c-fccc-4fdd-8a81-13d5e23b6f2f',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'d88a1d'},body:JSON.stringify({sessionId:'d88a1d',runId:'post-fix',hypothesisId:'A,B,F',location:'audit.js:requestTelecallerReview',message:'review request body keys',data:{model,bodyKeys:Object.keys(reviewBody),hasMaxTokens:'max_tokens' in reviewBody,hasMaxCompletionTokens:'max_completion_tokens' in reviewBody,hasTemperature:'temperature' in reviewBody,temperature:reviewBody.temperature,auditedRows:summary.auditedRows},timestamp:Date.now()})}).catch(()=>{});
-  // #endregion
   const response=await fetch("https://api.openai.com/v1/chat/completions",{
     method:"POST",signal,
     headers:{"Content-Type":"application/json","Authorization":`Bearer ${apiKey}`},
@@ -687,25 +684,15 @@ export async function requestTelecallerReview(apiKey,rawSettings,job,signal,log)
   });
   if(!response.ok){
     let detail="";
-    let errCode="";
-    let errParam="";
     try{
       const errJson=await response.json();
       detail=errJson.error?.message||"";
-      errCode=errJson.error?.code||"";
-      errParam=errJson.error?.param||"";
     }catch{/* ignore */}
-    // #region agent log
-    fetch('http://127.0.0.1:7797/ingest/f5b1638c-fccc-4fdd-8a81-13d5e23b6f2f',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'d88a1d'},body:JSON.stringify({sessionId:'d88a1d',runId:'post-fix',hypothesisId:'A,B,F',location:'audit.js:requestTelecallerReview:error',message:'review OpenAI error',data:{status:response.status,detail,errCode,errParam,model,bodyKeys:Object.keys(reviewBody)},timestamp:Date.now()})}).catch(()=>{});
-    // #endregion
     throw new Error(`OpenAI review ${response.status}: ${detail||response.statusText}`);
   }
   const data=await response.json();
   const choice=data.choices?.[0];
   const text=clean(choice?.message?.content||"");
-  // #region agent log
-  fetch('http://127.0.0.1:7797/ingest/f5b1638c-fccc-4fdd-8a81-13d5e23b6f2f',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'d88a1d'},body:JSON.stringify({sessionId:'d88a1d',runId:'post-fix',hypothesisId:'D',location:'audit.js:requestTelecallerReview:ok',message:'review OpenAI success shape',data:{model,finishReason:choice?.finish_reason||"",contentLen:text.length,hasRefusal:Boolean(choice?.message?.refusal),usageKeys:Object.keys(data.usage||{})},timestamp:Date.now()})}).catch(()=>{});
-  // #endregion
   if(!text)throw new Error(`OpenAI returned an empty TeleCaller review (finish_reason=${choice?.finish_reason||"unknown"}).`);
   const usage=data.usage||{};
   const tokenUsage={
@@ -1191,12 +1178,6 @@ async function requestAudit(apiKey,settings,leads,signal,log,onUsage){
       ],
       response_format:{type:"json_schema",json_schema:{name:"ll_audit",strict:true,schema:responseSchema}}
     });
-  // #region agent log
-  if(!globalThis.__llAuditParamLogged){
-    globalThis.__llAuditParamLogged=true;
-    fetch('http://127.0.0.1:7797/ingest/f5b1638c-fccc-4fdd-8a81-13d5e23b6f2f',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'d88a1d'},body:JSON.stringify({sessionId:'d88a1d',runId:'post-fix',hypothesisId:'C',location:'audit.js:requestAudit',message:'audit request body keys (once per page)',data:{model:settings.model,bodyKeys:Object.keys(auditBody),hasMaxTokens:'max_tokens' in auditBody,hasMaxCompletionTokens:'max_completion_tokens' in auditBody,hasTemperature:'temperature' in auditBody,temperature:auditBody.temperature},timestamp:Date.now()})}).catch(()=>{});
-  }
-  // #endregion
   const response=await fetch("https://api.openai.com/v1/chat/completions",{
     method:"POST",signal,
     headers:{"Content-Type":"application/json","Authorization":`Bearer ${apiKey}`},
@@ -1204,17 +1185,10 @@ async function requestAudit(apiKey,settings,leads,signal,log,onUsage){
   });
   if(!response.ok){
     let detail="";
-    let errCode="";
-    let errParam="";
     try{
       const errJson=await response.json();
       detail=errJson.error?.message||"";
-      errCode=errJson.error?.code||"";
-      errParam=errJson.error?.param||"";
     }catch{/* ignore */}
-    // #region agent log
-    fetch('http://127.0.0.1:7797/ingest/f5b1638c-fccc-4fdd-8a81-13d5e23b6f2f',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'d88a1d'},body:JSON.stringify({sessionId:'d88a1d',runId:'post-fix',hypothesisId:'C',location:'audit.js:requestAudit:error',message:'audit OpenAI error',data:{status:response.status,detail,errCode,errParam,model:settings.model},timestamp:Date.now()})}).catch(()=>{});
-    // #endregion
     throw new Error(`OpenAI ${response.status}: ${detail||response.statusText}`);
   }
   const data=await response.json(),usage=data.usage;

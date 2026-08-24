@@ -7,9 +7,9 @@
   <meta name="description" content="Private, browser-based AI telecalling audit engine">
   <title>LeadLens Audit</title>
   <link rel="manifest" href="manifest.webmanifest">
-  <link rel="stylesheet" href="styles.css?v=3.0.1">
+  <link rel="stylesheet" href="styles.css?v=3.0.2">
   <script defer src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-  <script type="module" src="app.js?v=3.0.1"></script>
+  <script type="module" src="app.js?v=3.0.2"></script>
 </head>
 <body>
   <div id="update-banner" class="update-banner hidden" role="status">
@@ -26,7 +26,7 @@
         <button class="nav-item" data-view="history"><span>◷</span>History</button>
         <button class="nav-item" data-view="settings"><span>⚙</span>Settings</button>
       </nav>
-      <div class="privacy-note"><strong id="sidebar-version">v3.0.1</strong><span id="sidebar-notes">Fix gpt-5-nano review API params (max_completion_tokens; omit temperature); separate Review model ₹/1M rates from OpenAI list price; correct split cost estimate</span></div>
+      <div class="privacy-note"><strong id="sidebar-version">v3.0.2</strong><span id="sidebar-notes">Parallel TeleCaller Review: up to 10 review jobs at once (worker pool); remaining queued. Per-job pause/checkpoints unchanged. Removed debug ingest.</span></div>
     </aside>
 
     <main>
