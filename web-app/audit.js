@@ -1,6 +1,6 @@
-export const APP_VERSION = "3.0.0";
+export const APP_VERSION = "3.0.1";
 /** Bump when default AI rules / field defaults must refresh existing localStorage settings. */
-export const SETTINGS_SEED = 10;
+export const SETTINGS_SEED = 11;
 
 /** Settings limits — batch size is leads per request; concurrency is parallel requests. */
 export const MAX_BATCH_SIZE = 20;
@@ -114,6 +114,10 @@ export const DEFAULT_RULES = [
   {field:"AI Recommendation",instruction:"r must be a concrete telecaller coaching action: what to ask/capture/correct on the next call (fields, questions, status fix down/up the Prospect→Lost ladder, follow-up discipline). Not vague ('follow up', 'update remarks'). 20-40 words, specific to THIS call's gaps.",errors:""},
   {field:"Buying intent",instruction:"i=1 only for genuine positive purchase interest in THIS call's latest comment/status; else i=0. Earlier history alone does not set i=1 if the latest comment cooled. All-RNR / k=No ⇒ i=0.",errors:""}
 ];
+/* gpt-5-nano OpenAI list price (USD/1M): $0.05 input, $0.005 cached, $0.40 output.
+   Defaults stored as ₹/1M using ₹87/USD (OpenAI publishes USD only).
+   https://developers.openai.com/api/docs/models/gpt-5-nano */
+export const DEFAULT_REVIEW_PRICING={input:4.35,cached:0.435,output:34.8};
 export const DEFAULT_SETTINGS = {
   batchSize:20,concurrency:2,model:"gpt-4o-mini",reviewModel:"gpt-5-nano",
   inputFields:DEFAULT_INPUT_FIELDS,aiFields:DEFAULT_AI_FIELDS,outputFields:DEFAULT_OUTPUT_FIELDS,rules:DEFAULT_RULES,
@@ -121,12 +125,32 @@ export const DEFAULT_SETTINGS = {
   noValues:"1st RNR, 2nd RNR, 3rd RNR, Call Disconnected, Continues RNR, Duplicate Lead, Junk Lead, Marketing Enquiry, RNR, Re-Open, Wrong Number",
   additionalInstructions:"",
   sort:{field:"callDate",direction:"asc"},
-  pricing:{input:0,cached:0,output:0}
+  pricing:{input:0,cached:0,output:0},
+  reviewPricing:{...DEFAULT_REVIEW_PRICING}
 };
+
+/** GPT-5 / o-series Chat Completions: use max_completion_tokens; omit non-default temperature. */
+export function needsMaxCompletionTokens(model){
+  const id=String(model||"").trim().toLowerCase();
+  if(!id)return false;
+  if(id.includes("gpt-5-chat"))return false;
+  return /(^|[^a-z])(gpt-5|o1|o3|o4)([.-]|$)/.test(id)||/^o[134]/.test(id);
+}
+export function buildChatCompletionBody(model,{temperature,maxTokens,messages,...rest}){
+  const body={model,messages,...rest};
+  if(needsMaxCompletionTokens(model)){
+    body.max_completion_tokens=maxTokens;
+    // Reasoning models only accept default temperature — omit the field entirely.
+  }else{
+    body.max_tokens=maxTokens;
+    if(temperature!==undefined)body.temperature=temperature;
+  }
+  return body;
+}
 
 /* Large stable prefix FIRST so OpenAI prompt caching can activate (>=1024 tokens;
    some models need closer to 2048). Run-specific rules come after; lead data last. */
-const CACHE_HANDBOOK = `LeadLens QA v3.0.0 — stable cacheable auditor handbook. Evidence only. Never invent facts, dates, budgets, locations, or prior calls.
+const CACHE_HANDBOOK = `LeadLens QA v3.0.1 — stable cacheable auditor handbook. Evidence only. Never invent facts, dates, budgets, locations, or prior calls.
 
 PURPOSE
 You audit Indian real-estate telecalling follow-up notes. Judge only the supplied fields for THIS call id. Optional day[] lists sibling calls on the same latest calendar day — context only; still return one result for THIS id.
@@ -489,6 +513,11 @@ export function normalizeSettings(saved={}){
   if(commentsField){commentsField.enabled=true;commentsField.history=true;}
   merged.settingsSeed=SETTINGS_SEED;
   merged.pricing={...DEFAULT_SETTINGS.pricing,...(saved.pricing||{})};
+  merged.reviewPricing={...DEFAULT_SETTINGS.reviewPricing,...(saved.reviewPricing||{})};
+  if(seedFresh&&previousSeed<11){
+    // Seed 11: ship gpt-5-nano review rates (₹) for users who never set reviewPricing.
+    merged.reviewPricing={...DEFAULT_SETTINGS.reviewPricing,...(saved.reviewPricing||{})};
+  }
   // Force Lead Update Date ascending on first upgrade to seed 4; keep user sort afterward.
   if(seedFresh&&previousSeed<4)merged.sort={field:"callDate",direction:"asc"};
   else merged.sort={...DEFAULT_SETTINGS.sort,...(saved.sort||{})};
@@ -638,27 +667,46 @@ export async function requestTelecallerReview(apiKey,rawSettings,job,signal,log)
   const summary=buildReviewSummary(job);
   const system=`You are a telecalling QA coach writing for a sales manager. Using only the supplied audit summary, write a plain-text TeleCaller performance review between 100 and 500 words. Cover comment quality, error patterns, strengths, and coaching focus. No markdown, no bullet lists required, no JSON, no invented leads or quotes beyond the samples.`;
   const user=`TeleCaller review request.\nSummary JSON:\n${JSON.stringify(summary)}`;
-  const response=await fetch("https://api.openai.com/v1/chat/completions",{
-    method:"POST",signal,
-    headers:{"Content-Type":"application/json","Authorization":`Bearer ${apiKey}`},
-    body:JSON.stringify({
-      model,
+  // Higher max for reasoning models (thinking tokens + 100–500 word review).
+  const reviewBody=buildChatCompletionBody(model,{
       temperature:0.3,
-      max_tokens:900,
+      maxTokens:4000,
       messages:[
         {role:"system",content:system},
         {role:"user",content:user}
       ]
-    })
+    });
+  if(log)log(`Review API params (${model}): keys=${Object.keys(reviewBody).join(",")} · max_tokens=${"max_tokens" in reviewBody} · max_completion_tokens=${"max_completion_tokens" in reviewBody} · temperature=${"temperature" in reviewBody}`,"info");
+  // #region agent log
+  fetch('http://127.0.0.1:7797/ingest/f5b1638c-fccc-4fdd-8a81-13d5e23b6f2f',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'d88a1d'},body:JSON.stringify({sessionId:'d88a1d',runId:'post-fix',hypothesisId:'A,B,F',location:'audit.js:requestTelecallerReview',message:'review request body keys',data:{model,bodyKeys:Object.keys(reviewBody),hasMaxTokens:'max_tokens' in reviewBody,hasMaxCompletionTokens:'max_completion_tokens' in reviewBody,hasTemperature:'temperature' in reviewBody,temperature:reviewBody.temperature,auditedRows:summary.auditedRows},timestamp:Date.now()})}).catch(()=>{});
+  // #endregion
+  const response=await fetch("https://api.openai.com/v1/chat/completions",{
+    method:"POST",signal,
+    headers:{"Content-Type":"application/json","Authorization":`Bearer ${apiKey}`},
+    body:JSON.stringify(reviewBody)
   });
   if(!response.ok){
     let detail="";
-    try{detail=(await response.json()).error?.message||"";}catch{/* ignore */}
+    let errCode="";
+    let errParam="";
+    try{
+      const errJson=await response.json();
+      detail=errJson.error?.message||"";
+      errCode=errJson.error?.code||"";
+      errParam=errJson.error?.param||"";
+    }catch{/* ignore */}
+    // #region agent log
+    fetch('http://127.0.0.1:7797/ingest/f5b1638c-fccc-4fdd-8a81-13d5e23b6f2f',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'d88a1d'},body:JSON.stringify({sessionId:'d88a1d',runId:'post-fix',hypothesisId:'A,B,F',location:'audit.js:requestTelecallerReview:error',message:'review OpenAI error',data:{status:response.status,detail,errCode,errParam,model,bodyKeys:Object.keys(reviewBody)},timestamp:Date.now()})}).catch(()=>{});
+    // #endregion
     throw new Error(`OpenAI review ${response.status}: ${detail||response.statusText}`);
   }
   const data=await response.json();
-  const text=clean(data.choices?.[0]?.message?.content||"");
-  if(!text)throw new Error("OpenAI returned an empty TeleCaller review.");
+  const choice=data.choices?.[0];
+  const text=clean(choice?.message?.content||"");
+  // #region agent log
+  fetch('http://127.0.0.1:7797/ingest/f5b1638c-fccc-4fdd-8a81-13d5e23b6f2f',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'d88a1d'},body:JSON.stringify({sessionId:'d88a1d',runId:'post-fix',hypothesisId:'D',location:'audit.js:requestTelecallerReview:ok',message:'review OpenAI success shape',data:{model,finishReason:choice?.finish_reason||"",contentLen:text.length,hasRefusal:Boolean(choice?.message?.refusal),usageKeys:Object.keys(data.usage||{})},timestamp:Date.now()})}).catch(()=>{});
+  // #endregion
+  if(!text)throw new Error(`OpenAI returned an empty TeleCaller review (finish_reason=${choice?.finish_reason||"unknown"}).`);
   const usage=data.usage||{};
   const tokenUsage={
     input:usage.prompt_tokens??usage.input_tokens??0,
@@ -1133,24 +1181,40 @@ function finalizeRecommendation(aiText,row,errors,q){
 
 async function requestAudit(apiKey,settings,leads,signal,log,onUsage){
   const modelInput=leads.map(lead=>({id:lead.leadId,...lead.auditContext}));
-  const response=await fetch("https://api.openai.com/v1/chat/completions",{
-    method:"POST",signal,
-    headers:{"Content-Type":"application/json","Authorization":`Bearer ${apiKey}`},
-    body:JSON.stringify({
-      model:settings.model,
+  const auditBody=buildChatCompletionBody(settings.model,{
       temperature:0,
-      max_tokens:Math.max(500,leads.length*140),
+      maxTokens:Math.max(500,leads.length*140),
       prompt_cache_key:promptCacheKey(settings),
       messages:[
         {role:"system",content:buildPrompt(settings)},
         {role:"user",content:`Audit ${leads.length} call(s). Echo each id. c=full history; u+pn=±5min prior follow-up; reg+fu=30min first-talk SLA; o=QA analysis not comment copy; r=specific coaching.\n${JSON.stringify({L:modelInput})}`}
       ],
       response_format:{type:"json_schema",json_schema:{name:"ll_audit",strict:true,schema:responseSchema}}
-    })
+    });
+  // #region agent log
+  if(!globalThis.__llAuditParamLogged){
+    globalThis.__llAuditParamLogged=true;
+    fetch('http://127.0.0.1:7797/ingest/f5b1638c-fccc-4fdd-8a81-13d5e23b6f2f',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'d88a1d'},body:JSON.stringify({sessionId:'d88a1d',runId:'post-fix',hypothesisId:'C',location:'audit.js:requestAudit',message:'audit request body keys (once per page)',data:{model:settings.model,bodyKeys:Object.keys(auditBody),hasMaxTokens:'max_tokens' in auditBody,hasMaxCompletionTokens:'max_completion_tokens' in auditBody,hasTemperature:'temperature' in auditBody,temperature:auditBody.temperature},timestamp:Date.now()})}).catch(()=>{});
+  }
+  // #endregion
+  const response=await fetch("https://api.openai.com/v1/chat/completions",{
+    method:"POST",signal,
+    headers:{"Content-Type":"application/json","Authorization":`Bearer ${apiKey}`},
+    body:JSON.stringify(auditBody)
   });
   if(!response.ok){
     let detail="";
-    try{detail=(await response.json()).error?.message||"";}catch{/* ignore */}
+    let errCode="";
+    let errParam="";
+    try{
+      const errJson=await response.json();
+      detail=errJson.error?.message||"";
+      errCode=errJson.error?.code||"";
+      errParam=errJson.error?.param||"";
+    }catch{/* ignore */}
+    // #region agent log
+    fetch('http://127.0.0.1:7797/ingest/f5b1638c-fccc-4fdd-8a81-13d5e23b6f2f',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'d88a1d'},body:JSON.stringify({sessionId:'d88a1d',runId:'post-fix',hypothesisId:'C',location:'audit.js:requestAudit:error',message:'audit OpenAI error',data:{status:response.status,detail,errCode,errParam,model:settings.model},timestamp:Date.now()})}).catch(()=>{});
+    // #endregion
     throw new Error(`OpenAI ${response.status}: ${detail||response.statusText}`);
   }
   const data=await response.json(),usage=data.usage;

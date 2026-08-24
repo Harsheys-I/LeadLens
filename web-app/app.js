@@ -1,8 +1,8 @@
-import {APP_VERSION,DEFAULT_SETTINGS,DEFAULT_OUTPUT_FIELDS,SETTINGS_SEED,MAX_BATCH_SIZE,MAX_CONCURRENCY,normalizeSettings,normalizeInputFields,slugFieldId,parseWorkbook,auditBatch,downloadWorkbook,downloadReviewPack,splitLeadsByTelecaller,requestTelecallerReview,estimateRunSeconds,estimateReviewRunSeconds,validateApiKey} from "./audit.js?v=3.0.0";
-import {putJob,getJob,getJobs,deleteJob,clearJobs,loadSettings,saveSettings,getApiKey,apiKeyIsRemembered,saveApiKey,forgetApiKey} from "./db.js?v=3.0.0";
+import {APP_VERSION,DEFAULT_SETTINGS,DEFAULT_OUTPUT_FIELDS,SETTINGS_SEED,MAX_BATCH_SIZE,MAX_CONCURRENCY,normalizeSettings,normalizeInputFields,slugFieldId,parseWorkbook,auditBatch,downloadWorkbook,downloadReviewPack,splitLeadsByTelecaller,requestTelecallerReview,estimateRunSeconds,estimateReviewRunSeconds,validateApiKey} from "./audit.js?v=3.0.1";
+import {putJob,getJob,getJobs,deleteJob,clearJobs,loadSettings,saveSettings,getApiKey,apiKeyIsRemembered,saveApiKey,forgetApiKey} from "./db.js?v=3.0.1";
 
 const $=id=>document.getElementById(id);
-const ids=["file-input","drop-zone","file-list","validation","start-audit","page-title","key-state","run-name","pause-run","download-result","progress-label","progress-percent","progress-bar","metric-leads","metric-excel-rows","metric-calls","metric-batch","metric-completed","metric-status","metric-input-tokens","metric-cached-tokens","metric-output-tokens","metric-duration","metric-eta","metric-cost","live-log","clear-console","history-list","clear-history","api-key","remember-key","toggle-key","save-key","forget-key","key-message","batch-size","concurrency","model","review-model","input-field-config","add-input-field","ai-field-config","rule-config","add-rule","output-field-config","yes-values","no-values","additional-instructions","input-price","cached-price","output-price","save-settings","reset-settings","settings-message","toast","mobile-menu","active-job-switch","sort-field","sort-direction","app-version","export-settings","import-settings","import-settings-file","update-banner","update-banner-text","reload-app","key-modal","onboard-key","onboard-toggle","onboard-remember","onboard-message","onboard-save","onboard-skip","sidebar-version","sidebar-notes","review-drop-zone","review-file-input","review-drop-hint","review-file-list","review-validation","start-review","review-run-panel","review-aggregate","review-cards","review-download-panel","download-review-txt","download-review-excel","review-open-console"];
+const ids=["file-input","drop-zone","file-list","validation","start-audit","page-title","key-state","run-name","pause-run","download-result","progress-label","progress-percent","progress-bar","metric-leads","metric-excel-rows","metric-calls","metric-batch","metric-completed","metric-status","metric-input-tokens","metric-cached-tokens","metric-output-tokens","metric-duration","metric-eta","metric-cost","live-log","clear-console","history-list","clear-history","api-key","remember-key","toggle-key","save-key","forget-key","key-message","batch-size","concurrency","model","review-model","input-field-config","add-input-field","ai-field-config","rule-config","add-rule","output-field-config","yes-values","no-values","additional-instructions","input-price","cached-price","output-price","review-input-price","review-cached-price","review-output-price","save-settings","reset-settings","settings-message","toast","mobile-menu","active-job-switch","sort-field","sort-direction","app-version","export-settings","import-settings","import-settings-file","update-banner","update-banner-text","reload-app","key-modal","onboard-key","onboard-toggle","onboard-remember","onboard-message","onboard-save","onboard-skip","sidebar-version","sidebar-notes","review-drop-zone","review-file-input","review-drop-hint","review-file-list","review-validation","start-review","review-run-panel","review-aggregate","review-cards","review-download-panel","download-review-txt","download-review-excel","review-open-console"];
 const els=Object.fromEntries(ids.map(id=>[id,$(id)]));
 const titles={new:"New audit",review:"TelleCaller Review",console:"Run console",history:"History",settings:"Settings"};
 const ENGINE_VERSION="latest-day-v7";
@@ -105,7 +105,20 @@ function renderLogs(job){
 }
 function elapsed(job){return (job.elapsedMs||0)+(job.status==="running"&&job.runStartedAt?Date.now()-new Date(job.runStartedAt).valueOf():0);}
 function durationText(ms){const seconds=Math.max(0,Math.floor(ms/1000)),minutes=Math.floor(seconds/60);return minutes?`${minutes}m ${seconds%60}s`:`${seconds}s`;}
-function estimatedCost(job){const usage=job.tokenUsage||{},rates=job.pricing||settings.pricing||{};return Math.max(0,(number(usage.input)-number(usage.cached))*number(rates.input)/1e6+number(usage.cached)*number(rates.cached)/1e6+number(usage.output)*number(rates.output)/1e6);}
+function estimatedCost(job){
+  const reviewUsage=job.reviewTokenUsage||{input:0,cached:0,output:0};
+  const total=job.tokenUsage||{input:0,cached:0,output:0};
+  // Review tokens are folded into tokenUsage after the second pass — split for dual rates.
+  const auditUsage={
+    input:Math.max(0,number(total.input)-number(reviewUsage.input)),
+    cached:Math.max(0,number(total.cached)-number(reviewUsage.cached)),
+    output:Math.max(0,number(total.output)-number(reviewUsage.output))
+  };
+  const auditRates=job.pricing||settings.pricing||{};
+  const reviewRates=job.reviewPricing||settings.reviewPricing||auditRates;
+  const cost=(usage,rates)=>Math.max(0,(number(usage.input)-number(usage.cached))*number(rates.input)/1e6+number(usage.cached)*number(rates.cached)/1e6+number(usage.output)*number(rates.output)/1e6);
+  return cost(auditUsage,auditRates)+cost(reviewUsage,reviewRates);
+}
 function stopClock(job){if(job.runStartedAt){job.elapsedMs=(job.elapsedMs||0)+Date.now()-new Date(job.runStartedAt).valueOf();job.runStartedAt="";}}
 
 function uniqueLeadCount(job){
@@ -403,6 +416,9 @@ async function runJob(job,{navigate=true}={}){
 
     if(isReview){
       if(!(job.reviewStatus==="completed"&&job.reviewText)){
+        // #region agent log
+        fetch('http://127.0.0.1:7797/ingest/f5b1638c-fccc-4fdd-8a81-13d5e23b6f2f',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'d88a1d'},body:JSON.stringify({sessionId:'d88a1d',runId:'pre-fix',hypothesisId:'E',location:'app.js:runJob:review-enter',message:'entering review pass',data:{jobId:job.id,status:job.status,reviewStatus:job.reviewStatus||"",nextBatch:job.nextBatch,totalBatches,resultCount:(job.results||[]).length,hasReviewText:Boolean(job.reviewText)},timestamp:Date.now()})}).catch(()=>{});
+        // #endregion
         job.status="reviewing";
         job.updatedAt=timestamp();
         addLog(job,`Audit finished — starting TeleCaller review with ${job.settings.reviewModel||settings.reviewModel||"gpt-5-nano"}…`);
@@ -576,6 +592,7 @@ async function startNew(){
       tokenUsage:{input:0,cached:0,output:0},
       elapsedMs:0,
       pricing:deepCopy(settings.pricing),
+      reviewPricing:deepCopy(settings.reviewPricing),
       settings:deepCopy(settings)
     };
     await putJob(job);
@@ -629,6 +646,7 @@ function createReviewJob({fileName,parentFileName,sheetName,telecallerName,leads
     reviewStatus:"pending",
     elapsedMs:0,
     pricing:deepCopy(settings.pricing),
+    reviewPricing:deepCopy(settings.reviewPricing),
     settings:deepCopy(settings)
   };
 }
@@ -1273,6 +1291,9 @@ function renderSettings(){
   els["input-price"].value=settings.pricing.input;
   els["cached-price"].value=settings.pricing.cached;
   els["output-price"].value=settings.pricing.output;
+  if(els["review-input-price"])els["review-input-price"].value=settings.reviewPricing?.input??0;
+  if(els["review-cached-price"])els["review-cached-price"].value=settings.reviewPricing?.cached??0;
+  if(els["review-output-price"])els["review-output-price"].value=settings.reviewPricing?.output??0;
   els["api-key"].value=getApiKey();
   els["remember-key"].checked=apiKeyIsRemembered();
   if(els["app-version"])els["app-version"].textContent=APP_VERSION;
@@ -1293,6 +1314,11 @@ function collectSettings(){
   next.noValues=els["no-values"].value.trim();
   next.additionalInstructions=els["additional-instructions"].value.trim();
   next.pricing={input:number(els["input-price"].value),cached:number(els["cached-price"].value),output:number(els["output-price"].value)};
+  next.reviewPricing={
+    input:number(els["review-input-price"]?.value),
+    cached:number(els["review-cached-price"]?.value),
+    output:number(els["review-output-price"]?.value)
+  };
   next.sort={field:els["sort-field"]?.value||"callDate",direction:els["sort-direction"]?.value==="desc"?"desc":"asc"};
   next.inputFields=normalizeInputFields([...document.querySelectorAll("[data-input-row]")].map(row=>{
     const id=row.dataset.inputRow;

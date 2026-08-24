@@ -7,9 +7,9 @@
   <meta name="description" content="Private, browser-based AI telecalling audit engine">
   <title>LeadLens Audit</title>
   <link rel="manifest" href="manifest.webmanifest">
-  <link rel="stylesheet" href="styles.css?v=3.0.0">
+  <link rel="stylesheet" href="styles.css?v=3.0.1">
   <script defer src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-  <script type="module" src="app.js?v=3.0.0"></script>
+  <script type="module" src="app.js?v=3.0.1"></script>
 </head>
 <body>
   <div id="update-banner" class="update-banner hidden" role="status">
@@ -26,7 +26,7 @@
         <button class="nav-item" data-view="history"><span>◷</span>History</button>
         <button class="nav-item" data-view="settings"><span>⚙</span>Settings</button>
       </nav>
-      <div class="privacy-note"><strong id="sidebar-version">v3.0.0</strong><span id="sidebar-notes">TelleCaller Review Mode: split combined Excel by telecaller, second gpt-5-nano review pass, combined or separate TXT+Excel downloads</span></div>
+      <div class="privacy-note"><strong id="sidebar-version">v3.0.1</strong><span id="sidebar-notes">Fix gpt-5-nano review API params (max_completion_tokens; omit temperature); separate Review model ₹/1M rates from OpenAI list price; correct split cost estimate</span></div>
     </aside>
 
     <main>
@@ -129,11 +129,16 @@
                 <label>Review model<input id="review-model" type="text" value="gpt-5-nano"></label>
               </div>
               <div class="field-grid pricing-grid settings-subgrid">
-                <label>Input rate / 1M<input id="input-price" type="number" min="0" step="0.000001"></label>
-                <label>Cached input / 1M<input id="cached-price" type="number" min="0" step="0.000001"></label>
-                <label>Output rate / 1M<input id="output-price" type="number" min="0" step="0.000001"></label>
+                <label>Audit input ₹ / 1M<input id="input-price" type="number" min="0" step="0.000001"></label>
+                <label>Audit cached ₹ / 1M<input id="cached-price" type="number" min="0" step="0.000001"></label>
+                <label>Audit output ₹ / 1M<input id="output-price" type="number" min="0" step="0.000001"></label>
               </div>
-              <p class="hint-copy">Console cost = (input − cached) × input rate + cached × cached rate + output × output rate.</p>
+              <div class="field-grid pricing-grid settings-subgrid">
+                <label>Review input ₹ / 1M<input id="review-input-price" type="number" min="0" step="0.000001"></label>
+                <label>Review cached ₹ / 1M<input id="review-cached-price" type="number" min="0" step="0.000001"></label>
+                <label>Review output ₹ / 1M<input id="review-output-price" type="number" min="0" step="0.000001"></label>
+              </div>
+              <p class="hint-copy">Console cost splits audit vs review tokens. Review defaults are gpt-5-nano OpenAI list price ($0.05 / $0.005 / $0.40 per 1M) × ₹87/USD → ₹4.35 / ₹0.435 / ₹34.8.</p>
             </section>
 
             <section class="settings-card">

@@ -1,5 +1,5 @@
 ﻿{
-  "version": "3.0.0",
+  "version": "3.0.1",
   "name": "LeadLens",
-  "notes": "Major release: TelleCaller Review Mode — split combined Excel by telecaller, second gpt-5-nano review pass, combined or separate TXT+Excel downloads"
+  "notes": "Fix gpt-5-nano review API params (max_completion_tokens; omit temperature); separate Review model ₹/1M rates from OpenAI list price; correct split cost estimate"
 }
