@@ -7,11 +7,11 @@
   <meta name="description" content="Private, browser-based AI telecalling audit engine">
   <title>LeadLens Audit</title>
   <link rel="manifest" href="manifest.webmanifest">
-  <link rel="stylesheet" href="styles.css?v=3.1.0">
+  <link rel="stylesheet" href="styles.css?v=3.2.0">
   <script defer src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
-  <script type="module" src="app.js?v=3.1.0"></script>
+  <script type="module" src="app.js?v=3.2.0"></script>
 </head>
 <body>
   <div id="update-banner" class="update-banner hidden" role="status">
@@ -28,7 +28,7 @@
         <button class="nav-item" data-view="history"><span>◷</span>History</button>
         <button class="nav-item" data-view="settings"><span>⚙</span>Settings</button>
       </nav>
-      <div class="privacy-note"><strong id="sidebar-version">v3.1.0</strong><span id="sidebar-notes">TeleCaller PDF performance reports: score strip, charts, coach summary + structured coaching; PDF replaces TXT as primary review download.</span></div>
+      <div class="privacy-note"><strong id="sidebar-version">v3.2.0</strong><span id="sidebar-notes">Canonical error types only (8 labels): renamed status/TAT/empty-field messages; removed polarity and prior-follow-up timing errors.</span></div>
     </aside>
 
     <main>
@@ -183,7 +183,7 @@
                 <button id="import-settings" type="button" class="secondary-button">Import settings JSON</button>
                 <input id="import-settings-file" type="file" accept="application/json,.json" hidden>
               </div>
-              <p class="hint-copy">Built-in error types: status history mismatch · status −ve/+ve · status +ve/−ve · missed 30min talk · Follow-up Missed · Lead Update not matching prior Follow-up · empty location · empty requirement · empty budget · empty analysis parameter · requirement set wrong. Separate multiple types with |.</p>
+              <p class="hint-copy">Built-in error types only: Lead Status Not Aligned With Comments · Fresh Call TAT Missed · Follow-up Missed · Estimate Budget Empty · Customer Requirement Empty · Customer Location Empty · Analysis Parameter Empty · Incorrect Customer Requirement. Separate multiple types with |.</p>
             </section>
           </div>
         </div>

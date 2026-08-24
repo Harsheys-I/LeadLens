@@ -1,5 +1,5 @@
 ﻿{
-  "version": "3.1.0",
+  "version": "3.2.0",
   "name": "LeadLens",
-  "notes": "TeleCaller PDF performance reports: score strip, charts, coach summary + structured coaching; PDF replaces TXT as primary review download."
+  "notes": "Canonical error types only (8 labels): renamed status/TAT/empty-field messages; removed polarity and prior-follow-up timing errors."
 }
