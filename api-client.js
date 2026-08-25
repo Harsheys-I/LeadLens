@@ -40,6 +40,7 @@ export const AuthApi = {
   logout: () => api('auth/logout', {method: 'POST', body: {}}),
   changePassword: (current_password, new_password) =>
     api('auth/change-password', {method: 'POST', body: {current_password, new_password}}),
+  updateProfile: (body) => api('auth/profile', {method: 'POST', body}),
   requestAccess: (payload) => api('auth/request-access', {method: 'POST', body: payload}),
 };
 
@@ -70,4 +71,14 @@ export const DashboardApi = {
   telecallerNames: () => api('dashboards/telecaller-names'),
   publish: (dashboards) => api('dashboards/publish', {method: 'POST', body: {dashboards}}),
   remove: (id) => api(`dashboards/${id}`, {method: 'DELETE'}),
+  removeAll: () => api('dashboards/all', {method: 'DELETE'}),
+};
+
+export const SettingsApi = {
+  getAudit: () => api('settings/audit'),
+  saveAudit: (settings) => api('settings/audit', {method: 'PUT', body: {settings}}),
+  openaiKeyStatus: () => api('settings/openai-key-status'),
+  getOpenaiKey: () => api('settings/openai-key'),
+  saveOpenaiKey: (api_key) => api('settings/openai-key', {method: 'PUT', body: {api_key}}),
+  clearOpenaiKey: () => api('settings/openai-key', {method: 'DELETE'}),
 };

@@ -1,5 +1,5 @@
-import {requireAuth, logout, getUser, hasPermission, requirePermission} from '../auth.js?v=5.0.1';
-import {AdminApi, NotifApi, DashboardApi} from '../api-client.js?v=5.0.1';
+import {requireAuth, logout, getUser, hasPermission, requirePermission, changePassword, updateProfile} from '../auth.js?v=5.0.2';
+import {AdminApi, NotifApi, DashboardApi} from '../api-client.js?v=5.0.2';
 
 const $ = id => document.getElementById(id);
 const titles = {users: 'User creation', roles: 'Roles'};
@@ -173,12 +173,18 @@ function renderUsersTable(users){
       <td>${escapeHtml(u.telecaller_name || '—')}</td>
       <td>${u.is_active ? 'Yes' : 'No'}</td>`;
     const td = document.createElement('td');
-    const edit = document.createElement('button');
-    edit.type = 'button';
-    edit.className = 'text-button';
-    edit.textContent = 'Edit';
-    edit.onclick = () => openUserModal(u);
-    td.append(edit);
+    const isSuperTarget = u.role_key === 'super';
+    const actor = getUser();
+    if (!(isSuperTarget && !actor?.is_super)) {
+      const edit = document.createElement('button');
+      edit.type = 'button';
+      edit.className = 'text-button';
+      edit.textContent = 'Edit';
+      edit.onclick = () => openUserModal(u);
+      td.append(edit);
+    } else {
+      td.textContent = '—';
+    }
     tr.append(td);
     tbody.append(tr);
   }
@@ -187,6 +193,11 @@ function renderUsersTable(users){
 }
 
 function openUserModal(user = null){
+  const actor = getUser();
+  if (user?.role_key === 'super' && !actor?.is_super) {
+    toast('Only Super User can edit Super User accounts');
+    return;
+  }
   $('user-modal-title').textContent = user ? 'Edit user' : 'New user';
   $('user-id').value = user?.id || '';
   $('user-username').value = user?.username || '';
@@ -236,12 +247,20 @@ async function refreshRoles(){
       card.innerHTML = `<div><strong>${escapeHtml(role.name)}</strong>
         <p>Rank ${role.rank}${role.is_system ? ' · system' : ''}</p>
         <p class="muted">${escapeHtml(perms || 'No permissions')}</p></div>`;
-      const edit = document.createElement('button');
-      edit.type = 'button';
-      edit.className = 'secondary-button';
-      edit.textContent = 'Edit';
-      edit.onclick = () => openRoleModal(role);
-      card.append(edit);
+      const isSuperRole = role.role_key === 'super';
+      if (!isSuperRole) {
+        const edit = document.createElement('button');
+        edit.type = 'button';
+        edit.className = 'secondary-button';
+        edit.textContent = 'Edit';
+        edit.onclick = () => openRoleModal(role);
+        card.append(edit);
+      } else {
+        const locked = document.createElement('span');
+        locked.className = 'muted';
+        locked.textContent = 'Locked';
+        card.append(locked);
+      }
       mount.append(card);
     }
   } catch (err) {
@@ -251,12 +270,16 @@ async function refreshRoles(){
 }
 
 function openRoleModal(role = null){
+  if (role?.role_key === 'super') {
+    toast('Super User role cannot be edited');
+    return;
+  }
   editingRole = role;
   $('role-modal-title').textContent = role ? `Edit · ${role.name}` : 'New role';
   $('role-id').value = role?.id || '';
   $('role-name').value = role?.name || '';
   $('role-rank').value = role?.rank ?? 10;
-  $('role-rank').disabled = role?.role_key === 'super';
+  $('role-rank').disabled = false;
   $('role-delete').classList.toggle('hidden', !role || role.is_system);
   renderPermChecks(role?.permissions || []);
   $('role-form-message').textContent = '';
@@ -452,6 +475,46 @@ $('notif-mark-all').onclick = async () => {
   await NotifApi.markAllRead();
   refreshNotifs();
 };
+
+function openAccountModal(){
+  const user = getUser();
+  if (!user) return;
+  $('account-username').value = user.username || '';
+  $('account-display').value = user.display_name || '';
+  $('account-telecaller').value = user.telecaller_name || '— set by Admin only —';
+  $('account-pw-current').value = '';
+  $('account-pw-new').value = '';
+  $('account-pw-confirm').value = '';
+  $('account-message').textContent = '';
+  $('account-modal').classList.remove('hidden');
+}
+$('shell-account')?.addEventListener('click', openAccountModal);
+$('account-cancel')?.addEventListener('click', () => $('account-modal').classList.add('hidden'));
+$('account-save')?.addEventListener('click', async () => {
+  const msg = $('account-message');
+  msg.textContent = 'Saving…';
+  try {
+    const user = await updateProfile({
+      username: $('account-username').value.trim(),
+      display_name: $('account-display').value.trim(),
+    });
+    const pwCur = $('account-pw-current').value;
+    const pwNew = $('account-pw-new').value;
+    if (pwCur || pwNew) {
+      if (pwNew !== $('account-pw-confirm').value) {
+        msg.textContent = 'New passwords do not match.';
+        return;
+      }
+      await changePassword(pwCur, pwNew);
+    }
+    $('shell-user-label').textContent = user.display_name || user.username;
+    msg.textContent = 'Account updated.';
+    toast('Account saved');
+    setTimeout(() => $('account-modal').classList.add('hidden'), 400);
+  } catch (err) {
+    msg.textContent = err.message || 'Could not update account';
+  }
+});
 
 (async function boot(){
   const user = await requireAuth({loginPath: '/'});

@@ -1,8 +1,8 @@
-import {APP_VERSION,DEFAULT_SETTINGS,DEFAULT_OUTPUT_FIELDS,SETTINGS_SEED,MAX_BATCH_SIZE,MAX_CONCURRENCY,normalizeSettings,normalizeInputFields,slugFieldId,parseWorkbook,parseAuditedWorkbook,auditBatch,downloadWorkbook,downloadReviewPack,splitLeadsByTelecaller,splitResultsByTelecaller,validateApiKey,HIGH_SEVERITY_ERRORS} from "./audit.js?v=5.0.1";
-import {putJob,getJob,getJobs,deleteJob,clearJobs,loadSettings,saveSettings,getApiKey,apiKeyIsRemembered,saveApiKey,forgetApiKey,setStorageUserId,storageKey} from "./db.js?v=5.0.1";
-import {renderReviewDashboard,destroyReviewDashboard} from "./dashboard-view.js?v=5.0.1";
-import {requireAuth,logout,hasPermission,getUser} from "./auth.js?v=5.0.1";
-import {DashboardApi} from "./api-client.js?v=5.0.1";
+import {APP_VERSION,DEFAULT_SETTINGS,DEFAULT_OUTPUT_FIELDS,SETTINGS_SEED,MAX_BATCH_SIZE,MAX_CONCURRENCY,normalizeSettings,normalizeInputFields,slugFieldId,parseWorkbook,parseAuditedWorkbook,auditBatch,downloadWorkbook,downloadReviewPack,splitLeadsByTelecaller,splitResultsByTelecaller,validateApiKey,HIGH_SEVERITY_ERRORS,SERVER_API_KEY} from "./audit.js?v=5.0.2";
+import {putJob,getJob,getJobs,deleteJob,clearJobs,loadSettings,saveSettings,getApiKey,apiKeyIsRemembered,saveApiKey,forgetApiKey,setStorageUserId,storageKey} from "./db.js?v=5.0.2";
+import {renderReviewDashboard,destroyReviewDashboard} from "./dashboard-view.js?v=5.0.2";
+import {requireAuth,logout,hasPermission,getUser,changePassword,updateProfile} from "./auth.js?v=5.0.2";
+import {DashboardApi,SettingsApi} from "./api-client.js?v=5.0.2";
 
 const $=id=>document.getElementById(id);
 const ids=["page-title","key-state","run-name","pause-run","download-result","progress-label","progress-percent","progress-bar","metric-leads","metric-excel-rows","metric-calls","metric-batch","metric-completed","metric-status","metric-input-tokens","metric-cached-tokens","metric-output-tokens","metric-duration","metric-cost","live-log","clear-console","history-list","clear-history","api-key","remember-key","toggle-key","save-key","forget-key","key-message","batch-size","concurrency","model","input-field-config","add-input-field","ai-field-config","rule-config","add-rule","output-field-config","yes-values","no-values","additional-instructions","input-price","cached-price","output-price","save-settings","reset-settings","settings-message","toast","mobile-menu","active-job-switch","sort-field","sort-direction","app-version","export-settings","import-settings","import-settings-file","update-banner","update-banner-text","reload-app","key-modal","onboard-key","onboard-toggle","onboard-remember","onboard-message","onboard-save","onboard-skip","sidebar-version","sidebar-notes","review-drop-zone","review-file-input","review-drop-hint","review-file-list","review-validation","start-review","review-run-panel","review-aggregate","review-cards","review-dashboard-panel","review-dashboard-mount","download-review-excel","review-open-console","review-precounts","review-live-progress","review-progress-label","review-progress-percent","review-progress-bar","review-post-actions","create-review-dashboard","upload-dashboard-btn","upload-dashboard-modal","upload-telecaller-list","upload-dash-message","upload-dash-confirm","upload-dash-cancel","published-list","refresh-published","published-dashboard-panel","published-dash-title","published-dash-meta","published-dash-actions","published-dashboard-mount","shell-user-label","shell-logout"];
@@ -29,6 +29,30 @@ const liveJobs=new Map();
 const controllers=new Map();
 const saveChains=new Map();
 let settings=normalizeSettings(DEFAULT_SETTINGS);
+let serverKeyConfigured=false;
+
+function canSeeComparativeKpis(){
+  const user=getUser();
+  if(!user)return false;
+  return Boolean(user.is_super||hasPermission("dashboards.view_all"));
+}
+
+function canManagePublishedDashboards(){
+  const user=getUser();
+  if(!user)return false;
+  return Boolean(user.is_super||hasPermission("dashboards.view_all")||hasPermission("admin.users"));
+}
+
+function effectiveApiKey(){
+  const local=getApiKey();
+  if(local)return local;
+  if(serverKeyConfigured)return SERVER_API_KEY;
+  return "";
+}
+
+function dashboardRenderOptions(){
+  return{highSeverityErrors:HIGH_SEVERITY_ERRORS,showComparativeKpis:canSeeComparativeKpis()};
+}
 
 const deepCopy=value=>JSON.parse(JSON.stringify(value));
 const number=value=>Number.isFinite(Number(value))?Number(value):0;
@@ -46,6 +70,39 @@ function reloadUserSettings(){
   const previousSettingsSeed=Number(loaded.settingsSeed)||0;
   settings=normalizeSettings(loaded);
   if(previousSettingsSeed<SETTINGS_SEED)saveSettings(settings);
+}
+
+async function loadServerSettingsAndKey(){
+  try{
+    const [audit, keyStatus]=await Promise.all([
+      SettingsApi.getAudit().catch(()=>({settings:null})),
+      SettingsApi.openaiKeyStatus().catch(()=>({configured:false})),
+    ]);
+    serverKeyConfigured=Boolean(keyStatus?.configured);
+    if(audit?.settings&&typeof audit.settings==="object"){
+      settings=normalizeSettings({...DEFAULT_SETTINGS,...audit.settings});
+      saveSettings(settings); // local mirror only
+    }
+  }catch{/* keep local fallback */}
+  updateKeyState();
+}
+
+async function persistSettingsEverywhere(next,{announce=true}={}){
+  settings=normalizeSettings(next);
+  saveSettings(settings);
+  const user=getUser();
+  if(user?.is_super||hasPermission("telecaller.settings")&&user?.is_super){
+    try{
+      await SettingsApi.saveAudit(settings);
+      if(announce&&els["settings-message"])els["settings-message"].textContent="Saved for everyone.";
+      return true;
+    }catch(err){
+      if(els["settings-message"])els["settings-message"].textContent=err.message||"Saved locally; server save failed.";
+      return false;
+    }
+  }
+  if(announce&&els["settings-message"])els["settings-message"].textContent="Settings applied for this session (server settings are Super User only).";
+  return true;
 }
 
 function clearInMemoryJobs(){
@@ -83,10 +140,15 @@ function showView(name){
   if(name==="published")refreshPublishedDashboards();
 }
 function toast(message){els.toast.textContent=message;els.toast.classList.add("show");clearTimeout(toast.timer);toast.timer=setTimeout(()=>els.toast.classList.remove("show"),3200);}
-function updateKeyState(){const ready=Boolean(getApiKey());els["key-state"].textContent=ready?"API key ready":"API key not set";els["key-state"].classList.toggle("ready",ready);}
+function updateKeyState(){
+  const ready=Boolean(effectiveApiKey());
+  const label=getApiKey()?"API key ready":(serverKeyConfigured?"Server API key ready":"API key not set");
+  els["key-state"].textContent=label;
+  els["key-state"].classList.toggle("ready",ready);
+}
 // Only hard-block a save for these; soft failures (network/quota/other) still save with a caution.
 const BLOCK_KEY_REASONS=new Set(["empty","format","unauthorized","forbidden"]);
-async function validateAndSaveKey(key,remember,messageEl,buttonEl){
+async function validateAndSaveKey(key,remember,messageEl,buttonEl,{toServer=false}={}){
   const trimmed=(key||"").trim();
   if(!trimmed){if(messageEl)messageEl.textContent="Enter a key.";return false;}
   if(buttonEl)buttonEl.disabled=true;
@@ -97,6 +159,20 @@ async function validateAndSaveKey(key,remember,messageEl,buttonEl){
     if(messageEl)messageEl.textContent=result.message;
     return false;
   }
+  if(toServer){
+    try{
+      await SettingsApi.saveOpenaiKey(trimmed);
+      serverKeyConfigured=true;
+      forgetApiKey();
+      if(els["api-key"])els["api-key"].value="";
+      updateKeyState();
+      if(messageEl)messageEl.textContent=(result.ok?result.message+" ":"")+ "Saved encrypted on the server for everyone.";
+      return true;
+    }catch(err){
+      if(messageEl)messageEl.textContent=err.message||"Could not save server key";
+      return false;
+    }
+  }
   saveApiKey(trimmed,Boolean(remember));
   updateKeyState();
   if(messageEl){
@@ -106,7 +182,7 @@ async function validateAndSaveKey(key,remember,messageEl,buttonEl){
   return true;
 }
 function openKeyModal(){
-  if(!els["key-modal"])return;
+  if(!els["key-modal"]||serverKeyConfigured)return;
   els["onboard-key"].value="";
   els["onboard-remember"].checked=false;
   els["onboard-message"].textContent="";
@@ -116,7 +192,7 @@ function openKeyModal(){
   setTimeout(()=>els["onboard-key"]?.focus(),60);
 }
 function closeKeyModal(){els["key-modal"]?.classList.add("hidden");}
-function maybePromptForApiKey(){if(!getApiKey())openKeyModal();}
+function maybePromptForApiKey(){if(!effectiveApiKey())openKeyModal();}
 function timeText(iso){return new Intl.DateTimeFormat(undefined,{dateStyle:"medium",timeStyle:"short"}).format(new Date(iso));}
 function addLog(job,message,level="info"){
   job.logs=job.logs||[];
@@ -396,9 +472,9 @@ async function flushPendingBatches(job){
 
 async function runJob(job,{navigate=false}={}){
   if(controllers.has(job.id)){toast("That audit is already running.");return;}
-  const key=getApiKey();
+  const key=effectiveApiKey();
   if(!key){showView("settings");toast("Add an OpenAI API key first.");return;}
-  if(!/^sk-[A-Za-z0-9_-]{20,}$/.test(key)){showView("settings");toast("That does not look like an OpenAI API key.");return;}
+  if(key!==SERVER_API_KEY&&!/^sk-[A-Za-z0-9_-]{20,}$/.test(key)){showView("settings");toast("That does not look like an OpenAI API key.");return;}
 
   const isReview=job.mode==="telecaller-review";
   const isParent=job.mode==="telecaller-review-parent";
@@ -1003,7 +1079,7 @@ async function startReview(){
     toast("Excel RAW needs a Telecaller Name column to split reports.");
     return;
   }
-  const key=getApiKey();
+  const key=effectiveApiKey();
   if(!key){showView("settings");toast("Add an OpenAI API key first (Excel RAW runs an audit).");return;}
   reviewSessionIds=[];
   reviewQueue=[];
@@ -1215,7 +1291,7 @@ async function renderReviewProgress(){
       if(key!==lastReviewDashboardKey){
         lastReviewDashboardKey=key;
         try{
-          renderReviewDashboard(els["review-dashboard-mount"],ready,{highSeverityErrors:HIGH_SEVERITY_ERRORS});
+          renderReviewDashboard(els["review-dashboard-mount"],ready,dashboardRenderOptions());
         }catch(error){
           toast(error.message||"Could not render dashboard.");
         }
@@ -1700,6 +1776,45 @@ els["shell-logout"]?.addEventListener("click",async()=>{
   setStorageUserId(null);
   location.href="/";
 });
+els["shell-account"]?.addEventListener("click",()=>{
+  const user=getUser();
+  const modal=document.getElementById("account-modal");
+  if(!user||!modal)return;
+  document.getElementById("account-username").value=user.username||"";
+  document.getElementById("account-display").value=user.display_name||"";
+  document.getElementById("account-telecaller").value=user.telecaller_name||"— set by Admin only —";
+  document.getElementById("account-pw-current").value="";
+  document.getElementById("account-pw-new").value="";
+  document.getElementById("account-pw-confirm").value="";
+  document.getElementById("account-message").textContent="";
+  modal.classList.remove("hidden");
+});
+document.getElementById("account-cancel")?.addEventListener("click",()=>{
+  document.getElementById("account-modal")?.classList.add("hidden");
+});
+document.getElementById("account-save")?.addEventListener("click",async()=>{
+  const msg=document.getElementById("account-message");
+  if(!msg)return;
+  msg.textContent="Saving…";
+  try{
+    const user=await updateProfile({
+      username:document.getElementById("account-username").value.trim(),
+      display_name:document.getElementById("account-display").value.trim(),
+    });
+    const pwCur=document.getElementById("account-pw-current").value;
+    const pwNew=document.getElementById("account-pw-new").value;
+    if(pwCur||pwNew){
+      if(pwNew!==document.getElementById("account-pw-confirm").value){msg.textContent="New passwords do not match.";return;}
+      await changePassword(pwCur,pwNew);
+    }
+    if(els["shell-user-label"])els["shell-user-label"].textContent=user.display_name||user.username;
+    msg.textContent="Account updated.";
+    toast("Account saved");
+    setTimeout(()=>document.getElementById("account-modal")?.classList.add("hidden"),400);
+  }catch(err){
+    msg.textContent=err.message||"Could not update account";
+  }
+});
 els["pause-run"].onclick=async()=>{
   if(!currentJob)return;
   if(currentJob.status==="running"||currentJob.status==="reviewing")controllers.get(currentJob.id)?.abort();
@@ -1748,8 +1863,27 @@ els["clear-history"]?.addEventListener("click",async()=>{
   }
 });
 els["toggle-key"]?.addEventListener("click",()=>{const hidden=els["api-key"].type==="password";els["api-key"].type=hidden?"text":"password";els["toggle-key"].textContent=hidden?"Hide":"Show";});
-els["save-key"]?.addEventListener("click",()=>validateAndSaveKey(els["api-key"].value,els["remember-key"].checked,els["key-message"],els["save-key"]));
-els["forget-key"]?.addEventListener("click",()=>{forgetApiKey();els["api-key"].value="";els["remember-key"].checked=false;els["key-message"].textContent="Key removed.";updateKeyState();});
+els["save-key"]?.addEventListener("click",async()=>{
+  const toServer=Boolean(getUser()?.is_super);
+  await validateAndSaveKey(els["api-key"].value,els["remember-key"].checked,els["key-message"],els["save-key"],{toServer});
+});
+els["forget-key"]?.addEventListener("click",async()=>{
+  forgetApiKey();
+  els["api-key"].value="";
+  els["remember-key"].checked=false;
+  if(getUser()?.is_super&&serverKeyConfigured){
+    try{
+      await SettingsApi.clearOpenaiKey();
+      serverKeyConfigured=false;
+      els["key-message"].textContent="Server key cleared.";
+    }catch(err){
+      els["key-message"].textContent=err.message||"Could not clear server key";
+    }
+  }else{
+    els["key-message"].textContent="Key removed.";
+  }
+  updateKeyState();
+});
 els["onboard-toggle"]?.addEventListener("click",()=>{const hidden=els["onboard-key"].type==="password";els["onboard-key"].type=hidden?"text":"password";els["onboard-toggle"].textContent=hidden?"Hide":"Show";});
 els["onboard-save"]?.addEventListener("click",async()=>{
   const saved=await validateAndSaveKey(els["onboard-key"].value,els["onboard-remember"].checked,els["onboard-message"],els["onboard-save"]);
@@ -1769,7 +1903,7 @@ els["add-input-field"].onclick=()=>{
   renderOutputFields();
   renderSortFields();
 };
-els["save-settings"].onclick=()=>{
+els["save-settings"].onclick=async()=>{
   // Validate the raw inputs first — collectSettings() clamps to the limits, which
   // would otherwise hide out-of-range values from the checks below.
   const rawBatch=Number(els["batch-size"].value);
@@ -1779,12 +1913,15 @@ els["save-settings"].onclick=()=>{
   const next=collectSettings();
   if(!next.model){els["settings-message"].textContent="Enter a model name.";return;}
   if(!next.outputFields.some(field=>field.enabled)){els["settings-message"].textContent="Select at least one output Excel field.";return;}
-  settings=next;
-  saveSettings(settings);
-  els["settings-message"].textContent="Settings saved. Downloads always use the Sort By / Order shown here.";
+  await persistSettingsEverywhere(next);
   renderSettings();
 };
-els["reset-settings"].onclick=()=>{settings=normalizeSettings(DEFAULT_SETTINGS);saveSettings(settings);renderSettings();els["settings-message"].textContent="Defaults restored.";};
+els["reset-settings"].onclick=async()=>{
+  settings=normalizeSettings(DEFAULT_SETTINGS);
+  await persistSettingsEverywhere(settings,{announce:false});
+  renderSettings();
+  els["settings-message"].textContent=getUser()?.is_super?"Defaults restored for everyone.":"Defaults restored locally.";
+};
 els["export-settings"].onclick=exportSettings;
 els["import-settings"].onclick=()=>els["import-settings-file"].click();
 els["import-settings-file"].onchange=event=>importSettingsFile(event.target.files?.[0]);
@@ -1832,6 +1969,7 @@ async function bootTeleCallerAudit(){
   setStorageUserId(user.id);
   clearInMemoryJobs();
   reloadUserSettings();
+  await loadServerSettingsAndKey();
   loadReviewSessionIds();
   renderSettings();
   await renderHistory();
@@ -1935,22 +2073,15 @@ async function confirmUploadDashboard(){
   }
 }
 
-function canDeletePublishedDashboard(item){
-  const user=getUser();
-  if(!user)return false;
-  if(user.is_super||hasPermission("dashboards.view_all")||hasPermission("admin.users"))return true;
-  const own=String(user.telecaller_name||"").trim();
-  if(own&&item?.telecaller_name&&own.toLowerCase()===String(item.telecaller_name).toLowerCase())return true;
-  if(item?.uploaded_by!=null&&Number(item.uploaded_by)===Number(user.id))return true;
-  return false;
+function canDeletePublishedDashboard(){
+  return canManagePublishedDashboards();
 }
 
 function renderPublishedManageList(items){
   const mount=els["published-list"];
   if(!mount)return;
   mount.replaceChildren();
-  const deletable=items.filter(canDeletePublishedDashboard);
-  if(!deletable.length){
+  if(!canManagePublishedDashboards()||!items.length){
     mount.classList.add("hidden");
     return;
   }
@@ -1961,7 +2092,7 @@ function renderPublishedManageList(items){
   head.className="muted";
   head.textContent="Manage published TeleCaller boards";
   wrap.append(head);
-  for(const item of deletable){
+  for(const item of items){
     const row=document.createElement("div");
     row.className="published-manage-row";
     const info=document.createElement("div");
@@ -1980,7 +2111,27 @@ function renderPublishedManageList(items){
     row.append(info,del);
     wrap.append(row);
   }
+  if(items.length>1){
+    const all=document.createElement("button");
+    all.type="button";
+    all.className="danger-button";
+    all.textContent="Delete All";
+    all.onclick=()=>deleteAllPublishedDashboards();
+    wrap.append(all);
+  }
   mount.append(wrap);
+}
+
+async function deleteAllPublishedDashboards(){
+  if(!canManagePublishedDashboards())return;
+  if(!confirm("Delete all published dashboards? This cannot be undone."))return;
+  try{
+    await DashboardApi.removeAll();
+    toast("All published dashboards deleted");
+    await refreshPublishedDashboards();
+  }catch(err){
+    toast(err.message||"Could not delete dashboards");
+  }
 }
 
 async function deletePublishedDashboard(item){
@@ -2030,7 +2181,7 @@ async function refreshPublishedDashboards(){
     const actions=els["published-dash-actions"];
     if(actions){
       actions.replaceChildren();
-      if(items.length===1&&canDeletePublishedDashboard(items[0])){
+      if(items.length===1&&canDeletePublishedDashboard()){
         const del=document.createElement("button");
         del.type="button";
         del.className="danger-button";
@@ -2038,10 +2189,18 @@ async function refreshPublishedDashboards(){
         del.onclick=()=>deletePublishedDashboard(items[0]);
         actions.append(del);
       }
+      if(items.length>1&&canManagePublishedDashboards()){
+        const all=document.createElement("button");
+        all.type="button";
+        all.className="danger-button";
+        all.textContent="Delete All";
+        all.onclick=()=>deleteAllPublishedDashboards();
+        actions.append(all);
+      }
     }
     panel?.classList.remove("hidden");
     const fakeJob={id:"published-combined",results,status:"completed"};
-    renderReviewDashboard(els["published-dashboard-mount"],[fakeJob],{highSeverityErrors:HIGH_SEVERITY_ERRORS});
+    renderReviewDashboard(els["published-dashboard-mount"],[fakeJob],dashboardRenderOptions());
   }catch(err){
     mount.classList.remove("hidden");
     mount.innerHTML=`<div class="empty-card">${err.message||"Could not load dashboards."}</div>`;

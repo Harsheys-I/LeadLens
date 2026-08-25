@@ -2,7 +2,7 @@
  * In-app TeleCaller Review dashboard (KPIs, scorecard, Chart.js charts, error table).
  */
 
-import {buildDashboardModel} from "./dashboard-metrics.js?v=5.0.1";
+import {buildDashboardModel} from "./dashboard-metrics.js?v=5.0.2";
 
 const CHART_COLORS = {
   green2: "#1f5d45",
@@ -14,7 +14,7 @@ const CHART_COLORS = {
   palette: ["#12372a", "#1f5d45", "#3f8c68", "#c57924", "#a33a32", "#2a5f9e", "#6c7771", "#9bb7a8"]
 };
 
-/** @type {Map<string, {destroy: Function}>} */
+/** @type {Map<string, {destroy: Function, resize?: Function}>} */
 const chartRegistry = new Map();
 
 function destroyCharts(){
@@ -22,6 +22,12 @@ function destroyCharts(){
     try{chart.destroy();}catch{/* ignore */}
   }
   chartRegistry.clear();
+}
+
+function resizeCharts(){
+  for(const chart of chartRegistry.values()){
+    try{chart.resize();}catch{/* ignore */}
+  }
 }
 
 function requireChart(){
@@ -82,6 +88,11 @@ function fillMultiSelect(select, values, selected){
 function syncFiltersBodyPadding(aside){
   const open = aside && !aside.classList.contains("is-collapsed") && document.body.contains(aside);
   document.body.classList.toggle("dashboard-filters-open", Boolean(open));
+  // Charts must reflow after padding / rail width changes (all roles).
+  requestAnimationFrame(() => {
+    resizeCharts();
+    requestAnimationFrame(resizeCharts);
+  });
 }
 
 function buildFilters(filterOptions, filters){
@@ -92,7 +103,11 @@ function buildFilters(filterOptions, filters){
 
   const panel = el("div", "dashboard-filters-panel");
   const form = el("form", "dashboard-filters");
-  form.append(el("h3", null, "Filters"));
+  const head = el("div", "filters-panel-head");
+  head.append(el("h3", null, "Filters"));
+  const hint = el("p", "filters-panel-hint", "Hold Ctrl/Cmd to multi-select");
+  head.append(hint);
+  form.append(head);
 
   const fields = [
     ["telecallers", "TeleCaller", filterOptions.telecallers, filters.telecallers],
@@ -103,25 +118,29 @@ function buildFilters(filterOptions, filters){
 
   for(const [name, label, options, selected] of fields){
     const wrap = el("label", "dashboard-filter");
-    wrap.append(el("span", null, label + " (multi)"));
+    wrap.append(el("span", "dashboard-filter-label", label));
     const select = document.createElement("select");
     select.name = name;
-    select.size = Math.min(6, Math.max(3, (options || []).length || 3));
+    select.className = "dashboard-filter-select";
+    select.size = Math.min(5, Math.max(3, (options || []).length || 3));
     fillMultiSelect(select, options || [], selected || []);
     wrap.append(select);
     form.append(wrap);
   }
 
+  const dates = el("div", "dashboard-filter-dates");
   for(const [name, label] of [["dateFrom", "Reg. from"], ["dateTo", "Reg. to"]]){
     const wrap = el("label", "dashboard-filter");
-    wrap.append(el("span", null, label));
+    wrap.append(el("span", "dashboard-filter-label", label));
     const input = document.createElement("input");
     input.type = "date";
     input.name = name;
+    input.className = "dashboard-filter-date";
     input.value = filters[name] || "";
     wrap.append(input);
-    form.append(wrap);
+    dates.append(wrap);
   }
+  form.append(dates);
 
   const reset = el("button", "secondary-button dashboard-filter-reset", "Reset filters");
   reset.type = "button";
@@ -141,7 +160,7 @@ function buildFilters(filterOptions, filters){
   return {aside, form, reset};
 }
 
-function renderKpis(kpis){
+function renderKpis(kpis, {showComparativeKpis = true} = {}){
   const mount = el("div", "dashboard-kpis");
   const items = [
     ["Reporting period", kpis.reportingPeriod],
@@ -149,10 +168,14 @@ function renderKpis(kpis){
     ["Total errors", num(kpis.totalErrors)],
     ["Accuracy", pct(kpis.accuracyPct)],
     ["Critical", num(kpis.criticalCount)],
-    ["Medium", num(kpis.mediumCount)],
-    ["Best TeleCaller", kpis.bestTelecaller],
-    ["Lowest TeleCaller", kpis.lowestTelecaller]
+    ["Medium", num(kpis.mediumCount)]
   ];
+  if(showComparativeKpis){
+    items.push(
+      ["Best TeleCaller", kpis.bestTelecaller],
+      ["Lowest TeleCaller", kpis.lowestTelecaller]
+    );
+  }
   for(const [label, value] of items){
     const cell = el("div", "dashboard-kpi");
     cell.append(el("span", null, label), el("strong", null, value));
@@ -202,11 +225,34 @@ function baseChartOptions(extra = {}){
   return {
     responsive: true,
     maintainAspectRatio: false,
+    layout: {
+      padding: {top: 4, right: 8, bottom: 12, left: 4, ...(extra.layout?.padding || {})}
+    },
     plugins: {
       legend: {display: false, labels: {color: CHART_COLORS.ink}},
       ...extra.plugins
     },
     scales: extra.scales
+  };
+}
+
+function barScaleOptions(){
+  return {
+    x: {
+      ticks: {
+        color: CHART_COLORS.muted,
+        maxRotation: 45,
+        minRotation: 0,
+        autoSkip: true,
+        padding: 8
+      },
+      grid: {display: false, drawBorder: false}
+    },
+    y: {
+      beginAtZero: true,
+      ticks: {color: CHART_COLORS.muted, precision: 0, padding: 6},
+      grid: {color: CHART_COLORS.line, drawBorder: false}
+    }
   };
 }
 
@@ -218,30 +264,24 @@ function renderCharts(charts){
   const specs = [
     ["accuracy", "TeleCaller Accuracy %", "bar", charts.telecallerAccuracy, {
       scales: {
-        x: {ticks: {color: CHART_COLORS.muted, maxRotation: 45, minRotation: 0}},
-        y: {min: 0, max: 100, ticks: {color: CHART_COLORS.muted, callback: v => `${v}%`}, grid: {color: CHART_COLORS.line}}
+        ...barScaleOptions(),
+        y: {min: 0, max: 100, ticks: {color: CHART_COLORS.muted, callback: v => `${v}%`, padding: 6}, grid: {color: CHART_COLORS.line, drawBorder: false}}
       }
     }, CHART_COLORS.green2],
     ["errors", "Errors by TeleCaller", "bar", charts.errorsByTelecaller, {
-      scales: {
-        x: {ticks: {color: CHART_COLORS.muted, maxRotation: 45, minRotation: 0}},
-        y: {beginAtZero: true, ticks: {color: CHART_COLORS.muted, precision: 0}, grid: {color: CHART_COLORS.line}}
-      }
+      scales: barScaleOptions()
     }, CHART_COLORS.amber],
     ["errorTypes", "Error Type Distribution", "doughnut", charts.errorTypeDistribution, {
-      plugins: {legend: {display: true, position: "bottom", labels: {color: CHART_COLORS.ink, boxWidth: 12}}}
+      plugins: {legend: {display: true, position: "bottom", labels: {color: CHART_COLORS.ink, boxWidth: 12, padding: 10}}}
     }],
     ["projects", "Project-wise Errors", "bar", charts.projectErrors, {
-      scales: {
-        x: {ticks: {color: CHART_COLORS.muted, maxRotation: 45, minRotation: 0}},
-        y: {beginAtZero: true, ticks: {color: CHART_COLORS.muted, precision: 0}, grid: {color: CHART_COLORS.line}}
-      }
+      scales: barScaleOptions()
     }, CHART_COLORS.red],
     ["severity", "Severity Distribution", "doughnut", charts.severityDistribution, {
-      plugins: {legend: {display: true, position: "bottom", labels: {color: CHART_COLORS.ink, boxWidth: 12}}}
+      plugins: {legend: {display: true, position: "bottom", labels: {color: CHART_COLORS.ink, boxWidth: 12, padding: 10}}}
     }],
     ["commentQuality", "Comment Quality Score", "pie", charts.commentQualityDistribution, {
-      plugins: {legend: {display: true, position: "bottom", labels: {color: CHART_COLORS.ink, boxWidth: 12}}}
+      plugins: {legend: {display: true, position: "bottom", labels: {color: CHART_COLORS.ink, boxWidth: 12, padding: 10}}}
     }]
   ];
 
@@ -280,6 +320,7 @@ function renderCharts(charts){
     });
     chartRegistry.set(id, chart);
   }
+  queueMicrotask(() => resizeCharts());
   return mount;
 }
 
@@ -332,12 +373,13 @@ function section(title, noteText, child){
  * Render (or refresh) the Review Mode dashboard into a container.
  * @param {HTMLElement} container
  * @param {object[]} jobs Ready review jobs with results
- * @param {{highSeverityErrors?: Set<string>|string[]}} [options]
+ * @param {{highSeverityErrors?: Set<string>|string[], showComparativeKpis?: boolean}} [options]
  */
 export function renderReviewDashboard(container, jobs, options = {}){
   if(!container) return;
   const results = flattenJobResults(jobs);
   const highSeverityErrors = options.highSeverityErrors;
+  const showComparativeKpis = options.showComparativeKpis !== false;
 
   destroyCharts();
   container.replaceChildren();
@@ -365,7 +407,7 @@ export function renderReviewDashboard(container, jobs, options = {}){
     const model = buildDashboardModel(results, filters, {highSeverityErrors});
     const {aside, form, reset} = buildFilters(model.filterOptions, filters);
     const body = el("div", "dashboard-body");
-    body.append(section("Executive KPIs", null, renderKpis(model.kpis)));
+    body.append(section("Executive KPIs", null, renderKpis(model.kpis, {showComparativeKpis})));
     body.append(section("TeleCaller Performance", null, renderScorecard(model.scorecard)));
     body.append(section("Charts", null, renderCharts(model.charts)));
     body.append(section("Detailed Error Report", `${num(model.errorDetails.length)} error row(s)`, renderErrorDetails(model.errorDetails)));

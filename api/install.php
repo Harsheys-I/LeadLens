@@ -122,6 +122,15 @@ function ll_install_run(): void
     CONSTRAINT fk_pub_user FOREIGN KEY (uploaded_by) REFERENCES users(id) ON DELETE SET NULL
   ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
 
+  $pdo->exec("CREATE TABLE IF NOT EXISTS app_settings (
+    setting_key VARCHAR(80) NOT NULL PRIMARY KEY,
+    setting_value LONGTEXT NULL,
+    updated_by INT UNSIGNED NULL,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    KEY idx_app_settings_updated (updated_by),
+    CONSTRAINT fk_app_settings_user FOREIGN KEY (updated_by) REFERENCES users(id) ON DELETE SET NULL
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+
   $roles = [
     ['Super User', 'super', 100, ll_default_role_permissions('super'), 1],
     ['Admin', 'admin', 50, ll_default_role_permissions('admin'), 1],

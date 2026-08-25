@@ -7,11 +7,11 @@
   <meta name="description" content="LeadLens TeleCaller Audit">
   <title>LeadLens · TeleCaller Audit</title>
   <link rel="manifest" href="../manifest.webmanifest">
-  <link rel="stylesheet" href="../styles.css?v=5.0.1">
+  <link rel="stylesheet" href="../styles.css?v=5.0.2">
   <script defer src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
-  <script type="module" src="../app.js?v=5.0.1"></script>
+  <script type="module" src="../app.js?v=5.0.2"></script>
 </head>
 <body>
   <div id="update-banner" class="update-banner hidden" role="status">
@@ -30,10 +30,11 @@
       </nav>
       <div class="sidebar-user">
         <span id="shell-user-label"></span>
+        <button type="button" id="shell-account" class="text-button sidebar-account">Account</button>
         <a class="text-button sidebar-link" href="/">Home</a>
         <button type="button" id="shell-logout" class="text-button">Sign out</button>
       </div>
-      <div class="privacy-note"><strong id="sidebar-version">v5.0.1</strong><span id="sidebar-notes">Admin UX fixes · merged TeleCaller dashboards · per-user history.</span></div>
+      <div class="privacy-note"><strong id="sidebar-version">v5.0.2</strong><span id="sidebar-notes">Server settings · encrypted API key · admin permission fix · chart overflow.</span></div>
     </aside>
 
     <main>
@@ -120,7 +121,7 @@
           <div class="settings-toolbar" role="toolbar" aria-label="Settings actions">
             <div class="settings-toolbar-copy">
               <strong>Settings</strong>
-              <span>Changes apply to new audits after you save. Sort applies on the next Excel download.</span>
+              <span>Super User saves apply for everyone. Others load server settings automatically for audits.</span>
             </div>
             <div class="inline-actions settings-toolbar-actions">
               <button id="save-settings" type="button" class="primary-button">Save settings</button>
@@ -131,9 +132,9 @@
 
           <div class="settings-sections">
             <form id="settings-form" class="settings-card">
-              <div class="card-title"><h2>1 · OpenAI connection</h2><p>Your key stays in this browser and is sent only to OpenAI during an audit.</p></div>
+              <div class="card-title"><h2>1 · OpenAI connection</h2><p>Super User saves the key encrypted on the server. Audits use the server proxy — Admins never need to paste a key.</p></div>
               <label>API key<div class="input-row"><input id="api-key" type="password" autocomplete="off" placeholder="sk-…"><button id="toggle-key" type="button" class="secondary-button">Show</button></div></label>
-              <label class="check-row"><input id="remember-key" type="checkbox"><span>Remember on this device <small>Uses this browser's local storage.</small></span></label>
+              <label class="check-row"><input id="remember-key" type="checkbox"><span>Remember on this device <small>Optional local fallback. Prefer Save to server (Super User).</small></span></label>
               <div class="inline-actions"><button id="save-key" type="button" class="primary-button">Save key</button><button id="forget-key" type="button" class="text-button">Forget key</button><span id="key-message" class="form-message"></span></div>
             </form>
 
@@ -224,6 +225,27 @@
       <div class="inline-actions">
         <button id="upload-dash-confirm" type="button" class="primary-button">Upload</button>
         <button id="upload-dash-cancel" type="button" class="text-button">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="account-modal" class="key-modal hidden" role="dialog" aria-modal="true">
+    <div class="key-modal-card">
+      <p class="eyebrow">ACCOUNT</p>
+      <h2>Your profile</h2>
+      <p class="key-modal-copy">Update username or password. Linked TeleCaller is Admin-managed.</p>
+      <label>Username<input id="account-username" type="text"></label>
+      <label>Display name<input id="account-display" type="text"></label>
+      <label>Linked TeleCaller<input id="account-telecaller" type="text" disabled></label>
+      <hr class="account-divider">
+      <p class="muted">Change password (optional)</p>
+      <label>Current password<input id="account-pw-current" type="password"></label>
+      <label>New password<input id="account-pw-new" type="password"></label>
+      <label>Confirm new password<input id="account-pw-confirm" type="password"></label>
+      <div id="account-message" class="form-message"></div>
+      <div class="inline-actions">
+        <button id="account-save" type="button" class="primary-button">Save</button>
+        <button id="account-cancel" type="button" class="text-button">Cancel</button>
       </div>
     </div>
   </div>

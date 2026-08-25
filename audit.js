@@ -1,6 +1,8 @@
-import {buildTelecallerDashboardBlob} from "./dashboard-export.js?v=5.0.1";
+import {buildTelecallerDashboardBlob} from "./dashboard-export.js?v=5.0.2";
 
-export const APP_VERSION = "5.0.1";
+export const APP_VERSION = "5.0.2";
+/** Sentinel: use server OpenAI proxy (no raw key in the browser). */
+export const SERVER_API_KEY = "__server__";
 /** Bump when default AI rules / field defaults must refresh existing localStorage settings. */
 export const SETTINGS_SEED = 16;
 
@@ -157,7 +159,7 @@ export function buildChatCompletionBody(model,{temperature,maxTokens,messages,..
 
 /* Large stable prefix FIRST so OpenAI prompt caching can activate (>=1024 tokens;
    some models need closer to 2048). Run-specific rules come after; lead data last. */
-const CACHE_HANDBOOK = `LeadLens QA v5.0.1 — stable cacheable auditor handbook. Evidence only. Never invent facts, dates, budgets, locations, or prior calls.
+const CACHE_HANDBOOK = `LeadLens QA v5.0.2 — stable cacheable auditor handbook. Evidence only. Never invent facts, dates, budgets, locations, or prior calls.
 
 PURPOSE
 You audit Indian real-estate telecalling follow-up notes. Judge only the supplied fields for THIS call id. Optional day[] lists sibling calls on the same latest calendar day — context only; still return one result for THIS id.
@@ -690,19 +692,22 @@ export function buildReviewSummary(job){
 export async function validateApiKey(key,signal){
   const trimmed=String(key||"").trim();
   if(!trimmed)return{ok:false,reason:"empty",message:"Enter an OpenAI API key."};
-  if(!/^sk-[A-Za-z0-9_-]{20,}$/.test(trimmed))return{ok:false,reason:"format",message:"That does not look like an OpenAI API key (it should start with \"sk-\")."};
+  const useProxy=trimmed===SERVER_API_KEY;
+  if(!useProxy&&!/^sk-[A-Za-z0-9_-]{20,}$/.test(trimmed))return{ok:false,reason:"format",message:"That does not look like an OpenAI API key (it should start with \"sk-\")."};
   try{
-    const response=await fetch("https://api.openai.com/v1/models",{
+    const response=await fetch(useProxy?"/api/openai/models":"https://api.openai.com/v1/models",{
       method:"GET",
-      headers:{"Authorization":`Bearer ${trimmed}`},
+      credentials:useProxy?"same-origin":"omit",
+      headers:useProxy?{Accept:"application/json"}:{"Authorization":`Bearer ${trimmed}`},
       signal
     });
-    if(response.ok)return{ok:true,message:"Key is valid and active."};
+    if(response.ok)return{ok:true,message:useProxy?"Server OpenAI key is valid and active.":"Key is valid and active."};
     let detail="";
     try{detail=(await response.json())?.error?.message||"";}catch{/* ignore */}
     if(response.status===401)return{ok:false,reason:"unauthorized",status:401,message:detail||"Invalid API key — OpenAI rejected it (401)."};
     if(response.status===403)return{ok:false,reason:"forbidden",status:403,message:detail||"This key is not authorized (403)."};
     if(response.status===429)return{ok:false,reason:"quota",status:429,message:detail||"Key reached a rate/quota limit (429). It may have no remaining balance."};
+    if(response.status===503)return{ok:false,reason:"empty",status:503,message:detail||"Server OpenAI key is not configured."};
     return{ok:false,reason:"http",status:response.status,message:detail||`OpenAI returned ${response.status}.`};
   }catch(error){
     if(error?.name==="AbortError")return{ok:false,reason:"aborted",message:"Key check cancelled."};
@@ -1337,16 +1342,20 @@ async function requestAudit(apiKey,settings,leads,signal,log,onUsage){
       ],
       response_format:{type:"json_schema",json_schema:{name:"ll_audit",strict:true,schema:responseSchema}}
     });
-  const response=await fetch("https://api.openai.com/v1/chat/completions",{
+  const useProxy=!apiKey||apiKey===SERVER_API_KEY;
+  const response=await fetch(useProxy?"/api/openai/chat/completions":"https://api.openai.com/v1/chat/completions",{
     method:"POST",signal,
-    headers:{"Content-Type":"application/json","Authorization":`Bearer ${apiKey}`},
+    credentials:useProxy?"same-origin":"omit",
+    headers:useProxy
+      ?{"Content-Type":"application/json",Accept:"application/json"}
+      :{"Content-Type":"application/json","Authorization":`Bearer ${apiKey}`},
     body:JSON.stringify(auditBody)
   });
   if(!response.ok){
     let detail="";
     try{
       const errJson=await response.json();
-      detail=errJson.error?.message||"";
+      detail=errJson.error?.message||errJson.error||"";
     }catch{/* ignore */}
     throw new Error(`OpenAI ${response.status}: ${detail||response.statusText}`);
   }

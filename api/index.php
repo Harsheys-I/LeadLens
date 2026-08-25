@@ -29,6 +29,14 @@ try {
       require __DIR__ . '/routes/dashboards.php';
       ll_route_dashboards($action, $id);
       break;
+    case 'settings':
+      require __DIR__ . '/routes/settings.php';
+      ll_route_settings($action);
+      break;
+    case 'openai':
+      require __DIR__ . '/routes/openai.php';
+      ll_route_openai($action, $parts);
+      break;
     case 'meta':
       ll_ok([
         'permissions' => ll_permission_catalog(),
