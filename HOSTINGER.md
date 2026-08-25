@@ -4,20 +4,31 @@ The `hostinger` Git branch is a flat copy of `web-app/` (including `api/`). Depl
 
 ## One-time MySQL + install
 
-1. In **hPanel → Databases**, create a MySQL database and user. Note host (often `localhost`), database name, username, and password.
-2. On the server (File Manager or SSH), copy:
-   - `api/config.example.php` → `api/config.local.php`
-3. Edit `api/config.local.php`:
-   - Set `db.host`, `db.name`, `db.user`, `db.pass`
-   - Set `session.secret` to a long random string
-4. Visit **https://ai.gurupunvaanii.com/api/install.php** once.
+**Critical:** `api/config.local.php` is **gitignored**. Git/Hostinger auto-deploy will **never** upload it. After every fresh deploy (or if login shows placeholder / Access denied for `your_database_user`), create or re-upload this file **directly on the live server** via hPanel File Manager or FTP. Local-only `config.local.php` does nothing for production.
+
+1. In **hPanel → Databases → MySQL Databases**, create a database and user, then **Add user to database** with full privileges. Note host (usually `localhost`), database name, username, and password.
+2. On the **live** site document root (File Manager or FTP), open `api/`:
+   - Copy `config.example.php` → `config.local.php` (same folder).
+   - Or New File → `config.local.php` and paste the example contents.
+3. Edit **live** `api/config.local.php` (replace placeholders — do not leave `your_database_*`):
+   - `db.host` → usually `localhost`
+   - `db.name` → exact database name from hPanel
+   - `db.user` → exact MySQL username from hPanel
+   - `db.pass` → exact MySQL password from hPanel
+   - `session.secret` → a long random string (not `change-me-to-a-long-random-string`)
+4. Visit **https://ai.gurupunvaanii.com/api/install.php** once **after** DB credentials work.
    - Creates tables and seeds Super User: username `super user`, password `12345` (bcrypt).
 5. Log in at https://ai.gurupunvaanii.com/ and change the Super User password when prompted.
 6. Set `app.install_locked` to `true` in `config.local.php` (or delete/rename `install.php`).
 
+### If login says Access denied / `your_database_user`
+
+The API fell back to `config.example.php` because live `config.local.php` is missing or still has placeholders. Fix steps 2–3 on Hostinger, then re-run step 4.
+
 ## Verify after sync
 
 - `/api/` is present on the live tree (comes from `web-app/api/` via the hostinger sync workflow).
+- Live `api/config.local.php` exists with real credentials (check File Manager; Git will not create it).
 - `.htaccess` routes `/api/*` to `api/index.php` and blocks direct download of `config.local.php`.
 - PHP and `mod_rewrite` are enabled (default on Hostinger shared hosting).
 

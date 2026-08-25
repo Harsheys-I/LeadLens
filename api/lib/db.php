@@ -11,7 +11,18 @@ function ll_pdo(): PDO
 
   $cfg = $GLOBALS['LL_CONFIG']['db'] ?? null;
   if (!$cfg || empty($cfg['name']) || empty($cfg['user'])) {
-    ll_error('Database is not configured. Copy api/config.example.php to api/config.local.php.', 503);
+    ll_error('Database is not configured. On the live Hostinger server, create api/config.local.php from config.example.php with real MySQL credentials (it is gitignored and will not deploy from Git).', 503);
+  }
+
+  $usingExample = ($GLOBALS['LL_CONFIG_SOURCE'] ?? '') === 'example';
+  $placeholderUser = ($cfg['user'] ?? '') === 'your_database_user';
+  $placeholderName = ($cfg['name'] ?? '') === 'your_database_name';
+  $placeholderPass = ($cfg['pass'] ?? '') === 'your_database_password';
+  if ($usingExample || $placeholderUser || $placeholderName || $placeholderPass) {
+    ll_error(
+      'MySQL credentials are still placeholders. Upload api/config.local.php on the Hostinger server (File Manager or FTP) with real hPanel database name/user/password. Git deploy will not include this file because it is gitignored. Then open /api/install.php once.',
+      503
+    );
   }
 
   $dsn = sprintf(
