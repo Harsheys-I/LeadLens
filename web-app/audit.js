@@ -1252,7 +1252,7 @@ function fallbackObservation(row,errors,q){
   if(has(MISSED_30MIN_ERROR))issues.push("the first contact missed the daytime response window");
   if(has(FOLLOWUP_MISSED_ERROR))issues.push("the promised follow-up date is already past");
   if(has(WRONG_REQUIREMENT))issues.push("the requirement field holds call jargon instead of a real need");
-  if(gaps.length)issues.push(`the customer's ${joinNatural(gaps)} ${gaps.length>1?"were":"was"} not captured`);
+  if(gaps.length)issues.push(`the customer's ${joinNatural(gaps)} ${gaps.length>1?"were":"was"} not captured on this call`);
   if(has(EMPTY_PARAMETER))issues.push("the analysis parameter was left blank");
   let text="";
   if(connected==="yes"&&thin&&issues.length){
