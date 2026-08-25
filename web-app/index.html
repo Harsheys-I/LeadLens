@@ -7,8 +7,8 @@
   <meta name="description" content="LeadLens — AI telecalling audit platform">
   <title>LeadLens</title>
   <link rel="manifest" href="manifest.webmanifest">
-  <link rel="stylesheet" href="styles.css?v=5.0.0">
-  <script type="module" src="home.js?v=5.0.0"></script>
+  <link rel="stylesheet" href="styles.css?v=5.0.1">
+  <script type="module" src="home.js?v=5.0.1"></script>
 </head>
 <body class="auth-body">
   <div class="auth-bg" aria-hidden="true"></div>
@@ -82,9 +82,9 @@
 
   <div id="password-modal" class="key-modal hidden" role="dialog" aria-modal="true" aria-labelledby="pw-title">
     <div class="key-modal-card">
-      <p class="eyebrow">SECURITY</p>
+      <p class="eyebrow" id="pw-eyebrow">SECURITY</p>
       <h2 id="pw-title">Change your password</h2>
-      <p class="key-modal-copy">You are using the default Super User password. Choose a new password before continuing.</p>
+      <p class="key-modal-copy" id="pw-copy">You’re using a temporary password. Choose a new password before continuing.</p>
       <label>Current password<input id="pw-current" type="password" autocomplete="current-password"></label>
       <label>New password<input id="pw-new" type="password" autocomplete="new-password"></label>
       <label>Confirm new password<input id="pw-confirm" type="password" autocomplete="new-password"></label>

@@ -2,7 +2,7 @@
  * In-app TeleCaller Review dashboard (KPIs, scorecard, Chart.js charts, error table).
  */
 
-import {buildDashboardModel} from "./dashboard-metrics.js?v=5.0.0";
+import {buildDashboardModel} from "./dashboard-metrics.js?v=5.0.1";
 
 const CHART_COLORS = {
   green2: "#1f5d45",
@@ -79,6 +79,11 @@ function fillMultiSelect(select, values, selected){
   }
 }
 
+function syncFiltersBodyPadding(aside){
+  const open = aside && !aside.classList.contains("is-collapsed") && document.body.contains(aside);
+  document.body.classList.toggle("dashboard-filters-open", Boolean(open));
+}
+
 function buildFilters(filterOptions, filters){
   const aside = el("aside", "dashboard-filters-rail");
   const toggle = el("button", "filters-tab-toggle", "Filters");
@@ -128,7 +133,10 @@ function buildFilters(filterOptions, filters){
     const open = !aside.classList.contains("is-collapsed");
     aside.classList.toggle("is-collapsed", open);
     toggle.setAttribute("aria-expanded", open ? "false" : "true");
+    syncFiltersBodyPadding(aside);
   });
+
+  queueMicrotask(() => syncFiltersBodyPadding(aside));
 
   return {aside, form, reset};
 }
@@ -386,4 +394,5 @@ export function renderReviewDashboard(container, jobs, options = {}){
 
 export function destroyReviewDashboard(){
   destroyCharts();
+  document.body.classList.remove("dashboard-filters-open");
 }

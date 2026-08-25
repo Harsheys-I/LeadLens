@@ -7,11 +7,11 @@
   <meta name="description" content="LeadLens TeleCaller Audit">
   <title>LeadLens · TeleCaller Audit</title>
   <link rel="manifest" href="../manifest.webmanifest">
-  <link rel="stylesheet" href="../styles.css?v=5.0.0">
+  <link rel="stylesheet" href="../styles.css?v=5.0.1">
   <script defer src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
-  <script type="module" src="../app.js?v=5.0.0"></script>
+  <script type="module" src="../app.js?v=5.0.1"></script>
 </head>
 <body>
   <div id="update-banner" class="update-banner hidden" role="status">
@@ -33,7 +33,7 @@
         <a class="text-button sidebar-link" href="/">Home</a>
         <button type="button" id="shell-logout" class="text-button">Sign out</button>
       </div>
-      <div class="privacy-note"><strong id="sidebar-version">v5.0.0</strong><span id="sidebar-notes">Multi-page auth · published TeleCaller dashboards.</span></div>
+      <div class="privacy-note"><strong id="sidebar-version">v5.0.1</strong><span id="sidebar-notes">Admin UX fixes · merged TeleCaller dashboards · per-user history.</span></div>
     </aside>
 
     <main>
@@ -96,18 +96,22 @@
 
       <section id="view-published" class="view">
         <div class="section-head">
-          <div><h2>Published dashboards</h2><p>Server-stored dashboards scoped to your TeleCaller (or all, if permitted).</p></div>
+          <div><h2>Dashboard</h2><p>Merged published audit results for your TeleCaller (or all TeleCallers, if permitted).</p></div>
           <button id="refresh-published" type="button" class="secondary-button">Refresh</button>
         </div>
         <div id="published-list" class="published-list"><div class="empty-card">Loading…</div></div>
         <div id="published-dashboard-panel" class="review-dashboard-panel hidden">
-          <div class="card-title"><h2 id="published-dash-title">Dashboard</h2><p id="published-dash-meta"></p></div>
+          <div class="card-title">
+            <h2 id="published-dash-title">Dashboard</h2>
+            <p id="published-dash-meta"></p>
+            <div id="published-dash-actions" class="published-dash-actions"></div>
+          </div>
           <div id="published-dashboard-mount"></div>
         </div>
       </section>
 
       <section id="view-history" class="view">
-        <div class="section-head"><div><h2>Audit history</h2><p>Private to this browser profile.</p></div><button id="clear-history" class="danger-button">Clear history</button></div>
+        <div class="section-head"><div><h2>Audit history</h2><p>Private to your account on this browser.</p></div><button id="clear-history" class="danger-button">Clear history</button></div>
         <div id="history-list" class="history-list"><div class="empty-card">No audits yet.</div></div>
       </section>
 

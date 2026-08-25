@@ -1,5 +1,5 @@
 {
-  "version": "5.0.0",
+  "version": "5.0.1",
   "name": "LeadLens",
-  "notes": "Multi-page auth, Admin users/roles, published TeleCaller dashboards."
+  "notes": "Admin UX fixes: combined merged dashboards, per-user history, password/forms hardening."
 }

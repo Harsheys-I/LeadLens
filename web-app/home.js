@@ -1,5 +1,5 @@
-import {login, logout, loadSession, changePassword, moduleTilesForUser} from './auth.js?v=5.0.0';
-import {AuthApi} from './api-client.js?v=5.0.0';
+import {login, logout, loadSession, changePassword, moduleTilesForUser} from './auth.js?v=5.0.1';
+import {AuthApi} from './api-client.js?v=5.0.1';
 
 const $ = id => document.getElementById(id);
 const panelLogin = $('panel-login');
@@ -43,7 +43,20 @@ function renderTiles(user){
   }
 }
 
-function openPasswordModal(){
+function openPasswordModal(user){
+  const eyebrow = $('pw-eyebrow');
+  const title = $('pw-title');
+  const copy = $('pw-copy');
+  if (user?.is_super) {
+    if (eyebrow) eyebrow.textContent = 'SUPER USER';
+    if (title) title.textContent = 'Change Super User password';
+  } else {
+    if (eyebrow) eyebrow.textContent = 'SECURITY';
+    if (title) title.textContent = 'Change your password';
+  }
+  if (copy) {
+    copy.textContent = 'You’re using a temporary password. Choose a new password before continuing.';
+  }
   pwModal.classList.remove('hidden');
   $('pw-current').value = '';
   $('pw-new').value = '';
@@ -59,7 +72,7 @@ async function enterHome(user){
   $('home-user-label').textContent = `${user.display_name || user.username} · ${user.role_name}`;
   renderTiles(user);
   showPanel('home');
-  if (user.must_change_password) openPasswordModal();
+  if (user.must_change_password) openPasswordModal(user);
 
   const params = new URLSearchParams(location.search);
   const next = params.get('next');

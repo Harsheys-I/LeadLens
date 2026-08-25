@@ -66,6 +66,8 @@ export const NotifApi = {
 export const DashboardApi = {
   list: () => api('dashboards/list'),
   get: (id) => api(`dashboards/${id}`),
+  combined: () => api('dashboards/combined'),
+  telecallerNames: () => api('dashboards/telecaller-names'),
   publish: (dashboards) => api('dashboards/publish', {method: 'POST', body: {dashboards}}),
   remove: (id) => api(`dashboards/${id}`, {method: 'DELETE'}),
 };

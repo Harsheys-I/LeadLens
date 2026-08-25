@@ -1,19 +1,17 @@
-import {APP_VERSION,DEFAULT_SETTINGS,DEFAULT_OUTPUT_FIELDS,SETTINGS_SEED,MAX_BATCH_SIZE,MAX_CONCURRENCY,normalizeSettings,normalizeInputFields,slugFieldId,parseWorkbook,parseAuditedWorkbook,auditBatch,downloadWorkbook,downloadReviewPack,splitLeadsByTelecaller,splitResultsByTelecaller,validateApiKey,HIGH_SEVERITY_ERRORS} from "./audit.js?v=5.0.0";
-import {putJob,getJob,getJobs,deleteJob,clearJobs,loadSettings,saveSettings,getApiKey,apiKeyIsRemembered,saveApiKey,forgetApiKey} from "./db.js?v=5.0.0";
-import {renderReviewDashboard,destroyReviewDashboard} from "./dashboard-view.js?v=5.0.0";
-import {requireAuth,logout,hasPermission,getUser} from "./auth.js?v=5.0.0";
-import {DashboardApi} from "./api-client.js?v=5.0.0";
+import {APP_VERSION,DEFAULT_SETTINGS,DEFAULT_OUTPUT_FIELDS,SETTINGS_SEED,MAX_BATCH_SIZE,MAX_CONCURRENCY,normalizeSettings,normalizeInputFields,slugFieldId,parseWorkbook,parseAuditedWorkbook,auditBatch,downloadWorkbook,downloadReviewPack,splitLeadsByTelecaller,splitResultsByTelecaller,validateApiKey,HIGH_SEVERITY_ERRORS} from "./audit.js?v=5.0.1";
+import {putJob,getJob,getJobs,deleteJob,clearJobs,loadSettings,saveSettings,getApiKey,apiKeyIsRemembered,saveApiKey,forgetApiKey,setStorageUserId,storageKey} from "./db.js?v=5.0.1";
+import {renderReviewDashboard,destroyReviewDashboard} from "./dashboard-view.js?v=5.0.1";
+import {requireAuth,logout,hasPermission,getUser} from "./auth.js?v=5.0.1";
+import {DashboardApi} from "./api-client.js?v=5.0.1";
 
 const $=id=>document.getElementById(id);
-const ids=["page-title","key-state","run-name","pause-run","download-result","progress-label","progress-percent","progress-bar","metric-leads","metric-excel-rows","metric-calls","metric-batch","metric-completed","metric-status","metric-input-tokens","metric-cached-tokens","metric-output-tokens","metric-duration","metric-cost","live-log","clear-console","history-list","clear-history","api-key","remember-key","toggle-key","save-key","forget-key","key-message","batch-size","concurrency","model","input-field-config","add-input-field","ai-field-config","rule-config","add-rule","output-field-config","yes-values","no-values","additional-instructions","input-price","cached-price","output-price","save-settings","reset-settings","settings-message","toast","mobile-menu","active-job-switch","sort-field","sort-direction","app-version","export-settings","import-settings","import-settings-file","update-banner","update-banner-text","reload-app","key-modal","onboard-key","onboard-toggle","onboard-remember","onboard-message","onboard-save","onboard-skip","sidebar-version","sidebar-notes","review-drop-zone","review-file-input","review-drop-hint","review-file-list","review-validation","start-review","review-run-panel","review-aggregate","review-cards","review-dashboard-panel","review-dashboard-mount","download-review-excel","review-open-console","review-precounts","review-live-progress","review-progress-label","review-progress-percent","review-progress-bar","review-post-actions","create-review-dashboard","upload-dashboard-btn","upload-dashboard-modal","upload-telecaller-list","upload-dash-message","upload-dash-confirm","upload-dash-cancel","published-list","refresh-published","published-dashboard-panel","published-dash-title","published-dash-meta","published-dashboard-mount","shell-user-label","shell-logout"];
+const ids=["page-title","key-state","run-name","pause-run","download-result","progress-label","progress-percent","progress-bar","metric-leads","metric-excel-rows","metric-calls","metric-batch","metric-completed","metric-status","metric-input-tokens","metric-cached-tokens","metric-output-tokens","metric-duration","metric-cost","live-log","clear-console","history-list","clear-history","api-key","remember-key","toggle-key","save-key","forget-key","key-message","batch-size","concurrency","model","input-field-config","add-input-field","ai-field-config","rule-config","add-rule","output-field-config","yes-values","no-values","additional-instructions","input-price","cached-price","output-price","save-settings","reset-settings","settings-message","toast","mobile-menu","active-job-switch","sort-field","sort-direction","app-version","export-settings","import-settings","import-settings-file","update-banner","update-banner-text","reload-app","key-modal","onboard-key","onboard-toggle","onboard-remember","onboard-message","onboard-save","onboard-skip","sidebar-version","sidebar-notes","review-drop-zone","review-file-input","review-drop-hint","review-file-list","review-validation","start-review","review-run-panel","review-aggregate","review-cards","review-dashboard-panel","review-dashboard-mount","download-review-excel","review-open-console","review-precounts","review-live-progress","review-progress-label","review-progress-percent","review-progress-bar","review-post-actions","create-review-dashboard","upload-dashboard-btn","upload-dashboard-modal","upload-telecaller-list","upload-dash-message","upload-dash-confirm","upload-dash-cancel","published-list","refresh-published","published-dashboard-panel","published-dash-title","published-dash-meta","published-dash-actions","published-dashboard-mount","shell-user-label","shell-logout"];
 const els=Object.fromEntries(ids.map(id=>[id,$(id)]));
 const titles={review:"Bucket 1 lead audit",console:"Run console",published:"Dashboard",history:"History",settings:"Settings"};
 /** When false, completed audits do not auto-render charts until Create Dashboard. */
 let reviewDashboardRequested=false;
 let lastReadyReviewJobs=[];
 const ENGINE_VERSION="latest-day-v7";
-const ACTIVE_JOB_KEY="leadlens.activeJobId";
-const REVIEW_SESSION_KEY="leadlens.reviewSessionIds";
 /** Max TeleCaller review jobs running at once (outer pool). Inner batch pool stays settings.concurrency per job. */
 const REVIEW_JOB_CONCURRENCY=10;
 
@@ -30,21 +28,41 @@ let lastReviewDashboardKey="";
 const liveJobs=new Map();
 const controllers=new Map();
 const saveChains=new Map();
-const loadedSettings=loadSettings(DEFAULT_SETTINGS);
-const previousSettingsSeed=Number(loadedSettings.settingsSeed)||0;
-let settings=normalizeSettings(loadedSettings);
-if(previousSettingsSeed<SETTINGS_SEED)saveSettings(settings);
+let settings=normalizeSettings(DEFAULT_SETTINGS);
 
 const deepCopy=value=>JSON.parse(JSON.stringify(value));
 const number=value=>Number.isFinite(Number(value))?Number(value):0;
 const timestamp=()=>new Date().toISOString();
-const setActiveJobId=id=>{if(id)sessionStorage.setItem(ACTIVE_JOB_KEY,id);else sessionStorage.removeItem(ACTIVE_JOB_KEY);};
-const getActiveJobId=()=>sessionStorage.getItem(ACTIVE_JOB_KEY)||"";
-const saveReviewSessionIds=()=>sessionStorage.setItem(REVIEW_SESSION_KEY,JSON.stringify(reviewSessionIds));
+const setActiveJobId=id=>{const key=storageKey("activeJobId");if(id)sessionStorage.setItem(key,id);else sessionStorage.removeItem(key);};
+const getActiveJobId=()=>sessionStorage.getItem(storageKey("activeJobId"))||"";
+const saveReviewSessionIds=()=>sessionStorage.setItem(storageKey("reviewSessionIds"),JSON.stringify(reviewSessionIds));
 const loadReviewSessionIds=()=>{
-  try{const parsed=JSON.parse(sessionStorage.getItem(REVIEW_SESSION_KEY)||"[]");reviewSessionIds=Array.isArray(parsed)?parsed.filter(Boolean):[];}
+  try{const parsed=JSON.parse(sessionStorage.getItem(storageKey("reviewSessionIds"))||"[]");reviewSessionIds=Array.isArray(parsed)?parsed.filter(Boolean):[];}
   catch{reviewSessionIds=[];}
 };
+
+function reloadUserSettings(){
+  const loaded=loadSettings(DEFAULT_SETTINGS);
+  const previousSettingsSeed=Number(loaded.settingsSeed)||0;
+  settings=normalizeSettings(loaded);
+  if(previousSettingsSeed<SETTINGS_SEED)saveSettings(settings);
+}
+
+function clearInMemoryJobs(){
+  for(const c of controllers.values()){try{c.abort();}catch{/* ignore */}}
+  controllers.clear();
+  saveChains.clear();
+  liveJobs.clear();
+  currentJob=null;
+  reviewSessionIds=[];
+  reviewQueue=[];
+  reviewQueueRunning=false;
+  reviewActiveCount=0;
+  lastReadyReviewJobs=[];
+  lastReviewDashboardKey="";
+  reviewDashboardRequested=false;
+  reviewParsedFiles=[];
+}
 
 function showView(name){
   const btn=document.querySelector(`.nav-item[data-view="${name}"]`);
@@ -56,6 +74,8 @@ function showView(name){
   document.querySelectorAll(".nav-item").forEach(button=>button.classList.toggle("active",button.dataset.view===name));
   if(els["page-title"])els["page-title"].textContent=titles[name]||titles.review;
   document.querySelector(".shell")?.classList.remove("menu-open");
+  const activeRail=document.querySelector(".view.active .dashboard-filters-rail:not(.is-collapsed)");
+  document.body.classList.toggle("dashboard-filters-open",Boolean(activeRail));
   if(name==="history")renderHistory();
   if(name==="settings")renderSettings();
   if(name==="console")refreshJobSwitcher();
@@ -1674,7 +1694,12 @@ document.querySelector(".brand")?.addEventListener("click",event=>{
 });
 document.getElementById("settings-form")?.addEventListener("submit",event=>event.preventDefault());
 els["mobile-menu"]?.addEventListener("click",()=>document.querySelector(".shell")?.classList.toggle("menu-open"));
-els["shell-logout"]?.addEventListener("click",async()=>{await logout();location.href="/";});
+els["shell-logout"]?.addEventListener("click",async()=>{
+  await logout();
+  clearInMemoryJobs();
+  setStorageUserId(null);
+  location.href="/";
+});
 els["pause-run"].onclick=async()=>{
   if(!currentJob)return;
   if(currentJob.status==="running"||currentJob.status==="reviewing")controllers.get(currentJob.id)?.abort();
@@ -1794,9 +1819,6 @@ window.addEventListener("beforeunload",event=>{
   event.returnValue="";
 });
 
-renderSettings();
-renderHistory();
-loadReviewSessionIds();
 setReviewFormat("raw");
 
 async function bootTeleCallerAudit(){
@@ -1806,6 +1828,14 @@ async function bootTeleCallerAudit(){
     location.href="/";
     return;
   }
+
+  setStorageUserId(user.id);
+  clearInMemoryJobs();
+  reloadUserSettings();
+  loadReviewSessionIds();
+  renderSettings();
+  await renderHistory();
+
   if(els["shell-user-label"])els["shell-user-label"].textContent=user.display_name||user.username;
 
   document.querySelectorAll(".nav-item[data-perm]").forEach(btn=>{
@@ -1818,7 +1848,7 @@ async function bootTeleCallerAudit(){
 
   const firstVisible=[...document.querySelectorAll(".nav-item:not(.hidden)")][0];
   showView(firstVisible?.dataset.view||"review");
-  restoreFromStorage();
+  await restoreFromStorage();
   checkForUpdate();
   if(hasPermission("telecaller.bucket1")||hasPermission("telecaller.settings"))maybePromptForApiKey();
   setInterval(()=>{
@@ -1894,65 +1924,128 @@ async function confirmUploadDashboard(){
   els["upload-dash-message"].textContent="Uploading…";
   try{
     const data=await DashboardApi.publish(dashboards);
-    els["upload-dash-message"].textContent=`Published ${data.published?.length||0} dashboard(s).`;
-    toast("Dashboards uploaded");
+    const mergedCount=(data.published||[]).filter(p=>p.merged).length;
+    els["upload-dash-message"].textContent=mergedCount
+      ? `Merged into ${data.published?.length||0} TeleCaller board(s).`
+      : `Published ${data.published?.length||0} dashboard(s).`;
+    toast(mergedCount?"Dashboards merged into existing boards":"Dashboards uploaded");
     setTimeout(closeUploadDashboardModal,800);
   }catch(err){
     els["upload-dash-message"].textContent=err.message||"Upload failed";
   }
 }
 
-async function refreshPublishedDashboards(){
+function canDeletePublishedDashboard(item){
+  const user=getUser();
+  if(!user)return false;
+  if(user.is_super||hasPermission("dashboards.view_all")||hasPermission("admin.users"))return true;
+  const own=String(user.telecaller_name||"").trim();
+  if(own&&item?.telecaller_name&&own.toLowerCase()===String(item.telecaller_name).toLowerCase())return true;
+  if(item?.uploaded_by!=null&&Number(item.uploaded_by)===Number(user.id))return true;
+  return false;
+}
+
+function renderPublishedManageList(items){
   const mount=els["published-list"];
   if(!mount)return;
-  if(!hasPermission("telecaller.dashboard")){
-    mount.innerHTML='<div class="empty-card">Dashboard access is not enabled for your role.</div>';
+  mount.replaceChildren();
+  const deletable=items.filter(canDeletePublishedDashboard);
+  if(!deletable.length){
+    mount.classList.add("hidden");
     return;
   }
-  mount.innerHTML='<div class="empty-card">Loading…</div>';
+  mount.classList.remove("hidden");
+  const wrap=document.createElement("div");
+  wrap.className="published-manage";
+  const head=document.createElement("p");
+  head.className="muted";
+  head.textContent="Manage published TeleCaller boards";
+  wrap.append(head);
+  for(const item of deletable){
+    const row=document.createElement("div");
+    row.className="published-manage-row";
+    const info=document.createElement("div");
+    const title=document.createElement("strong");
+    title.textContent=item.telecaller_name||item.title||"Dashboard";
+    const meta=document.createElement("span");
+    meta.className="muted";
+    const when=item.updated_at||item.created_at;
+    meta.textContent=`${item.lead_count??"—"} leads${when?" · "+new Date(String(when).endsWith("Z")?when:when+"Z").toLocaleString():""}`;
+    info.append(title,document.createElement("br"),meta);
+    const del=document.createElement("button");
+    del.type="button";
+    del.className="danger-button";
+    del.textContent="Delete";
+    del.onclick=()=>deletePublishedDashboard(item);
+    row.append(info,del);
+    wrap.append(row);
+  }
+  mount.append(wrap);
+}
+
+async function deletePublishedDashboard(item){
+  const name=item.telecaller_name||item.title||"this TeleCaller";
+  if(!confirm(`Delete the published dashboard for ${name}? This cannot be undone.`))return;
   try{
-    const data=await DashboardApi.list();
-    const items=data.dashboards||[];
-    mount.replaceChildren();
-    if(!items.length){
-      mount.innerHTML='<div class="empty-card">No published dashboards yet.</div>';
-      return;
-    }
-    for(const item of items){
-      const card=document.createElement("button");
-      card.type="button";
-      card.className="published-card";
-      const when=item.created_at?new Date(item.created_at+"Z").toLocaleString():"";
-      const title=document.createElement("strong");
-      title.textContent=item.title||item.telecaller_name;
-      const meta=document.createElement("span");
-      meta.textContent=`${item.telecaller_name}${when?" · "+when:""}`;
-      const by=document.createElement("span");
-      by.className="muted";
-      by.textContent=item.uploaded_by_name||"";
-      card.append(title,meta,by);
-      card.onclick=()=>openPublishedDashboard(item.id);
-      mount.append(card);
-    }
+    await DashboardApi.remove(item.id);
+    toast(`Deleted ${name}`);
+    await refreshPublishedDashboards();
   }catch(err){
-    mount.innerHTML=`<div class="empty-card">${err.message||"Could not load dashboards."}</div>`;
+    toast(err.message||"Could not delete dashboard");
   }
 }
 
-async function openPublishedDashboard(id){
+async function refreshPublishedDashboards(){
+  const mount=els["published-list"];
   const panel=els["published-dashboard-panel"];
+  if(!mount)return;
+  if(!hasPermission("telecaller.dashboard")){
+    mount.classList.remove("hidden");
+    mount.innerHTML='<div class="empty-card">Dashboard access is not enabled for your role.</div>';
+    panel?.classList.add("hidden");
+    destroyReviewDashboard();
+    return;
+  }
+  mount.classList.remove("hidden");
+  mount.innerHTML='<div class="empty-card">Loading…</div>';
   try{
-    const data=await DashboardApi.get(id);
-    const dash=data.dashboard;
-    if(els["published-dash-title"])els["published-dash-title"].textContent=dash.title||dash.telecaller_name;
+    const data=await DashboardApi.combined();
+    const results=data.results||[];
+    const items=data.dashboards||[];
+    if(!results.length&&!items.length){
+      mount.innerHTML='<div class="empty-card">No published dashboards yet.</div>';
+      panel?.classList.add("hidden");
+      destroyReviewDashboard();
+      return;
+    }
+    renderPublishedManageList(items);
+    if(els["published-dash-title"])els["published-dash-title"].textContent=data.title||"Dashboard";
     if(els["published-dash-meta"]){
-      els["published-dash-meta"].textContent=`${dash.telecaller_name} · uploaded ${dash.created_at||""}`;
+      const when=data.updated_at?new Date(String(data.updated_at).endsWith("Z")?data.updated_at:data.updated_at+"Z").toLocaleString():"";
+      const count=items.length;
+      els["published-dash-meta"].textContent=data.view_all
+        ?`Combined · ${count} TeleCaller${count===1?"":"s"} · ${results.length} rows${when?" · updated "+when:""}`
+        :`Your board · ${results.length} rows${when?" · updated "+when:""}`;
+    }
+    const actions=els["published-dash-actions"];
+    if(actions){
+      actions.replaceChildren();
+      if(items.length===1&&canDeletePublishedDashboard(items[0])){
+        const del=document.createElement("button");
+        del.type="button";
+        del.className="danger-button";
+        del.textContent="Delete board";
+        del.onclick=()=>deletePublishedDashboard(items[0]);
+        actions.append(del);
+      }
     }
     panel?.classList.remove("hidden");
-    const fakeJob={id:`published-${dash.id}`,results:dash.payload?.results||[],status:"completed"};
+    const fakeJob={id:"published-combined",results,status:"completed"};
     renderReviewDashboard(els["published-dashboard-mount"],[fakeJob],{highSeverityErrors:HIGH_SEVERITY_ERRORS});
   }catch(err){
-    toast(err.message||"Could not open dashboard");
+    mount.classList.remove("hidden");
+    mount.innerHTML=`<div class="empty-card">${err.message||"Could not load dashboards."}</div>`;
+    panel?.classList.add("hidden");
   }
 }
 
