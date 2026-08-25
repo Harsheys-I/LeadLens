@@ -1,5 +1,5 @@
 {
-  "version": "3.6.2",
+  "version": "3.6.3",
   "name": "LeadLens",
-  "notes": "AI Observation fallbacks use plain-English supervisor notes (no Connected=Yes dumps)."
+  "notes": "Stronger AI Observation/Recommendation prompts; keep model prose (no error-cue fallback gate)."
 }

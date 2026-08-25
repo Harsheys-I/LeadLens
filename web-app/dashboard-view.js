@@ -2,7 +2,7 @@
  * In-app TeleCaller Review dashboard (KPIs, scorecard, Chart.js charts, error table).
  */
 
-import {buildDashboardModel} from "./dashboard-metrics.js?v=3.6.2";
+import {buildDashboardModel} from "./dashboard-metrics.js?v=3.6.3";
 
 const CHART_COLORS = {
   green2: "#1f5d45",

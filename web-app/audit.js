@@ -1,8 +1,8 @@
-import {buildTelecallerDashboardBlob} from "./dashboard-export.js?v=3.6.2";
+import {buildTelecallerDashboardBlob} from "./dashboard-export.js?v=3.6.3";
 
-export const APP_VERSION = "3.6.2";
+export const APP_VERSION = "3.6.3";
 /** Bump when default AI rules / field defaults must refresh existing localStorage settings. */
-export const SETTINGS_SEED = 14;
+export const SETTINGS_SEED = 15;
 
 /** Settings limits — batch size is leads per request; concurrency is parallel requests. */
 export const MAX_BATCH_SIZE = 20;
@@ -117,8 +117,8 @@ export const DEFAULT_RULES = [
   {field:"Follow-up Missed",instruction:`If n (this call's Next Followup) is a past calendar date before today → emit "${FOLLOWUP_MISSED_ERROR}". Do not emit any other follow-up timing errors.`,errors:FOLLOWUP_MISSED_ERROR},
   {field:"Comment quality",instruction:"Score q strictly. q must reflect how well Comments capture the real telecaller–customer conversation (need, budget, location preference, objection, decision-maker, next step). One-word/CRM crumbs like visited/RNR/CNP/busy/followup = q 0-2 max. Generic connected notes without customer detail = q <=4. Only rich descriptive talk earns 8-10. When c is an array, score THIS call's latest comment (last entry), using earlier entries only as context.",errors:""},
   {field:"Customer Requirement",instruction:`Only review the Customer Requirement when the call actually connected (Connected / k = Yes). On a connected call, rq should describe what the customer genuinely wants — for example a home configuration (2BHK/3BHK/plot), a budget, a preferred location/locality, facing, or a possession timeline. If rq is blank or only a placeholder such as ".", "-", "**", "NA" or "nil", raise "${EMPTY_REQUIREMENT}". If rq instead holds call notes or jargon rather than a real need — for example RNR, CNP, Visited, Site visit, Busy, Follow-up, Callback, Interested/Not interested — raise "${WRONG_REQUIREMENT}". When the call did not connect (Connected / k = No or blank), leave the requirement alone and never raise either of these two errors.`,errors:`${EMPTY_REQUIREMENT} | ${WRONG_REQUIREMENT}`},
-  {field:"AI Observation",instruction:"o is a short plain-English QA note (18-28 words) explaining what went wrong from Error Type(s), comment quality, and Connected (k). Weave connectedness into the sentence when relevant (e.g. 'the call connected' / 'the call did not connect') — never dump labels like Connected=Yes/No. When e is non-empty, say the issue in layman words (location missing, status mismatch, late first contact, etc.), not stacked template fragments or raw error-code dumps. Forbidden: copying or paraphrasing c. When e is empty, judge note quality only.",errors:""},
-  {field:"AI Recommendation",instruction:"r is practical next-step coaching in plain English (20-40 words) from comment history + Connected (k) + Error Type(s). Concrete ask/capture/correct actions for the next call. Not a correction rewrite of the note. Not vague ('follow up', 'update remarks'). Not robotic label dumps.",errors:""},
+  {field:"AI Observation",instruction:"Write o as a layman supervisor speaking to a telecaller (18-28 words). Cover every Error Type you put in e using evidence from Comments (c) and Connected (k) — e.g. 'the call connected' / 'never connected', never Connected=Yes/No dumps. Name the gap in plain words (status too warm for unanswered history, location missing, first contact late, overdue follow-up, junk requirement, thin note). Forbidden: copying or paraphrasing c; stacking raw error labels; template fragments. When e is empty, judge note quality / connectedness only.",errors:""},
+  {field:"AI Recommendation",instruction:"Write r as layman next-step coaching (20-40 words) grounded in comment history + Connected (k) + the Error Types in e. Tell the caller what to ask, capture, or correct on the next attempt (config, locality, budget, status ladder, dated follow-up). Not a rewrite of the comment. Not vague ('follow up', 'update remarks', 'call again'). Not Connected=Yes/No or error-label dumps.",errors:""},
   {field:"Buying intent",instruction:"i=1 only for genuine positive purchase interest in THIS call's latest comment/status; else i=0. Earlier history alone does not set i=1 if the latest comment cooled. All-RNR / k=No ⇒ i=0.",errors:""}
 ];
 /* gpt-5-nano OpenAI list price (USD/1M): $0.05 input, $0.005 cached, $0.40 output.
@@ -157,7 +157,7 @@ export function buildChatCompletionBody(model,{temperature,maxTokens,messages,..
 
 /* Large stable prefix FIRST so OpenAI prompt caching can activate (>=1024 tokens;
    some models need closer to 2048). Run-specific rules come after; lead data last. */
-const CACHE_HANDBOOK = `LeadLens QA v3.6.2 — stable cacheable auditor handbook. Evidence only. Never invent facts, dates, budgets, locations, or prior calls.
+const CACHE_HANDBOOK = `LeadLens QA v3.6.3 — stable cacheable auditor handbook. Evidence only. Never invent facts, dates, budgets, locations, or prior calls.
 
 PURPOSE
 You audit Indian real-estate telecalling follow-up notes. Judge only the supplied fields for THIS call id. Optional day[] lists sibling calls on the same latest calendar day — context only; still return one result for THIS id.
@@ -240,8 +240,15 @@ CONNECTED GATING
 If k is No or "", NEVER emit those three — even if rq/b are empty, "**", ".", or junk.
 
 STYLE — OBSERVATION (o) AND RECOMMENDATION (r)
-o is a natural 18–28 word QA observation in layman English. Explain Error Type(s) using Comments (c) and Connected (k). Weave connectedness into the sentence when useful — never write "Connected=Yes" / "Connected=No" as a label dump. Do NOT copy, trim, or paraphrase Comments. Bad o: "Connected=Yes. Comment lacks a real telecaller–customer conversation. Connected call missing usable location." Good o: "The call connected, but the note is thin and the customer's preferred location was not captured on this call." / "Every attempt went unanswered and the call never connected, yet status is still Warm." When e is non-empty, o must clearly cover those issues in plain words (exact error labels optional if meaning is obvious).
-r is practical next-step coaching from comment history + Connected + Error Type(s) — not a correction rewrite of the note. Bad r: "Follow up", "Update comments", "Call again". Good r: "On the next connected call ask preferred config, micro-market, and budget band; replace junk requirement text with a real need; set a same-day follow-up date."
+Voice: layman QA supervisor speaking to the telecaller — clear, specific, human. No CRM jargon dumps.
+
+o (18–28 words): Explain the Error Types you emit in e using Comments (c) + Connected (k). Weave connectedness naturally ("the call connected" / "the call never connected") — NEVER "Connected=Yes" / "Connected=No". Cover each issued error in plain words (status too warm for unanswered history, preferred location missing, first contact late, overdue follow-up, junk requirement, thin note). Exact error labels optional if meaning is obvious. Do NOT copy, trim, or paraphrase Comments. When e is empty, judge note quality / connectedness only.
+Bad o: "Connected=Yes. Comment lacks a real telecaller–customer conversation. Connected call missing usable location."
+Good o: "The call connected, but the note is thin and the customer's preferred location was not captured on this call." / "Every attempt went unanswered and the call never connected, yet status is still Warm."
+
+r (20–40 words): Practical next-step coaching from full comment history + Connected + the Error Types in e. Concrete ask / capture / correct actions for the next call — not a rewrite of the note, not vague ("follow up", "update remarks", "call again"), not robotic label dumps.
+Bad r: "Follow up and update comments."
+Good r: "On the next connected call ask preferred config, micro-market, and budget band; replace junk requirement text with a real need; set a same-day follow-up date."
 Never dump the full comment into o or r. Never restate this handbook.
 
 EXAMPLES
@@ -1293,37 +1300,14 @@ function fallbackRecommendation(row,errors,q){
   const body=joinNatural(actions);
   return clipWords(`${body.charAt(0).toUpperCase()}${body.slice(1)}.`,40);
 }
-function observationReferencesErrors(text,errors){
-  if(!errors.length)return true;
-  const n=norm(text);
-  if(!n)return false;
-  const plainCues={
-    [STATUS_HISTORY_ERROR]:["lead status","status does not match","status still","warmer than","comment history","conversation went","heat"],
-    [MISSED_30MIN_ERROR]:["response window","daytime","first contact","first talk","30 minute","thirty minute","tat","fresh call","registration window","callback missed"],
-    [FOLLOWUP_MISSED_ERROR]:["follow-up","follow up","followup","already past","overdue"],
-    [EMPTY_LOCATION]:["location","locality","micro-market","micromarket"],
-    [EMPTY_REQUIREMENT]:["requirement was left blank","requirement is blank","requirement empty","customer requirement","requirement was not"],
-    [WRONG_REQUIREMENT]:["call jargon","not a real need","incorrect requirement","requirement field"],
-    [EMPTY_BUDGET]:["budget was not","budget missing","budget empty","budget was never","no budget","budget were not"],
-    [EMPTY_PARAMETER]:["analysis parameter","parameter is blank","parameter was left","parameter empty"]
-  };
-  return errors.some(label=>{
-    const labelNorm=norm(label);
-    if(labelNorm&&n.includes(labelNorm))return true;
-    const tokens=labelNorm.split(" ").filter(word=>word.length>3);
-    // Require at least two distinctive tokens so "empty" alone is not enough.
-    const hits=tokens.filter(token=>n.includes(token));
-    if(hits.length>=Math.min(2,tokens.length))return true;
-    return(plainCues[label]||[]).some(cue=>n.includes(norm(cue)));
-  });
-}
 function finalizeObservation(aiText,row,errors,q){
+  // Prefer model prose: only empty or clear comment-echo → local fallback.
   const clipped=clipWords(aiText,28);
   if(!clipped||isCommentEcho(clipped,row.comments))return fallbackObservation(row,errors,q);
-  if(errors.length&&!observationReferencesErrors(clipped,errors))return fallbackObservation(row,errors,q);
   return clipped;
 }
 function finalizeRecommendation(aiText,row,errors,q){
+  // Prefer model prose: empty, comment-echo, tiny, or single vague phrase → fallback.
   const clipped=clipWords(aiText,40);
   const words=clipped.split(/\s+/).filter(Boolean);
   const vague=/^(follow\s*up|call\s*again|update\s*(comments?|remarks?)|try\s*later|connect\s*again)\.?$/i.test(clipped);
@@ -1339,7 +1323,7 @@ async function requestAudit(apiKey,settings,leads,signal,log,onUsage){
       prompt_cache_key:promptCacheKey(settings),
       messages:[
         {role:"system",content:buildPrompt(settings)},
-        {role:"user",content:`Audit ${leads.length} call(s). Echo each id. c=full history; reg+fu=fresh-call TAT; o=explain Error Types via comments+Connected; r=coaching from comments+Connected+errors.\n${JSON.stringify({L:modelInput})}`}
+        {role:"user",content:`Audit ${leads.length} call(s). Echo each id. c=full history; reg+fu=fresh-call TAT. o (18-28 words): layman supervisor note explaining every e label via comments+Connected — no Connected=Yes dumps, no comment paraphrase. r (20-40 words): concrete next-step coaching from comment history+Connected+e — not vague follow-up / remark rewrites.\n${JSON.stringify({L:modelInput})}`}
       ],
       response_format:{type:"json_schema",json_schema:{name:"ll_audit",strict:true,schema:responseSchema}}
     });
