@@ -1,0 +1,13 @@
+# Deny direct access to PHP libraries and local config
+<IfModule mod_authz_core.c>
+  <FilesMatch "^(config\.local\.php)$">
+    Require all denied
+  </FilesMatch>
+</IfModule>
+
+# Front controller for pretty /api/... paths when rewrite hits this folder
+<IfModule mod_rewrite.c>
+  RewriteEngine On
+  RewriteCond %{REQUEST_FILENAME} !-f
+  RewriteRule ^(.*)$ index.php?r=$1 [QSA,L]
+</IfModule>

@@ -1,5 +1,5 @@
 {
-  "version": "3.6.4",
+  "version": "5.0.0",
   "name": "LeadLens",
-  "notes": "Tighter Lead Status vs Comments alignment; fewer false positives on mixed/RNR histories."
+  "notes": "Multi-page auth, Admin users/roles, published TeleCaller dashboards."
 }

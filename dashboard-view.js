@@ -2,7 +2,7 @@
  * In-app TeleCaller Review dashboard (KPIs, scorecard, Chart.js charts, error table).
  */
 
-import {buildDashboardModel} from "./dashboard-metrics.js?v=3.6.4";
+import {buildDashboardModel} from "./dashboard-metrics.js?v=5.0.0";
 
 const CHART_COLORS = {
   green2: "#1f5d45",
@@ -49,70 +49,88 @@ function flattenJobResults(jobs){
   return (jobs || []).flatMap(job => job?.results || []);
 }
 
+function readMulti(form, name){
+  return [...form.querySelectorAll(`select[name="${name}"] option:checked`)].map(o => o.value).filter(Boolean);
+}
+
 function readFilters(form){
   if(!form) return {};
   const data = new FormData(form);
   return {
-    telecaller: String(data.get("telecaller") || "All"),
-    project: String(data.get("project") || "All"),
+    telecallers: readMulti(form, "telecallers"),
+    projects: readMulti(form, "projects"),
     dateFrom: String(data.get("dateFrom") || ""),
     dateTo: String(data.get("dateTo") || ""),
-    severity: String(data.get("severity") || "All"),
-    errorType: String(data.get("errorType") || "All")
+    severities: readMulti(form, "severities"),
+    errorTypes: readMulti(form, "errorTypes")
   };
 }
 
-function fillSelect(select, values, current){
+function fillMultiSelect(select, values, selected){
   select.replaceChildren();
-  const all = document.createElement("option");
-  all.value = "All";
-  all.textContent = "All";
-  select.append(all);
+  select.multiple = true;
+  const selectedSet = new Set(selected || []);
   for(const value of values){
     const opt = document.createElement("option");
     opt.value = value;
     opt.textContent = value;
+    if(selectedSet.has(value)) opt.selected = true;
     select.append(opt);
   }
-  select.value = current && [...select.options].some(o => o.value === current) ? current : "All";
 }
 
 function buildFilters(filterOptions, filters){
+  const aside = el("aside", "dashboard-filters-rail");
+  const toggle = el("button", "filters-tab-toggle", "Filters");
+  toggle.type = "button";
+  toggle.setAttribute("aria-expanded", "true");
+
+  const panel = el("div", "dashboard-filters-panel");
   const form = el("form", "dashboard-filters");
+  form.append(el("h3", null, "Filters"));
+
   const fields = [
-    ["telecaller", "TeleCaller", "select"],
-    ["project", "Project", "select"],
-    ["dateFrom", "Reg. from", "date"],
-    ["dateTo", "Reg. to", "date"],
-    ["severity", "Severity", "select"],
-    ["errorType", "Error Type", "select"]
+    ["telecallers", "TeleCaller", filterOptions.telecallers, filters.telecallers],
+    ["projects", "Project", filterOptions.projects, filters.projects],
+    ["severities", "Severity", filterOptions.severities, filters.severities],
+    ["errorTypes", "Error Type", filterOptions.errorTypes, filters.errorTypes]
   ];
 
-  for(const [name, label, type] of fields){
+  for(const [name, label, options, selected] of fields){
+    const wrap = el("label", "dashboard-filter");
+    wrap.append(el("span", null, label + " (multi)"));
+    const select = document.createElement("select");
+    select.name = name;
+    select.size = Math.min(6, Math.max(3, (options || []).length || 3));
+    fillMultiSelect(select, options || [], selected || []);
+    wrap.append(select);
+    form.append(wrap);
+  }
+
+  for(const [name, label] of [["dateFrom", "Reg. from"], ["dateTo", "Reg. to"]]){
     const wrap = el("label", "dashboard-filter");
     wrap.append(el("span", null, label));
-    if(type === "select"){
-      const select = document.createElement("select");
-      select.name = name;
-      if(name === "telecaller") fillSelect(select, filterOptions.telecallers, filters.telecaller);
-      else if(name === "project") fillSelect(select, filterOptions.projects, filters.project);
-      else if(name === "severity") fillSelect(select, filterOptions.severities, filters.severity);
-      else if(name === "errorType") fillSelect(select, filterOptions.errorTypes, filters.errorType);
-      wrap.append(select);
-    }else{
-      const input = document.createElement("input");
-      input.type = "date";
-      input.name = name;
-      input.value = filters[name] || "";
-      wrap.append(input);
-    }
+    const input = document.createElement("input");
+    input.type = "date";
+    input.name = name;
+    input.value = filters[name] || "";
+    wrap.append(input);
     form.append(wrap);
   }
 
   const reset = el("button", "secondary-button dashboard-filter-reset", "Reset filters");
   reset.type = "button";
   form.append(reset);
-  return {form, reset};
+  panel.append(form);
+  aside.append(toggle, panel);
+
+  toggle.addEventListener("click", () => {
+    const open = !aside.classList.contains("is-collapsed");
+    aside.classList.toggle("is-collapsed", open);
+    toggle.setAttribute("aria-expanded", open ? "false" : "true");
+  });
+
+  return {aside, form, reset};
 }
 
 function renderKpis(kpis){
@@ -315,7 +333,7 @@ export function renderReviewDashboard(container, jobs, options = {}){
 
   destroyCharts();
   container.replaceChildren();
-  container.classList.add("dashboard-root");
+  container.classList.add("dashboard-root", "dashboard-with-filters");
 
   if(!results.length){
     container.append(el("div", "dashboard-empty-state", "No audited rows available for the dashboard."));
@@ -323,26 +341,27 @@ export function renderReviewDashboard(container, jobs, options = {}){
   }
 
   let filters = {
-    telecaller: "All",
-    project: "All",
+    telecallers: [],
+    projects: [],
     dateFrom: "",
     dateTo: "",
-    severity: "All",
-    errorType: "All"
+    severities: [],
+    errorTypes: []
   };
 
   const paint = () => {
     destroyCharts();
     container.replaceChildren();
-    container.classList.add("dashboard-root");
+    container.classList.add("dashboard-root", "dashboard-with-filters");
 
     const model = buildDashboardModel(results, filters, {highSeverityErrors});
-    const {form, reset} = buildFilters(model.filterOptions, filters);
-    container.append(form);
-    container.append(section("Executive KPIs", null, renderKpis(model.kpis)));
-    container.append(section("TeleCaller Performance", null, renderScorecard(model.scorecard)));
-    container.append(section("Charts", null, renderCharts(model.charts)));
-    container.append(section("Detailed Error Report", `${num(model.errorDetails.length)} error row(s)`, renderErrorDetails(model.errorDetails)));
+    const {aside, form, reset} = buildFilters(model.filterOptions, filters);
+    const body = el("div", "dashboard-body");
+    body.append(section("Executive KPIs", null, renderKpis(model.kpis)));
+    body.append(section("TeleCaller Performance", null, renderScorecard(model.scorecard)));
+    body.append(section("Charts", null, renderCharts(model.charts)));
+    body.append(section("Detailed Error Report", `${num(model.errorDetails.length)} error row(s)`, renderErrorDetails(model.errorDetails)));
+    container.append(body, aside);
 
     const apply = () => {
       filters = readFilters(form);
@@ -351,12 +370,12 @@ export function renderReviewDashboard(container, jobs, options = {}){
     form.addEventListener("change", apply);
     reset.addEventListener("click", () => {
       filters = {
-        telecaller: "All",
-        project: "All",
+        telecallers: [],
+        projects: [],
         dateFrom: "",
         dateTo: "",
-        severity: "All",
-        errorType: "All"
+        severities: [],
+        errorTypes: []
       };
       paint();
     });
