@@ -1,5 +1,5 @@
 {
-  "version": "3.6.3",
+  "version": "3.6.4",
   "name": "LeadLens",
-  "notes": "Stronger AI Observation/Recommendation prompts; keep model prose (no error-cue fallback gate)."
+  "notes": "Tighter Lead Status vs Comments alignment; fewer false positives on mixed/RNR histories."
 }

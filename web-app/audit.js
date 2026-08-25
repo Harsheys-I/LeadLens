@@ -1,8 +1,8 @@
-import {buildTelecallerDashboardBlob} from "./dashboard-export.js?v=3.6.3";
+import {buildTelecallerDashboardBlob} from "./dashboard-export.js?v=3.6.4";
 
-export const APP_VERSION = "3.6.3";
+export const APP_VERSION = "3.6.4";
 /** Bump when default AI rules / field defaults must refresh existing localStorage settings. */
-export const SETTINGS_SEED = 15;
+export const SETTINGS_SEED = 16;
 
 /** Settings limits — batch size is leads per request; concurrency is parallel requests. */
 export const MAX_BATCH_SIZE = 20;
@@ -112,7 +112,7 @@ export const DEFAULT_OUTPUT_FIELDS = [
   {id:"buyingIntent",label:"Buying Intent",enabled:true},{id:"observation",label:"AI Observation",enabled:true},{id:"recommendation",label:"AI Recommendation",enabled:true}
 ];
 export const DEFAULT_RULES = [
-  {field:"Lead Status + Comments",instruction:`Allowed Lead Status labels only (case-insensitive): Prospect, Hot, Warm, Cold, Beyond Budget, Lost. Heat ladder highest→lowest: ${STATUS_LADDER_TEXT}. c is ALWAYS the FULL chronological comment history (oldest→newest). HARD RULE — all-RNR / not connected: if EVERY non-empty comment in c is RNR-like (RNR, CNP, busy, ringing, WhatsApp follow-up/WA FU, no answer, switched off) AND k=No, then s MUST be lesser than Warm (only Cold, Beyond Budget, or Lost). If s is Warm, Hot, or Prospect in that case → emit "${STATUS_HISTORY_ERROR}". Trajectory: if early comments were highly positive but later entries cool to RNR/neutral/negative, s must step down; more than 2 continuous trailing RNR-like notes ⇒ s cannot be Prospect — emit "${STATUS_HISTORY_ERROR}". Opposite warm-up with cold status ⇒ same error. Do not emit any other status/comment polarity labels.`,errors:STATUS_HISTORY_ERROR},
+  {field:"Lead Status + Comments",instruction:`Allowed Lead Status labels only (case-insensitive): Prospect, Hot, Warm, Cold, Beyond Budget, Lost. Heat ladder highest→lowest: ${STATUS_LADDER_TEXT}. c is ALWAYS the FULL chronological comment history (oldest→newest). Emit "${STATUS_HISTORY_ERROR}" ONLY for a clear mismatch — prefer e:[] when status reasonably fits the timeline. HARD RULE — all-RNR / not connected: if EVERY non-empty comment in c is RNR-like (RNR, CNP, busy, ringing, WhatsApp follow-up/WA FU, no answer, switched off) AND k=No, then s MUST be lesser than Warm (only Cold, Beyond Budget, or Lost). Warm/Hot/Prospect in that case → emit. Prospect ban: more than 2 continuous trailing RNR-like notes ⇒ s cannot be Prospect → emit. Warm-up mismatch: latest comment shows clear purchase interest but s is Cold/Beyond Budget/Lost → emit. DO NOT emit when: mixed history still supports Hot/Warm (prior interest + short RNR/callback gaps); status already stepped down from Prospect into Hot/Warm; thin admin notes without a hard rule hit; uncertain polarity. Do not emit any other status/comment polarity labels.`,errors:STATUS_HISTORY_ERROR},
   {field:"First talk SLA",instruction:`Inputs reg = Lead Registration DateTime, fu = FIRST Lead Update DateTime after near-duplicate filtering (oldest call, NOT the latest). Only when reg has a clock time AND falls between 09:30 and 17:00 inclusive: fu must be within 30 minutes after reg. If fu is missing, earlier than reg, or more than 30 minutes later → emit "${MISSED_30MIN_ERROR}". If reg is outside 09:30–17:00, or reg is date-only (no usable time), do nothing for this check.`,errors:MISSED_30MIN_ERROR},
   {field:"Follow-up Missed",instruction:`If n (this call's Next Followup) is a past calendar date before today → emit "${FOLLOWUP_MISSED_ERROR}". Do not emit any other follow-up timing errors.`,errors:FOLLOWUP_MISSED_ERROR},
   {field:"Comment quality",instruction:"Score q strictly. q must reflect how well Comments capture the real telecaller–customer conversation (need, budget, location preference, objection, decision-maker, next step). One-word/CRM crumbs like visited/RNR/CNP/busy/followup = q 0-2 max. Generic connected notes without customer detail = q <=4. Only rich descriptive talk earns 8-10. When c is an array, score THIS call's latest comment (last entry), using earlier entries only as context.",errors:""},
@@ -157,7 +157,7 @@ export function buildChatCompletionBody(model,{temperature,maxTokens,messages,..
 
 /* Large stable prefix FIRST so OpenAI prompt caching can activate (>=1024 tokens;
    some models need closer to 2048). Run-specific rules come after; lead data last. */
-const CACHE_HANDBOOK = `LeadLens QA v3.6.3 — stable cacheable auditor handbook. Evidence only. Never invent facts, dates, budgets, locations, or prior calls.
+const CACHE_HANDBOOK = `LeadLens QA v3.6.4 — stable cacheable auditor handbook. Evidence only. Never invent facts, dates, budgets, locations, or prior calls.
 
 PURPOSE
 You audit Indian real-estate telecalling follow-up notes. Judge only the supplied fields for THIS call id. Optional day[] lists sibling calls on the same latest calendar day — context only; still return one result for THIS id.
@@ -194,7 +194,7 @@ ERROR TYPES (emit exact labels only — no codes, no paraphrases, no other label
 - Customer Requirement Empty
 - Analysis Parameter Empty
 - Incorrect Customer Requirement
-Do NOT emit "Customer Location Empty" — the app decides that locally. Prefer e:[] over weak guesses. The app may also add some empty-field / SLA / history errors deterministically. NEVER invent labels outside this list.
+Do NOT emit "Customer Location Empty" — the app decides that locally. Prefer e:[] over weak guesses — especially for "Lead Status Not Aligned With Comments". The app may also add some empty-field / SLA / history errors deterministically. NEVER invent labels outside this list.
 
 COMMENT QUALITY q — STRICT
 Comments must reflect the actual telecaller–customer talk (need, budget, locality preference, objection, decision-maker, next step).
@@ -219,11 +219,18 @@ STATUS vs FULL COMMENT HISTORY
 Allowed Lead Status labels (case-insensitive): Prospect, Hot, Warm, Cold, Beyond Budget, Lost.
 Heat ladder highest→lowest: Prospect > Hot > Warm > Cold > Beyond Budget > Lost.
 c is the full chronological timeline — read ALL entries, then judge CURRENT s.
-HARD RULE — all RNR + not connected: if every non-empty comment in c is RNR-like (RNR, CNP, busy, ringing, no answer, switched off, WhatsApp follow-up / WA FU) AND k=No, then s MUST be lesser than Warm (Cold, Beyond Budget, or Lost only). Warm/Hot/Prospect in that case → emit "Lead Status Not Aligned With Comments".
-If early comments were hot/positive but later notes cool to RNR/neutral/negative, s must decrease. More than 2 continuous trailing RNR-like notes ⇒ s cannot be Prospect — emit "Lead Status Not Aligned With Comments".
-Opposite: history warms from cold/RNR to clear positive interest but s stays Cold/Beyond Budget/Lost ⇒ emit "Lead Status Not Aligned With Comments".
+Emit "Lead Status Not Aligned With Comments" ONLY on clear mismatch. Prefer e:[] for this label when unsure or when s reasonably matches the timeline. Weak polarity guesses are forbidden.
+EMIT when any of these hold:
+1) HARD RULE — all RNR + not connected: every non-empty comment in c is RNR-like (RNR, CNP, busy, ringing, no answer, switched off, WhatsApp follow-up / WA FU) AND k=No AND s is Warm/Hot/Prospect.
+2) Prospect ban: more than 2 continuous trailing RNR-like notes AND s=Prospect.
+3) Warm-up mismatch: latest comment shows clear purchase interest (site visit / config+budget ask / active shortlist) AND s is Cold/Beyond Budget/Lost.
+DO NOT emit when:
+- Mixed history has real prior interest and s is Hot or Warm (short RNR/callback/WA gaps are normal; Hot/Warm is an allowed step-down from Prospect).
+- Status heat already matches comment trajectory (e.g. cooled from hot talk into Warm; or stayed Hot after one/two unreachable attempts).
+- Partial/thin notes without hitting a hard rule above.
+- Ambiguous tone — leave e without this label.
 Do not emit any other status/comment polarity labels.
-RNR/CNP/busy alone does not justify keeping/upgrading to Prospect/Hot/Warm when the whole history is RNR and k=No.
+RNR/CNP/busy alone does not justify Warm/Hot/Prospect when the WHOLE history is RNR-like and k=No.
 
 FIRST TALK SLA (reg + fu)
 reg = registration datetime; fu = FIRST update datetime (oldest after near-dupe filter), never the latest call.
@@ -260,6 +267,8 @@ E) day[] siblings present: score/flag THIS call only; siblings are context.
 F) s=Hot, c=wants 2BHK under 90L Saturday visit => high q, i=1, e:[].
 G) k=No, c all RNR-like, s=Warm => "Lead Status Not Aligned With Comments", i=0.
 H) c history [hot interest, RNR, RNR, WA followup] and s=Prospect => "Lead Status Not Aligned With Comments".
+H2) c history [interested 2BHK, RNR, RNR] and s=Hot or Warm => e:[] for status (step-down / temporary unreachable is aligned).
+H3) c latest="wants Saturday site visit for 2BHK" and s=Cold => "Lead Status Not Aligned With Comments".
 I) reg=12/03/2026 10:00, fu=12/03/2026 11:00 => "Fresh Call TAT Missed". reg=12/03/2026 18:00 => skip SLA.
 J) n is yesterday's date => "Follow-up Missed".
 
@@ -270,7 +279,7 @@ EDGE CASES
 - Insufficient data => short o + r asking what to capture next.
 - Illegal or harassing calling advice is forbidden in r.
 - Budget ranges stay as written; do not normalize currency.
-- CRM labels Hot/Warm/Cold/NI/CNP/Busy need comment polarity, not label alone.
+- CRM labels Hot/Warm/Cold/NI/CNP/Busy need comment evidence, not the label alone; do not invent status errors from labels without a hard rule hit.
 - "Just enquiry/browsing" with no next step is usually i=0.
 - Callback-after-salary with active locality search can support i=1.
 - For Comments history arrays, status must weigh the full timeline then the latest tone; q and i still focus on THIS call's latest comment unless a run check says otherwise.
@@ -763,10 +772,15 @@ function isRnrLikeComment(value){
 function isStrongPositiveComment(value){
   const n=norm(value);
   if(!n||isRnrLikeComment(n))return false;
-  if(/\b(not interested|\bni\b|don't|dont|do not|no need|stop calling)\b/.test(n))return false;
+  // Negation / drop-off — not purchase interest (avoid "doesn't want", "beyond budget" FPs).
+  if(/\b(not interested|\bni\b|don't|dont|doesn'?t|do not|no need|stop calling|beyond budget|too (high|expensive)|not looking|plan dropped)\b/.test(n))return false;
   // Bare CRM crumbs (visited/SV alone) are not positive interest — quality caps already treat them as q<=2.
   if(/^(visited|visit|sv|sv done|site visit|site visited)$/.test(n))return false;
-  return/\b(interested|site visit|sv done|want(s|ed)?|looking for|budget|2bhk|3bhk|call me|send(ing)? details|shortlist|book(ing)?|come(s)? for visit)\b/.test(n)
+  // Clear interest only — never bare "want"/"budget" alone (those fire on negative notes).
+  return/\b(interested|site visit|sv done|looking for|call me|send(ing)? details|shortlist|come(s)? for visit)\b/.test(n)
+    ||/\bbook(ing|ed)?\b/.test(n)
+    ||/\bwants?\s+(to\s+)?(visit|see|buy|book|come)\b/.test(n)
+    ||(/\b(2bhk|3bhk)\b/.test(n)&&/\b(interested|looking|need|visit|want)\b/.test(n))
     ||(/\bvisit(ed)?\b/.test(n)&&n.split(/\s+/).length>=3);
 }
 function trailingRnrStreak(comments){
@@ -791,14 +805,10 @@ function historyStatusErrors(status,comments,connected=""){
   if(allCommentsRnrLike(list)&&norm(connected)==="no"&&warmOrHigher.includes(statusNorm)){
     errors.push(STATUS_HISTORY_ERROR);
   }
+  // Prospect only: >2 continuous trailing RNR-like notes (Hot/Warm after short RNR gaps stays aligned).
   const streak=trailingRnrStreak(list);
   if(streak>2&&statusNorm==="prospect"&&!errors.includes(STATUS_HISTORY_ERROR))errors.push(STATUS_HISTORY_ERROR);
-  if(["prospect","hot"].includes(statusNorm)&&streak>=2){
-    const earlier=list.slice(0,-streak);
-    if(earlier.some(item=>isStrongPositiveComment(item)||/\b(interested|hot|prospect|site visit|want)\b/.test(norm(item)))){
-      if(!errors.includes(STATUS_HISTORY_ERROR))errors.push(STATUS_HISTORY_ERROR);
-    }
-  }
+  // Latest comment clearly positive but status still cold-side.
   const last=list[list.length-1];
   if(isStrongPositiveComment(last)&&["cold","beyond budget","lost"].includes(statusNorm)){
     if(!errors.includes(STATUS_HISTORY_ERROR))errors.push(STATUS_HISTORY_ERROR);
