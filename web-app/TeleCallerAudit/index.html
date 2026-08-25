@@ -1,0 +1,227 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#12372a">
+  <meta name="description" content="LeadLens TeleCaller Audit">
+  <title>LeadLens · TeleCaller Audit</title>
+  <link rel="manifest" href="../manifest.webmanifest">
+  <link rel="stylesheet" href="../styles.css?v=5.0.0">
+  <script defer src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  <script type="module" src="../app.js?v=5.0.0"></script>
+</head>
+<body>
+  <div id="update-banner" class="update-banner hidden" role="status">
+    <div id="update-banner-text"></div>
+    <button id="reload-app" type="button" class="primary-button">Hard reload now</button>
+  </div>
+  <div class="shell">
+    <aside class="sidebar">
+      <a class="brand" href="/"><span class="brand-mark">L</span><span>LeadLens</span></a>
+      <nav aria-label="TeleCaller Audit navigation">
+        <button class="nav-item active" data-view="review" data-perm="telecaller.bucket1"><span>◎</span>Bucket 1 lead audit</button>
+        <button class="nav-item" data-view="console" data-perm="telecaller.run_console"><span>⌁</span>Run console</button>
+        <button class="nav-item" data-view="published" data-perm="telecaller.dashboard"><span>▦</span>Dashboard</button>
+        <button class="nav-item" data-view="history" data-perm="telecaller.history"><span>◷</span>History</button>
+        <button class="nav-item" data-view="settings" data-perm="telecaller.settings"><span>⚙</span>Settings</button>
+      </nav>
+      <div class="sidebar-user">
+        <span id="shell-user-label"></span>
+        <a class="text-button sidebar-link" href="/">Home</a>
+        <button type="button" id="shell-logout" class="text-button">Sign out</button>
+      </div>
+      <div class="privacy-note"><strong id="sidebar-version">v5.0.0</strong><span id="sidebar-notes">Multi-page auth · published TeleCaller dashboards.</span></div>
+    </aside>
+
+    <main>
+      <header class="topbar">
+        <button id="mobile-menu" class="icon-button" aria-label="Toggle navigation">☰</button>
+        <div><p class="eyebrow">TELECALLER AUDIT</p><h1 id="page-title">Bucket 1 lead audit</h1></div>
+        <div id="key-state" class="key-state">API key not set</div>
+      </header>
+
+      <section id="view-review" class="view active">
+        <div class="intro"><h2>Bucket 1 lead audit</h2><p><strong>Excel RAW</strong> detects TeleCallers, audits the whole file, then lets you save Excel or create a dashboard. <strong>Excel Audit</strong> skips AI — upload an already-audited workbook and review.</p></div>
+        <div class="format-toggle" role="group" aria-label="Upload format">
+          <button type="button" class="format-option active" data-review-format="raw">Excel RAW</button>
+          <button type="button" class="format-option" data-review-format="audit">Excel Audit</button>
+        </div>
+        <div id="review-drop-zone" class="drop-zone" role="button" tabindex="0" aria-label="Upload Excel for Bucket 1 audit">
+          <input id="review-file-input" type="file" accept=".xlsx,.xls,.xlsm" hidden>
+          <div class="upload-icon">⇧</div><h3>Drop Excel here</h3><p id="review-drop-hint">CRM / RAW export · auto-detect TeleCallers · audit then Save / Create Dashboard · XLSX, XLS or XLSM</p>
+        </div>
+        <div id="review-file-list" class="file-list hidden"></div>
+        <div id="review-validation" class="validation hidden" role="status"></div>
+        <div id="review-precounts" class="review-precounts hidden" aria-live="polite"></div>
+        <div class="action-row"><button id="start-review" class="primary-button" disabled>Start Audit <span>→</span></button></div>
+
+        <div id="review-run-panel" class="review-run-panel hidden">
+          <div class="section-head">
+            <div><h2>Live audit</h2><p>Progress stays here — open Run console only if you need full logs.</p></div>
+            <button id="review-open-console" type="button" class="text-button">Open Run console</button>
+          </div>
+          <div id="review-live-progress" class="review-live-progress hidden">
+            <div class="progress-copy"><strong id="review-progress-label">Waiting</strong><span id="review-progress-percent">0%</span></div>
+            <div class="progress-track"><div id="review-progress-bar" class="progress-bar"></div></div>
+          </div>
+          <div id="review-aggregate" class="review-aggregate hidden"></div>
+          <div id="review-cards" class="review-cards"></div>
+          <div id="review-post-actions" class="review-post-actions hidden">
+            <button id="download-review-excel" type="button" class="secondary-button" disabled>Save Audit Excel</button>
+            <button id="create-review-dashboard" type="button" class="primary-button" disabled>Create Dashboard</button>
+          </div>
+          <div id="review-dashboard-panel" class="review-dashboard-panel hidden">
+            <div class="card-title"><h2>Dashboard</h2><p>KPIs, TeleCaller scorecard, charts, and error details. Use the Filters tab on the right.</p></div>
+            <div id="review-dashboard-mount"></div>
+            <div class="inline-actions review-download-actions dashboard-footer-actions">
+              <button id="upload-dashboard-btn" type="button" class="primary-button" disabled>Upload Dashboard</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="view-console" class="view">
+        <div class="run-head"><div><p class="eyebrow">CURRENT RUN</p><h2 id="run-name">No active audit</h2></div><div class="run-actions"><button id="pause-run" class="secondary-button" disabled>Pause</button><button id="download-result" class="primary-button" disabled>Download Excel</button></div></div>
+        <div id="active-job-switch" class="job-switch hidden" aria-live="polite"></div>
+        <div class="progress-panel">
+          <div class="progress-copy"><strong id="progress-label">Waiting for a file</strong><span id="progress-percent">0%</span></div>
+          <div class="progress-track"><div id="progress-bar" class="progress-bar"></div></div>
+          <div class="metrics"><div><span>Leads</span><strong id="metric-leads">—</strong></div><div><span>Calls</span><strong id="metric-calls">—</strong></div><div><span>Audited</span><strong id="metric-completed">—</strong></div><div><span>Batch</span><strong id="metric-batch">—</strong></div><div><span>Status</span><strong id="metric-status">Idle</strong></div><div><span>Input tokens</span><strong id="metric-input-tokens">—</strong></div><div><span>Cached input</span><strong id="metric-cached-tokens">—</strong></div><div><span>Output tokens</span><strong id="metric-output-tokens">—</strong></div><div><span>Run time</span><strong id="metric-duration">—</strong></div><div><span>Run cost</span><strong id="metric-cost">—</strong></div></div>
+        </div>
+        <div class="console-panel"><div class="panel-head"><div><span class="live-dot"></span><strong>Live log</strong></div><button id="clear-console" class="text-button">Clear view</button></div><div id="live-log" class="log-list"><div class="empty-state">Run activity will appear here.</div></div></div>
+      </section>
+
+      <section id="view-published" class="view">
+        <div class="section-head">
+          <div><h2>Published dashboards</h2><p>Server-stored dashboards scoped to your TeleCaller (or all, if permitted).</p></div>
+          <button id="refresh-published" type="button" class="secondary-button">Refresh</button>
+        </div>
+        <div id="published-list" class="published-list"><div class="empty-card">Loading…</div></div>
+        <div id="published-dashboard-panel" class="review-dashboard-panel hidden">
+          <div class="card-title"><h2 id="published-dash-title">Dashboard</h2><p id="published-dash-meta"></p></div>
+          <div id="published-dashboard-mount"></div>
+        </div>
+      </section>
+
+      <section id="view-history" class="view">
+        <div class="section-head"><div><h2>Audit history</h2><p>Private to this browser profile.</p></div><button id="clear-history" class="danger-button">Clear history</button></div>
+        <div id="history-list" class="history-list"><div class="empty-card">No audits yet.</div></div>
+      </section>
+
+      <section id="view-settings" class="view">
+        <div class="settings-page">
+          <div class="settings-toolbar" role="toolbar" aria-label="Settings actions">
+            <div class="settings-toolbar-copy">
+              <strong>Settings</strong>
+              <span>Changes apply to new audits after you save. Sort applies on the next Excel download.</span>
+            </div>
+            <div class="inline-actions settings-toolbar-actions">
+              <button id="save-settings" type="button" class="primary-button">Save settings</button>
+              <button id="reset-settings" type="button" class="text-button">Restore defaults</button>
+              <span id="settings-message" class="form-message"></span>
+            </div>
+          </div>
+
+          <div class="settings-sections">
+            <form id="settings-form" class="settings-card">
+              <div class="card-title"><h2>1 · OpenAI connection</h2><p>Your key stays in this browser and is sent only to OpenAI during an audit.</p></div>
+              <label>API key<div class="input-row"><input id="api-key" type="password" autocomplete="off" placeholder="sk-…"><button id="toggle-key" type="button" class="secondary-button">Show</button></div></label>
+              <label class="check-row"><input id="remember-key" type="checkbox"><span>Remember on this device <small>Uses this browser's local storage.</small></span></label>
+              <div class="inline-actions"><button id="save-key" type="button" class="primary-button">Save key</button><button id="forget-key" type="button" class="text-button">Forget key</button><span id="key-message" class="form-message"></span></div>
+            </form>
+
+            <section class="settings-card">
+              <div class="card-title"><h2>2 · Run &amp; cost</h2><p>Applied to new audits. <strong>Batch size</strong> is leads per API request (max 20). <strong>Parallel batches</strong> max 50.</p></div>
+              <div class="field-grid run-grid">
+                <label>Batch size (leads)<input id="batch-size" type="number" min="1" max="20" value="20"></label>
+                <label>Parallel batches<input id="concurrency" type="number" min="1" max="50" value="2"></label>
+                <label>Audit model<input id="model" type="text" value="gpt-4o-mini"></label>
+              </div>
+              <div class="field-grid pricing-grid settings-subgrid">
+                <label>Audit input ₹ / 1M<input id="input-price" type="number" min="0" step="0.000001"></label>
+                <label>Audit cached ₹ / 1M<input id="cached-price" type="number" min="0" step="0.000001"></label>
+                <label>Audit output ₹ / 1M<input id="output-price" type="number" min="0" step="0.000001"></label>
+              </div>
+            </section>
+
+            <section class="settings-card">
+              <div class="card-title"><h2>3 · Input Excel fields</h2><p>Add, remove, or reorder columns. Mobile and Project are required.</p></div>
+              <div id="input-field-config" class="config-list"></div>
+              <button id="add-input-field" type="button" class="secondary-button">Add input field</button>
+            </section>
+
+            <section class="settings-card">
+              <div class="card-title"><h2>4 · Fields sent to AI</h2><p>Comments always send full chronological history.</p></div>
+              <div id="ai-field-config" class="config-list"></div>
+              <div class="field-grid settings-subgrid">
+                <label>Connected = Yes values<input id="yes-values" type="text"></label>
+                <label>Connected = No values<input id="no-values" type="text"></label>
+              </div>
+            </section>
+
+            <section class="settings-card">
+              <div class="card-title"><h2>5 · AI audit rules</h2><p>List allowed error types as full text, separated by <code>|</code>.</p></div>
+              <div id="rule-config" class="rule-list"></div>
+              <button id="add-rule" type="button" class="secondary-button">Add AI rule</button>
+              <label>Additional instructions<textarea id="additional-instructions" rows="4" placeholder="Optional extra instructions for the auditor"></textarea></label>
+            </section>
+
+            <section class="settings-card">
+              <div class="card-title"><h2>6 · Output Excel &amp; sort</h2><p>Choose columns to include. Sort By / Order are read live on every download.</p></div>
+              <div id="output-field-config" class="config-list output-list"></div>
+              <div class="field-grid sort-grid">
+                <label>Sort by<select id="sort-field"></select></label>
+                <label>Order<select id="sort-direction"><option value="asc">Ascending (A→Z, oldest first)</option><option value="desc">Descending (Z→A, newest first)</option></select></label>
+              </div>
+            </section>
+
+            <section class="settings-card">
+              <div class="card-title"><h2>7 · Backup &amp; version</h2><p>Export settings as JSON. API keys are never included.</p></div>
+              <div class="version-row"><span>App version</span><strong id="app-version">…</strong></div>
+              <div class="inline-actions settings-actions">
+                <button id="export-settings" type="button" class="secondary-button">Export settings JSON</button>
+                <button id="import-settings" type="button" class="secondary-button">Import settings JSON</button>
+                <input id="import-settings-file" type="file" accept="application/json,.json" hidden>
+              </div>
+            </section>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+  <div id="key-modal" class="key-modal hidden" role="dialog" aria-modal="true" aria-labelledby="key-modal-title">
+    <div class="key-modal-card">
+      <p class="eyebrow">GET STARTED</p>
+      <h2 id="key-modal-title">Connect your OpenAI API key</h2>
+      <p class="key-modal-copy">Your key is stored only on this device and sent only to OpenAI when you run an audit.</p>
+      <label>API key<div class="input-row"><input id="onboard-key" type="password" autocomplete="off" placeholder="sk-…"><button id="onboard-toggle" type="button" class="secondary-button">Show</button></div></label>
+      <label class="check-row"><input id="onboard-remember" type="checkbox"><span>Remember on this device</span></label>
+      <div id="onboard-message" class="form-message" role="status"></div>
+      <div class="inline-actions">
+        <button id="onboard-save" type="button" class="primary-button">Validate &amp; save</button>
+        <button id="onboard-skip" type="button" class="text-button">I'll add it later</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="upload-dashboard-modal" class="key-modal hidden" role="dialog" aria-modal="true" aria-labelledby="upload-dash-title">
+    <div class="key-modal-card upload-dash-card">
+      <p class="eyebrow">PUBLISH</p>
+      <h2 id="upload-dash-title">Upload Dashboard</h2>
+      <p class="key-modal-copy">Select TeleCallers from this run. Each selected TeleCaller gets a published dashboard on the server (visible only to that TeleCaller unless Admin/Super).</p>
+      <div id="upload-telecaller-list" class="upload-telecaller-list"></div>
+      <div id="upload-dash-message" class="form-message" role="status"></div>
+      <div class="inline-actions">
+        <button id="upload-dash-confirm" type="button" class="primary-button">Upload</button>
+        <button id="upload-dash-cancel" type="button" class="text-button">Cancel</button>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

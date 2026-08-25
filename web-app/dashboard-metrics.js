@@ -3,7 +3,7 @@
  * Reuses mapResultsToRawDataRows for severity / overdue / error labels.
  */
 
-import {mapResultsToRawDataRows} from "./dashboard-export.js?v=3.6.4";
+import {mapResultsToRawDataRows} from "./dashboard-export.js?v=5.0.0";
 
 const MONTHS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
 
@@ -47,25 +47,31 @@ function countMapInc(map, key, by = 1){
   map.set(key, (map.get(key) || 0) + by);
 }
 
+function normalizeFilterList(value){
+  if(Array.isArray(value)){
+    return value.map(v => String(v || "").trim()).filter(v => v && !/^all$/i.test(v));
+  }
+  const s = String(value || "").trim();
+  if(!s || /^all$/i.test(s)) return [];
+  return [s];
+}
+
 function applyFilters(rows, filters = {}){
-  const telecaller = String(filters.telecaller || "").trim();
-  const project = String(filters.project || "").trim();
-  const severity = String(filters.severity || "").trim();
-  const errorType = String(filters.errorType || "").trim();
+  const telecallers = normalizeFilterList(filters.telecallers ?? filters.telecaller);
+  const projects = normalizeFilterList(filters.projects ?? filters.project);
+  const severities = normalizeFilterList(filters.severities ?? filters.severity);
+  const errorTypes = normalizeFilterList(filters.errorTypes ?? filters.errorType);
   const dateFrom = parseFilterDate(filters.dateFrom);
   const dateTo = parseFilterDate(filters.dateTo);
-  const allTele = !telecaller || /^all$/i.test(telecaller);
-  const allProject = !project || /^all$/i.test(project);
-  const allSev = !severity || /^all$/i.test(severity);
-  const allErr = !errorType || /^all$/i.test(errorType);
 
   return rows.filter(row => {
-    if(!allTele && row.telecaller !== telecaller) return false;
-    if(!allProject && row.project !== project) return false;
-    if(!allSev && row.severity !== severity) return false;
-    if(!allErr){
+    if(telecallers.length && !telecallers.includes(row.telecaller)) return false;
+    if(projects.length && !projects.includes(row.project)) return false;
+    if(severities.length && !severities.includes(row.severity)) return false;
+    if(errorTypes.length){
       const labels = row.errorLabels || [];
-      if(!labels.includes(errorType) && row.errorType !== errorType) return false;
+      const hit = errorTypes.some(et => labels.includes(et) || row.errorType === et);
+      if(!hit) return false;
     }
     if(dateFrom || dateTo){
       if(!(row.registration instanceof Date) || Number.isNaN(row.registration.valueOf())) return false;
@@ -98,7 +104,7 @@ function commentQualityBucket(score){
 
 /**
  * @param {object[]} results LeadLens audit result rows
- * @param {{telecaller?:string,project?:string,dateFrom?:string|Date,dateTo?:string|Date,severity?:string,errorType?:string}} [filters]
+ * @param {{telecaller?:string|string[],telecallers?:string[],project?:string|string[],projects?:string[],dateFrom?:string|Date,dateTo?:string|Date,severity?:string|string[],severities?:string[],errorType?:string|string[],errorTypes?:string[]}} [filters]
  * @param {{highSeverityErrors?: Set<string>|string[]}} [options]
  */
 export function buildDashboardModel(results, filters = {}, options = {}){

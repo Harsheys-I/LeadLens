@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#12372a">
+  <title>LeadLens · Admin</title>
+  <link rel="stylesheet" href="../styles.css?v=5.0.0">
+  <script type="module" src="admin.js?v=5.0.0"></script>
+</head>
+<body>
+  <div class="shell">
+    <aside class="sidebar">
+      <a class="brand" href="/"><span class="brand-mark">L</span><span>LeadLens</span></a>
+      <nav aria-label="Admin navigation">
+        <button class="nav-item active" data-view="users" data-perm="admin.users"><span>◎</span>User creation</button>
+        <button class="nav-item" data-view="roles" data-perm="admin.roles"><span>⌁</span>Roles</button>
+      </nav>
+      <div class="sidebar-user">
+        <span id="shell-user-label"></span>
+        <button type="button" id="notif-bell" class="notif-bell" title="Notifications">🔔 <span id="notif-count" class="notif-count hidden">0</span></button>
+        <a class="text-button sidebar-link" href="/">Home</a>
+        <button type="button" id="shell-logout" class="text-button">Sign out</button>
+      </div>
+      <div class="privacy-note"><strong>Admin</strong><span>Users, roles, and access requests.</span></div>
+    </aside>
+
+    <main>
+      <header class="topbar">
+        <button id="mobile-menu" class="icon-button" aria-label="Toggle navigation">☰</button>
+        <div><p class="eyebrow">ADMIN</p><h1 id="page-title">User creation</h1></div>
+      </header>
+
+      <section id="view-users" class="view active">
+        <div class="section-head">
+          <div><h2>Users</h2><p>Create and edit accounts. Pending access requests appear below.</p></div>
+          <button id="btn-new-user" type="button" class="primary-button">New user</button>
+        </div>
+        <div id="access-queue" class="access-queue"></div>
+        <div id="users-table" class="admin-table-wrap"></div>
+      </section>
+
+      <section id="view-roles" class="view">
+        <div class="section-head">
+          <div><h2>Roles</h2><p>Permission matrix. Grant Run console and module access here.</p></div>
+          <button id="btn-new-role" type="button" class="primary-button">New role</button>
+        </div>
+        <div id="roles-panel" class="roles-panel"></div>
+      </section>
+    </main>
+  </div>
+
+  <div id="notif-drawer" class="notif-drawer hidden" aria-live="polite">
+    <div class="notif-drawer-head">
+      <strong>Notifications</strong>
+      <button type="button" id="notif-mark-all" class="text-button">Mark all read</button>
+      <button type="button" id="notif-close" class="text-button">Close</button>
+    </div>
+    <div id="notif-list" class="notif-list"></div>
+  </div>
+
+  <div id="user-modal" class="key-modal hidden" role="dialog" aria-modal="true">
+    <div class="key-modal-card admin-modal-card">
+      <h2 id="user-modal-title">New user</h2>
+      <form id="user-form" class="auth-form">
+        <input type="hidden" id="user-id">
+        <label>Username<input id="user-username" required></label>
+        <label>Display name<input id="user-display"></label>
+        <label>Password<input id="user-password" type="password" autocomplete="new-password"><small class="hint-copy">Leave blank when editing to keep current password.</small></label>
+        <label>Role<select id="user-role" required></select></label>
+        <label>Linked TeleCaller name<input id="user-telecaller" placeholder="Exact Excel TeleCaller Name"></label>
+        <label>Notes<textarea id="user-notes" rows="2"></textarea></label>
+        <label class="check-row"><input id="user-active" type="checkbox" checked><span>Active</span></label>
+        <label class="check-row"><input id="user-must-pw" type="checkbox"><span>Must change password on next login</span></label>
+        <div id="user-form-message" class="form-message"></div>
+        <div class="inline-actions">
+          <button type="submit" class="primary-button">Save</button>
+          <button type="button" id="user-cancel" class="text-button">Cancel</button>
+          <button type="button" id="user-delete" class="danger-button hidden">Delete</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div id="approve-modal" class="key-modal hidden" role="dialog" aria-modal="true">
+    <div class="key-modal-card admin-modal-card">
+      <h2>Approve access request</h2>
+      <p id="approve-summary" class="key-modal-copy"></p>
+      <form id="approve-form" class="auth-form">
+        <input type="hidden" id="approve-id">
+        <label>Username<input id="approve-username" required></label>
+        <label>Display name<input id="approve-display"></label>
+        <label>Password<input id="approve-password" type="password" required></label>
+        <label>Role<select id="approve-role" required></select></label>
+        <label>Linked TeleCaller name<input id="approve-telecaller"></label>
+        <label>Note<textarea id="approve-note" rows="2"></textarea></label>
+        <div id="approve-message" class="form-message"></div>
+        <div class="inline-actions">
+          <button type="submit" class="primary-button">Create user &amp; approve</button>
+          <button type="button" id="approve-cancel" class="text-button">Cancel</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div id="role-modal" class="key-modal hidden" role="dialog" aria-modal="true">
+    <div class="key-modal-card admin-modal-card role-modal-card">
+      <h2 id="role-modal-title">Edit role</h2>
+      <form id="role-form" class="auth-form">
+        <input type="hidden" id="role-id">
+        <label>Name<input id="role-name" required></label>
+        <label>Rank <small>(higher = more authority; Super = 100)</small><input id="role-rank" type="number" min="1" max="99" value="10"></label>
+        <div id="role-perms" class="role-perms"></div>
+        <div id="role-form-message" class="form-message"></div>
+        <div class="inline-actions">
+          <button type="submit" class="primary-button">Save role</button>
+          <button type="button" id="role-cancel" class="text-button">Cancel</button>
+          <button type="button" id="role-delete" class="danger-button hidden">Delete</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+</body>
+</html>

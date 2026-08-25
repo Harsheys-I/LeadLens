@@ -1,21 +1,2 @@
-# Python-generated files
-__pycache__/
-*.py[oc]
-build/
-dist/
-wheels/
-*.egg-info
-
-# Virtual environments
-.venv
-
-# Local data and credentials — never commit customer records or keys
-.env
-.env.*
-*.xlsx
-*.xls
-*.xlsm
-!web-app/templates/telecalling-lead-audit.xlsx
-Audit_Data*.csv
-Audit_Data*.json
-checkpoint.json
+# Never commit Hostinger credentials
+web-app/api/config.local.php

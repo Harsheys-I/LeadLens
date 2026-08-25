@@ -1,11 +1,16 @@
-import {APP_VERSION,DEFAULT_SETTINGS,DEFAULT_OUTPUT_FIELDS,SETTINGS_SEED,MAX_BATCH_SIZE,MAX_CONCURRENCY,normalizeSettings,normalizeInputFields,slugFieldId,parseWorkbook,parseAuditedWorkbook,auditBatch,downloadWorkbook,downloadReviewPack,splitLeadsByTelecaller,splitResultsByTelecaller,validateApiKey,HIGH_SEVERITY_ERRORS} from "./audit.js?v=3.6.4";
-import {putJob,getJob,getJobs,deleteJob,clearJobs,loadSettings,saveSettings,getApiKey,apiKeyIsRemembered,saveApiKey,forgetApiKey} from "./db.js?v=3.6.4";
-import {renderReviewDashboard,destroyReviewDashboard} from "./dashboard-view.js?v=3.6.4";
+import {APP_VERSION,DEFAULT_SETTINGS,DEFAULT_OUTPUT_FIELDS,SETTINGS_SEED,MAX_BATCH_SIZE,MAX_CONCURRENCY,normalizeSettings,normalizeInputFields,slugFieldId,parseWorkbook,parseAuditedWorkbook,auditBatch,downloadWorkbook,downloadReviewPack,splitLeadsByTelecaller,splitResultsByTelecaller,validateApiKey,HIGH_SEVERITY_ERRORS} from "./audit.js?v=5.0.0";
+import {putJob,getJob,getJobs,deleteJob,clearJobs,loadSettings,saveSettings,getApiKey,apiKeyIsRemembered,saveApiKey,forgetApiKey} from "./db.js?v=5.0.0";
+import {renderReviewDashboard,destroyReviewDashboard} from "./dashboard-view.js?v=5.0.0";
+import {requireAuth,logout,hasPermission,getUser} from "./auth.js?v=5.0.0";
+import {DashboardApi} from "./api-client.js?v=5.0.0";
 
 const $=id=>document.getElementById(id);
-const ids=["page-title","key-state","run-name","pause-run","download-result","progress-label","progress-percent","progress-bar","metric-leads","metric-excel-rows","metric-calls","metric-batch","metric-completed","metric-status","metric-input-tokens","metric-cached-tokens","metric-output-tokens","metric-duration","metric-cost","live-log","clear-console","history-list","clear-history","api-key","remember-key","toggle-key","save-key","forget-key","key-message","batch-size","concurrency","model","input-field-config","add-input-field","ai-field-config","rule-config","add-rule","output-field-config","yes-values","no-values","additional-instructions","input-price","cached-price","output-price","save-settings","reset-settings","settings-message","toast","mobile-menu","active-job-switch","sort-field","sort-direction","app-version","export-settings","import-settings","import-settings-file","update-banner","update-banner-text","reload-app","key-modal","onboard-key","onboard-toggle","onboard-remember","onboard-message","onboard-save","onboard-skip","sidebar-version","sidebar-notes","review-drop-zone","review-file-input","review-drop-hint","review-file-list","review-validation","start-review","review-run-panel","review-aggregate","review-cards","review-dashboard-panel","review-dashboard-mount","download-review-excel","review-open-console"];
+const ids=["page-title","key-state","run-name","pause-run","download-result","progress-label","progress-percent","progress-bar","metric-leads","metric-excel-rows","metric-calls","metric-batch","metric-completed","metric-status","metric-input-tokens","metric-cached-tokens","metric-output-tokens","metric-duration","metric-cost","live-log","clear-console","history-list","clear-history","api-key","remember-key","toggle-key","save-key","forget-key","key-message","batch-size","concurrency","model","input-field-config","add-input-field","ai-field-config","rule-config","add-rule","output-field-config","yes-values","no-values","additional-instructions","input-price","cached-price","output-price","save-settings","reset-settings","settings-message","toast","mobile-menu","active-job-switch","sort-field","sort-direction","app-version","export-settings","import-settings","import-settings-file","update-banner","update-banner-text","reload-app","key-modal","onboard-key","onboard-toggle","onboard-remember","onboard-message","onboard-save","onboard-skip","sidebar-version","sidebar-notes","review-drop-zone","review-file-input","review-drop-hint","review-file-list","review-validation","start-review","review-run-panel","review-aggregate","review-cards","review-dashboard-panel","review-dashboard-mount","download-review-excel","review-open-console","review-precounts","review-live-progress","review-progress-label","review-progress-percent","review-progress-bar","review-post-actions","create-review-dashboard","upload-dashboard-btn","upload-dashboard-modal","upload-telecaller-list","upload-dash-message","upload-dash-confirm","upload-dash-cancel","published-list","refresh-published","published-dashboard-panel","published-dash-title","published-dash-meta","published-dashboard-mount","shell-user-label","shell-logout"];
 const els=Object.fromEntries(ids.map(id=>[id,$(id)]));
-const titles={review:"TelleCaller Review",console:"Run console",history:"History",settings:"Settings"};
+const titles={review:"Bucket 1 lead audit",console:"Run console",published:"Dashboard",history:"History",settings:"Settings"};
+/** When false, completed audits do not auto-render charts until Create Dashboard. */
+let reviewDashboardRequested=false;
+let lastReadyReviewJobs=[];
 const ENGINE_VERSION="latest-day-v7";
 const ACTIVE_JOB_KEY="leadlens.activeJobId";
 const REVIEW_SESSION_KEY="leadlens.reviewSessionIds";
@@ -42,14 +47,20 @@ const loadReviewSessionIds=()=>{
 };
 
 function showView(name){
+  const btn=document.querySelector(`.nav-item[data-view="${name}"]`);
+  if(btn?.dataset.perm&&!hasPermission(btn.dataset.perm)){
+    toast("You do not have permission for this screen.");
+    return;
+  }
   document.querySelectorAll(".view").forEach(view=>view.classList.toggle("active",view.id===`view-${name}`));
   document.querySelectorAll(".nav-item").forEach(button=>button.classList.toggle("active",button.dataset.view===name));
-  els["page-title"].textContent=titles[name]||titles.review;
-  document.querySelector(".shell").classList.remove("menu-open");
+  if(els["page-title"])els["page-title"].textContent=titles[name]||titles.review;
+  document.querySelector(".shell")?.classList.remove("menu-open");
   if(name==="history")renderHistory();
   if(name==="settings")renderSettings();
   if(name==="console")refreshJobSwitcher();
   if(name==="review")renderReviewProgress();
+  if(name==="published")refreshPublishedDashboards();
 }
 function toast(message){els.toast.textContent=message;els.toast.classList.add("show");clearTimeout(toast.timer);toast.timer=setTimeout(()=>els.toast.classList.remove("show"),3200);}
 function updateKeyState(){const ready=Boolean(getApiKey());els["key-state"].textContent=ready?"API key ready":"API key not set";els["key-state"].classList.toggle("ready",ready);}
@@ -726,6 +737,7 @@ function renderReviewFileList(){
   if(!reviewParsedFiles.length){
     list.classList.add("hidden");
     if(els["start-review"]&&!reviewQueueRunning)els["start-review"].disabled=true;
+    renderReviewPrecounts();
     return;
   }
   list.classList.remove("hidden");
@@ -758,6 +770,24 @@ function renderReviewFileList(){
     list.append(card);
   }
   if(els["start-review"])els["start-review"].disabled=false;
+  renderReviewPrecounts();
+}
+
+function renderReviewPrecounts(){
+  const box=els["review-precounts"];
+  if(!box)return;
+  if(!reviewParsedFiles.length){box.className="review-precounts hidden";box.replaceChildren();return;}
+  const file=reviewParsedFiles[0];
+  const leads=file.leadCount||0;
+  const calls=file.results?.length||file.callCount||file.leads?.length||0;
+  const audits=file.results?.length||leads;
+  box.className="review-precounts";
+  box.replaceChildren();
+  for(const [label,value] of [["Leads",leads],["Calls",calls],["Audits",audits]]){
+    const cell=document.createElement("div");
+    cell.innerHTML=`<span>${label}</span><strong>${Number(value).toLocaleString()}</strong>`;
+    box.append(cell);
+  }
 }
 
 function updateReviewValidation(){
@@ -855,6 +885,15 @@ async function handleReviewFiles(fileList){
 async function startReview(){
   if(!reviewParsedFiles.length)return;
   const file=reviewParsedFiles[0];
+  reviewDashboardRequested=false;
+  lastReadyReviewJobs=[];
+  lastReviewDashboardKey="";
+  destroyReviewDashboard();
+  if(els["review-dashboard-mount"])els["review-dashboard-mount"].replaceChildren();
+  els["review-dashboard-panel"]?.classList.add("hidden");
+  els["review-post-actions"]?.classList.add("hidden");
+  if(els["create-review-dashboard"])els["create-review-dashboard"].disabled=true;
+  if(els["upload-dashboard-btn"])els["upload-dashboard-btn"].disabled=true;
 
   if(reviewFormat==="audit"){
     if(!file.results?.length){toast("No audited rows found in this Excel.");return;}
@@ -1024,7 +1063,7 @@ function drainReviewQueue(){
         }else if(reviewActiveCount===0){
           reviewQueueRunning=false;
           drainReviewQueue._rateWarned=false;
-          if(els["start-review"])els["start-review"].textContent="Start review →";
+          if(els["start-review"])els["start-review"].textContent="Start Audit →";
           scheduleReviewProgress();
         }
       }
@@ -1103,12 +1142,13 @@ async function renderReviewProgress(){
       ?reviewJobs.filter(job=>job.status==="completed").length
       :completed;
     const teleFailed=reviewJobs.filter(job=>job.status==="failed").length;
+    const pct=totalTarget?Math.round(Math.min(totalDone,totalTarget)/totalTarget*100):0;
     const items=[
+      ["Leads finished",totalLeads.toLocaleString()],
+      ["Audits finished",totalTarget?`${totalDone} / ${totalTarget}`:"—"],
       ["TeleCallers",`${teleDone} / ${teleTotal}${teleFailed?` · ${teleFailed} failed`:""}`],
-      ["Leads",totalLeads.toLocaleString()],
-      ["Audited",totalTarget?`${totalDone} / ${totalTarget}`:"—"],
-      [sessionDone?"Total Time Taken":"Elapsed",wallMs?durationText(wallMs):"—"],
-      ["Cost",totalCost.toFixed(4)]
+      [sessionDone?"Time taken":"Time taken",wallMs?durationText(wallMs):"—"],
+      ["Cost",`₹ ${totalCost.toFixed(4)}`]
     ];
     for(const [label,value] of items){
       const cell=document.createElement("div");
@@ -1116,18 +1156,41 @@ async function renderReviewProgress(){
       span.textContent=label;
       const strong=document.createElement("strong");
       strong.textContent=value;
-      if(label==="Total Time Taken")strong.className="total-time-taken";
+      if(label==="Time taken"&&sessionDone)strong.className="total-time-taken";
       cell.append(span,strong);
       aggregate.append(cell);
+    }
+    const live=els["review-live-progress"];
+    if(live){
+      live.classList.remove("hidden");
+      if(els["review-progress-label"])els["review-progress-label"].textContent=sessionDone?"Audit complete":"Auditing…";
+      if(els["review-progress-percent"])els["review-progress-percent"].textContent=`${pct}%`;
+      if(els["review-progress-bar"])els["review-progress-bar"].style.width=`${pct}%`;
+    }
+  }
+
+  const ready=await getReadyReviewDownloadJobs();
+  lastReadyReviewJobs=ready;
+  const post=els["review-post-actions"];
+  if(post){
+    if(ready.length){
+      post.classList.remove("hidden");
+      if(els["download-review-excel"])els["download-review-excel"].disabled=false;
+      if(els["create-review-dashboard"])els["create-review-dashboard"].disabled=false;
+    }else{
+      post.classList.add("hidden");
+      if(els["download-review-excel"])els["download-review-excel"].disabled=true;
+      if(els["create-review-dashboard"])els["create-review-dashboard"].disabled=true;
     }
   }
 
   const dashboardPanel=els["review-dashboard-panel"];
   if(dashboardPanel){
-    const ready=await getReadyReviewDownloadJobs();
-    if(ready.length){
+    if(reviewDashboardRequested&&ready.length){
       dashboardPanel.classList.remove("hidden");
-      if(els["download-review-excel"])els["download-review-excel"].disabled=false;
+      if(els["upload-dashboard-btn"]){
+        els["upload-dashboard-btn"].disabled=!hasPermission("telecaller.upload_dashboard");
+      }
       const key=ready.map(job=>`${job.id}:${job.results?.length||0}:${job.status}`).join("|");
       if(key!==lastReviewDashboardKey){
         lastReviewDashboardKey=key;
@@ -1137,12 +1200,18 @@ async function renderReviewProgress(){
           toast(error.message||"Could not render dashboard.");
         }
       }
+    }else if(!reviewDashboardRequested){
+      lastReviewDashboardKey="";
+      destroyReviewDashboard();
+      if(els["review-dashboard-mount"])els["review-dashboard-mount"].replaceChildren();
+      dashboardPanel.classList.add("hidden");
+      if(els["upload-dashboard-btn"])els["upload-dashboard-btn"].disabled=true;
     }else{
       lastReviewDashboardKey="";
       destroyReviewDashboard();
       if(els["review-dashboard-mount"])els["review-dashboard-mount"].replaceChildren();
       dashboardPanel.classList.add("hidden");
-      if(els["download-review-excel"])els["download-review-excel"].disabled=true;
+      if(els["upload-dashboard-btn"])els["upload-dashboard-btn"].disabled=true;
     }
   }
 }
@@ -1601,11 +1670,11 @@ async function checkForUpdate(){
 
 document.querySelectorAll(".nav-item").forEach(button=>button.addEventListener("click",()=>showView(button.dataset.view)));
 document.querySelector(".brand")?.addEventListener("click",event=>{
-  event.preventDefault();
-  showView("review");
+  // Brand goes to home hub (href="/"); only prevent default if we want in-module nav
 });
 document.getElementById("settings-form")?.addEventListener("submit",event=>event.preventDefault());
-els["mobile-menu"].onclick=()=>document.querySelector(".shell").classList.toggle("menu-open");
+els["mobile-menu"]?.addEventListener("click",()=>document.querySelector(".shell")?.classList.toggle("menu-open"));
+els["shell-logout"]?.addEventListener("click",async()=>{await logout();location.href="/";});
 els["pause-run"].onclick=async()=>{
   if(!currentJob)return;
   if(currentJob.status==="running"||currentJob.status==="reviewing")controllers.get(currentJob.id)?.abort();
@@ -1627,12 +1696,23 @@ if(els["review-drop-zone"]){
 if(els["review-file-input"])els["review-file-input"].onchange=event=>handleReviewFiles(event.target.files);
 if(els["start-review"])els["start-review"].onclick=startReview;
 if(els["download-review-excel"])els["download-review-excel"].onclick=()=>downloadReviewArtifact("excel");
+if(els["create-review-dashboard"])els["create-review-dashboard"].onclick=()=>{
+  reviewDashboardRequested=true;
+  lastReviewDashboardKey="";
+  renderReviewProgress();
+  toast("Dashboard created below.");
+};
+if(els["upload-dashboard-btn"])els["upload-dashboard-btn"].onclick=openUploadDashboardModal;
+if(els["upload-dash-cancel"])els["upload-dash-cancel"].onclick=closeUploadDashboardModal;
+if(els["upload-dash-confirm"])els["upload-dash-confirm"].onclick=confirmUploadDashboard;
+if(els["refresh-published"])els["refresh-published"].onclick=()=>refreshPublishedDashboards();
 if(els["review-open-console"])els["review-open-console"].onclick=()=>{
+  if(!hasPermission("telecaller.run_console")){toast("Run console is not enabled for your role.");return;}
   if(currentJob){displayLogs=true;renderProgress(currentJob);}
   showView("console");
 };
 
-els["clear-history"].onclick=async()=>{
+els["clear-history"]?.addEventListener("click",async()=>{
   if(controllers.size){toast("Pause all running audits before clearing history.");return;}
   if(confirm("Delete all locally stored audits, checkpoints, token history and logs?")){
     await clearJobs();
@@ -1641,10 +1721,10 @@ els["clear-history"].onclick=async()=>{
     renderHistory();
     toast("Local history cleared.");
   }
-};
-els["toggle-key"].onclick=()=>{const hidden=els["api-key"].type==="password";els["api-key"].type=hidden?"text":"password";els["toggle-key"].textContent=hidden?"Hide":"Show";};
-els["save-key"].onclick=()=>validateAndSaveKey(els["api-key"].value,els["remember-key"].checked,els["key-message"],els["save-key"]);
-els["forget-key"].onclick=()=>{forgetApiKey();els["api-key"].value="";els["remember-key"].checked=false;els["key-message"].textContent="Key removed.";updateKeyState();};
+});
+els["toggle-key"]?.addEventListener("click",()=>{const hidden=els["api-key"].type==="password";els["api-key"].type=hidden?"text":"password";els["toggle-key"].textContent=hidden?"Hide":"Show";});
+els["save-key"]?.addEventListener("click",()=>validateAndSaveKey(els["api-key"].value,els["remember-key"].checked,els["key-message"],els["save-key"]));
+els["forget-key"]?.addEventListener("click",()=>{forgetApiKey();els["api-key"].value="";els["remember-key"].checked=false;els["key-message"].textContent="Key removed.";updateKeyState();});
 els["onboard-toggle"]?.addEventListener("click",()=>{const hidden=els["onboard-key"].type==="password";els["onboard-key"].type=hidden?"text":"password";els["onboard-toggle"].textContent=hidden?"Hide":"Show";});
 els["onboard-save"]?.addEventListener("click",async()=>{
   const saved=await validateAndSaveKey(els["onboard-key"].value,els["onboard-remember"].checked,els["onboard-message"],els["onboard-save"]);
@@ -1688,8 +1768,8 @@ function persistSortFromForm(){
   saveSettings(settings);
   els["settings-message"].textContent=`Sort set to ${els["sort-field"].selectedOptions[0]?.textContent||settings.sort.field} · ${settings.sort.direction==="desc"?"descending":"ascending"}. Re-download the Excel to apply.`;
 }
-els["sort-field"].onchange=persistSortFromForm;
-els["sort-direction"].onchange=persistSortFromForm;
+els["sort-field"]?.addEventListener("change",persistSortFromForm);
+els["sort-direction"]?.addEventListener("change",persistSortFromForm);
 els["reload-app"]?.addEventListener("click",async()=>{
   try{
     if("serviceWorker" in navigator){
@@ -1718,15 +1798,165 @@ renderSettings();
 renderHistory();
 loadReviewSessionIds();
 setReviewFormat("raw");
-showView("review");
-restoreFromStorage();
-checkForUpdate();
-maybePromptForApiKey();
-setInterval(()=>{
-  if(currentJob?.status==="running"||currentJob?.status==="reviewing")renderProgress(currentJob);
-  if(reviewSessionIds.length)scheduleReviewProgress();
-},1000);
-setInterval(checkForUpdate,5*60*1000);
+
+async function bootTeleCallerAudit(){
+  const user=await requireAuth({loginPath:"/"});
+  if(!user)return;
+  if(!hasPermission("module.telecaller_audit")&&!user.is_super){
+    location.href="/";
+    return;
+  }
+  if(els["shell-user-label"])els["shell-user-label"].textContent=user.display_name||user.username;
+
+  document.querySelectorAll(".nav-item[data-perm]").forEach(btn=>{
+    const perm=btn.dataset.perm;
+    if(perm&&!hasPermission(perm))btn.classList.add("hidden");
+  });
+  if(els["review-open-console"]&&!hasPermission("telecaller.run_console")){
+    els["review-open-console"].classList.add("hidden");
+  }
+
+  const firstVisible=[...document.querySelectorAll(".nav-item:not(.hidden)")][0];
+  showView(firstVisible?.dataset.view||"review");
+  restoreFromStorage();
+  checkForUpdate();
+  if(hasPermission("telecaller.bucket1")||hasPermission("telecaller.settings"))maybePromptForApiKey();
+  setInterval(()=>{
+    if(currentJob?.status==="running"||currentJob?.status==="reviewing")renderProgress(currentJob);
+    if(reviewSessionIds.length)scheduleReviewProgress();
+  },1000);
+  setInterval(checkForUpdate,5*60*1000);
+}
+
+function telecallerNamesFromJobs(jobs){
+  const names=new Set();
+  for(const job of jobs||[]){
+    for(const row of job.results||[]){
+      const n=String(row.telecallerName||row.telecaller||"").trim();
+      if(n)names.add(n);
+    }
+    if(job.telecallerName&&job.mode==="telecaller-review")names.add(job.telecallerName);
+  }
+  return [...names].sort((a,b)=>a.localeCompare(b,undefined,{sensitivity:"base"}));
+}
+
+function openUploadDashboardModal(){
+  if(!hasPermission("telecaller.upload_dashboard")){toast("Upload not permitted for your role.");return;}
+  const modal=els["upload-dashboard-modal"];
+  const list=els["upload-telecaller-list"];
+  if(!modal||!list)return;
+  const names=telecallerNamesFromJobs(lastReadyReviewJobs);
+  list.replaceChildren();
+  if(!names.length){
+    list.innerHTML='<p class="muted">No TeleCaller names found in this run.</p>';
+  }else{
+    for(const name of names){
+      const label=document.createElement("label");
+      label.className="check-row";
+      const input=document.createElement("input");
+      input.type="checkbox";
+      input.value=name;
+      input.checked=true;
+      const span=document.createElement("span");
+      span.textContent=name;
+      label.append(input,span);
+      list.append(label);
+    }
+  }
+  if(els["upload-dash-message"])els["upload-dash-message"].textContent="";
+  modal.classList.remove("hidden");
+}
+
+function closeUploadDashboardModal(){
+  els["upload-dashboard-modal"]?.classList.add("hidden");
+}
+
+async function confirmUploadDashboard(){
+  const list=els["upload-telecaller-list"];
+  const selected=[...list.querySelectorAll("input[type=checkbox]:checked")].map(i=>i.value);
+  if(!selected.length){els["upload-dash-message"].textContent="Select at least one TeleCaller.";return;}
+  const allResults=lastReadyReviewJobs.flatMap(j=>j.results||[]);
+  const sourceFile=lastReadyReviewJobs[0]?.parentFileName||lastReadyReviewJobs[0]?.fileName||"";
+  const dashboards=selected.map(name=>{
+    const results=allResults.filter(row=>{
+      const n=String(row.telecallerName||row.telecaller||"").trim();
+      return n===name;
+    });
+    return {
+      telecaller_name:name,
+      title:`${name} · ${sourceFile||"audit"}`,
+      results,
+      source_file:sourceFile,
+      lead_count:results.length
+    };
+  }).filter(d=>d.results.length);
+  if(!dashboards.length){els["upload-dash-message"].textContent="No result rows for the selected TeleCallers.";return;}
+  els["upload-dash-message"].textContent="Uploading…";
+  try{
+    const data=await DashboardApi.publish(dashboards);
+    els["upload-dash-message"].textContent=`Published ${data.published?.length||0} dashboard(s).`;
+    toast("Dashboards uploaded");
+    setTimeout(closeUploadDashboardModal,800);
+  }catch(err){
+    els["upload-dash-message"].textContent=err.message||"Upload failed";
+  }
+}
+
+async function refreshPublishedDashboards(){
+  const mount=els["published-list"];
+  if(!mount)return;
+  if(!hasPermission("telecaller.dashboard")){
+    mount.innerHTML='<div class="empty-card">Dashboard access is not enabled for your role.</div>';
+    return;
+  }
+  mount.innerHTML='<div class="empty-card">Loading…</div>';
+  try{
+    const data=await DashboardApi.list();
+    const items=data.dashboards||[];
+    mount.replaceChildren();
+    if(!items.length){
+      mount.innerHTML='<div class="empty-card">No published dashboards yet.</div>';
+      return;
+    }
+    for(const item of items){
+      const card=document.createElement("button");
+      card.type="button";
+      card.className="published-card";
+      const when=item.created_at?new Date(item.created_at+"Z").toLocaleString():"";
+      const title=document.createElement("strong");
+      title.textContent=item.title||item.telecaller_name;
+      const meta=document.createElement("span");
+      meta.textContent=`${item.telecaller_name}${when?" · "+when:""}`;
+      const by=document.createElement("span");
+      by.className="muted";
+      by.textContent=item.uploaded_by_name||"";
+      card.append(title,meta,by);
+      card.onclick=()=>openPublishedDashboard(item.id);
+      mount.append(card);
+    }
+  }catch(err){
+    mount.innerHTML=`<div class="empty-card">${err.message||"Could not load dashboards."}</div>`;
+  }
+}
+
+async function openPublishedDashboard(id){
+  const panel=els["published-dashboard-panel"];
+  try{
+    const data=await DashboardApi.get(id);
+    const dash=data.dashboard;
+    if(els["published-dash-title"])els["published-dash-title"].textContent=dash.title||dash.telecaller_name;
+    if(els["published-dash-meta"]){
+      els["published-dash-meta"].textContent=`${dash.telecaller_name} · uploaded ${dash.created_at||""}`;
+    }
+    panel?.classList.remove("hidden");
+    const fakeJob={id:`published-${dash.id}`,results:dash.payload?.results||[],status:"completed"};
+    renderReviewDashboard(els["published-dashboard-mount"],[fakeJob],{highSeverityErrors:HIGH_SEVERITY_ERRORS});
+  }catch(err){
+    toast(err.message||"Could not open dashboard");
+  }
+}
+
+bootTeleCallerAudit();
 // Do not re-register a service worker — it only caused sticky "update" banners.
 if("serviceWorker" in navigator){
   navigator.serviceWorker.getRegistrations().then(regs=>Promise.all(regs.map(reg=>reg.unregister()))).catch(()=>{});

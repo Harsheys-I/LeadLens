@@ -1,31 +1,34 @@
 # LeadLens web app
 
-A static, privacy-first telecalling audit app designed for GitHub Pages.
+Login-gated multi-module app for Hostinger (PHP + MySQL) with browser-side AI audits.
 
-**Current version:** see `version.json` / Settings → Backup & version.
+**Current version:** see `version.json` (5.0.0+).
 
-## What stays local
+## Routes
 
-- The uploaded workbook is parsed in the browser.
-- The API key is stored in session storage by default. "Remember on this device" uses local storage.
-- Checkpoints, audit results and logs are stored in IndexedDB for this browser profile and survive page reloads.
-- Settings can be exported/imported as JSON (API key excluded).
-- No workbook, API key, audit or log is committed to GitHub.
+| Path | Purpose |
+|------|---------|
+| `/` | Login, request access, home module tiles |
+| `/TeleCallerAudit/` | Bucket 1 audit, Run console (permission), published dashboards, History, Settings |
+| `/admin/` | Users, Roles, access-request queue, notifications |
+| `/api/` | PHP session auth, admin CRUD, published dashboards |
 
-## Token design
+CRM / HR tiles are **Coming soon** only.
 
-- Stable compact handbook + short field keys (`s`,`c`,`n`,…) at the front for prompt caching; lead payloads last.
-- AI returns short keys and **full error type labels** in `e[]` (no numeric codes). Severity is computed in-app.
-- Console shows total input, cached input, and **billable input** (total − cached).
+## What stays local (audits)
 
-## Parallel batches
+- Workbooks parse in the browser; OpenAI key stays in this browser.
+- Checkpoints / results / logs remain in IndexedDB.
+- **Published dashboards** are stored on the server (MySQL) and scoped by TeleCaller name.
 
-Settings → **Parallel batches** keeps that many API requests in flight continuously. When one batch finishes, the next starts immediately. Batch size is **N leads** (Mobile+Project); all latest-day calls for a lead stay in the same batch. Checkpoints append in order via a save lock (`pendingBatches`), but the Run Console progress bar counts finished API batches immediately — even when a later batch is waiting for earlier checkpoints.
+## Hostinger
 
-## Preview / deploy
+See [HOSTINGER.md](HOSTINGER.md). Sync of `web-app/` → `hostinger` branch includes `api/`.
+
+## Local static preview
 
 ```powershell
 python -m http.server 8080
 ```
 
-Open `http://localhost:8080/web-app/`. Deploy via GitHub Actions from `web-app/` as before. Hard-reload after deploy (`Ctrl+Shift+R`) so `version.json` updates.
+Open `http://localhost:8080/web-app/`. Login/API need PHP+MySQL (or Hostinger). Hard-reload after deploy (`Ctrl+Shift+R`).
