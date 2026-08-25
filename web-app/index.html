@@ -7,13 +7,24 @@
   <meta name="description" content="LeadLens — AI telecalling audit platform">
   <title>LeadLens</title>
   <link rel="manifest" href="manifest.webmanifest">
-  <link rel="stylesheet" href="styles.css?v=5.0.1">
-  <script type="module" src="home.js?v=5.0.1"></script>
+  <link rel="stylesheet" href="styles.css?v=5.0.2">
+  <script type="module" src="home.js?v=5.0.2"></script>
 </head>
-<body class="auth-body">
+<body class="auth-body auth-loading">
   <div class="auth-bg" aria-hidden="true"></div>
 
-  <section id="panel-login" class="auth-panel">
+  <section id="panel-loading" class="auth-panel auth-loading-panel">
+    <div class="auth-brand">
+      <span class="brand-mark">L</span>
+      <div>
+        <strong>LeadLens</strong>
+        <p>Checking your session…</p>
+      </div>
+    </div>
+    <div class="auth-spinner" aria-hidden="true"></div>
+  </section>
+
+  <section id="panel-login" class="auth-panel hidden">
     <div class="auth-brand">
       <span class="brand-mark">L</span>
       <div>
@@ -50,8 +61,6 @@
         <select id="req-module">
           <option value="TeleCaller Audit">TeleCaller Audit</option>
           <option value="Admin">Admin</option>
-          <option value="CRM">CRM</option>
-          <option value="HR">HR</option>
           <option value="Other">Other</option>
         </select>
       </label>
@@ -69,13 +78,14 @@
       <a class="brand" href="/"><span class="brand-mark">L</span><span>LeadLens</span></a>
       <div class="home-user">
         <span id="home-user-label"></span>
+        <button type="button" id="home-account" class="secondary-button">Account</button>
         <button type="button" id="home-logout" class="secondary-button">Sign out</button>
       </div>
     </header>
     <main class="home-main">
-      <p class="eyebrow">MODULES</p>
-      <h1>Choose a workspace</h1>
-      <p class="home-sub">Open the module you have permission to use.</p>
+      <p class="eyebrow">YOUR WORKSPACE</p>
+      <h1>Where do you want to work?</h1>
+      <p class="home-sub">Pick a module your role can open. Admins manage people and access; auditors run TeleCaller QA.</p>
       <div id="home-tiles" class="home-tiles"></div>
     </main>
   </section>
@@ -91,6 +101,27 @@
       <div id="pw-message" class="form-message" role="status"></div>
       <div class="inline-actions">
         <button id="pw-save" type="button" class="primary-button">Save password</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="account-modal" class="key-modal hidden" role="dialog" aria-modal="true" aria-labelledby="account-title">
+    <div class="key-modal-card">
+      <p class="eyebrow">ACCOUNT</p>
+      <h2 id="account-title">Your profile</h2>
+      <p class="key-modal-copy">Update your username or password. Linked TeleCaller name is managed by an Admin.</p>
+      <label>Username<input id="account-username" type="text" autocomplete="username"></label>
+      <label>Display name<input id="account-display" type="text" autocomplete="nickname"></label>
+      <label>Linked TeleCaller<input id="account-telecaller" type="text" disabled></label>
+      <hr class="account-divider">
+      <p class="muted">Change password (optional)</p>
+      <label>Current password<input id="account-pw-current" type="password" autocomplete="current-password"></label>
+      <label>New password<input id="account-pw-new" type="password" autocomplete="new-password"></label>
+      <label>Confirm new password<input id="account-pw-confirm" type="password" autocomplete="new-password"></label>
+      <div id="account-message" class="form-message" role="status"></div>
+      <div class="inline-actions">
+        <button id="account-save" type="button" class="primary-button">Save</button>
+        <button id="account-cancel" type="button" class="text-button">Cancel</button>
       </div>
     </div>
   </div>

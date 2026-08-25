@@ -60,6 +60,43 @@ function ll_route_auth(string $action): void
       ll_ok(['user' => ll_public_user($fresh)]);
       break;
 
+    case 'profile':
+      ll_require_method('POST', 'PUT', 'PATCH');
+      $user = ll_require_user();
+      $body = ll_read_json_body();
+      // Self-service must never change linked TeleCaller name.
+      if (array_key_exists('telecaller_name', $body)) {
+        ll_error('Linked TeleCaller name can only be set by an Admin', 403);
+      }
+      $fields = [];
+      $params = [];
+      if (array_key_exists('username', $body)) {
+        $username = trim((string) $body['username']);
+        if ($username === '') {
+          ll_error('Username cannot be empty');
+        }
+        $other = ll_find_user_by_username($username);
+        if ($other && (int) $other['id'] !== (int) $user['id']) {
+          ll_error('Username already exists');
+        }
+        $fields[] = 'username = ?';
+        $params[] = $username;
+      }
+      if (array_key_exists('display_name', $body)) {
+        $display = trim((string) $body['display_name']);
+        $fields[] = 'display_name = ?';
+        $params[] = $display !== '' ? $display : $user['username'];
+      }
+      if (!$fields) {
+        ll_error('No profile fields to update');
+      }
+      $fields[] = 'updated_at = UTC_TIMESTAMP()';
+      $params[] = (int) $user['id'];
+      ll_pdo()->prepare('UPDATE users SET ' . implode(', ', $fields) . ' WHERE id = ?')->execute($params);
+      $fresh = ll_find_user_by_id((int) $user['id']);
+      ll_ok(['user' => ll_public_user($fresh)]);
+      break;
+
     case 'request-access':
       ll_require_method('POST');
       $body = ll_read_json_body();

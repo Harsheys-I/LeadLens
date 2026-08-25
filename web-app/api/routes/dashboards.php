@@ -356,29 +356,43 @@ function ll_route_dashboards(string $action, ?int $id): void
     ]);
   }
 
-  if ($method === 'DELETE' && ($id !== null || ctype_digit($action))) {
+  // Delete all published dashboards — Admin / Super / view_all only.
+  if ($method === 'DELETE' && ($action === 'all' || $action === 'delete-all')) {
     $user = ll_require_user();
-    $dashId = $id ?? (int) $action;
-    $canAccess = ll_user_has_permission($user, 'telecaller.dashboard')
-      || ll_user_has_permission($user, 'telecaller.upload_dashboard')
-      || ll_dashboard_can_view_all($user);
-    if (!$canAccess) {
+    if (!ll_dashboard_can_view_all($user)) {
       ll_error('Forbidden', 403);
     }
+    $pdo = ll_pdo();
+    $count = (int) $pdo->query('SELECT COUNT(*) FROM published_dashboards')->fetchColumn();
+    $pdo->exec('DELETE FROM published_dashboards');
+    ll_ok(['deleted' => true, 'count' => $count]);
+  }
+
+  if ($method === 'POST' && ($action === 'delete-all')) {
+    $user = ll_require_user();
+    if (!ll_dashboard_can_view_all($user)) {
+      ll_error('Forbidden', 403);
+    }
+    $pdo = ll_pdo();
+    $count = (int) $pdo->query('SELECT COUNT(*) FROM published_dashboards')->fetchColumn();
+    $pdo->exec('DELETE FROM published_dashboards');
+    ll_ok(['deleted' => true, 'count' => $count]);
+  }
+
+  if ($method === 'DELETE' && ($id !== null || ctype_digit($action))) {
+    $user = ll_require_user();
+    // TeleCallers cannot delete — only Admin/Super/view_all (uploader alone is not enough).
+    if (!ll_dashboard_can_view_all($user)) {
+      ll_error('Forbidden', 403);
+    }
+    $dashId = $id ?? (int) $action;
     $stmt = ll_pdo()->prepare('SELECT * FROM published_dashboards WHERE id = ? LIMIT 1');
     $stmt->execute([$dashId]);
     $row = $stmt->fetch();
     if (!$row) {
       ll_error('Dashboard not found', 404);
     }
-    $viewAll = ll_dashboard_can_view_all($user);
-    $ownName = trim((string) ($user['telecaller_name'] ?? ''));
     $rowName = trim((string) ($row['telecaller_name'] ?? ''));
-    $isOwnTelecaller = $ownName !== '' && strcasecmp($ownName, $rowName) === 0;
-    $isUploader = (int) ($row['uploaded_by'] ?? 0) === (int) $user['id'];
-    if (!$viewAll && !$isOwnTelecaller && !$isUploader) {
-      ll_error('Forbidden', 403);
-    }
     // Remove the whole TeleCaller board (all legacy rows for that name).
     ll_pdo()->prepare('DELETE FROM published_dashboards WHERE telecaller_name = ?')->execute([$rowName !== '' ? $rowName : $row['telecaller_name']]);
     ll_ok(['deleted' => true, 'telecaller_name' => $rowName]);

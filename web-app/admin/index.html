@@ -5,8 +5,8 @@
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="theme-color" content="#12372a">
   <title>LeadLens · Admin</title>
-  <link rel="stylesheet" href="../styles.css?v=5.0.1">
-  <script type="module" src="admin.js?v=5.0.1"></script>
+  <link rel="stylesheet" href="../styles.css?v=5.0.2">
+  <script type="module" src="admin.js?v=5.0.2"></script>
 </head>
 <body>
   <div class="shell">
@@ -18,7 +18,14 @@
       </nav>
       <div class="sidebar-user">
         <span id="shell-user-label"></span>
-        <button type="button" id="notif-bell" class="notif-bell" title="Notifications">🔔 <span id="notif-count" class="notif-count hidden">0</span></button>
+        <button type="button" id="notif-bell" class="notif-bell" title="Notifications" aria-label="Notifications">
+          <svg class="notif-bell-icon" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M15 17h5l-1.4-1.4A2 2 0 0 1 18 14.2V11a6 6 0 1 0-12 0v3.2c0 .5-.2 1-.6 1.4L4 17h5"/>
+            <path d="M9.5 17a2.5 2.5 0 0 0 5 0"/>
+          </svg>
+          <span id="notif-count" class="notif-count hidden">0</span>
+        </button>
+        <button type="button" id="shell-account" class="text-button sidebar-account">Account</button>
         <a class="text-button sidebar-link" href="/">Home</a>
         <button type="button" id="shell-logout" class="text-button">Sign out</button>
       </div>
@@ -122,5 +129,26 @@
   </div>
 
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+  <div id="account-modal" class="key-modal hidden" role="dialog" aria-modal="true">
+    <div class="key-modal-card">
+      <p class="eyebrow">ACCOUNT</p>
+      <h2>Your profile</h2>
+      <p class="key-modal-copy">Update username or password. Linked TeleCaller is Admin-managed.</p>
+      <label>Username<input id="account-username" type="text"></label>
+      <label>Display name<input id="account-display" type="text"></label>
+      <label>Linked TeleCaller<input id="account-telecaller" type="text" disabled></label>
+      <hr class="account-divider">
+      <p class="muted">Change password (optional)</p>
+      <label>Current password<input id="account-pw-current" type="password"></label>
+      <label>New password<input id="account-pw-new" type="password"></label>
+      <label>Confirm new password<input id="account-pw-confirm" type="password"></label>
+      <div id="account-message" class="form-message"></div>
+      <div class="inline-actions">
+        <button id="account-save" type="button" class="primary-button">Save</button>
+        <button id="account-cancel" type="button" class="text-button">Cancel</button>
+      </div>
+    </div>
+  </div>
 </body>
 </html>

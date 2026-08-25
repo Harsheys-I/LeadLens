@@ -24,10 +24,9 @@ function ll_route_admin(string $action, ?int $id, array $parts): void
 
 function ll_admin_users(?int $id): void
 {
+  // Permission-based: admin.users is enough. Rank is only used later to
+  // block assigning/editing roles above the actor and Super User accounts.
   $actor = ll_require_permission('admin.users');
-  if (!ll_is_admin_rank($actor)) {
-    ll_error('Admin access required', 403);
-  }
   $pdo = ll_pdo();
   $method = ll_method();
 
@@ -220,10 +219,8 @@ function ll_assert_role_assignable(array $actor, int $roleId): void
 
 function ll_admin_roles(?int $id): void
 {
+  // Permission-based: admin.roles is enough. Rank gates stay on create/update.
   $actor = ll_require_permission('admin.roles');
-  if (!ll_is_admin_rank($actor)) {
-    ll_error('Admin access required', 403);
-  }
   $pdo = ll_pdo();
   $method = ll_method();
 
@@ -280,6 +277,10 @@ function ll_admin_roles(?int $id): void
     if (!$row) {
       ll_error('Role not found', 404);
     }
+    // Super User role is permanently locked — no name/rank/permission edits.
+    if (($row['role_key'] ?? '') === 'super') {
+      ll_error('Super User role cannot be edited', 403);
+    }
     $body = ll_read_json_body();
     $name = array_key_exists('name', $body) ? trim((string) $body['name']) : $row['name'];
     $rank = array_key_exists('rank', $body) ? (int) $body['rank'] : (int) $row['rank'];
@@ -287,18 +288,14 @@ function ll_admin_roles(?int $id): void
       ? ll_normalize_permissions($body['permissions'])
       : ll_normalize_permissions($row['permissions']);
 
-    if ($row['role_key'] === 'super') {
-      // Super role always keeps full permissions and top rank
-      $rank = 100;
-      $perms = ll_all_permission_ids();
-      $name = $name !== '' ? $name : 'Super User';
-    } else {
-      if ($rank >= 100) {
-        ll_error('Cannot elevate role to Super User');
-      }
-      if ($rank > ll_user_rank($actor) && !$actor['is_super']) {
-        ll_error('Cannot set rank higher than your own', 403);
-      }
+    if ($name === '') {
+      ll_error('Role name is required');
+    }
+    if ($rank >= 100) {
+      ll_error('Cannot elevate role to Super User');
+    }
+    if ($rank > ll_user_rank($actor) && !$actor['is_super']) {
+      ll_error('Cannot set rank higher than your own', 403);
     }
 
     $pdo->prepare(
@@ -347,9 +344,6 @@ function ll_format_role(array $row): array
 function ll_admin_access_requests(?int $id, string $verb): void
 {
   $actor = ll_require_permission('admin.access_requests');
-  if (!ll_is_admin_rank($actor) && !ll_user_has_permission($actor, 'admin.users')) {
-    // still allow if they have access_requests
-  }
   $pdo = ll_pdo();
   $method = ll_method();
 
@@ -382,6 +376,7 @@ function ll_admin_access_requests(?int $id, string $verb): void
       $pdo->prepare(
         'UPDATE access_requests SET status = \'denied\', reviewer_id = ?, review_note = ?, reviewed_at = UTC_TIMESTAMP() WHERE id = ?'
       )->execute([(int) $actor['id'], $note !== '' ? $note : null, $id]);
+      ll_clear_access_request_notifications($id);
       ll_ok(['request' => ll_fetch_access_request($id)]);
     }
 
@@ -415,6 +410,7 @@ function ll_admin_access_requests(?int $id, string $verb): void
       'UPDATE access_requests SET status = \'approved\', reviewer_id = ?, assigned_role_id = ?, created_user_id = ?,
        review_note = ?, reviewed_at = UTC_TIMESTAMP() WHERE id = ?'
     )->execute([(int) $actor['id'], $roleId, $newUserId, $note !== '' ? $note : null, $id]);
+    ll_clear_access_request_notifications($id);
     ll_ok([
       'request' => ll_fetch_access_request($id),
       'user' => ll_public_user(ll_find_user_by_id($newUserId)),
@@ -422,6 +418,21 @@ function ll_admin_access_requests(?int $id, string $verb): void
   }
 
   ll_error('Not found', 404);
+}
+
+/** Remove access-request notifications for every admin when a request is resolved. */
+function ll_clear_access_request_notifications(int $requestId): void
+{
+  $pdo = ll_pdo();
+  // Match by JSON meta.access_request_id (MySQL JSON_EXTRACT) and fallback LIKE.
+  $pdo->prepare(
+    "DELETE FROM notifications
+     WHERE type = 'access_request'
+       AND (
+         JSON_UNQUOTE(JSON_EXTRACT(meta, '$.access_request_id')) = ?
+         OR meta LIKE ?
+       )"
+  )->execute([(string) $requestId, '%"access_request_id":' . $requestId . '%']);
 }
 
 function ll_fetch_access_request(int $id): ?array

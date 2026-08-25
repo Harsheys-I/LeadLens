@@ -182,8 +182,14 @@ function ll_require_permission(string $permission): array
 
 function ll_require_admin_rank(): array
 {
+  // Legacy helper — prefer permission checks. Kept for compatibility.
   $user = ll_require_user();
-  if (!ll_is_admin_rank($user)) {
+  if (
+    !ll_user_has_permission($user, 'admin.users')
+    && !ll_user_has_permission($user, 'admin.roles')
+    && !ll_user_has_permission($user, 'admin.access_requests')
+    && empty($user['is_super'])
+  ) {
     ll_error('Admin access required', 403);
   }
   return $user;

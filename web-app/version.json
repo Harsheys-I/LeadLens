@@ -1,5 +1,5 @@
 {
-  "version": "5.0.1",
+  "version": "5.0.2",
   "name": "LeadLens",
-  "notes": "Admin UX fixes: combined merged dashboards, per-user history, password/forms hardening."
+  "notes": "Admin permission fix · server-wide settings & encrypted OpenAI key · dashboard delete-all · chart overflow · access-request sync · account profile."
 }

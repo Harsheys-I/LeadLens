@@ -23,27 +23,51 @@ export async function loadSession(){
   try {
     const data = await AuthApi.me();
     currentUser = data.user || null;
+    if (currentUser) {
+      try { sessionStorage.setItem('ll_session_hint', '1'); } catch { /* ignore */ }
+    } else {
+      try { sessionStorage.removeItem('ll_session_hint'); } catch { /* ignore */ }
+    }
     return currentUser;
   } catch (err) {
     currentUser = null;
-    if (err.status === 401) return null;
+    if (err.status === 401) {
+      try { sessionStorage.removeItem('ll_session_hint'); } catch { /* ignore */ }
+      return null;
+    }
     throw err;
   }
+}
+
+export function hasSessionHint(){
+  try { return sessionStorage.getItem('ll_session_hint') === '1'; }
+  catch { return false; }
 }
 
 export async function login(username, password){
   const data = await AuthApi.login(username, password);
   currentUser = data.user;
+  try { sessionStorage.setItem('ll_session_hint', '1'); } catch { /* ignore */ }
   return currentUser;
 }
 
 export async function logout(){
   try { await AuthApi.logout(); } catch { /* ignore */ }
   currentUser = null;
+  try { sessionStorage.removeItem('ll_session_hint'); } catch { /* ignore */ }
 }
 
 export async function changePassword(currentPassword, newPassword){
   const data = await AuthApi.changePassword(currentPassword, newPassword);
+  currentUser = data.user;
+  return currentUser;
+}
+
+export async function updateProfile({username, display_name} = {}){
+  const body = {};
+  if (username != null) body.username = username;
+  if (display_name != null) body.display_name = display_name;
+  const data = await AuthApi.updateProfile(body);
   currentUser = data.user;
   return currentUser;
 }
@@ -80,22 +104,6 @@ export function moduleTilesForUser(user = currentUser){
       desc: 'Bucket 1 audits, Run console, published dashboards'
     },
     {
-      id: 'crm',
-      title: 'CRM',
-      href: '#',
-      perm: 'module.crm',
-      soon: true,
-      desc: 'Coming soon'
-    },
-    {
-      id: 'hr',
-      title: 'HR',
-      href: '#',
-      perm: 'module.hr',
-      soon: true,
-      desc: 'Coming soon'
-    },
-    {
       id: 'admin',
       title: 'Admin',
       href: '/admin/',
@@ -106,8 +114,6 @@ export function moduleTilesForUser(user = currentUser){
   ];
   return tiles.filter(t => {
     if (user.is_super) return true;
-    // Show coming-soon tiles if user has the module perm OR always show CRM/HR as soon if they have any module access?
-    // Plan: tile visibility respects module permissions.
     return hasPermission(t.perm);
   });
 }

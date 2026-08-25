@@ -21,5 +21,7 @@ return [
     'name' => 'LeadLens',
     // Set true after first install if you want install.php to refuse re-runs
     'install_locked' => false,
+    // Used to encrypt OpenAI API key at rest (AES-256-GCM). Falls back to session.secret if empty.
+    'secrets_key' => 'change-me-to-another-long-random-string',
   ],
 ];
