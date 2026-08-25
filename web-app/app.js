@@ -1,5 +1,5 @@
-import {APP_VERSION,DEFAULT_SETTINGS,DEFAULT_OUTPUT_FIELDS,SETTINGS_SEED,MAX_BATCH_SIZE,MAX_CONCURRENCY,normalizeSettings,normalizeInputFields,slugFieldId,parseWorkbook,parseAuditedWorkbook,auditBatch,downloadWorkbook,downloadReviewPack,splitLeadsByTelecaller,splitResultsByTelecaller,validateApiKey} from "./audit.js?v=3.5.2";
-import {putJob,getJob,getJobs,deleteJob,clearJobs,loadSettings,saveSettings,getApiKey,apiKeyIsRemembered,saveApiKey,forgetApiKey} from "./db.js?v=3.5.2";
+import {APP_VERSION,DEFAULT_SETTINGS,DEFAULT_OUTPUT_FIELDS,SETTINGS_SEED,MAX_BATCH_SIZE,MAX_CONCURRENCY,normalizeSettings,normalizeInputFields,slugFieldId,parseWorkbook,parseAuditedWorkbook,auditBatch,downloadWorkbook,downloadReviewPack,splitLeadsByTelecaller,splitResultsByTelecaller,validateApiKey} from "./audit.js?v=3.5.3";
+import {putJob,getJob,getJobs,deleteJob,clearJobs,loadSettings,saveSettings,getApiKey,apiKeyIsRemembered,saveApiKey,forgetApiKey} from "./db.js?v=3.5.3";
 
 const $=id=>document.getElementById(id);
 const ids=["file-input","drop-zone","file-list","validation","start-audit","page-title","key-state","run-name","pause-run","download-result","progress-label","progress-percent","progress-bar","metric-leads","metric-excel-rows","metric-calls","metric-batch","metric-completed","metric-status","metric-input-tokens","metric-cached-tokens","metric-output-tokens","metric-duration","metric-cost","live-log","clear-console","history-list","clear-history","api-key","remember-key","toggle-key","save-key","forget-key","key-message","batch-size","concurrency","model","input-field-config","add-input-field","ai-field-config","rule-config","add-rule","output-field-config","yes-values","no-values","additional-instructions","input-price","cached-price","output-price","save-settings","reset-settings","settings-message","toast","mobile-menu","active-job-switch","sort-field","sort-direction","app-version","export-settings","import-settings","import-settings-file","update-banner","update-banner-text","reload-app","key-modal","onboard-key","onboard-toggle","onboard-remember","onboard-message","onboard-save","onboard-skip","sidebar-version","sidebar-notes","review-drop-zone","review-file-input","review-drop-hint","review-file-list","review-validation","start-review","review-run-panel","review-aggregate","review-cards","review-download-panel","download-review-dashboard","download-review-excel","review-open-console","audit-run-panel","audit-aggregate","audit-cards","audit-download-panel","download-audit-excel","audit-open-console"];
@@ -229,6 +229,9 @@ function renderProgress(job){
   els["pause-run"].disabled=!(["running","reviewing","paused","failed"].includes(job.status));
   els["pause-run"].textContent=job.status==="running"||job.status==="reviewing"?"Pause":"Resume";
   els["download-result"].disabled=job.status!=="completed";
+  els["download-result"].textContent=(job.mode==="telecaller-review"||job.mode==="telecaller-review-parent")
+    ?"Download dashboard"
+    :"Download Excel";
   renderLogs(job);
   refreshJobSwitcher();
   if(job.mode==="telecaller-review"||job.mode==="telecaller-review-parent")scheduleReviewProgress();
@@ -1467,13 +1470,8 @@ async function renderReviewProgress(){
   }
 
   if(downloads){
-    const ready=jobs.filter(job=>job.mode==="telecaller-review"&&job.status==="completed"&&job.results?.length);
-    const allDone=sessionDone;
-    if(ready.length&&allDone){
-      downloads.classList.remove("hidden");
-      els["download-review-dashboard"].disabled=false;
-      els["download-review-excel"].disabled=false;
-    }else if(ready.length){
+    const ready=await getReadyReviewDownloadJobs();
+    if(ready.length){
       downloads.classList.remove("hidden");
       els["download-review-dashboard"].disabled=false;
       els["download-review-excel"].disabled=false;
@@ -1485,25 +1483,74 @@ async function renderReviewProgress(){
   }
 }
 
+/** Resolve completed TeleCaller review jobs for dashboard/audit Excel download (Excel RAW + Excel Audit). */
+async function getReadyReviewDownloadJobs(){
+  const jobs=await getReviewSessionJobs();
+  let ready=jobs.filter(job=>job.mode==="telecaller-review"&&job.status==="completed"&&job.results?.length);
+  if(ready.length)return ready;
+  // Children may be missing from session ids — recover from parent childReviewIds or parent results.
+  const parents=jobs.filter(job=>job.mode==="telecaller-review-parent"&&job.status==="completed");
+  for(const parent of parents){
+    for(const id of parent.childReviewIds||[]){
+      const child=liveJobs.get(id)||await getJob(id);
+      if(child?.mode==="telecaller-review"&&child.status==="completed"&&child.results?.length){
+        if(!ready.some(row=>row.id===child.id))ready.push(child);
+        if(!reviewSessionIds.includes(child.id))reviewSessionIds.push(child.id);
+      }
+    }
+  }
+  if(ready.length){
+    saveReviewSessionIds();
+    return ready;
+  }
+  for(const parent of parents){
+    if(parent.results?.length){
+      // Combined parent holds full audited rows — valid dashboard source for "All in one".
+      ready.push(parent);
+    }
+  }
+  return ready;
+}
+
 async function downloadReviewArtifact(artifact){
   try{
-    const jobs=await getReviewSessionJobs();
-    // Exclude combined parent audit — children hold per-telecaller result subsets for dashboard/Excel.
-    const ready=jobs.filter(job=>job.mode==="telecaller-review"&&job.status==="completed"&&job.results?.length);
+    const ready=await getReadyReviewDownloadJobs();
     if(!ready.length){toast("No completed reviews yet.");return;}
     const live=collectSettings();
     settings=live;
     saveSettings(settings);
-    await downloadReviewPack(ready,live,{packing:getReviewPacking(),artifact});
-    toast(artifact==="dashboard"?"Dashboard Excel downloaded.":"Audit Excel downloaded.");
+    // Primary dashboard button must never emit the plain audit workbook (Excel Audit or RAW).
+    const kind=artifact==="dashboard"?"dashboard":"excel";
+    await downloadReviewPack(ready,live,{packing:getReviewPacking(),artifact:kind});
+    toast(kind==="dashboard"?"Dashboard Excel downloaded.":"Audit Excel downloaded.");
   }catch(error){toast(error.message);}
 }
 
-function download(job){
+async function download(job){
   try{
     const live=collectSettings();
     settings=live;
     saveSettings(settings);
+    if(job.mode==="telecaller-review"){
+      await downloadReviewPack([job],live,{packing:"separate",artifact:"dashboard"});
+      toast("Dashboard Excel downloaded.");
+      return;
+    }
+    if(job.mode==="telecaller-review-parent"){
+      const packing=getReviewPacking();
+      let list=[];
+      if(packing==="separate"){
+        for(const id of job.childReviewIds||[]){
+          const child=liveJobs.get(id)||await getJob(id);
+          if(child?.results?.length)list.push(child);
+        }
+      }
+      if(!list.length&&job.results?.length)list=[job];
+      if(!list.length)throw new Error("No TeleCaller dashboard data ready yet.");
+      await downloadReviewPack(list,live,{packing,artifact:"dashboard"});
+      toast("Dashboard Excel downloaded.");
+      return;
+    }
     downloadWorkbook(job,live);
     toast(`Downloaded · sorted by ${live.sort.field} (${live.sort.direction})`);
   }catch(error){toast(error.message);}
@@ -1532,18 +1579,11 @@ async function renderHistory(){
     view.onclick=()=>{displayLogs=true;renderProgress(job);showView("console");};
     actions.append(view);
     if(job.status==="completed"&&!legacy){
-      if(job.mode==="telecaller-review"){
+      if(job.mode==="telecaller-review"||job.mode==="telecaller-review-parent"){
         const reviewBtn=document.createElement("button");
         reviewBtn.className="primary-button";
         reviewBtn.textContent="Download dashboard";
-        reviewBtn.onclick=async()=>{
-          try{
-            const live=collectSettings();
-            settings=live;saveSettings(settings);
-            await downloadReviewPack([job],live,{packing:"separate",artifact:"dashboard"});
-            toast("Dashboard Excel downloaded.");
-          }catch(error){toast(error.message);}
-        };
+        reviewBtn.onclick=()=>download(job);
         actions.append(reviewBtn);
       }else{
         const button=document.createElement("button");

@@ -1,6 +1,6 @@
-import {buildTelecallerDashboardBlob} from "./dashboard-export.js?v=3.5.2";
+import {buildTelecallerDashboardBlob} from "./dashboard-export.js?v=3.5.3";
 
-export const APP_VERSION = "3.5.2";
+export const APP_VERSION = "3.5.3";
 /** Bump when default AI rules / field defaults must refresh existing localStorage settings. */
 export const SETTINGS_SEED = 12;
 
@@ -156,7 +156,7 @@ export function buildChatCompletionBody(model,{temperature,maxTokens,messages,..
 
 /* Large stable prefix FIRST so OpenAI prompt caching can activate (>=1024 tokens;
    some models need closer to 2048). Run-specific rules come after; lead data last. */
-const CACHE_HANDBOOK = `LeadLens QA v3.5.2 — stable cacheable auditor handbook. Evidence only. Never invent facts, dates, budgets, locations, or prior calls.
+const CACHE_HANDBOOK = `LeadLens QA v3.5.3 — stable cacheable auditor handbook. Evidence only. Never invent facts, dates, budgets, locations, or prior calls.
 
 PURPOSE
 You audit Indian real-estate telecalling follow-up notes. Judge only the supplied fields for THIS call id. Optional day[] lists sibling calls on the same latest calendar day — context only; still return one result for THIS id.
@@ -1945,14 +1945,19 @@ export async function downloadTelecallerDashboard(jobs,filename){
   downloadBlobFile(blob,filename||`TeleCaller_Dashboard_${stampFile()}.xlsx`);
 }
 
-/** Download dashboard Excel and/or audit Excel for one or many jobs according to packing. */
+/** Download dashboard Excel and/or audit Excel for one or many jobs according to packing.
+ * artifact "dashboard" → template fill only (never plain audit workbook).
+ * artifact "excel" → plain audit workbook only.
+ */
 export async function downloadReviewPack(jobs,currentSettings,{packing="combined",artifact="both"}={}){
   const list=(jobs||[]).filter(job=>job&&job.results?.length);
   if(!list.length)throw new Error("No completed TeleCaller audits to download.");
   const settings=normalizeSettings(currentSettings);
   const stamp=stampFile();
-  const wantDash=artifact==="both"||artifact==="pdf"||artifact==="txt"||artifact==="dashboard";
-  const wantExcel=artifact==="both"||artifact==="excel";
+  // Legacy pdf/txt aliases map to dashboard (PDF download was replaced in 3.5.0).
+  const wantDash=artifact==="dashboard"||artifact==="both"||artifact==="pdf"||artifact==="txt";
+  // Plain audit Excel is never bundled with a dashboard-only request.
+  const wantExcel=artifact==="excel"||artifact==="both";
   const sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms));
 
   if(packing==="separate"){

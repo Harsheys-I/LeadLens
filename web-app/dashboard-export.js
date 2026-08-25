@@ -1,6 +1,9 @@
 /**
  * Fill Telecalling Lead Audit template via JSZip (preserves slicers/charts/formulas).
  * Writes Raw Data only — Executive / Performance / Detailed / ChartCache stay formula-driven.
+ *
+ * Excel Online: opens after calcChain dangling-refs are stripped. Slicers + FILTER/UNIQUE
+ * ChartCache sync are desktop Excel 365 features; Online may show static charts / limited slicers.
  */
 
 const TEMPLATE_URL = new URL("./templates/telecalling-lead-audit.xlsx", import.meta.url).href;
@@ -251,6 +254,18 @@ async function readZipText(zip, name){
   return f.async("string");
 }
 
+/** Remove calcChain part + package references (dangling Override/Relationship breaks Excel Online). */
+function stripCalcChainPackageRefs(zip, contentTypesXml, workbookRelsXml){
+  if(zip.file("xl/calcChain.xml")) zip.remove("xl/calcChain.xml");
+  let ct = contentTypesXml || "";
+  ct = ct.replace(/<Override\b[^>]*PartName="\/xl\/calcChain\.xml"[^>]*\/>\s*/gi, "");
+  let rels = workbookRelsXml || "";
+  rels = rels.replace(/<Relationship\b[^>]*Target="calcChain\.xml"[^>]*\/>\s*/gi, "");
+  // Also match namespaced Relationship tags rewritten by some zip tools
+  rels = rels.replace(/<[^:>\s]*:?Relationship\b[^>]*Target="calcChain\.xml"[^>]*\/>\s*/gi, "");
+  return {contentTypesXml: ct, workbookRelsXml: rels};
+}
+
 async function loadTemplateBytes(templateUrl = TEMPLATE_URL){
   const res = await fetch(templateUrl, {cache: "no-store"});
   if(!res.ok) throw new Error(`Could not load dashboard template (${res.status}).`);
@@ -269,14 +284,14 @@ export async function buildTelecallerDashboardBlob(results, options = {}){
 
   const lastDataRow = 1 + rawRows.length;
   const dataXml = buildRawDataRowsXml(rawRows);
-  const mergeXml = buildMergeCellsXml(rawRows);
+  // Do NOT merge cells inside RawData — Excel Tables forbid merges; Online treats that as corrupt.
   const dimension = `A1:V${Math.max(lastDataRow, 2)}`;
 
   const bytes = await loadTemplateBytes(options.templateUrl || TEMPLATE_URL);
   const zip = await JSZip.loadAsync(bytes);
 
   let sheet2 = await readZipText(zip, "xl/worksheets/sheet2.xml");
-  sheet2 = replaceSheetDataPreserveHeader(sheet2, dataXml, dimension, mergeXml);
+  sheet2 = replaceSheetDataPreserveHeader(sheet2, dataXml, dimension, "");
   zip.file("xl/worksheets/sheet2.xml", sheet2);
 
   let table1 = await readZipText(zip, "xl/tables/table1.xml");
@@ -285,7 +300,11 @@ export async function buildTelecallerDashboardBlob(results, options = {}){
   zip.file("xl/tables/table1.xml", table1);
 
   // Executive / Performance / Detailed / ChartCache / charts / slicers: leave template as-is
-  if(zip.file("xl/calcChain.xml")) zip.remove("xl/calcChain.xml");
+  let contentTypes = await readZipText(zip, "[Content_Types].xml");
+  let workbookRels = await readZipText(zip, "xl/_rels/workbook.xml.rels");
+  ({contentTypesXml: contentTypes, workbookRelsXml: workbookRels} = stripCalcChainPackageRefs(zip, contentTypes, workbookRels));
+  zip.file("[Content_Types].xml", contentTypes);
+  zip.file("xl/_rels/workbook.xml.rels", workbookRels);
 
   let workbook = await readZipText(zip, "xl/workbook.xml");
   if(/<calcPr[\s\S]*?\/>/.test(workbook)){
@@ -297,5 +316,10 @@ export async function buildTelecallerDashboardBlob(results, options = {}){
   }
   zip.file("xl/workbook.xml", workbook);
 
-  return zip.generateAsync({type: "blob", mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"});
+  // createFolders:false avoids empty directory entries that Excel Online may reject
+  return zip.generateAsync({
+    type: "blob",
+    mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    createFolders: false
+  });
 }

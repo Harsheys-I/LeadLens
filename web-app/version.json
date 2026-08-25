@@ -1,5 +1,5 @@
 ﻿{
-  "version": "3.5.2",
+  "version": "3.5.3",
   "name": "LeadLens",
-  "notes": "Excel dashboard: slicer-synced charts, date-only registration, accuracy % formatting."
+  "notes": "Fix dashboard download path + Excel Online OOXML (calcChain refs, no table merges)."
 }
