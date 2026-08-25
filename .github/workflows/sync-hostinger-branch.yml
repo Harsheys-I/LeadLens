@@ -1,0 +1,72 @@
+name: Sync hostinger deploy branch
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "web-app/**"
+      - ".github/workflows/sync-hostinger-branch.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: sync-hostinger
+  cancel-in-progress: true
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build flat hostinger branch from web-app/
+        env:
+          BRANCH: hostinger
+        run: |
+          set -euo pipefail
+
+          if [ ! -d web-app ]; then
+            echo "web-app/ missing; aborting"
+            exit 1
+          fi
+
+          WORKDIR="$(mktemp -d)"
+          # Site files only — never copy .github from web-app
+          rsync -a \
+            --exclude='.github' \
+            --exclude='.git' \
+            web-app/ "$WORKDIR/"
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git fetch origin "$BRANCH" 2>/dev/null || true
+
+          if git show-ref --verify --quiet "refs/remotes/origin/$BRANCH"; then
+            git checkout -B "$BRANCH" "origin/$BRANCH"
+          else
+            git checkout --orphan "$BRANCH"
+            git rm -rf . >/dev/null 2>&1 || true
+          fi
+
+          # Replace branch tree with flat web-app contents
+          find . -mindepth 1 -maxdepth 1 \
+            ! -name '.git' \
+            -exec rm -rf {} +
+
+          rsync -a "$WORKDIR"/ ./
+
+          git add -A
+          if git diff --cached --quiet; then
+            echo "No changes for $BRANCH; skipping push"
+            exit 0
+          fi
+
+          git commit -m "Sync site root from web-app/ for Hostinger deploy"
+          git push --force-with-lease origin "HEAD:$BRANCH"
