@@ -1,0 +1,188 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#12372a">
+  <meta name="description" content="Private, browser-based AI telecalling audit engine">
+  <title>LeadLens Audit</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="stylesheet" href="styles.css?v=3.6.4">
+  <script defer src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  <script type="module" src="app.js?v=3.6.4"></script>
+</head>
+<body>
+  <div id="update-banner" class="update-banner hidden" role="status">
+    <div id="update-banner-text"></div>
+    <button id="reload-app" type="button" class="primary-button">Hard reload now</button>
+  </div>
+  <div class="shell">
+    <aside class="sidebar">
+      <a class="brand" href="#review" aria-label="LeadLens home"><span class="brand-mark">L</span><span>LeadLens</span></a>
+      <nav aria-label="Primary navigation">
+        <button class="nav-item active" data-view="review"><span>◎</span>TelleCaller Review</button>
+        <button class="nav-item" data-view="console"><span>⌁</span>Run console</button>
+        <button class="nav-item" data-view="history"><span>◷</span>History</button>
+        <button class="nav-item" data-view="settings"><span>⚙</span>Settings</button>
+      </nav>
+      <div class="privacy-note"><strong id="sidebar-version">v3.6.4</strong><span id="sidebar-notes">Tighter Lead Status vs Comments alignment; fewer false positives.</span></div>
+    </aside>
+
+    <main>
+      <header class="topbar">
+        <button id="mobile-menu" class="icon-button" aria-label="Toggle navigation">☰</button>
+        <div><p class="eyebrow">AI TELECALLING QA</p><h1 id="page-title">TelleCaller Review</h1></div>
+        <div id="key-state" class="key-state">API key not set</div>
+      </header>
+
+      <section id="view-review" class="view active">
+        <div class="intro"><h2>Review every TeleCaller.</h2><p><strong>Excel RAW</strong> detects TeleCallers, audits the whole file, then opens an in-app dashboard. <strong>Excel Audit</strong> skips AI — upload an already-audited workbook, split by TeleCaller, and review the in-app dashboard.</p></div>
+        <div class="format-toggle" role="group" aria-label="Upload format">
+          <button type="button" class="format-option active" data-review-format="raw">Excel RAW</button>
+          <button type="button" class="format-option" data-review-format="audit">Excel Audit</button>
+        </div>
+        <div id="review-drop-zone" class="drop-zone" role="button" tabindex="0" aria-label="Upload Excel for TeleCaller review">
+          <input id="review-file-input" type="file" accept=".xlsx,.xls,.xlsm" hidden>
+          <div class="upload-icon">⇧</div><h3>Drop Excel here</h3><p id="review-drop-hint">CRM / RAW export · auto-detect TeleCallers · audit then in-app dashboard · XLSX, XLS or XLSM</p>
+        </div>
+        <div id="review-file-list" class="file-list hidden"></div>
+        <div id="review-validation" class="validation hidden" role="status"></div>
+        <div class="action-row"><button id="start-review" class="primary-button" disabled>Start review <span>→</span></button></div>
+
+        <div id="review-run-panel" class="review-run-panel hidden">
+          <div class="section-head">
+            <div><h2>Live review</h2><p>Progress stays here — open Run console only if you need full logs.</p></div>
+            <button id="review-open-console" type="button" class="text-button">Open Run console</button>
+          </div>
+          <div id="review-aggregate" class="review-aggregate hidden"></div>
+          <div id="review-cards" class="review-cards"></div>
+          <div id="review-dashboard-panel" class="review-dashboard-panel hidden">
+            <div class="card-title"><h2>Dashboard</h2><p>KPIs, TeleCaller scorecard, charts, and error details. Filters replace Excel slicers. Optionally download audit Excel.</p></div>
+            <div id="review-dashboard-mount"></div>
+            <div class="inline-actions review-download-actions dashboard-footer-actions">
+              <button id="download-review-excel" type="button" class="secondary-button" disabled>Download audit Excel</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="view-console" class="view">
+        <div class="run-head"><div><p class="eyebrow">CURRENT RUN</p><h2 id="run-name">No active audit</h2></div><div class="run-actions"><button id="pause-run" class="secondary-button" disabled>Pause</button><button id="download-result" class="primary-button" disabled>Download Excel</button></div></div>
+        <div id="active-job-switch" class="job-switch hidden" aria-live="polite"></div>
+        <div class="progress-panel">
+          <div class="progress-copy"><strong id="progress-label">Waiting for a file</strong><span id="progress-percent">0%</span></div>
+          <div class="progress-track"><div id="progress-bar" class="progress-bar"></div></div>
+          <div class="metrics"><div><span>Leads</span><strong id="metric-leads">—</strong></div><div><span>Calls</span><strong id="metric-calls">—</strong></div><div><span>Audited</span><strong id="metric-completed">—</strong></div><div><span>Batch</span><strong id="metric-batch">—</strong></div><div><span>Status</span><strong id="metric-status">Idle</strong></div><div><span>Input tokens</span><strong id="metric-input-tokens">—</strong></div><div><span>Cached input</span><strong id="metric-cached-tokens">—</strong></div><div><span>Output tokens</span><strong id="metric-output-tokens">—</strong></div><div><span>Run time</span><strong id="metric-duration">—</strong></div><div><span>Run cost</span><strong id="metric-cost">—</strong></div></div>
+        </div>
+        <div class="console-panel"><div class="panel-head"><div><span class="live-dot"></span><strong>Live log</strong></div><button id="clear-console" class="text-button">Clear view</button></div><div id="live-log" class="log-list"><div class="empty-state">Run activity will appear here.</div></div></div>
+      </section>
+
+      <section id="view-history" class="view">
+        <div class="section-head"><div><h2>Audit history</h2><p>Private to this browser profile.</p></div><button id="clear-history" class="danger-button">Clear history</button></div>
+        <div id="history-list" class="history-list"><div class="empty-card">No audits yet.</div></div>
+      </section>
+
+      <section id="view-settings" class="view">
+        <div class="settings-page">
+          <div class="settings-toolbar" role="toolbar" aria-label="Settings actions">
+            <div class="settings-toolbar-copy">
+              <strong>Settings</strong>
+              <span>Changes apply to new audits after you save. Sort applies on the next Excel download.</span>
+            </div>
+            <div class="inline-actions settings-toolbar-actions">
+              <button id="save-settings" type="button" class="primary-button">Save settings</button>
+              <button id="reset-settings" type="button" class="text-button">Restore defaults</button>
+              <span id="settings-message" class="form-message"></span>
+            </div>
+          </div>
+
+          <div class="settings-sections">
+            <form id="settings-form" class="settings-card">
+              <div class="card-title"><h2>1 · OpenAI connection</h2><p>Your key stays in this browser and is sent only to OpenAI during an audit. It is never part of the GitHub Pages deployment.</p></div>
+              <label>API key<div class="input-row"><input id="api-key" type="password" autocomplete="off" placeholder="sk-…"><button id="toggle-key" type="button" class="secondary-button">Show</button></div></label>
+              <label class="check-row"><input id="remember-key" type="checkbox"><span>Remember on this device <small>Uses this browser's local storage.</small></span></label>
+              <div class="inline-actions"><button id="save-key" type="button" class="primary-button">Save key</button><button id="forget-key" type="button" class="text-button">Forget key</button><span id="key-message" class="form-message"></span></div>
+            </form>
+
+            <section class="settings-card">
+              <div class="card-title"><h2>2 · Run &amp; cost</h2><p>Applied to new audits. <strong>Batch size</strong> is leads per API request (project + mobile), max 20. <strong>Parallel batches</strong> keep multiple requests in flight (max 50); checkpoints still save in order.</p></div>
+              <div class="field-grid run-grid">
+                <label>Batch size (leads)<input id="batch-size" type="number" min="1" max="20" value="20"></label>
+                <label>Parallel batches<input id="concurrency" type="number" min="1" max="50" value="2"></label>
+                <label>Audit model<input id="model" type="text" value="gpt-4o-mini"></label>
+              </div>
+              <div class="field-grid pricing-grid settings-subgrid">
+                <label>Audit input ₹ / 1M<input id="input-price" type="number" min="0" step="0.000001"></label>
+                <label>Audit cached ₹ / 1M<input id="cached-price" type="number" min="0" step="0.000001"></label>
+                <label>Audit output ₹ / 1M<input id="output-price" type="number" min="0" step="0.000001"></label>
+              </div>
+              <p class="hint-copy">Console cost uses audit rates. TeleCaller in-app dashboards are built from audit metrics (no separate review-model pass).</p>
+            </section>
+
+            <section class="settings-card">
+              <div class="card-title"><h2>3 · Input Excel fields</h2><p>Add, remove, or reorder columns. Toggle which headers to read. Mobile and Project are required. <strong>Lead Update Date</strong> is accepted for ascending arrange/export only — it is not sent to the AI.</p></div>
+              <div id="input-field-config" class="config-list"></div>
+              <button id="add-input-field" type="button" class="secondary-button">Add input field</button>
+            </section>
+
+            <section class="settings-card">
+              <div class="card-title"><h2>4 · Fields sent to AI</h2><p>Comments always send <strong>full chronological history</strong>. The app also sends <code>reg</code> (registration) and <code>fu</code> (first Lead Update after near-dupe filter) for the 30-minute talk SLA. Other fields default to the latest call only.</p></div>
+              <div id="ai-field-config" class="config-list"></div>
+              <div class="field-grid settings-subgrid">
+                <label>Connected = Yes values<input id="yes-values" type="text"></label>
+                <label>Connected = No values<input id="no-values" type="text"></label>
+              </div>
+            </section>
+
+            <section class="settings-card">
+              <div class="card-title"><h2>5 · AI audit rules</h2><p>All default checks are listed below. List allowed <strong>error types</strong> as full text, separated by <code>|</code>. The model and Excel both use the same labels — no numeric codes.</p></div>
+              <div id="rule-config" class="rule-list"></div>
+              <button id="add-rule" type="button" class="secondary-button">Add AI rule</button>
+              <label>Additional instructions<textarea id="additional-instructions" rows="4" placeholder="Optional extra instructions for the auditor"></textarea></label>
+            </section>
+
+            <section class="settings-card">
+              <div class="card-title"><h2>6 · Output Excel &amp; sort</h2><p>Choose columns to include. Sort By / Order are read live on every download.</p></div>
+              <div id="output-field-config" class="config-list output-list"></div>
+              <div class="field-grid sort-grid">
+                <label>Sort by<select id="sort-field"></select></label>
+                <label>Order<select id="sort-direction"><option value="asc">Ascending (A→Z, oldest first)</option><option value="desc">Descending (Z→A, newest first)</option></select></label>
+              </div>
+              <p class="hint-copy">Dates (Lead Update Date / Lead Registration / Next Followup) sort chronologically. Default sort is Lead Update Date ascending. Filename includes the active sort. Export always keeps the same Mobile + Project together and merges those two cells across that lead’s call rows.</p>
+            </section>
+
+            <section class="settings-card">
+              <div class="card-title"><h2>7 · Backup &amp; version</h2><p>Export settings as JSON before a browser reset. Import restores aliases, rules, sort, pricing and run config. API keys are never included.</p></div>
+              <div class="version-row"><span>App version</span><strong id="app-version">…</strong></div>
+              <div class="inline-actions settings-actions">
+                <button id="export-settings" type="button" class="secondary-button">Export settings JSON</button>
+                <button id="import-settings" type="button" class="secondary-button">Import settings JSON</button>
+                <input id="import-settings-file" type="file" accept="application/json,.json" hidden>
+              </div>
+              <p class="hint-copy">Built-in error types only: Lead Status Not Aligned With Comments · Fresh Call TAT Missed · Follow-up Missed · Estimate Budget Empty · Customer Requirement Empty · Customer Location Empty · Analysis Parameter Empty · Incorrect Customer Requirement. Separate multiple types with |.</p>
+            </section>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+  <div id="key-modal" class="key-modal hidden" role="dialog" aria-modal="true" aria-labelledby="key-modal-title">
+    <div class="key-modal-card">
+      <p class="eyebrow">GET STARTED</p>
+      <h2 id="key-modal-title">Connect your OpenAI API key</h2>
+      <p class="key-modal-copy">LeadLens runs entirely in your browser. Your key is stored only on this device and sent only to OpenAI when you run an audit. We verify it works before saving — this check does not use any tokens.</p>
+      <label>API key<div class="input-row"><input id="onboard-key" type="password" autocomplete="off" placeholder="sk-…"><button id="onboard-toggle" type="button" class="secondary-button">Show</button></div></label>
+      <label class="check-row"><input id="onboard-remember" type="checkbox"><span>Remember on this device <small>Uses this browser's local storage. Leave off to keep the key only for this session.</small></span></label>
+      <div id="onboard-message" class="form-message" role="status"></div>
+      <div class="inline-actions">
+        <button id="onboard-save" type="button" class="primary-button">Validate &amp; save</button>
+        <button id="onboard-skip" type="button" class="text-button">I'll add it later</button>
+      </div>
+    </div>
+  </div>
+</body>
+</html>
