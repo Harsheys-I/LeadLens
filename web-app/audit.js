@@ -1,8 +1,8 @@
-import {buildTelecallerDashboardBlob} from "./dashboard-export.js?v=3.6.1";
+import {buildTelecallerDashboardBlob} from "./dashboard-export.js?v=3.6.2";
 
-export const APP_VERSION = "3.6.1";
+export const APP_VERSION = "3.6.2";
 /** Bump when default AI rules / field defaults must refresh existing localStorage settings. */
-export const SETTINGS_SEED = 13;
+export const SETTINGS_SEED = 14;
 
 /** Settings limits — batch size is leads per request; concurrency is parallel requests. */
 export const MAX_BATCH_SIZE = 20;
@@ -117,8 +117,8 @@ export const DEFAULT_RULES = [
   {field:"Follow-up Missed",instruction:`If n (this call's Next Followup) is a past calendar date before today → emit "${FOLLOWUP_MISSED_ERROR}". Do not emit any other follow-up timing errors.`,errors:FOLLOWUP_MISSED_ERROR},
   {field:"Comment quality",instruction:"Score q strictly. q must reflect how well Comments capture the real telecaller–customer conversation (need, budget, location preference, objection, decision-maker, next step). One-word/CRM crumbs like visited/RNR/CNP/busy/followup = q 0-2 max. Generic connected notes without customer detail = q <=4. Only rich descriptive talk earns 8-10. When c is an array, score THIS call's latest comment (last entry), using earlier entries only as context.",errors:""},
   {field:"Customer Requirement",instruction:`Only review the Customer Requirement when the call actually connected (Connected / k = Yes). On a connected call, rq should describe what the customer genuinely wants — for example a home configuration (2BHK/3BHK/plot), a budget, a preferred location/locality, facing, or a possession timeline. If rq is blank or only a placeholder such as ".", "-", "**", "NA" or "nil", raise "${EMPTY_REQUIREMENT}". If rq instead holds call notes or jargon rather than a real need — for example RNR, CNP, Visited, Site visit, Busy, Follow-up, Callback, Interested/Not interested — raise "${WRONG_REQUIREMENT}". When the call did not connect (Connected / k = No or blank), leave the requirement alone and never raise either of these two errors.`,errors:`${EMPTY_REQUIREMENT} | ${WRONG_REQUIREMENT}`},
-  {field:"AI Observation",instruction:"o must explain the merged Error Type(s) using Comments (c) and Connected (k). Forbidden: copying, lightly shortening, or paraphrasing c. When e is non-empty, name those raised error(s) and why comments/connected support them. When e is empty, judge note quality only. Not a comment paraphrase. 18-28 words.",errors:""},
-  {field:"AI Recommendation",instruction:"r is next-step coaching from comment history + Connected (k) + Error Type(s). Concrete ask/capture/correct actions for the next call (fields, questions, status fix on the Prospect→Lost ladder, follow-up discipline). Not a correction rewrite of the note. Not vague ('follow up', 'update remarks'). 20-40 words.",errors:""},
+  {field:"AI Observation",instruction:"o is a short plain-English QA note (18-28 words) explaining what went wrong from Error Type(s), comment quality, and Connected (k). Weave connectedness into the sentence when relevant (e.g. 'the call connected' / 'the call did not connect') — never dump labels like Connected=Yes/No. When e is non-empty, say the issue in layman words (location missing, status mismatch, late first contact, etc.), not stacked template fragments or raw error-code dumps. Forbidden: copying or paraphrasing c. When e is empty, judge note quality only.",errors:""},
+  {field:"AI Recommendation",instruction:"r is practical next-step coaching in plain English (20-40 words) from comment history + Connected (k) + Error Type(s). Concrete ask/capture/correct actions for the next call. Not a correction rewrite of the note. Not vague ('follow up', 'update remarks'). Not robotic label dumps.",errors:""},
   {field:"Buying intent",instruction:"i=1 only for genuine positive purchase interest in THIS call's latest comment/status; else i=0. Earlier history alone does not set i=1 if the latest comment cooled. All-RNR / k=No ⇒ i=0.",errors:""}
 ];
 /* gpt-5-nano OpenAI list price (USD/1M): $0.05 input, $0.005 cached, $0.40 output.
@@ -157,7 +157,7 @@ export function buildChatCompletionBody(model,{temperature,maxTokens,messages,..
 
 /* Large stable prefix FIRST so OpenAI prompt caching can activate (>=1024 tokens;
    some models need closer to 2048). Run-specific rules come after; lead data last. */
-const CACHE_HANDBOOK = `LeadLens QA v3.6.1 — stable cacheable auditor handbook. Evidence only. Never invent facts, dates, budgets, locations, or prior calls.
+const CACHE_HANDBOOK = `LeadLens QA v3.6.2 — stable cacheable auditor handbook. Evidence only. Never invent facts, dates, budgets, locations, or prior calls.
 
 PURPOSE
 You audit Indian real-estate telecalling follow-up notes. Judge only the supplied fields for THIS call id. Optional day[] lists sibling calls on the same latest calendar day — context only; still return one result for THIS id.
@@ -240,8 +240,8 @@ CONNECTED GATING
 If k is No or "", NEVER emit those three — even if rq/b are empty, "**", ".", or junk.
 
 STYLE — OBSERVATION (o) AND RECOMMENDATION (r)
-o must explain the Error Type(s) in e using Comments (c) and Connected (k). It must NOT copy, trim, or paraphrase Comments. Bad o: restating "customer visited", "wants 2BHK Whitefield". Good o: "All comments are RNR with Connected=No but status still Warm." / "First talk missed the daytime TAT window." When e is non-empty, o must reference those raised errors.
-r is next-step coaching from comment history + Connected + Error Type(s) — not a correction rewrite of the note. Bad r: "Follow up", "Update comments", "Call again". Good r: "On next connected call ask preferred config, micro-market, and budget band; replace rq junk with real requirement; set follow-up date same day."
+o is a natural 18–28 word QA observation in layman English. Explain Error Type(s) using Comments (c) and Connected (k). Weave connectedness into the sentence when useful — never write "Connected=Yes" / "Connected=No" as a label dump. Do NOT copy, trim, or paraphrase Comments. Bad o: "Connected=Yes. Comment lacks a real telecaller–customer conversation. Connected call missing usable location." Good o: "The call connected, but the note is thin and the customer's preferred location was not captured on this call." / "Every attempt went unanswered and the call never connected, yet status is still Warm." When e is non-empty, o must clearly cover those issues in plain words (exact error labels optional if meaning is obvious).
+r is practical next-step coaching from comment history + Connected + Error Type(s) — not a correction rewrite of the note. Bad r: "Follow up", "Update comments", "Call again". Good r: "On the next connected call ask preferred config, micro-market, and budget band; replace junk requirement text with a real need; set a same-day follow-up date."
 Never dump the full comment into o or r. Never restate this handbook.
 
 EXAMPLES
@@ -1233,47 +1233,88 @@ function isCommentEcho(observation,comments){
   for(const word of ow)if(cw.has(word))overlap++;
   return overlap/ow.size>=0.72;
 }
+function joinNatural(items){
+  if(!items.length)return "";
+  if(items.length===1)return items[0];
+  if(items.length===2)return `${items[0]} and ${items[1]}`;
+  return `${items.slice(0,-1).join(", ")}, and ${items[items.length-1]}`;
+}
 function fallbackObservation(row,errors,q){
-  const bits=[];
-  const connected=clean(row.connected);
-  if(connected)bits.push(`Connected=${connected}.`);
-  if(q<=3)bits.push("Comment lacks a real telecaller–customer conversation.");
-  if(errors.includes(STATUS_HISTORY_ERROR))bits.push("Lead status does not reflect the full comment history trajectory.");
-  if(errors.includes(MISSED_30MIN_ERROR))bits.push("First update missed the fresh-call TAT window after daytime registration.");
-  if(errors.includes(EMPTY_REQUIREMENT))bits.push("Connected call has empty/placeholder requirement.");
-  if(errors.includes(WRONG_REQUIREMENT))bits.push("Requirement field holds call jargon, not a customer need.");
-  if(errors.includes(EMPTY_LOCATION))bits.push("Connected call missing usable location.");
-  if(errors.includes(EMPTY_BUDGET))bits.push("Connected call missing budget.");
-  if(errors.includes(FOLLOWUP_MISSED_ERROR))bits.push("Follow-up date is already past.");
-  if(errors.includes(EMPTY_PARAMETER))bits.push("Analysis parameter is blank.");
-  if(!bits.length)bits.push("Review note quality and field completeness for this call.");
-  return clipWords(bits.join(" "),28);
+  const connected=norm(row.connected);
+  const thin=Number(q)<=3;
+  const has=label=>errors.includes(label);
+  const gaps=[];
+  if(has(EMPTY_LOCATION))gaps.push("preferred location");
+  if(has(EMPTY_BUDGET))gaps.push("budget");
+  if(has(EMPTY_REQUIREMENT))gaps.push("customer requirement");
+  const issues=[];
+  if(has(STATUS_HISTORY_ERROR))issues.push("the lead status does not match how the conversation went");
+  if(has(MISSED_30MIN_ERROR))issues.push("the first contact missed the daytime response window");
+  if(has(FOLLOWUP_MISSED_ERROR))issues.push("the promised follow-up date is already past");
+  if(has(WRONG_REQUIREMENT))issues.push("the requirement field holds call jargon instead of a real need");
+  if(gaps.length)issues.push(`the customer's ${joinNatural(gaps)} ${gaps.length>1?"were":"was"} not captured`);
+  if(has(EMPTY_PARAMETER))issues.push("the analysis parameter was left blank");
+  let text="";
+  if(connected==="yes"&&thin&&issues.length){
+    text=`The call connected, but the note is thin and ${joinNatural(issues)}.`;
+  }else if(connected==="yes"&&thin){
+    text="The call connected, but the note is thin and does not show a real telecaller–customer conversation.";
+  }else if(connected==="yes"&&issues.length){
+    text=`The call connected, yet ${joinNatural(issues)}.`;
+  }else if(connected==="no"&&has(STATUS_HISTORY_ERROR)&&issues.length===1){
+    text="The call never connected and every note looks unanswered, yet the lead status is still warmer than the history supports.";
+  }else if(connected==="no"&&issues.length){
+    text=`The call never connected, and ${joinNatural(issues)}.`;
+  }else if(connected==="no"&&thin){
+    text="The call never connected, and the note shows little more than an unanswered attempt with no customer detail.";
+  }else if(issues.length){
+    const body=joinNatural(issues);
+    text=body.charAt(0).toUpperCase()+body.slice(1)+".";
+  }else if(thin){
+    text="The note lacks a real telecaller–customer conversation and needs clearer detail on need and next step.";
+  }else{
+    text="Review note quality and field completeness for this call before the next follow-up.";
+  }
+  if(!/[.!?]$/.test(text))text+=".";
+  return clipWords(text,28);
 }
 function fallbackRecommendation(row,errors,q){
-  const bits=[];
-  if(norm(row.connected)==="no")bits.push("When the customer connects, capture need, locality, and budget before closing.");
-  if(q<=4)bits.push("Rewrite remarks with what the customer said: need, locality, budget, objection, and next step.");
-  if(errors.includes(STATUS_HISTORY_ERROR))bits.push("Align Lead Status on the Prospect→Lost ladder to the full comment timeline (all-RNR / not connected must be below Warm).");
-  if(errors.includes(MISSED_30MIN_ERROR))bits.push("Call daytime registrations within 30 minutes and log the first update promptly.");
-  if(errors.includes(WRONG_REQUIREMENT)||errors.includes(EMPTY_REQUIREMENT))bits.push("On next connected call capture a real requirement (config/area), not RNR/Visited/status text.");
-  if(errors.includes(EMPTY_LOCATION))bits.push("Ask and save preferred micro-market/location.");
-  if(errors.includes(EMPTY_BUDGET))bits.push("Ask and save budget band before ending the call.");
-  if(errors.includes(FOLLOWUP_MISSED_ERROR))bits.push("Call on/before the promised follow-up and set a fresh dated next step.");
-  if(errors.includes(EMPTY_PARAMETER))bits.push("Set Analysis Parameter from the actual call outcome.");
-  if(!bits.length)bits.push("Confirm interest, capture missing fields, and lock a dated next action the same day.");
-  return clipWords(bits.join(" "),40);
+  const actions=[];
+  if(norm(row.connected)==="no")actions.push("when the customer picks up, capture need, locality, and budget before closing");
+  else if(Number(q)<=4)actions.push("rewrite remarks with what the customer said: need, locality, budget, objection, and next step");
+  if(errors.includes(STATUS_HISTORY_ERROR))actions.push("align lead status on the Prospect→Lost ladder to the full comment timeline");
+  if(errors.includes(MISSED_30MIN_ERROR))actions.push("call daytime registrations within 30 minutes and log the first update promptly");
+  if(errors.includes(WRONG_REQUIREMENT)||errors.includes(EMPTY_REQUIREMENT))actions.push("on the next connected call capture a real requirement (config or area), not RNR or visit jargon");
+  if(errors.includes(EMPTY_LOCATION))actions.push("ask and save the preferred micro-market or location");
+  if(errors.includes(EMPTY_BUDGET))actions.push("ask and save a budget band before ending the call");
+  if(errors.includes(FOLLOWUP_MISSED_ERROR))actions.push("call on or before the promised follow-up and set a fresh dated next step");
+  if(errors.includes(EMPTY_PARAMETER))actions.push("set Analysis Parameter from the actual call outcome");
+  if(!actions.length)return clipWords("Confirm interest, capture any missing fields, and lock a dated next action the same day.",40);
+  const body=joinNatural(actions);
+  return clipWords(`${body.charAt(0).toUpperCase()}${body.slice(1)}.`,40);
 }
 function observationReferencesErrors(text,errors){
   if(!errors.length)return true;
   const n=norm(text);
   if(!n)return false;
+  const plainCues={
+    [STATUS_HISTORY_ERROR]:["lead status","status does not match","status still","warmer than","comment history","conversation went","heat"],
+    [MISSED_30MIN_ERROR]:["response window","daytime","first contact","first talk","30 minute","thirty minute","tat","fresh call","registration window","callback missed"],
+    [FOLLOWUP_MISSED_ERROR]:["follow-up","follow up","followup","already past","overdue"],
+    [EMPTY_LOCATION]:["location","locality","micro-market","micromarket"],
+    [EMPTY_REQUIREMENT]:["requirement was left blank","requirement is blank","requirement empty","customer requirement","requirement was not"],
+    [WRONG_REQUIREMENT]:["call jargon","not a real need","incorrect requirement","requirement field"],
+    [EMPTY_BUDGET]:["budget was not","budget missing","budget empty","budget was never","no budget","budget were not"],
+    [EMPTY_PARAMETER]:["analysis parameter","parameter is blank","parameter was left","parameter empty"]
+  };
   return errors.some(label=>{
     const labelNorm=norm(label);
     if(labelNorm&&n.includes(labelNorm))return true;
     const tokens=labelNorm.split(" ").filter(word=>word.length>3);
     // Require at least two distinctive tokens so "empty" alone is not enough.
     const hits=tokens.filter(token=>n.includes(token));
-    return hits.length>=Math.min(2,tokens.length);
+    if(hits.length>=Math.min(2,tokens.length))return true;
+    return(plainCues[label]||[]).some(cue=>n.includes(norm(cue)));
   });
 }
 function finalizeObservation(aiText,row,errors,q){

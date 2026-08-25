@@ -1,5 +1,5 @@
 {
-  "version": "3.6.1",
+  "version": "3.6.2",
   "name": "LeadLens",
-  "notes": "In-app TeleCaller Review dashboard (Chart.js); optional audit Excel download."
+  "notes": "AI Observation fallbacks use plain-English supervisor notes (no Connected=Yes dumps)."
 }
