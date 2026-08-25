@@ -1,11 +1,12 @@
-import {requireAuth, logout, getUser, hasPermission, requirePermission} from '../auth.js?v=5.0.0';
-import {AdminApi, NotifApi} from '../api-client.js?v=5.0.0';
+import {requireAuth, logout, getUser, hasPermission, requirePermission} from '../auth.js?v=5.0.1';
+import {AdminApi, NotifApi, DashboardApi} from '../api-client.js?v=5.0.1';
 
 const $ = id => document.getElementById(id);
 const titles = {users: 'User creation', roles: 'Roles'};
 let rolesCache = [];
 let catalog = [];
 let editingRole = null;
+let telecallerNames = [];
 
 function toast(msg){
   const el = $('toast');
@@ -24,14 +25,68 @@ function showView(name){
   if (name === 'roles') refreshRoles();
 }
 
+function actorRank(){
+  const user = getUser();
+  return Number(user?.role_rank ?? 0);
+}
+
 function fillRoleSelect(select, selectedId){
   select.replaceChildren();
+  const maxRank = actorRank();
+  const selected = selectedId != null && selectedId !== '' ? Number(selectedId) : null;
   for (const role of rolesCache) {
+    const rank = Number(role.rank ?? 0);
+    if (rank > maxRank && role.id !== selected) continue;
     const opt = document.createElement('option');
     opt.value = role.id;
     opt.textContent = `${role.name} (rank ${role.rank})`;
-    if (selectedId && Number(selectedId) === role.id) opt.selected = true;
+    if (selected != null && selected === role.id) opt.selected = true;
     select.append(opt);
+  }
+}
+
+function roleNeedsTelecaller(roleId){
+  const role = rolesCache.find(r => r.id === Number(roleId));
+  return role?.role_key === 'telecaller';
+}
+
+function fillTelecallerSelect(select, selectedName){
+  select.replaceChildren();
+  const none = document.createElement('option');
+  none.value = '';
+  none.textContent = '— None —';
+  select.append(none);
+  const names = [...telecallerNames];
+  const current = String(selectedName || '').trim();
+  if (current && !names.includes(current)) names.unshift(current);
+  for (const name of names) {
+    const opt = document.createElement('option');
+    opt.value = name;
+    opt.textContent = name;
+    if (current && name === current) opt.selected = true;
+    select.append(opt);
+  }
+  if (!current) none.selected = true;
+}
+
+function syncTelecallerField(roleSelectId, wrapId, selectId, selectedName){
+  const wrap = $(wrapId);
+  const select = $(selectId);
+  const needed = roleNeedsTelecaller($(roleSelectId).value);
+  wrap.classList.toggle('hidden', !needed);
+  select.disabled = !needed;
+  if (needed) fillTelecallerSelect(select, selectedName ?? select.value);
+  else {
+    select.value = '';
+  }
+}
+
+async function loadTelecallerNames(){
+  try {
+    const data = await DashboardApi.telecallerNames();
+    telecallerNames = data.names || [];
+  } catch {
+    telecallerNames = [];
   }
 }
 
@@ -42,12 +97,18 @@ async function loadRolesCache(){
 }
 
 async function refreshUsers(){
-  const [usersData, reqData] = await Promise.all([
-    AdminApi.listUsers(),
-    AdminApi.listAccessRequests('pending').catch(() => ({requests: []})),
-  ]);
-  renderAccessQueue(reqData.requests || []);
-  renderUsersTable(usersData.users || []);
+  const mount = $('users-table');
+  try {
+    const [usersData, reqData] = await Promise.all([
+      AdminApi.listUsers(),
+      AdminApi.listAccessRequests('pending').catch(() => ({requests: []})),
+    ]);
+    renderAccessQueue(reqData.requests || []);
+    renderUsersTable(usersData.users || []);
+  } catch (err) {
+    toast(err.message || 'Could not load users');
+    mount.innerHTML = `<div class="empty-card">Could not load users. ${escapeHtml(err.message || '')}</div>`;
+  }
 }
 
 function renderAccessQueue(requests){
@@ -77,10 +138,14 @@ function renderAccessQueue(requests){
     deny.textContent = 'Deny';
     deny.onclick = async () => {
       if (!confirm('Deny this request?')) return;
-      await AdminApi.denyRequest(req.id, {review_note: 'Denied'});
-      toast('Request denied');
-      refreshUsers();
-      refreshNotifs();
+      try {
+        await AdminApi.denyRequest(req.id, {review_note: 'Denied'});
+        toast('Request denied');
+        await refreshUsers();
+        refreshNotifs();
+      } catch (err) {
+        toast(err.message || 'Could not deny request');
+      }
     };
     actions.append(accept, deny);
     row.append(actions);
@@ -90,6 +155,10 @@ function renderAccessQueue(requests){
 
 function renderUsersTable(users){
   const mount = $('users-table');
+  if (!users.length) {
+    mount.innerHTML = '<div class="empty-card">No users yet.</div>';
+    return;
+  }
   const table = document.createElement('table');
   table.className = 'admin-table';
   table.innerHTML = `<thead><tr>
@@ -125,7 +194,7 @@ function openUserModal(user = null){
   $('user-password').value = '';
   $('user-password').required = !user;
   fillRoleSelect($('user-role'), user?.role_id);
-  $('user-telecaller').value = user?.telecaller_name || '';
+  syncTelecallerField('user-role', 'user-telecaller-wrap', 'user-telecaller', user?.telecaller_name || '');
   $('user-notes').value = user?.notes || '';
   $('user-active').checked = user ? user.is_active : true;
   $('user-must-pw').checked = user ? !!user.must_change_password : true;
@@ -145,30 +214,39 @@ function openApprove(req){
   $('approve-display').value = req.full_name || '';
   $('approve-password').value = '';
   fillRoleSelect($('approve-role'), rolesCache.find(r => r.role_key === 'telecaller')?.id);
-  $('approve-telecaller').value = '';
+  syncTelecallerField('approve-role', 'approve-telecaller-wrap', 'approve-telecaller', '');
   $('approve-note').value = '';
   $('approve-message').textContent = '';
   $('approve-modal').classList.remove('hidden');
 }
 
 async function refreshRoles(){
-  await loadRolesCache();
   const mount = $('roles-panel');
-  mount.replaceChildren();
-  for (const role of rolesCache) {
-    const card = document.createElement('div');
-    card.className = 'role-card';
-    const perms = (role.permissions || []).slice(0, 8).join(', ') + ((role.permissions || []).length > 8 ? '…' : '');
-    card.innerHTML = `<div><strong>${escapeHtml(role.name)}</strong>
-      <p>Rank ${role.rank}${role.is_system ? ' · system' : ''}</p>
-      <p class="muted">${escapeHtml(perms || 'No permissions')}</p></div>`;
-    const edit = document.createElement('button');
-    edit.type = 'button';
-    edit.className = 'secondary-button';
-    edit.textContent = 'Edit';
-    edit.onclick = () => openRoleModal(role);
-    card.append(edit);
-    mount.append(card);
+  try {
+    await loadRolesCache();
+    mount.replaceChildren();
+    if (!rolesCache.length) {
+      mount.innerHTML = '<div class="empty-card">No roles yet.</div>';
+      return;
+    }
+    for (const role of rolesCache) {
+      const card = document.createElement('div');
+      card.className = 'role-card';
+      const perms = (role.permissions || []).slice(0, 8).join(', ') + ((role.permissions || []).length > 8 ? '…' : '');
+      card.innerHTML = `<div><strong>${escapeHtml(role.name)}</strong>
+        <p>Rank ${role.rank}${role.is_system ? ' · system' : ''}</p>
+        <p class="muted">${escapeHtml(perms || 'No permissions')}</p></div>`;
+      const edit = document.createElement('button');
+      edit.type = 'button';
+      edit.className = 'secondary-button';
+      edit.textContent = 'Edit';
+      edit.onclick = () => openRoleModal(role);
+      card.append(edit);
+      mount.append(card);
+    }
+  } catch (err) {
+    toast(err.message || 'Could not load roles');
+    mount.innerHTML = `<div class="empty-card">Could not load roles. ${escapeHtml(err.message || '')}</div>`;
   }
 }
 
@@ -262,6 +340,12 @@ $('user-cancel').onclick = closeUserModal;
 $('approve-cancel').onclick = () => $('approve-modal').classList.add('hidden');
 $('btn-new-role').onclick = () => openRoleModal(null);
 $('role-cancel').onclick = () => $('role-modal').classList.add('hidden');
+$('user-role').addEventListener('change', () => {
+  syncTelecallerField('user-role', 'user-telecaller-wrap', 'user-telecaller');
+});
+$('approve-role').addEventListener('change', () => {
+  syncTelecallerField('approve-role', 'approve-telecaller-wrap', 'approve-telecaller');
+});
 
 $('user-form').onsubmit = async (e) => {
   e.preventDefault();
@@ -270,7 +354,7 @@ $('user-form').onsubmit = async (e) => {
     username: $('user-username').value.trim(),
     display_name: $('user-display').value.trim(),
     role_id: Number($('user-role').value),
-    telecaller_name: $('user-telecaller').value.trim(),
+    telecaller_name: roleNeedsTelecaller($('user-role').value) ? $('user-telecaller').value.trim() : '',
     notes: $('user-notes').value.trim(),
     is_active: $('user-active').checked,
     must_change_password: $('user-must-pw').checked,
@@ -286,7 +370,7 @@ $('user-form').onsubmit = async (e) => {
     }
     closeUserModal();
     toast('User saved');
-    refreshUsers();
+    await refreshUsers();
   } catch (err) {
     $('user-form-message').textContent = err.message;
   }
@@ -299,7 +383,7 @@ $('user-delete').onclick = async () => {
     await AdminApi.deleteUser(id);
     closeUserModal();
     toast('User deleted');
-    refreshUsers();
+    await refreshUsers();
   } catch (err) {
     $('user-form-message').textContent = err.message;
   }
@@ -314,12 +398,12 @@ $('approve-form').onsubmit = async (e) => {
       display_name: $('approve-display').value.trim(),
       password: $('approve-password').value,
       role_id: Number($('approve-role').value),
-      telecaller_name: $('approve-telecaller').value.trim(),
+      telecaller_name: roleNeedsTelecaller($('approve-role').value) ? $('approve-telecaller').value.trim() : '',
       review_note: $('approve-note').value.trim(),
     });
     $('approve-modal').classList.add('hidden');
     toast('User created');
-    refreshUsers();
+    await refreshUsers();
     refreshNotifs();
   } catch (err) {
     $('approve-message').textContent = err.message;
@@ -340,7 +424,7 @@ $('role-form').onsubmit = async (e) => {
     else await AdminApi.createRole(body);
     $('role-modal').classList.add('hidden');
     toast('Role saved');
-    refreshRoles();
+    await refreshRoles();
   } catch (err) {
     $('role-form-message').textContent = err.message;
   }
@@ -353,7 +437,7 @@ $('role-delete').onclick = async () => {
     await AdminApi.deleteRole(id);
     $('role-modal').classList.add('hidden');
     toast('Role deleted');
-    refreshRoles();
+    await refreshRoles();
   } catch (err) {
     $('role-form-message').textContent = err.message;
   }
@@ -379,7 +463,11 @@ $('notif-mark-all').onclick = async () => {
     if (!hasPermission(btn.dataset.perm)) btn.classList.add('hidden');
   });
 
-  await loadRolesCache();
+  try {
+    await Promise.all([loadRolesCache(), loadTelecallerNames()]);
+  } catch (err) {
+    toast(err.message || 'Could not load admin data');
+  }
   const first = [...document.querySelectorAll('.nav-item:not(.hidden)')][0];
   showView(first?.dataset.view || 'users');
   refreshNotifs();

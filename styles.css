@@ -193,16 +193,35 @@ body.auth-body.home-mode{display:block;padding:0;place-items:unset}
 .published-card{display:grid;gap:4px;text-align:left;padding:16px 18px;background:var(--panel);border:1px solid var(--line);border-radius:12px;cursor:pointer;font:inherit;color:inherit}
 .published-card:hover{border-color:#9bb7a8}
 .published-card .muted,.muted{color:var(--muted);font-size:12px}
+.published-manage{display:grid;gap:10px;margin:16px 0 8px}
+.published-manage-row{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;padding:12px 14px;background:var(--panel);border:1px solid var(--line);border-radius:10px}
+.published-manage-row strong{font-size:14px}
+.published-dash-actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
 .upload-telecaller-list{display:grid;gap:8px;max-height:240px;overflow:auto;margin:12px 0}
 .upload-dash-card{max-width:480px}
 
-/* —— Right Filters rail —— */
-body .dashboard-with-filters{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:0;align-items:start}
+/* —— Right Filters rail (fixed to viewport edge) —— */
+body .dashboard-with-filters{display:block;min-width:0}
 body .dashboard-body{display:grid;gap:22px;min-width:0}
-body .dashboard-filters-rail{position:sticky;top:12px;display:flex;align-items:stretch;justify-self:end}
-body .filters-tab-toggle{writing-mode:vertical-rl;transform:rotate(180deg);border:1px solid var(--line);border-right:0;background:var(--green);color:#fff;padding:14px 8px;border-radius:0 10px 10px 0;cursor:pointer;font-weight:700;letter-spacing:.08em;font-size:12px}
-body .dashboard-filters-panel{width:240px;background:#f7faf8;border:1px solid var(--line);border-radius:12px 0 0 12px;padding:14px;max-height:calc(100vh - 40px);overflow:auto}
+body .dashboard-filters-rail{
+  position:fixed;right:0;top:98px;bottom:0;z-index:30;
+  display:flex;align-items:stretch;pointer-events:none
+}
+body .dashboard-filters-rail > *{pointer-events:auto}
+body .filters-tab-toggle{
+  writing-mode:vertical-rl;transform:rotate(180deg);
+  border:1px solid var(--line);border-right:0;background:var(--green);color:#fff;
+  padding:14px 8px;border-radius:0 10px 10px 0;cursor:pointer;font-weight:700;
+  letter-spacing:.08em;font-size:12px;align-self:flex-start;margin-top:24px;flex-shrink:0
+}
+body .dashboard-filters-panel{
+  width:240px;background:#f7faf8;border:1px solid var(--line);border-right:0;
+  border-radius:12px 0 0 12px;padding:14px;height:100%;overflow:auto;box-shadow:var(--shadow)
+}
 body .dashboard-filters-rail.is-collapsed .dashboard-filters-panel{display:none}
+.view:not(.active) .dashboard-filters-rail{display:none!important}
+body.dashboard-filters-open .shell main,
+body.dashboard-filters-open .view.active{padding-right:calc(240px + 36px)}
 body .dashboard-filters{display:grid;gap:12px;padding:0;background:transparent;border:0}
 body .dashboard-filters h3{margin:0 0 4px;font-size:14px}
 body .dashboard-filter select[multiple]{min-height:72px}
@@ -234,10 +253,18 @@ body .dashboard-filter select[multiple]{min-height:72px}
 .notif-item.unread{background:#f7fbf8}
 .notif-item span{font-size:12px;color:var(--muted)}
 @media(max-width:850px){
-  body .dashboard-with-filters{grid-template-columns:1fr}
-  body .dashboard-filters-rail{position:relative;top:0;justify-self:stretch}
-  body .filters-tab-toggle{writing-mode:horizontal-tb;transform:none;border-radius:10px 10px 0 0;border:1px solid var(--line);border-bottom:0;width:100%}
-  body .dashboard-filters-panel{width:100%;border-radius:0 0 12px 12px;max-height:none}
+  body .dashboard-with-filters{display:block}
+  body .dashboard-filters-rail{
+    position:fixed;left:0;right:0;top:auto;bottom:0;z-index:30;
+    flex-direction:column-reverse;align-items:stretch;max-height:70vh
+  }
+  body .filters-tab-toggle{
+    writing-mode:horizontal-tb;transform:none;border-radius:10px 10px 0 0;
+    border:1px solid var(--line);border-bottom:0;width:100%;margin:0;align-self:stretch
+  }
+  body .dashboard-filters-panel{width:100%;border-radius:0;border-right:1px solid var(--line);max-height:none;height:auto}
+  body.dashboard-filters-open .shell main,
+  body.dashboard-filters-open .view.active{padding-right:20px;padding-bottom:48px}
   .review-precounts{grid-template-columns:1fr}
   .home-topbar{padding:16px 18px;flex-wrap:wrap;gap:12px}
 }
