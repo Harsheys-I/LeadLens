@@ -9,8 +9,11 @@ $configExample = __DIR__ . '/../config.example.php';
 
 if (is_file($configLocal)) {
   $GLOBALS['LL_CONFIG'] = require $configLocal;
+  $GLOBALS['LL_CONFIG_SOURCE'] = 'local';
 } elseif (is_file($configExample)) {
+  // Fallback only so missing-local is detectable; placeholders must not be used live.
   $GLOBALS['LL_CONFIG'] = require $configExample;
+  $GLOBALS['LL_CONFIG_SOURCE'] = 'example';
 } else {
   http_response_code(503);
   header('Content-Type: application/json; charset=utf-8');
