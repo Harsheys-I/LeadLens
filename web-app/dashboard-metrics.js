@@ -3,7 +3,7 @@
  * Reuses mapResultsToRawDataRows for severity / overdue / error labels.
  */
 
-import {mapResultsToRawDataRows} from "./dashboard-export.js?v=3.6.0";
+import {mapResultsToRawDataRows} from "./dashboard-export.js?v=3.6.1";
 
 const MONTHS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
 
@@ -84,6 +84,18 @@ function seriesFromMap(map, {sortBy = "label"} = {}){
   return {labels: entries.map(([k]) => k), values: entries.map(([, v]) => v)};
 }
 
+const CQ_BUCKETS = ["0-2", "3-4", "5-6", "7-8", "9-10"];
+
+function commentQualityBucket(score){
+  const n = Number(score);
+  if(!Number.isFinite(n)) return null;
+  if(n <= 2) return "0-2";
+  if(n <= 4) return "3-4";
+  if(n <= 6) return "5-6";
+  if(n <= 8) return "7-8";
+  return "9-10";
+}
+
 /**
  * @param {object[]} results LeadLens audit result rows
  * @param {{telecaller?:string,project?:string,dateFrom?:string|Date,dateTo?:string|Date,severity?:string,errorType?:string}} [filters]
@@ -158,10 +170,13 @@ export function buildDashboardModel(results, filters = {}, options = {}){
   const errorTypeCounts = new Map();
   const projectErrorCounts = new Map();
   const severityCounts = new Map([["Critical", 0], ["Medium", 0]]);
+  const commentQualityCounts = new Map(CQ_BUCKETS.map(label => [label, 0]));
   for(const row of rows){
     if(row.severity === "Critical" || row.severity === "Medium"){
       countMapInc(severityCounts, row.severity);
     }
+    const cqBucket = commentQualityBucket(row.commentQuality);
+    if(cqBucket) countMapInc(commentQualityCounts, cqBucket);
     if(row.errorFlag){
       countMapInc(projectErrorCounts, row.project || "(No project)");
       const labels = row.errorLabels?.length ? row.errorLabels : (row.errorType && row.errorType !== "None" ? [row.errorType] : []);
@@ -183,6 +198,10 @@ export function buildDashboardModel(results, filters = {}, options = {}){
     severityDistribution: {
       labels: ["Critical", "Medium"],
       values: [severityCounts.get("Critical") || 0, severityCounts.get("Medium") || 0]
+    },
+    commentQualityDistribution: {
+      labels: CQ_BUCKETS.slice(),
+      values: CQ_BUCKETS.map(label => commentQualityCounts.get(label) || 0)
     }
   };
 

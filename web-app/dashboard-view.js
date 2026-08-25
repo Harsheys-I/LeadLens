@@ -2,7 +2,7 @@
  * In-app TeleCaller Review dashboard (KPIs, scorecard, Chart.js charts, error table).
  */
 
-import {buildDashboardModel} from "./dashboard-metrics.js?v=3.6.0";
+import {buildDashboardModel} from "./dashboard-metrics.js?v=3.6.1";
 
 const CHART_COLORS = {
   green2: "#1f5d45",
@@ -213,6 +213,9 @@ function renderCharts(charts){
     }, CHART_COLORS.red],
     ["severity", "Severity Distribution", "doughnut", charts.severityDistribution, {
       plugins: {legend: {display: true, position: "bottom", labels: {color: CHART_COLORS.ink, boxWidth: 12}}}
+    }],
+    ["commentQuality", "Comment Quality Score", "pie", charts.commentQualityDistribution, {
+      plugins: {legend: {display: true, position: "bottom", labels: {color: CHART_COLORS.ink, boxWidth: 12}}}
     }]
   ];
 
@@ -228,8 +231,8 @@ function renderCharts(charts){
 
     const labels = series?.labels || [];
     const values = series?.values || [];
-    const isDoughnut = type === "doughnut";
-    const backgroundColor = isDoughnut
+    const isSegmented = type === "doughnut" || type === "pie";
+    const backgroundColor = isSegmented
       ? (id === "severity"
         ? [CHART_COLORS.red, CHART_COLORS.amber]
         : labels.map((_, i) => CHART_COLORS.palette[i % CHART_COLORS.palette.length]))
@@ -243,7 +246,7 @@ function renderCharts(charts){
           data: values,
           backgroundColor,
           borderWidth: 0,
-          borderRadius: isDoughnut ? 0 : 4,
+          borderRadius: isSegmented ? 0 : 4,
           maxBarThickness: 42
         }]
       },

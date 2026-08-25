@@ -7,11 +7,11 @@
   <meta name="description" content="Private, browser-based AI telecalling audit engine">
   <title>LeadLens Audit</title>
   <link rel="manifest" href="manifest.webmanifest">
-  <link rel="stylesheet" href="styles.css?v=3.6.0">
+  <link rel="stylesheet" href="styles.css?v=3.6.1">
   <script defer src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
-  <script type="module" src="app.js?v=3.6.0"></script>
+  <script type="module" src="app.js?v=3.6.1"></script>
 </head>
 <body>
   <div id="update-banner" class="update-banner hidden" role="status">
@@ -20,51 +20,24 @@
   </div>
   <div class="shell">
     <aside class="sidebar">
-      <a class="brand" href="#new" aria-label="LeadLens home"><span class="brand-mark">L</span><span>LeadLens</span></a>
+      <a class="brand" href="#review" aria-label="LeadLens home"><span class="brand-mark">L</span><span>LeadLens</span></a>
       <nav aria-label="Primary navigation">
-        <button class="nav-item active" data-view="new"><span>＋</span>New audit</button>
-        <button class="nav-item" data-view="review"><span>◎</span>TelleCaller Review</button>
+        <button class="nav-item active" data-view="review"><span>◎</span>TelleCaller Review</button>
         <button class="nav-item" data-view="console"><span>⌁</span>Run console</button>
         <button class="nav-item" data-view="history"><span>◷</span>History</button>
         <button class="nav-item" data-view="settings"><span>⚙</span>Settings</button>
       </nav>
-      <div class="privacy-note"><strong id="sidebar-version">v3.6.0</strong><span id="sidebar-notes">In-app TeleCaller Review dashboard (Chart.js); optional audit Excel download.</span></div>
+      <div class="privacy-note"><strong id="sidebar-version">v3.6.1</strong><span id="sidebar-notes">In-app TeleCaller Review dashboard (Chart.js); optional audit Excel download.</span></div>
     </aside>
 
     <main>
       <header class="topbar">
         <button id="mobile-menu" class="icon-button" aria-label="Toggle navigation">☰</button>
-        <div><p class="eyebrow">AI TELECALLING QA</p><h1 id="page-title">New audit</h1></div>
+        <div><p class="eyebrow">AI TELECALLING QA</p><h1 id="page-title">TelleCaller Review</h1></div>
         <div id="key-state" class="key-state">API key not set</div>
       </header>
 
-      <section id="view-new" class="view active">
-        <div class="intro"><h2>Turn follow-up history into decisions.</h2><p>Upload one or more Excel exports. LeadLens runs each file as a separate audit, checks compliance, audits with AI, and creates dashboard-ready workbooks.</p></div>
-        <div id="drop-zone" class="drop-zone" role="button" tabindex="0" aria-label="Upload Excel files">
-          <input id="file-input" type="file" accept=".xlsx,.xls,.xlsm" multiple hidden>
-          <div class="upload-icon">⇧</div><h3>Drop Excel files here</h3><p>or click to browse · one or many · XLSX, XLS or XLSM · files are audited separately</p>
-        </div>
-        <div id="file-list" class="file-list hidden"></div>
-        <div id="validation" class="validation hidden" role="status"></div>
-        <div class="action-row"><button id="start-audit" class="primary-button" disabled>Start audit <span>→</span></button></div>
-
-        <div id="audit-run-panel" class="review-run-panel hidden">
-          <div class="section-head">
-            <div><h2>Live review</h2><p>Progress stays here — open Run console only if you need full logs.</p></div>
-            <button id="audit-open-console" type="button" class="text-button">Open Run console</button>
-          </div>
-          <div id="audit-aggregate" class="review-aggregate hidden"></div>
-          <div id="audit-cards" class="review-cards"></div>
-          <div id="audit-download-panel" class="review-download-panel hidden">
-            <div class="card-title"><h2>Downloads</h2><p>Download the audited Excel when a file finishes.</p></div>
-            <div class="inline-actions review-download-actions">
-              <button id="download-audit-excel" type="button" class="primary-button" disabled>Download audit Excel</button>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <section id="view-review" class="view">
+      <section id="view-review" class="view active">
         <div class="intro"><h2>Review every TeleCaller.</h2><p><strong>Excel RAW</strong> detects TeleCallers, audits the whole file, then opens an in-app dashboard. <strong>Excel Audit</strong> skips AI — upload an already-audited workbook, split by TeleCaller, and review the in-app dashboard.</p></div>
         <div class="format-toggle" role="group" aria-label="Upload format">
           <button type="button" class="format-option active" data-review-format="raw">Excel RAW</button>
