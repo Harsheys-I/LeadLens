@@ -106,6 +106,10 @@ function ll_settings_openai_key(): void
 
   if ($method === 'PUT' || $method === 'POST') {
     $body = ll_read_json_body();
+    if (!empty($body['clear'])) {
+      ll_setting_delete('openai_api_key_encrypted');
+      ll_ok(['configured' => false, 'message' => 'Server key cleared']);
+    }
     $key = trim((string) ($body['api_key'] ?? $body['key'] ?? ''));
     if ($key === '') {
       ll_error('api_key is required');

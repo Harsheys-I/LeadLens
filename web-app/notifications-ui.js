@@ -43,8 +43,34 @@ function formatWhen(iso){
   }
 }
 
+function normalizedPath(){
+  return location.pathname.replace(/\/index\.html$/i, '/');
+}
+
+function isHomeShell(){
+  const path = normalizedPath();
+  return path === '/' || path === '';
+}
+
+function isAdminShell(){
+  return /\/admin\/?$/i.test(normalizedPath());
+}
+
+function isTeleCallerAuditShell(){
+  return /\/TeleCallerAudit\/?$/i.test(normalizedPath());
+}
+
+function openDashboardFromNotification(opts){
+  if (typeof opts.onDashboardUpdate === 'function') {
+    opts.onDashboardUpdate();
+    return;
+  }
+  if (isTeleCallerAuditShell()) return;
+  location.href = '/TeleCallerAudit/#published';
+}
+
 /**
- * @param {{onOpenAccessRequests?: () => void, variant?: 'sidebar'|'chrome'}} opts
+ * @param {{onOpenAccessRequests?: () => void, onDashboardUpdate?: () => void, variant?: 'sidebar'|'chrome'}} opts
  */
 export function mountNotifications(opts = {}){
   const bell = document.getElementById('notif-bell');
@@ -64,6 +90,7 @@ export function mountNotifications(opts = {}){
   if (opts.variant === 'chrome') bell.classList.add('notif-bell-chrome');
 
   let timer = null;
+  const ac = new AbortController();
 
   async function refresh(){
     try {
@@ -105,11 +132,10 @@ export function mountNotifications(opts = {}){
           drawer.classList.add('hidden');
           if (n.type === 'access_request' && typeof opts.onOpenAccessRequests === 'function') {
             opts.onOpenAccessRequests();
+          } else if (n.type === 'access_request' && (isHomeShell() || isAdminShell())) {
+            location.href = '/admin/';
           } else if (n.type === 'dashboard_update') {
-            // Prefer TeleCaller Audit dashboard when available from home.
-            if (location.pathname === '/' || location.pathname === '') {
-              location.href = '/TeleCallerAudit/#published';
-            }
+            openDashboardFromNotification(opts);
           }
           refresh();
         };
@@ -132,15 +158,15 @@ export function mountNotifications(opts = {}){
     else closeDrawer();
   }
 
-  bell.addEventListener('click', toggleDrawer);
-  closeBtn?.addEventListener('click', closeDrawer);
+  bell.addEventListener('click', toggleDrawer, {signal: ac.signal});
+  closeBtn?.addEventListener('click', closeDrawer, {signal: ac.signal});
   markAll?.addEventListener('click', async () => {
     try { await NotifApi.markAllRead(); } catch { /* ignore */ }
     refresh();
-  });
+  }, {signal: ac.signal});
   drawer.addEventListener('click', (e) => {
     if (e.target === drawer) closeDrawer();
-  });
+  }, {signal: ac.signal});
 
   refresh();
   timer = setInterval(refresh, 60_000);
@@ -149,6 +175,7 @@ export function mountNotifications(opts = {}){
     refresh,
     destroy(){
       if (timer) clearInterval(timer);
+      ac.abort();
     }
   };
 }

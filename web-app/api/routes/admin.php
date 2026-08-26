@@ -233,7 +233,7 @@ function ll_assert_role_assignable(array $actor, int $roleId): void
   if (!$role) {
     ll_error('Role not found');
   }
-  if (($role['role_key'] ?? '') === 'super' && empty($actor['is_super'])) {
+  if (($role['role_key'] ?? '') === 'super' || (int) ($role['rank'] ?? 0) >= 100) {
     ll_error('Cannot assign Super User role', 403);
   }
   if (!empty($actor['is_super'])) {
@@ -330,7 +330,7 @@ function ll_admin_roles(?int $id): void
     if ($name === '') {
       ll_error('Role name is required');
     }
-    if ($rank >= 100) {
+    if ($rank >= 100 || strtolower(preg_replace('/[^a-z0-9_]+/', '_', $name) ?: '') === 'super') {
       ll_error('Cannot elevate role to Super User', 403);
     }
     ll_assert_role_manageable($actor, $row, $rank);
