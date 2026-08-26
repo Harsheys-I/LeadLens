@@ -101,7 +101,16 @@ export function moduleTilesForUser(user = currentUser){
       href: '/TeleCallerAudit/',
       perm: 'module.telecaller_audit',
       soon: false,
-      desc: 'Bucket 1 audits, Run console, published dashboards'
+      desc: 'Bucket 1 audits, Run console, published dashboards',
+      icon: `<svg viewBox="0 0 96 96" fill="none" aria-hidden="true">
+        <rect x="18" y="22" width="40" height="54" rx="10" stroke="currentColor" stroke-width="3"/>
+        <path d="M28 34h20M28 44h16M28 54h12" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/>
+        <circle cx="64" cy="58" r="16" stroke="currentColor" stroke-width="3"/>
+        <path d="M58 58c0-3.3 2.7-6 6-6s6 2.7 6 6" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/>
+        <path d="M70 66v6c0 2.2-1.8 4-4 4h-4" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/>
+        <path d="M74 40c4 4 6 9 6 14" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" opacity=".55"/>
+        <path d="M80 34c6 6 9 13.5 9 22" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" opacity=".35"/>
+      </svg>`
     },
     {
       id: 'admin',
@@ -109,7 +118,16 @@ export function moduleTilesForUser(user = currentUser){
       href: '/admin/',
       perm: 'module.admin',
       soon: false,
-      desc: 'Users, roles, access requests'
+      desc: 'Users, roles, access requests',
+      icon: `<svg viewBox="0 0 96 96" fill="none" aria-hidden="true">
+        <circle cx="36" cy="30" r="12" stroke="currentColor" stroke-width="3"/>
+        <path d="M16 72c2.5-14 11-20 20-20s17.5 6 20 20" stroke="currentColor" stroke-width="3" stroke-linecap="round"/>
+        <circle cx="66" cy="34" r="9" stroke="currentColor" stroke-width="2.8"/>
+        <path d="M54 70c1.6-9 7.2-13 12-13 3.2 0 6.4 1.6 8.8 4.4" stroke="currentColor" stroke-width="2.8" stroke-linecap="round"/>
+        <rect x="58" y="54" width="24" height="16" rx="4" stroke="currentColor" stroke-width="2.8"/>
+        <circle cx="70" cy="62" r="2.5" fill="currentColor"/>
+        <path d="M70 64.5V68" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/>
+      </svg>`
     },
   ];
   return tiles.filter(t => {

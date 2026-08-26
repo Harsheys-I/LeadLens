@@ -62,6 +62,8 @@ export const NotifApi = {
   list: () => api('notifications'),
   markRead: (id) => api(`notifications/read/${id}`, {method: 'POST', body: {}}),
   markAllRead: () => api('notifications/read-all', {method: 'POST', body: {}}),
+  clearAll: () => api('notifications/clear-all', {method: 'POST', body: {}}),
+  clearOne: (id) => api(`notifications/clear/${id}`, {method: 'POST', body: {}}),
 };
 
 export const DashboardApi = {
@@ -83,4 +85,13 @@ export const SettingsApi = {
   saveOpenaiKey: (api_key) => api('settings/openai-key', {method: 'POST', body: {api_key}}),
   // POST clear — Hostinger/shared hosts often block DELETE
   clearOpenaiKey: () => api('settings/openai-key', {method: 'POST', body: {clear: true}}),
+};
+
+export const JobsApi = {
+  list: () => api('jobs/list'),
+  get: (jobId) => api(`jobs/${encodeURIComponent(jobId)}`),
+  upsert: (job) => api('jobs/upsert', {method: 'POST', body: {job}}),
+  // POST — Hostinger/shared hosts often block DELETE
+  remove: (jobId) => api('jobs/delete', {method: 'POST', body: {job_id: jobId}}),
+  clear: () => api('jobs/clear', {method: 'POST', body: {}}),
 };

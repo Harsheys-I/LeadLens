@@ -1,5 +1,5 @@
 {
-  "version": "5.0.3",
+  "version": "5.0.5",
   "name": "LeadLens",
-  "notes": "Shared server API key · role escalation locks · replace-on-publish · Delete All · global notifications · topbar Account/Sign out."
+  "notes": "Dashboard panel switcher · error-cell hover full text · Shared History sync · notifications · Account."
 }

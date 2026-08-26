@@ -7,11 +7,11 @@
   <meta name="description" content="LeadLens TeleCaller Audit">
   <title>LeadLens · TeleCaller Audit</title>
   <link rel="manifest" href="../manifest.webmanifest">
-  <link rel="stylesheet" href="../styles.css?v=5.0.3">
+  <link rel="stylesheet" href="../styles.css?v=5.0.5">
   <script defer src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
-  <script type="module" src="../app.js?v=5.0.3"></script>
+  <script type="module" src="../app.js?v=5.0.5"></script>
 </head>
 <body>
   <div id="update-banner" class="update-banner hidden" role="status">
@@ -28,7 +28,7 @@
         <button class="nav-item" data-view="history" data-perm="telecaller.history"><span>◷</span>History</button>
         <button class="nav-item" data-view="settings" data-perm="telecaller.settings"><span>⚙</span>Settings</button>
       </nav>
-      <div class="privacy-note"><strong id="sidebar-version">v5.0.3</strong><span id="sidebar-notes">Server API key share · role locks · replace-on-publish · notifications.</span></div>
+      <div class="privacy-note"><strong id="sidebar-version">v5.0.5</strong><span id="sidebar-notes">Dashboard panel switcher · error-cell hover full text · Shared History sync · notifications · Account.</span></div>
     </aside>
 
     <main>
@@ -114,7 +114,7 @@
       </section>
 
       <section id="view-history" class="view">
-        <div class="section-head"><div><h2>Audit history</h2><p>Private to your account on this browser.</p></div><button id="clear-history" class="danger-button">Clear history</button></div>
+        <div class="section-head"><div><h2>Audit history</h2><p>Shared team history — anyone with History access can view, download, or resume these runs.</p></div><button id="clear-history" class="danger-button">Clear history</button></div>
         <div id="history-list" class="history-list"><div class="empty-card">No audits yet.</div></div>
       </section>
 
@@ -266,6 +266,7 @@
       </div>
       <div class="notif-drawer-actions">
         <button type="button" id="notif-mark-all" class="notif-action-btn">Mark all read</button>
+        <button type="button" id="notif-clear-all" class="notif-action-btn">Clear all</button>
         <button type="button" id="notif-close" class="notif-close-btn" aria-label="Close">×</button>
       </div>
     </div>

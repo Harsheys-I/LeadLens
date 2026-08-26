@@ -2,7 +2,15 @@
  * In-app TeleCaller Review dashboard (KPIs, scorecard, Chart.js charts, error table).
  */
 
-import {buildDashboardModel} from "./dashboard-metrics.js?v=5.0.3";
+import {buildDashboardModel} from "./dashboard-metrics.js?v=5.0.5";
+
+/** Panel switcher labels (presentation) → internal section titles stay as-built. */
+const DASHBOARD_PANELS = [
+  {id: "summary", label: "Summary"},
+  {id: "performance", label: "Performance"},
+  {id: "graphs", label: "Graphs"},
+  {id: "errors", label: "Detailed Error Report"}
+];
 
 const CHART_COLORS = {
   green2: "#1f5d45",
@@ -324,6 +332,95 @@ function renderCharts(charts){
   return mount;
 }
 
+function clipCell(className, text){
+  const td = el("td", className, text);
+  const full = String(text || "");
+  if(full){
+    td.dataset.fullText = full;
+    td.tabIndex = 0;
+  }
+  return td;
+}
+
+function ensureClipPopover(){
+  let tip = document.getElementById("dashboard-clip-popover");
+  if(tip) return tip;
+  tip = el("div", "dashboard-clip-popover");
+  tip.id = "dashboard-clip-popover";
+  tip.setAttribute("role", "tooltip");
+  tip.hidden = true;
+  document.body.append(tip);
+  return tip;
+}
+
+function hideClipPopover(){
+  const tip = document.getElementById("dashboard-clip-popover");
+  if(!tip) return;
+  tip.hidden = true;
+  tip.textContent = "";
+  tip.classList.remove("is-visible");
+}
+
+function showClipPopover(cell){
+  const full = cell?.dataset?.fullText || cell?.textContent || "";
+  if(!full || !cell) return;
+  // Only pop when the cell is actually truncated (or long enough to matter).
+  if(cell.scrollWidth <= cell.clientWidth + 1) return;
+
+  const tip = ensureClipPopover();
+  tip.textContent = full;
+  tip.hidden = false;
+  tip.classList.add("is-visible");
+
+  const rect = cell.getBoundingClientRect();
+  const tipRect = tip.getBoundingClientRect();
+  const pad = 10;
+  let left = rect.left;
+  let top = rect.top - tipRect.height - 8;
+  if(top < pad) top = rect.bottom + 8;
+  if(left + tipRect.width > window.innerWidth - pad) left = window.innerWidth - tipRect.width - pad;
+  if(left < pad) left = pad;
+  tip.style.left = `${Math.round(left + window.scrollX)}px`;
+  tip.style.top = `${Math.round(top + window.scrollY)}px`;
+}
+
+function wireClipHovers(root){
+  let active = null;
+  const show = (cell) => {
+    if(active === cell) return;
+    active = cell;
+    showClipPopover(cell);
+  };
+  const hide = () => {
+    active = null;
+    hideClipPopover();
+  };
+  root.addEventListener("pointerover", (e) => {
+    const cell = e.target.closest?.(".dashboard-clip[data-full-text]");
+    if(!cell || !root.contains(cell)) return;
+    show(cell);
+  });
+  root.addEventListener("pointerout", (e) => {
+    const cell = e.target.closest?.(".dashboard-clip[data-full-text]");
+    if(!cell || !root.contains(cell)) return;
+    const next = e.relatedTarget;
+    if(next && cell.contains(next)) return;
+    if(active === cell) hide();
+  });
+  root.addEventListener("focusin", (e) => {
+    const cell = e.target.closest?.(".dashboard-clip[data-full-text]");
+    if(cell && root.contains(cell)) show(cell);
+  });
+  root.addEventListener("focusout", (e) => {
+    const cell = e.target.closest?.(".dashboard-clip[data-full-text]");
+    if(!cell) return;
+    const next = e.relatedTarget;
+    if(next && cell.contains(next)) return;
+    if(active === cell) hide();
+  });
+  root.addEventListener("scroll", hide, true);
+}
+
 function renderErrorDetails(rows){
   const wrap = el("div", "dashboard-table-wrap dashboard-errors-wrap");
   const table = el("table", "dashboard-table dashboard-errors");
@@ -343,30 +440,95 @@ function renderErrorDetails(rows){
   }else{
     for(const row of rows){
       const tr = document.createElement("tr");
-      const sevClass = `dashboard-sev dashboard-sev-${String(row.severity || "").toLowerCase()}`;
+      const sevClass = `dashboard-clip dashboard-sev dashboard-sev-${String(row.severity || "").toLowerCase()}`;
       tr.append(
         el("td", null, row.project || ""),
         el("td", null, row.mobile || ""),
         el("td", null, row.telecaller || ""),
         el("td", null, row.errorType || ""),
-        el("td", "dashboard-clip", row.details || ""),
-        el("td", "dashboard-clip", row.action || ""),
-        el("td", sevClass, row.severity || "")
+        clipCell("dashboard-clip", row.details || ""),
+        clipCell("dashboard-clip", row.action || ""),
+        clipCell(sevClass, row.severity || "")
       );
       tbody.append(tr);
     }
   }
   table.append(thead, tbody);
   wrap.append(table);
+  wireClipHovers(wrap);
   return wrap;
 }
 
-function section(title, noteText, child){
+function section(title, noteText, child, panelId){
   const node = el("section", "dashboard-section");
+  if(panelId) node.dataset.panel = panelId;
   node.append(el("h2", null, title));
   if(noteText != null) node.append(el("p", "dashboard-section-note", noteText));
   node.append(child);
   return node;
+}
+
+function buildPanelSwitcher(activeId, onChange){
+  const bar = el("div", "dashboard-panel-switcher");
+  const label = el("label", "dashboard-panel-switcher-label");
+  label.append(el("span", null, "Panel"));
+  const select = document.createElement("select");
+  select.className = "dashboard-panel-select";
+  select.setAttribute("aria-label", "Dashboard panel");
+  for(const panel of DASHBOARD_PANELS){
+    const opt = document.createElement("option");
+    opt.value = panel.id;
+    opt.textContent = panel.label;
+    if(panel.id === activeId) opt.selected = true;
+    select.append(opt);
+  }
+  label.append(select);
+  bar.append(label);
+
+  // Compact segmented control for wider viewports; select remains the source of truth.
+  const segs = el("div", "dashboard-panel-segments");
+  segs.setAttribute("role", "tablist");
+  segs.setAttribute("aria-label", "Dashboard panels");
+  for(const panel of DASHBOARD_PANELS){
+    const btn = el("button", "dashboard-panel-seg", panel.label);
+    btn.type = "button";
+    btn.dataset.panel = panel.id;
+    btn.setAttribute("role", "tab");
+    btn.setAttribute("aria-selected", panel.id === activeId ? "true" : "false");
+    if(panel.id === activeId) btn.classList.add("is-active");
+    btn.addEventListener("click", () => {
+      select.value = panel.id;
+      onChange(panel.id);
+    });
+    segs.append(btn);
+  }
+  bar.append(segs);
+
+  select.addEventListener("change", () => onChange(select.value));
+  return {bar, select, segs};
+}
+
+function applyActivePanel(body, activeId){
+  const id = DASHBOARD_PANELS.some(p => p.id === activeId) ? activeId : "summary";
+  for(const sectionNode of body.querySelectorAll(".dashboard-section[data-panel]")){
+    const on = sectionNode.dataset.panel === id;
+    sectionNode.classList.toggle("is-panel-hidden", !on);
+    sectionNode.hidden = !on;
+  }
+  const select = body.querySelector(".dashboard-panel-select");
+  if(select && select.value !== id) select.value = id;
+  for(const btn of body.querySelectorAll(".dashboard-panel-seg")){
+    const on = btn.dataset.panel === id;
+    btn.classList.toggle("is-active", on);
+    btn.setAttribute("aria-selected", on ? "true" : "false");
+  }
+  if(id === "graphs"){
+    requestAnimationFrame(() => {
+      resizeCharts();
+      requestAnimationFrame(resizeCharts);
+    });
+  }
+  return id;
 }
 
 /**
@@ -382,6 +544,7 @@ export function renderReviewDashboard(container, jobs, options = {}){
   const showComparativeKpis = options.showComparativeKpis !== false;
 
   destroyCharts();
+  hideClipPopover();
   container.replaceChildren();
   container.classList.add("dashboard-root", "dashboard-with-filters");
 
@@ -398,20 +561,28 @@ export function renderReviewDashboard(container, jobs, options = {}){
     severities: [],
     errorTypes: []
   };
+  let activePanel = "summary";
 
   const paint = () => {
     destroyCharts();
+    hideClipPopover();
     container.replaceChildren();
     container.classList.add("dashboard-root", "dashboard-with-filters");
 
     const model = buildDashboardModel(results, filters, {highSeverityErrors});
     const {aside, form, reset} = buildFilters(model.filterOptions, filters);
     const body = el("div", "dashboard-body");
-    body.append(section("Executive KPIs", null, renderKpis(model.kpis, {showComparativeKpis})));
-    body.append(section("TeleCaller Performance", null, renderScorecard(model.scorecard)));
-    body.append(section("Charts", null, renderCharts(model.charts)));
-    body.append(section("Detailed Error Report", `${num(model.errorDetails.length)} error row(s)`, renderErrorDetails(model.errorDetails)));
+
+    const {bar} = buildPanelSwitcher(activePanel, (id) => {
+      activePanel = applyActivePanel(body, id);
+    });
+    body.append(bar);
+    body.append(section("Executive KPIs", null, renderKpis(model.kpis, {showComparativeKpis}), "summary"));
+    body.append(section("TeleCaller Performance", null, renderScorecard(model.scorecard), "performance"));
+    body.append(section("Charts", null, renderCharts(model.charts), "graphs"));
+    body.append(section("Detailed Error Report", `${num(model.errorDetails.length)} error row(s)`, renderErrorDetails(model.errorDetails), "errors"));
     container.append(body, aside);
+    activePanel = applyActivePanel(body, activePanel);
 
     const apply = () => {
       filters = readFilters(form);
@@ -436,5 +607,6 @@ export function renderReviewDashboard(container, jobs, options = {}){
 
 export function destroyReviewDashboard(){
   destroyCharts();
+  hideClipPopover();
   document.body.classList.remove("dashboard-filters-open");
 }
