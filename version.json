@@ -1,5 +1,5 @@
 {
-  "version": "5.0.8",
+  "version": "5.0.9",
   "name": "LeadLens",
-  "notes": "Error report eye-icon lead details modal · Observation cross-checks Error Type vs Comments · Recommendation coaches fix-next-time + next actions."
+  "notes": "Audit rules v5.0.9: same-day Fresh Call TAT (9–5), date-only Follow-up Missed, Comment Quality Not Appropriate, RNR→Cold OK, TAT Error removed, severities refreshed."
 }
