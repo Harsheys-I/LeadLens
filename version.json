@@ -1,5 +1,5 @@
 {
-  "version": "5.0.2",
+  "version": "5.0.3",
   "name": "LeadLens",
-  "notes": "Admin permission fix · server-wide settings & encrypted OpenAI key · dashboard delete-all · chart overflow · access-request sync · account profile."
+  "notes": "Shared server API key · role escalation locks · replace-on-publish · Delete All · global notifications · topbar Account/Sign out."
 }

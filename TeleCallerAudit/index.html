@@ -7,11 +7,11 @@
   <meta name="description" content="LeadLens TeleCaller Audit">
   <title>LeadLens · TeleCaller Audit</title>
   <link rel="manifest" href="../manifest.webmanifest">
-  <link rel="stylesheet" href="../styles.css?v=5.0.2">
+  <link rel="stylesheet" href="../styles.css?v=5.0.3">
   <script defer src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
-  <script type="module" src="../app.js?v=5.0.2"></script>
+  <script type="module" src="../app.js?v=5.0.3"></script>
 </head>
 <body>
   <div id="update-banner" class="update-banner hidden" role="status">
@@ -28,20 +28,22 @@
         <button class="nav-item" data-view="history" data-perm="telecaller.history"><span>◷</span>History</button>
         <button class="nav-item" data-view="settings" data-perm="telecaller.settings"><span>⚙</span>Settings</button>
       </nav>
-      <div class="sidebar-user">
-        <span id="shell-user-label"></span>
-        <button type="button" id="shell-account" class="text-button sidebar-account">Account</button>
-        <a class="text-button sidebar-link" href="/">Home</a>
-        <button type="button" id="shell-logout" class="text-button">Sign out</button>
-      </div>
-      <div class="privacy-note"><strong id="sidebar-version">v5.0.2</strong><span id="sidebar-notes">Server settings · encrypted API key · admin permission fix · chart overflow.</span></div>
+      <div class="privacy-note"><strong id="sidebar-version">v5.0.3</strong><span id="sidebar-notes">Server API key share · role locks · replace-on-publish · notifications.</span></div>
     </aside>
 
     <main>
       <header class="topbar">
         <button id="mobile-menu" class="icon-button" aria-label="Toggle navigation">☰</button>
         <div><p class="eyebrow">TELECALLER AUDIT</p><h1 id="page-title">Bucket 1 lead audit</h1></div>
-        <div id="key-state" class="key-state">API key not set</div>
+        <div class="topbar-actions">
+          <div id="key-state" class="key-state">API key not set</div>
+          <span id="shell-user-label" class="topbar-user-label"></span>
+          <button type="button" id="notif-bell" class="notif-bell notif-bell-chrome" title="Notifications" aria-label="Notifications">
+            <span id="notif-count" class="notif-count hidden">0</span>
+          </button>
+          <button type="button" id="shell-account" class="secondary-button">Account</button>
+          <button type="button" id="shell-logout" class="secondary-button">Sign out</button>
+        </div>
       </header>
 
       <section id="view-review" class="view active">
@@ -97,10 +99,10 @@
 
       <section id="view-published" class="view">
         <div class="section-head">
-          <div><h2>Dashboard</h2><p>Merged published audit results for your TeleCaller (or all TeleCallers, if permitted).</p></div>
+          <div><h2>Dashboard</h2><p>Published audit results for your TeleCaller (or all TeleCallers, if permitted). New uploads replace the previous board for each TeleCaller.</p></div>
           <button id="refresh-published" type="button" class="secondary-button">Refresh</button>
         </div>
-        <div id="published-list" class="published-list"><div class="empty-card">Loading…</div></div>
+        <div id="published-list" class="published-list hidden" aria-live="polite"></div>
         <div id="published-dashboard-panel" class="review-dashboard-panel hidden">
           <div class="card-title">
             <h2 id="published-dash-title">Dashboard</h2>
@@ -133,9 +135,10 @@
           <div class="settings-sections">
             <form id="settings-form" class="settings-card">
               <div class="card-title"><h2>1 · OpenAI connection</h2><p>Super User saves the key encrypted on the server. Audits use the server proxy — Admins never need to paste a key.</p></div>
+              <p id="api-key-server-hint" class="muted form-message"></p>
               <label>API key<div class="input-row"><input id="api-key" type="password" autocomplete="off" placeholder="sk-…"><button id="toggle-key" type="button" class="secondary-button">Show</button></div></label>
               <label class="check-row"><input id="remember-key" type="checkbox"><span>Remember on this device <small>Optional local fallback. Prefer Save to server (Super User).</small></span></label>
-              <div class="inline-actions"><button id="save-key" type="button" class="primary-button">Save key</button><button id="forget-key" type="button" class="text-button">Forget key</button><span id="key-message" class="form-message"></span></div>
+              <div class="inline-actions"><button id="save-key" type="button" class="primary-button">Save to server</button><button id="forget-key" type="button" class="text-button">Clear server key</button><span id="key-message" class="form-message"></span></div>
             </form>
 
             <section class="settings-card">
@@ -204,12 +207,12 @@
     <div class="key-modal-card">
       <p class="eyebrow">GET STARTED</p>
       <h2 id="key-modal-title">Connect your OpenAI API key</h2>
-      <p class="key-modal-copy">Your key is stored only on this device and sent only to OpenAI when you run an audit.</p>
+      <p class="key-modal-copy">Save the key to the server (encrypted). Admin and other audit users use it via the server proxy.</p>
       <label>API key<div class="input-row"><input id="onboard-key" type="password" autocomplete="off" placeholder="sk-…"><button id="onboard-toggle" type="button" class="secondary-button">Show</button></div></label>
       <label class="check-row"><input id="onboard-remember" type="checkbox"><span>Remember on this device</span></label>
       <div id="onboard-message" class="form-message" role="status"></div>
       <div class="inline-actions">
-        <button id="onboard-save" type="button" class="primary-button">Validate &amp; save</button>
+        <button id="onboard-save" type="button" class="primary-button">Validate &amp; save to server</button>
         <button id="onboard-skip" type="button" class="text-button">I'll add it later</button>
       </div>
     </div>
@@ -248,6 +251,25 @@
         <button id="account-cancel" type="button" class="text-button">Cancel</button>
       </div>
     </div>
+  </div>
+
+  <div id="notif-drawer" class="notif-drawer hidden" aria-live="polite" role="dialog" aria-label="Notifications">
+    <div class="notif-drawer-head">
+      <div class="notif-drawer-title">
+        <span class="notif-drawer-mark" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M15 17h5l-1.4-1.4A2 2 0 0 1 18 14.2V11a6 6 0 1 0-12 0v3.2c0 .5-.2 1-.6 1.4L4 17h5"/><path d="M9.5 17a2.5 2.5 0 0 0 5 0"/></svg>
+        </span>
+        <div>
+          <strong>Notifications</strong>
+          <p class="notif-drawer-sub" id="notif-unread-label">Loading…</p>
+        </div>
+      </div>
+      <div class="notif-drawer-actions">
+        <button type="button" id="notif-mark-all" class="notif-action-btn">Mark all read</button>
+        <button type="button" id="notif-close" class="notif-close-btn" aria-label="Close">×</button>
+      </div>
+    </div>
+    <div id="notif-list" class="notif-list"></div>
   </div>
 </body>
 </html>

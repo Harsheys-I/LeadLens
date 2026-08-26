@@ -44,17 +44,10 @@ function ll_route_dashboards(string $action, ?int $id): void
       ll_error('dashboards array is required');
     }
     $pdo = ll_pdo();
-    $find = $pdo->prepare(
-      'SELECT id, payload, meta, title FROM published_dashboards WHERE telecaller_name = ? ORDER BY id ASC'
-    );
+    $del = $pdo->prepare('DELETE FROM published_dashboards WHERE telecaller_name = ?');
     $ins = $pdo->prepare(
       'INSERT INTO published_dashboards (telecaller_name, title, payload, meta, uploaded_by)
        VALUES (?, ?, ?, ?, ?)'
-    );
-    $upd = $pdo->prepare(
-      'UPDATE published_dashboards
-       SET title = ?, payload = ?, meta = ?, uploaded_by = ?, updated_at = UTC_TIMESTAMP()
-       WHERE id = ?'
     );
     $created = [];
     foreach ($items as $item) {
@@ -71,41 +64,24 @@ function ll_route_dashboards(string $action, ?int $id): void
         ll_error('Each dashboard needs a results array');
       }
 
-      $find->execute([$telecaller]);
-      $existingRows = $find->fetchAll();
+      // Replace (not merge): drop any prior board for this TeleCaller, then insert fresh.
+      $del->execute([$telecaller]);
 
-      $mergedResults = [];
-      $meta = [];
-      $keepId = null;
-      if ($existingRows) {
-        // Collapse any legacy duplicates, then append this upload.
-        foreach ($existingRows as $row) {
-          foreach (ll_dashboard_decode_results($row['payload']) as $result) {
-            $mergedResults[] = $result;
-          }
-          $meta = array_merge($meta, ll_dashboard_decode_meta($row['meta']));
-          $keepId = (int) $row['id'];
-        }
-      }
-      foreach ($incoming as $result) {
-        $mergedResults[] = $result;
-      }
-
-      $uploadMeta = [
+      $meta = [
         'source_file' => $item['source_file'] ?? null,
-        'lead_count' => count($mergedResults),
+        'lead_count' => count($incoming),
         'uploaded_at' => gmdate('c'),
         'uploaded_by_name' => $user['display_name'] ?: $user['username'],
-        'last_upload_count' => count($incoming),
+        'replaced' => true,
       ];
       if (isset($item['meta']) && is_array($item['meta'])) {
-        $uploadMeta = array_merge($uploadMeta, $item['meta']);
+        $meta = array_merge($meta, $item['meta']);
+        $meta['lead_count'] = count($incoming);
+        $meta['replaced'] = true;
       }
-      $meta = array_merge($meta, $uploadMeta);
-      $meta['lead_count'] = count($mergedResults);
 
       $payload = json_encode([
-        'results' => $mergedResults,
+        'results' => $incoming,
         'telecaller_name' => $telecaller,
       ], JSON_UNESCAPED_UNICODE);
       if ($payload === false) {
@@ -113,38 +89,22 @@ function ll_route_dashboards(string $action, ?int $id): void
       }
       $metaJson = json_encode($meta, JSON_UNESCAPED_UNICODE);
 
-      if ($keepId) {
-        $upd->execute([$title, $payload, $metaJson, (int) $user['id'], $keepId]);
-        $extraIds = [];
-        foreach ($existingRows as $row) {
-          $rid = (int) $row['id'];
-          if ($rid !== $keepId) {
-            $extraIds[] = $rid;
-          }
-        }
-        if ($extraIds) {
-          $placeholders = implode(',', array_fill(0, count($extraIds), '?'));
-          $pdo->prepare("DELETE FROM published_dashboards WHERE id IN ($placeholders)")->execute($extraIds);
-        }
-        $dashId = $keepId;
-        $merged = true;
-      } else {
-        $ins->execute([$telecaller, $title, $payload, $metaJson, (int) $user['id']]);
-        $dashId = (int) $pdo->lastInsertId();
-        $merged = false;
-      }
+      $ins->execute([$telecaller, $title, $payload, $metaJson, (int) $user['id']]);
+      $dashId = (int) $pdo->lastInsertId();
 
       $created[] = [
         'id' => $dashId,
         'telecaller_name' => $telecaller,
         'title' => $title,
-        'merged' => $merged,
-        'lead_count' => count($mergedResults),
+        'replaced' => true,
+        'merged' => false,
+        'lead_count' => count($incoming),
       ];
     }
     if (!$created) {
       ll_error('No valid dashboards to publish');
     }
+    ll_notify_dashboard_publish($created, $user);
     ll_ok(['published' => $created], 201);
   }
 
@@ -210,7 +170,12 @@ function ll_route_dashboards(string $action, ?int $id): void
       $rows = $pdo->query(
         'SELECT d.id, d.telecaller_name, d.title, d.payload, d.meta, d.uploaded_by, d.created_at, d.updated_at
          FROM published_dashboards d
-         ORDER BY d.telecaller_name ASC, d.id ASC'
+         INNER JOIN (
+           SELECT telecaller_name, MAX(id) AS max_id
+           FROM published_dashboards
+           GROUP BY telecaller_name
+         ) latest ON latest.max_id = d.id
+         ORDER BY d.telecaller_name ASC'
       )->fetchAll();
     } else {
       $name = $user['telecaller_name'] ?? '';
@@ -227,42 +192,26 @@ function ll_route_dashboards(string $action, ?int $id): void
         'SELECT d.id, d.telecaller_name, d.title, d.payload, d.meta, d.uploaded_by, d.created_at, d.updated_at
          FROM published_dashboards d
          WHERE d.telecaller_name = ?
-         ORDER BY d.id ASC'
+         ORDER BY d.id DESC
+         LIMIT 1'
       );
       $stmt->execute([$name]);
       $rows = $stmt->fetchAll();
     }
 
-    // Merge all rows (handles legacy multi-row publishes + upserted single rows).
+    // One board per TeleCaller (latest only — publish replaces, never merges history).
     $byName = [];
     foreach ($rows as $row) {
       $tc = (string) $row['telecaller_name'];
-      if (!isset($byName[$tc])) {
-        $byName[$tc] = [
-          'id' => (int) $row['id'],
-          'telecaller_name' => $tc,
-          'title' => $row['title'],
-          'results' => [],
-          'uploaded_by' => $row['uploaded_by'] !== null ? (int) $row['uploaded_by'] : null,
-          'created_at' => $row['created_at'],
-          'updated_at' => $row['updated_at'],
-        ];
-      }
-      foreach (ll_dashboard_decode_results($row['payload']) as $result) {
-        $byName[$tc]['results'][] = $result;
-      }
-      $byName[$tc]['id'] = (int) $row['id'];
-      if ($row['uploaded_by'] !== null) {
-        $byName[$tc]['uploaded_by'] = (int) $row['uploaded_by'];
-      }
-      if (trim((string) ($row['title'] ?? '')) !== '') {
-        $byName[$tc]['title'] = $row['title'];
-      }
-      $stamp = $row['updated_at'] ?: $row['created_at'];
-      $prev = $byName[$tc]['updated_at'] ?: $byName[$tc]['created_at'];
-      if ($stamp && (!$prev || strcmp((string) $stamp, (string) $prev) > 0)) {
-        $byName[$tc]['updated_at'] = $row['updated_at'];
-      }
+      $byName[$tc] = [
+        'id' => (int) $row['id'],
+        'telecaller_name' => $tc,
+        'title' => $row['title'],
+        'results' => ll_dashboard_decode_results($row['payload']),
+        'uploaded_by' => $row['uploaded_by'] !== null ? (int) $row['uploaded_by'] : null,
+        'created_at' => $row['created_at'],
+        'updated_at' => $row['updated_at'],
+      ];
     }
 
     $merged = [];
@@ -399,4 +348,97 @@ function ll_route_dashboards(string $action, ?int $id): void
   }
 
   ll_error('Not found', 404);
+}
+
+/**
+ * After publish/replace: notify matching TeleCaller users + view_all/Admin/Super.
+ */
+function ll_notify_dashboard_publish(array $created, array $actor): void
+{
+  if (!$created) {
+    return;
+  }
+  $names = [];
+  foreach ($created as $row) {
+    $n = trim((string) ($row['telecaller_name'] ?? ''));
+    if ($n !== '') {
+      $names[$n] = true;
+    }
+  }
+  $names = array_keys($names);
+  if (!$names) {
+    return;
+  }
+
+  $pdo = ll_pdo();
+  $ins = $pdo->prepare(
+    'INSERT INTO notifications (user_id, type, title, body, meta, is_read)
+     VALUES (?, \'dashboard_update\', ?, ?, ?, 0)'
+  );
+  $notified = [];
+
+  // TeleCaller-linked users whose name matches a published board.
+  $placeholders = implode(',', array_fill(0, count($names), '?'));
+  $stmt = $pdo->prepare(
+    "SELECT u.id, u.telecaller_name
+     FROM users u
+     WHERE u.is_active = 1
+       AND u.telecaller_name IS NOT NULL
+       AND u.telecaller_name <> ''
+       AND u.telecaller_name IN ($placeholders)"
+  );
+  $stmt->execute($names);
+  foreach ($stmt->fetchAll() as $row) {
+    $uid = (int) $row['id'];
+    if (isset($notified[$uid])) {
+      continue;
+    }
+    $tc = (string) $row['telecaller_name'];
+    $ins->execute([
+      $uid,
+      'Dashboard has been updated',
+      'Your dashboard for ' . $tc . ' was replaced with a new upload.',
+      json_encode(['telecaller_name' => $tc, 'kind' => 'owner'], JSON_UNESCAPED_UNICODE),
+    ]);
+    $notified[$uid] = true;
+  }
+
+  // Admins / Super / view_all — one summary notification each.
+  $count = count($names);
+  $summaryBody = $count === 1
+    ? ('Updated board: ' . $names[0])
+    : ('Updated ' . $count . ' TeleCaller boards: ' . implode(', ', array_slice($names, 0, 5)) . ($count > 5 ? '…' : ''));
+  $users = $pdo->query(
+    "SELECT u.id, u.role_id, r.permissions, r.role_key, r.rank AS role_rank
+     FROM users u
+     INNER JOIN roles r ON r.id = u.role_id
+     WHERE u.is_active = 1"
+  )->fetchAll();
+  foreach ($users as $row) {
+    $uid = (int) $row['id'];
+    if (isset($notified[$uid])) {
+      continue;
+    }
+    $public = [
+      'permissions' => ll_normalize_permissions($row['permissions']),
+      'role_key' => $row['role_key'],
+      'role_rank' => (int) $row['role_rank'],
+      'is_super' => (($row['role_key'] ?? '') === 'super') || ((int) ($row['role_rank'] ?? 0) >= 100),
+    ];
+    if (!ll_dashboard_can_view_all($public)) {
+      continue;
+    }
+    $ins->execute([
+      $uid,
+      'Dashboard has been updated',
+      $summaryBody,
+      json_encode([
+        'telecaller_names' => $names,
+        'count' => $count,
+        'kind' => 'viewer',
+        'uploaded_by' => (int) ($actor['id'] ?? 0),
+      ], JSON_UNESCAPED_UNICODE),
+    ]);
+    $notified[$uid] = true;
+  }
 }

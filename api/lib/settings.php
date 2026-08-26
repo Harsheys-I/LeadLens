@@ -52,8 +52,8 @@ function ll_setting_delete(string $key): void
 
 function ll_openai_key_configured(): bool
 {
-  $row = ll_setting_get('openai_api_key_encrypted');
-  return $row && trim((string) ($row['setting_value'] ?? '')) !== '';
+  $plain = ll_openai_key_plaintext();
+  return $plain !== null && $plain !== '';
 }
 
 function ll_openai_key_plaintext(): ?string
@@ -62,7 +62,11 @@ function ll_openai_key_plaintext(): ?string
   if (!$row || trim((string) ($row['setting_value'] ?? '')) === '') {
     return null;
   }
-  return ll_decrypt_secret((string) $row['setting_value']);
+  $plain = ll_decrypt_secret((string) $row['setting_value']);
+  if ($plain === null || trim($plain) === '') {
+    return null;
+  }
+  return $plain;
 }
 
 function ll_can_manage_server_settings(array $user): bool
@@ -70,9 +74,12 @@ function ll_can_manage_server_settings(array $user): bool
   return !empty($user['is_super']);
 }
 
+/** Anyone who can run TeleCaller Audit may use the server OpenAI proxy / key status. */
 function ll_can_use_openai_proxy(array $user): bool
 {
-  return ll_user_has_permission($user, 'telecaller.bucket1')
+  return !empty($user['is_super'])
+    || ll_user_has_permission($user, 'module.telecaller_audit')
+    || ll_user_has_permission($user, 'telecaller.bucket1')
     || ll_user_has_permission($user, 'telecaller.settings')
-    || !empty($user['is_super']);
+    || ll_user_has_permission($user, 'telecaller.run_console');
 }
