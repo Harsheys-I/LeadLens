@@ -1,5 +1,5 @@
 {
-  "version": "5.0.5",
+  "version": "5.0.7",
   "name": "LeadLens",
-  "notes": "Dashboard panel switcher · error-cell hover full text · Shared History sync · notifications · Account."
+  "notes": "Dashboard filter Select All / Select None · home module tiles · Shared History sync · notifications · Account."
 }

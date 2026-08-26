@@ -2,7 +2,7 @@
  * In-app TeleCaller Review dashboard (KPIs, scorecard, Chart.js charts, error table).
  */
 
-import {buildDashboardModel} from "./dashboard-metrics.js?v=5.0.5";
+import {buildDashboardModel} from "./dashboard-metrics.js?v=5.0.7";
 
 /** Panel switcher labels (presentation) → internal section titles stay as-built. */
 const DASHBOARD_PANELS = [
@@ -93,6 +93,23 @@ function fillMultiSelect(select, values, selected){
   }
 }
 
+function setMultiSelectAll(select, selected){
+  for(const opt of select.options) opt.selected = selected;
+  select.dispatchEvent(new Event("change", {bubbles: true}));
+}
+
+function buildFilterSelectActions(select){
+  const actions = el("span", "dashboard-filter-actions");
+  const selectAll = el("button", "dashboard-filter-action", "Select All");
+  selectAll.type = "button";
+  const selectNone = el("button", "dashboard-filter-action", "Select None");
+  selectNone.type = "button";
+  selectAll.addEventListener("click", () => setMultiSelectAll(select, true));
+  selectNone.addEventListener("click", () => setMultiSelectAll(select, false));
+  actions.append(selectAll, selectNone);
+  return actions;
+}
+
 function syncFiltersBodyPadding(aside){
   const open = aside && !aside.classList.contains("is-collapsed") && document.body.contains(aside);
   document.body.classList.toggle("dashboard-filters-open", Boolean(open));
@@ -125,14 +142,16 @@ function buildFilters(filterOptions, filters){
   ];
 
   for(const [name, label, options, selected] of fields){
-    const wrap = el("label", "dashboard-filter");
-    wrap.append(el("span", "dashboard-filter-label", label));
+    const wrap = el("div", "dashboard-filter");
+    const head = el("div", "dashboard-filter-head");
+    head.append(el("span", "dashboard-filter-label", label));
     const select = document.createElement("select");
     select.name = name;
     select.className = "dashboard-filter-select";
     select.size = Math.min(5, Math.max(3, (options || []).length || 3));
     fillMultiSelect(select, options || [], selected || []);
-    wrap.append(select);
+    head.append(buildFilterSelectActions(select));
+    wrap.append(head, select);
     form.append(wrap);
   }
 
