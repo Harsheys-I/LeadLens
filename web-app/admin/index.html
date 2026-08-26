@@ -5,8 +5,8 @@
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="theme-color" content="#12372a">
   <title>LeadLens · Admin</title>
-  <link rel="stylesheet" href="../styles.css?v=5.0.2">
-  <script type="module" src="admin.js?v=5.0.2"></script>
+  <link rel="stylesheet" href="../styles.css?v=5.0.3">
+  <script type="module" src="admin.js?v=5.0.3"></script>
 </head>
 <body>
   <div class="shell">
@@ -16,19 +16,6 @@
         <button class="nav-item active" data-view="users" data-perm="admin.users"><span>◎</span>User creation</button>
         <button class="nav-item" data-view="roles" data-perm="admin.roles"><span>⌁</span>Roles</button>
       </nav>
-      <div class="sidebar-user">
-        <span id="shell-user-label"></span>
-        <button type="button" id="notif-bell" class="notif-bell" title="Notifications" aria-label="Notifications">
-          <svg class="notif-bell-icon" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M15 17h5l-1.4-1.4A2 2 0 0 1 18 14.2V11a6 6 0 1 0-12 0v3.2c0 .5-.2 1-.6 1.4L4 17h5"/>
-            <path d="M9.5 17a2.5 2.5 0 0 0 5 0"/>
-          </svg>
-          <span id="notif-count" class="notif-count hidden">0</span>
-        </button>
-        <button type="button" id="shell-account" class="text-button sidebar-account">Account</button>
-        <a class="text-button sidebar-link" href="/">Home</a>
-        <button type="button" id="shell-logout" class="text-button">Sign out</button>
-      </div>
       <div class="privacy-note"><strong>Admin</strong><span>Users, roles, and access requests.</span></div>
     </aside>
 
@@ -36,6 +23,14 @@
       <header class="topbar">
         <button id="mobile-menu" class="icon-button" aria-label="Toggle navigation">☰</button>
         <div><p class="eyebrow">ADMIN</p><h1 id="page-title">User creation</h1></div>
+        <div class="topbar-actions">
+          <span id="shell-user-label" class="topbar-user-label"></span>
+          <button type="button" id="notif-bell" class="notif-bell notif-bell-chrome" title="Notifications" aria-label="Notifications">
+            <span id="notif-count" class="notif-count hidden">0</span>
+          </button>
+          <button type="button" id="shell-account" class="secondary-button">Account</button>
+          <button type="button" id="shell-logout" class="secondary-button">Sign out</button>
+        </div>
       </header>
 
       <section id="view-users" class="view active">
@@ -57,11 +52,21 @@
     </main>
   </div>
 
-  <div id="notif-drawer" class="notif-drawer hidden" aria-live="polite">
+  <div id="notif-drawer" class="notif-drawer hidden" aria-live="polite" role="dialog" aria-label="Notifications">
     <div class="notif-drawer-head">
-      <strong>Notifications</strong>
-      <button type="button" id="notif-mark-all" class="text-button">Mark all read</button>
-      <button type="button" id="notif-close" class="text-button">Close</button>
+      <div class="notif-drawer-title">
+        <span class="notif-drawer-mark" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M15 17h5l-1.4-1.4A2 2 0 0 1 18 14.2V11a6 6 0 1 0-12 0v3.2c0 .5-.2 1-.6 1.4L4 17h5"/><path d="M9.5 17a2.5 2.5 0 0 0 5 0"/></svg>
+        </span>
+        <div>
+          <strong>Notifications</strong>
+          <p class="notif-drawer-sub" id="notif-unread-label">Loading…</p>
+        </div>
+      </div>
+      <div class="notif-drawer-actions">
+        <button type="button" id="notif-mark-all" class="notif-action-btn">Mark all read</button>
+        <button type="button" id="notif-close" class="notif-close-btn" aria-label="Close">×</button>
+      </div>
     </div>
     <div id="notif-list" class="notif-list"></div>
   </div>

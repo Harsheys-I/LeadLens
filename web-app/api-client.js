@@ -79,6 +79,7 @@ export const SettingsApi = {
   saveAudit: (settings) => api('settings/audit', {method: 'PUT', body: {settings}}),
   openaiKeyStatus: () => api('settings/openai-key-status'),
   getOpenaiKey: () => api('settings/openai-key'),
-  saveOpenaiKey: (api_key) => api('settings/openai-key', {method: 'PUT', body: {api_key}}),
+  // POST — Hostinger/shared hosts often block PUT
+  saveOpenaiKey: (api_key) => api('settings/openai-key', {method: 'POST', body: {api_key}}),
   clearOpenaiKey: () => api('settings/openai-key', {method: 'DELETE'}),
 };

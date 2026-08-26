@@ -76,7 +76,7 @@ function ll_settings_audit(): void
 function ll_settings_openai_key_status(): void
 {
   $user = ll_require_user();
-  if (!ll_can_use_openai_proxy($user) && !ll_user_has_permission($user, 'module.telecaller_audit')) {
+  if (!ll_can_use_openai_proxy($user)) {
     ll_error('Forbidden', 403);
   }
   $configured = ll_openai_key_configured();

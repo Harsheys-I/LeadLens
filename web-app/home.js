@@ -1,5 +1,6 @@
-import {login, logout, loadSession, changePassword, updateProfile, moduleTilesForUser, hasSessionHint, getUser} from './auth.js?v=5.0.2';
-import {AuthApi} from './api-client.js?v=5.0.2';
+import {login, logout, loadSession, changePassword, updateProfile, moduleTilesForUser, hasSessionHint, getUser} from './auth.js?v=5.0.3';
+import {AuthApi} from './api-client.js?v=5.0.3';
+import {mountNotifications} from './notifications-ui.js?v=5.0.3';
 
 const $ = id => document.getElementById(id);
 const panelLogin = $('panel-login');
@@ -93,6 +94,7 @@ async function enterHome(user){
   $('home-user-label').textContent = `${user.display_name || user.username} · ${user.role_name}`;
   renderTiles(user);
   showPanel('home');
+  mountNotifications({variant: 'chrome'});
   if (user.must_change_password) openPasswordModal(user);
 
   const params = new URLSearchParams(location.search);

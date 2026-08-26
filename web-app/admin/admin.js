@@ -1,5 +1,6 @@
-import {requireAuth, logout, getUser, hasPermission, requirePermission, changePassword, updateProfile} from '../auth.js?v=5.0.2';
-import {AdminApi, NotifApi, DashboardApi} from '../api-client.js?v=5.0.2';
+import {requireAuth, logout, getUser, hasPermission, requirePermission, changePassword, updateProfile} from '../auth.js?v=5.0.3';
+import {AdminApi, DashboardApi} from '../api-client.js?v=5.0.3';
+import {mountNotifications} from '../notifications-ui.js?v=5.0.3';
 
 const $ = id => document.getElementById(id);
 const titles = {users: 'User creation', roles: 'Roles'};
@@ -7,6 +8,7 @@ let rolesCache = [];
 let catalog = [];
 let editingRole = null;
 let telecallerNames = [];
+let notifCtl = null;
 
 function toast(msg){
   const el = $('toast');
@@ -30,19 +32,59 @@ function actorRank(){
   return Number(user?.role_rank ?? 0);
 }
 
-function fillRoleSelect(select, selectedId){
+function fillRoleSelect(select, selectedId, {lockToSelected = false} = {}){
   select.replaceChildren();
   const maxRank = actorRank();
+  const actor = getUser();
   const selected = selectedId != null && selectedId !== '' ? Number(selectedId) : null;
+  const allowEqualOrAbove = Boolean(actor?.is_super);
   for (const role of rolesCache) {
     const rank = Number(role.rank ?? 0);
-    if (rank > maxRank && role.id !== selected) continue;
+    // Strictly below actor rank; Super may assign any non-super role.
+    if (!allowEqualOrAbove) {
+      if (rank >= maxRank) continue;
+      if (role.role_key === 'super') continue;
+    } else if (role.role_key === 'super' && selected !== role.id) {
+      continue; // never re-assign Super via dropdown except keeping existing Super target
+    }
     const opt = document.createElement('option');
     opt.value = role.id;
     opt.textContent = `${role.name} (rank ${role.rank})`;
     if (selected != null && selected === role.id) opt.selected = true;
     select.append(opt);
   }
+  if (lockToSelected && selected != null) {
+    select.disabled = true;
+    // Ensure current role stays visible even if filtered out for peers
+    if (![...select.options].some(o => Number(o.value) === selected)) {
+      const role = rolesCache.find(r => r.id === selected);
+      if (role) {
+        const opt = document.createElement('option');
+        opt.value = role.id;
+        opt.textContent = `${role.name} (rank ${role.rank}) · locked`;
+        opt.selected = true;
+        select.append(opt);
+      }
+    }
+  } else {
+    select.disabled = false;
+  }
+}
+
+function canEditUserRow(u){
+  const actor = getUser();
+  if (!actor) return false;
+  if (u.role_key === 'super' && !actor.is_super) return false;
+  if (actor.is_super) return true;
+  return Number(u.role_rank ?? 0) < actorRank();
+}
+
+function canEditRoleCard(role){
+  const actor = getUser();
+  if (!actor) return false;
+  if (role.role_key === 'super') return false;
+  if (actor.is_super) return true;
+  return Number(role.rank ?? 0) < actorRank();
 }
 
 function roleNeedsTelecaller(roleId){
@@ -173,9 +215,7 @@ function renderUsersTable(users){
       <td>${escapeHtml(u.telecaller_name || '—')}</td>
       <td>${u.is_active ? 'Yes' : 'No'}</td>`;
     const td = document.createElement('td');
-    const isSuperTarget = u.role_key === 'super';
-    const actor = getUser();
-    if (!(isSuperTarget && !actor?.is_super)) {
+    if (canEditUserRow(u)) {
       const edit = document.createElement('button');
       edit.type = 'button';
       edit.className = 'text-button';
@@ -194,8 +234,8 @@ function renderUsersTable(users){
 
 function openUserModal(user = null){
   const actor = getUser();
-  if (user?.role_key === 'super' && !actor?.is_super) {
-    toast('Only Super User can edit Super User accounts');
+  if (user && !canEditUserRow(user)) {
+    toast('You cannot edit this user');
     return;
   }
   $('user-modal-title').textContent = user ? 'Edit user' : 'New user';
@@ -204,13 +244,16 @@ function openUserModal(user = null){
   $('user-display').value = user?.display_name || '';
   $('user-password').value = '';
   $('user-password').required = !user;
-  fillRoleSelect($('user-role'), user?.role_id);
+  const editingSelf = Boolean(user && actor && Number(user.id) === Number(actor.id));
+  fillRoleSelect($('user-role'), user?.role_id, {lockToSelected: editingSelf});
   syncTelecallerField('user-role', 'user-telecaller-wrap', 'user-telecaller', user?.telecaller_name || '');
   $('user-notes').value = user?.notes || '';
   $('user-active').checked = user ? user.is_active : true;
   $('user-must-pw').checked = user ? !!user.must_change_password : true;
-  $('user-delete').classList.toggle('hidden', !user || user.role_key === 'super');
-  $('user-form-message').textContent = '';
+  $('user-delete').classList.toggle('hidden', !user || user.role_key === 'super' || editingSelf);
+  $('user-form-message').textContent = editingSelf
+    ? 'Your own role is locked — ask a higher-rank account to change it.'
+    : '';
   $('user-modal').classList.remove('hidden');
 }
 
@@ -248,7 +291,7 @@ async function refreshRoles(){
         <p>Rank ${role.rank}${role.is_system ? ' · system' : ''}</p>
         <p class="muted">${escapeHtml(perms || 'No permissions')}</p></div>`;
       const isSuperRole = role.role_key === 'super';
-      if (!isSuperRole) {
+      if (canEditRoleCard(role)) {
         const edit = document.createElement('button');
         edit.type = 'button';
         edit.className = 'secondary-button';
@@ -258,7 +301,7 @@ async function refreshRoles(){
       } else {
         const locked = document.createElement('span');
         locked.className = 'muted';
-        locked.textContent = 'Locked';
+        locked.textContent = isSuperRole ? 'Locked' : 'Above your rank';
         card.append(locked);
       }
       mount.append(card);
@@ -270,19 +313,23 @@ async function refreshRoles(){
 }
 
 function openRoleModal(role = null){
-  if (role?.role_key === 'super') {
-    toast('Super User role cannot be edited');
+  if (role && !canEditRoleCard(role)) {
+    toast(role.role_key === 'super' ? 'Super User role cannot be edited' : 'Cannot edit a role at or above your rank');
     return;
   }
   editingRole = role;
   $('role-modal-title').textContent = role ? `Edit · ${role.name}` : 'New role';
   $('role-id').value = role?.id || '';
   $('role-name').value = role?.name || '';
-  $('role-rank').value = role?.rank ?? 10;
+  const maxAssignable = getUser()?.is_super ? 99 : Math.max(1, actorRank() - 1);
+  $('role-rank').value = role?.rank ?? Math.min(10, maxAssignable);
+  $('role-rank').max = String(maxAssignable);
   $('role-rank').disabled = false;
-  $('role-delete').classList.toggle('hidden', !role || role.is_system);
+  $('role-delete').classList.toggle('hidden', !role || role.is_system || !canEditRoleCard(role));
   renderPermChecks(role?.permissions || []);
-  $('role-form-message').textContent = '';
+  $('role-form-message').textContent = getUser()?.is_super
+    ? ''
+    : `Rank must be below yours (max ${maxAssignable}).`;
   $('role-modal').classList.remove('hidden');
 }
 
@@ -319,32 +366,8 @@ function escapeHtml(s){
   return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 }
 
-async function refreshNotifs(){
-  try {
-    const data = await NotifApi.list();
-    const count = data.unread || 0;
-    const badge = $('notif-count');
-    badge.textContent = String(count);
-    badge.classList.toggle('hidden', count < 1);
-    const list = $('notif-list');
-    list.replaceChildren();
-    for (const n of data.notifications || []) {
-      const row = document.createElement('button');
-      row.type = 'button';
-      row.className = 'notif-item' + (n.is_read ? '' : ' unread');
-      row.innerHTML = `<strong>${escapeHtml(n.title)}</strong><span>${escapeHtml(n.body || '')}</span>`;
-      row.onclick = async () => {
-        if (!n.is_read) await NotifApi.markRead(n.id);
-        showView('users');
-        $('notif-drawer').classList.add('hidden');
-        refreshNotifs();
-      };
-      list.append(row);
-    }
-    if (!(data.notifications || []).length) {
-      list.innerHTML = '<div class="empty-state">No notifications</div>';
-    }
-  } catch { /* ignore */ }
+function refreshNotifs(){
+  notifCtl?.refresh?.();
 }
 
 $('mobile-menu').onclick = () => document.querySelector('.shell').classList.toggle('menu-open');
@@ -373,15 +396,17 @@ $('approve-role').addEventListener('change', () => {
 $('user-form').onsubmit = async (e) => {
   e.preventDefault();
   const id = $('user-id').value;
+  const actor = getUser();
+  const editingSelf = Boolean(id && actor && Number(id) === Number(actor.id));
   const body = {
     username: $('user-username').value.trim(),
     display_name: $('user-display').value.trim(),
-    role_id: Number($('user-role').value),
     telecaller_name: roleNeedsTelecaller($('user-role').value) ? $('user-telecaller').value.trim() : '',
     notes: $('user-notes').value.trim(),
     is_active: $('user-active').checked,
     must_change_password: $('user-must-pw').checked,
   };
+  if (!editingSelf) body.role_id = Number($('user-role').value);
   const pw = $('user-password').value;
   if (pw) body.password = pw;
   try {
@@ -389,6 +414,7 @@ $('user-form').onsubmit = async (e) => {
     else {
       if (!pw) { $('user-form-message').textContent = 'Password required'; return; }
       body.password = pw;
+      body.role_id = Number($('user-role').value);
       await AdminApi.createUser(body);
     }
     closeUserModal();
@@ -466,16 +492,6 @@ $('role-delete').onclick = async () => {
   }
 };
 
-$('notif-bell').onclick = () => {
-  $('notif-drawer').classList.toggle('hidden');
-  refreshNotifs();
-};
-$('notif-close').onclick = () => $('notif-drawer').classList.add('hidden');
-$('notif-mark-all').onclick = async () => {
-  await NotifApi.markAllRead();
-  refreshNotifs();
-};
-
 function openAccountModal(){
   const user = getUser();
   if (!user) return;
@@ -533,6 +549,7 @@ $('account-save')?.addEventListener('click', async () => {
   }
   const first = [...document.querySelectorAll('.nav-item:not(.hidden)')][0];
   showView(first?.dataset.view || 'users');
-  refreshNotifs();
-  setInterval(refreshNotifs, 60000);
+  notifCtl = mountNotifications({
+    onOpenAccessRequests: () => showView('users'),
+  });
 })();

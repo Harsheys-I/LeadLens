@@ -1,8 +1,9 @@
-import {APP_VERSION,DEFAULT_SETTINGS,DEFAULT_OUTPUT_FIELDS,SETTINGS_SEED,MAX_BATCH_SIZE,MAX_CONCURRENCY,normalizeSettings,normalizeInputFields,slugFieldId,parseWorkbook,parseAuditedWorkbook,auditBatch,downloadWorkbook,downloadReviewPack,splitLeadsByTelecaller,splitResultsByTelecaller,validateApiKey,HIGH_SEVERITY_ERRORS,SERVER_API_KEY} from "./audit.js?v=5.0.2";
-import {putJob,getJob,getJobs,deleteJob,clearJobs,loadSettings,saveSettings,getApiKey,apiKeyIsRemembered,saveApiKey,forgetApiKey,setStorageUserId,storageKey} from "./db.js?v=5.0.2";
-import {renderReviewDashboard,destroyReviewDashboard} from "./dashboard-view.js?v=5.0.2";
-import {requireAuth,logout,hasPermission,getUser,changePassword,updateProfile} from "./auth.js?v=5.0.2";
-import {DashboardApi,SettingsApi} from "./api-client.js?v=5.0.2";
+import {APP_VERSION,DEFAULT_SETTINGS,DEFAULT_OUTPUT_FIELDS,SETTINGS_SEED,MAX_BATCH_SIZE,MAX_CONCURRENCY,normalizeSettings,normalizeInputFields,slugFieldId,parseWorkbook,parseAuditedWorkbook,auditBatch,downloadWorkbook,downloadReviewPack,splitLeadsByTelecaller,splitResultsByTelecaller,validateApiKey,HIGH_SEVERITY_ERRORS,SERVER_API_KEY} from "./audit.js?v=5.0.3";
+import {putJob,getJob,getJobs,deleteJob,clearJobs,loadSettings,saveSettings,getApiKey,apiKeyIsRemembered,saveApiKey,forgetApiKey,setStorageUserId,storageKey} from "./db.js?v=5.0.3";
+import {renderReviewDashboard,destroyReviewDashboard} from "./dashboard-view.js?v=5.0.3";
+import {requireAuth,logout,hasPermission,getUser,changePassword,updateProfile} from "./auth.js?v=5.0.3";
+import {DashboardApi,SettingsApi} from "./api-client.js?v=5.0.3";
+import {mountNotifications} from "./notifications-ui.js?v=5.0.3";
 
 const $=id=>document.getElementById(id);
 const ids=["page-title","key-state","run-name","pause-run","download-result","progress-label","progress-percent","progress-bar","metric-leads","metric-excel-rows","metric-calls","metric-batch","metric-completed","metric-status","metric-input-tokens","metric-cached-tokens","metric-output-tokens","metric-duration","metric-cost","live-log","clear-console","history-list","clear-history","api-key","remember-key","toggle-key","save-key","forget-key","key-message","batch-size","concurrency","model","input-field-config","add-input-field","ai-field-config","rule-config","add-rule","output-field-config","yes-values","no-values","additional-instructions","input-price","cached-price","output-price","save-settings","reset-settings","settings-message","toast","mobile-menu","active-job-switch","sort-field","sort-direction","app-version","export-settings","import-settings","import-settings-file","update-banner","update-banner-text","reload-app","key-modal","onboard-key","onboard-toggle","onboard-remember","onboard-message","onboard-save","onboard-skip","sidebar-version","sidebar-notes","review-drop-zone","review-file-input","review-drop-hint","review-file-list","review-validation","start-review","review-run-panel","review-aggregate","review-cards","review-dashboard-panel","review-dashboard-mount","download-review-excel","review-open-console","review-precounts","review-live-progress","review-progress-label","review-progress-percent","review-progress-bar","review-post-actions","create-review-dashboard","upload-dashboard-btn","upload-dashboard-modal","upload-telecaller-list","upload-dash-message","upload-dash-confirm","upload-dash-cancel","published-list","refresh-published","published-dashboard-panel","published-dash-title","published-dash-meta","published-dash-actions","published-dashboard-mount","shell-user-label","shell-logout"];
@@ -76,15 +77,19 @@ async function loadServerSettingsAndKey(){
   try{
     const [audit, keyStatus]=await Promise.all([
       SettingsApi.getAudit().catch(()=>({settings:null})),
-      SettingsApi.openaiKeyStatus().catch(()=>({configured:false})),
+      SettingsApi.openaiKeyStatus().catch(err=>{
+        console.warn("openai-key-status failed", err?.status, err?.message);
+        return {configured:false};
+      }),
     ]);
-    serverKeyConfigured=Boolean(keyStatus?.configured);
+    serverKeyConfigured=Boolean(keyStatus && (keyStatus.configured===true || keyStatus.configured===1 || keyStatus.configured==="true"));
     if(audit?.settings&&typeof audit.settings==="object"){
       settings=normalizeSettings({...DEFAULT_SETTINGS,...audit.settings});
       saveSettings(settings); // local mirror only
     }
   }catch{/* keep local fallback */}
   updateKeyState();
+  syncApiKeySettingsUi();
 }
 
 async function persistSettingsEverywhere(next,{announce=true}={}){
@@ -142,9 +147,46 @@ function showView(name){
 function toast(message){els.toast.textContent=message;els.toast.classList.add("show");clearTimeout(toast.timer);toast.timer=setTimeout(()=>els.toast.classList.remove("show"),3200);}
 function updateKeyState(){
   const ready=Boolean(effectiveApiKey());
-  const label=getApiKey()?"API key ready":(serverKeyConfigured?"Server API key ready":"API key not set");
+  let label="API key not set";
+  if(getApiKey())label="API key ready";
+  else if(serverKeyConfigured)label="Server API key ready";
   els["key-state"].textContent=label;
   els["key-state"].classList.toggle("ready",ready);
+}
+function syncApiKeySettingsUi(){
+  const isSuper=Boolean(getUser()?.is_super);
+  const saveBtn=els["save-key"];
+  const forgetBtn=els["forget-key"];
+  const keyInput=els["api-key"];
+  const remember=els["remember-key"];
+  const rememberLabel=remember?.closest("label");
+  const hint=document.getElementById("api-key-server-hint");
+  if(hint){
+    if(serverKeyConfigured&&!isSuper){
+      hint.textContent="Server API key is configured. Audits use the server proxy — you do not need to paste a key.";
+    }else if(serverKeyConfigured&&isSuper){
+      hint.textContent="Server API key is saved (encrypted). Paste a new key and click Save to server to replace it.";
+    }else if(!isSuper){
+      hint.textContent="No server API key yet. Ask a Super User to save one in Settings.";
+    }else{
+      hint.textContent="Paste your OpenAI key and click Save to server so every audit user can run without pasting a key.";
+    }
+    hint.classList.remove("hidden");
+  }
+  if(saveBtn){
+    saveBtn.textContent=isSuper?"Save to server":"Save on this device";
+    saveBtn.classList.toggle("hidden",!isSuper&&serverKeyConfigured);
+  }
+  if(keyInput){
+    keyInput.placeholder=isSuper?"sk-…":(serverKeyConfigured?"Using server key":"sk-… (optional local fallback)");
+    keyInput.disabled=!isSuper&&serverKeyConfigured;
+    if(!isSuper&&serverKeyConfigured)keyInput.value="";
+  }
+  if(rememberLabel)rememberLabel.classList.toggle("hidden",!isSuper&&serverKeyConfigured);
+  if(forgetBtn){
+    forgetBtn.textContent=isSuper&&serverKeyConfigured?"Clear server key":"Forget key";
+    forgetBtn.classList.toggle("hidden",!isSuper&&serverKeyConfigured);
+  }
 }
 // Only hard-block a save for these; soft failures (network/quota/other) still save with a caution.
 const BLOCK_KEY_REASONS=new Set(["empty","format","unauthorized","forbidden"]);
@@ -166,6 +208,7 @@ async function validateAndSaveKey(key,remember,messageEl,buttonEl,{toServer=fals
       forgetApiKey();
       if(els["api-key"])els["api-key"].value="";
       updateKeyState();
+      syncApiKeySettingsUi();
       if(messageEl)messageEl.textContent=(result.ok?result.message+" ":"")+ "Saved encrypted on the server for everyone.";
       return true;
     }catch(err){
@@ -175,6 +218,7 @@ async function validateAndSaveKey(key,remember,messageEl,buttonEl,{toServer=fals
   }
   saveApiKey(trimmed,Boolean(remember));
   updateKeyState();
+  syncApiKeySettingsUi();
   if(messageEl){
     const where=remember?"Saved on this device.":"Saved for this session.";
     messageEl.textContent=result.ok?`${result.message} ${where}`:`${result.message} Saved anyway — ${where}`;
@@ -182,9 +226,34 @@ async function validateAndSaveKey(key,remember,messageEl,buttonEl,{toServer=fals
   return true;
 }
 function openKeyModal(){
-  if(!els["key-modal"]||serverKeyConfigured)return;
+  if(!els["key-modal"])return;
+  // Non-super: never ask to paste a personal key when server key exists.
+  if(!getUser()?.is_super){
+    if(serverKeyConfigured)return;
+    if(els["key-modal-title"])els["key-modal-title"].textContent="OpenAI key not configured";
+    const copy=els["key-modal"].querySelector(".key-modal-copy");
+    if(copy)copy.textContent="Ask a Super User to save the OpenAI API key in Settings. Audits use the server key — you should not paste one here.";
+    els["onboard-key"]?.closest("label")?.classList.add("hidden");
+    els["onboard-remember"]?.closest("label")?.classList.add("hidden");
+    if(els["onboard-save"])els["onboard-save"].classList.add("hidden");
+    if(els["onboard-skip"])els["onboard-skip"].textContent="OK";
+    if(els["onboard-message"])els["onboard-message"].textContent="";
+    els["key-modal"].classList.remove("hidden");
+    return;
+  }
+  if(serverKeyConfigured)return;
+  if(els["key-modal-title"])els["key-modal-title"].textContent="Connect your OpenAI API key";
+  const copy=els["key-modal"].querySelector(".key-modal-copy");
+  if(copy)copy.textContent="Save the key to the server (encrypted). Admin and other audit users will use it via the server proxy — they never need to paste a key.";
+  els["onboard-key"]?.closest("label")?.classList.remove("hidden");
+  els["onboard-remember"]?.closest("label")?.classList.add("hidden");
+  if(els["onboard-save"]){
+    els["onboard-save"].classList.remove("hidden");
+    els["onboard-save"].textContent="Validate & save to server";
+  }
+  if(els["onboard-skip"])els["onboard-skip"].textContent="I'll add it later";
   els["onboard-key"].value="";
-  els["onboard-remember"].checked=false;
+  if(els["onboard-remember"])els["onboard-remember"].checked=false;
   els["onboard-message"].textContent="";
   els["onboard-key"].type="password";
   if(els["onboard-toggle"])els["onboard-toggle"].textContent="Show";
@@ -1615,6 +1684,7 @@ function renderSettings(){
   renderOutputFields();
   renderSortFields();
   updateKeyState();
+  syncApiKeySettingsUi();
 }
 function collectSettings(){
   const next=normalizeSettings(settings);
@@ -1883,14 +1953,16 @@ els["forget-key"]?.addEventListener("click",async()=>{
     els["key-message"].textContent="Key removed.";
   }
   updateKeyState();
+  syncApiKeySettingsUi();
 });
 els["onboard-toggle"]?.addEventListener("click",()=>{const hidden=els["onboard-key"].type==="password";els["onboard-key"].type=hidden?"text":"password";els["onboard-toggle"].textContent=hidden?"Hide":"Show";});
 els["onboard-save"]?.addEventListener("click",async()=>{
-  const saved=await validateAndSaveKey(els["onboard-key"].value,els["onboard-remember"].checked,els["onboard-message"],els["onboard-save"]);
-  if(saved){closeKeyModal();toast("OpenAI key saved.");}
+  const toServer=Boolean(getUser()?.is_super);
+  const saved=await validateAndSaveKey(els["onboard-key"].value,els["onboard-remember"].checked,els["onboard-message"],els["onboard-save"],{toServer});
+  if(saved){closeKeyModal();toast(toServer?"Server OpenAI key saved for everyone.":"OpenAI key saved.");}
 });
 els["onboard-key"]?.addEventListener("keydown",event=>{if(event.key==="Enter"){event.preventDefault();els["onboard-save"].click();}});
-els["onboard-skip"]?.addEventListener("click",()=>{closeKeyModal();toast("You can add your API key any time in Settings.");});
+els["onboard-skip"]?.addEventListener("click",()=>{closeKeyModal();toast(getUser()?.is_super?"You can save the server key any time in Settings.":"Ask a Super User to configure the server API key.");});
 els["add-rule"].onclick=()=>{settings=collectSettings();settings.rules.push({field:"Comments",instruction:"",errors:""});renderRules();};
 els["add-input-field"].onclick=()=>{
   settings=collectSettings();
@@ -1989,6 +2061,11 @@ async function bootTeleCallerAudit(){
   await restoreFromStorage();
   checkForUpdate();
   if(hasPermission("telecaller.bucket1")||hasPermission("telecaller.settings"))maybePromptForApiKey();
+  mountNotifications({
+    variant:"chrome",
+    onOpenAccessRequests:()=>{location.href="/admin/";}
+  });
+  if(location.hash==="#published"&&hasPermission("telecaller.dashboard"))showView("published");
   setInterval(()=>{
     if(currentJob?.status==="running"||currentJob?.status==="reviewing")renderProgress(currentJob);
     if(reviewSessionIds.length)scheduleReviewProgress();
@@ -2062,11 +2139,9 @@ async function confirmUploadDashboard(){
   els["upload-dash-message"].textContent="Uploading…";
   try{
     const data=await DashboardApi.publish(dashboards);
-    const mergedCount=(data.published||[]).filter(p=>p.merged).length;
-    els["upload-dash-message"].textContent=mergedCount
-      ? `Merged into ${data.published?.length||0} TeleCaller board(s).`
-      : `Published ${data.published?.length||0} dashboard(s).`;
-    toast(mergedCount?"Dashboards merged into existing boards":"Dashboards uploaded");
+    const n=data.published?.length||0;
+    els["upload-dash-message"].textContent=`Replaced ${n} TeleCaller board(s) with this upload.`;
+    toast(n===1?"Dashboard replaced for TeleCaller":`Replaced ${n} TeleCaller dashboards`);
     setTimeout(closeUploadDashboardModal,800);
   }catch(err){
     els["upload-dash-message"].textContent=err.message||"Upload failed";
@@ -2077,49 +2152,12 @@ function canDeletePublishedDashboard(){
   return canManagePublishedDashboards();
 }
 
-function renderPublishedManageList(items){
+/** Empty the manage list mount — per-TeleCaller Delete cards removed; Delete All lives in panel actions. */
+function clearPublishedManageList(){
   const mount=els["published-list"];
   if(!mount)return;
   mount.replaceChildren();
-  if(!canManagePublishedDashboards()||!items.length){
-    mount.classList.add("hidden");
-    return;
-  }
-  mount.classList.remove("hidden");
-  const wrap=document.createElement("div");
-  wrap.className="published-manage";
-  const head=document.createElement("p");
-  head.className="muted";
-  head.textContent="Manage published TeleCaller boards";
-  wrap.append(head);
-  for(const item of items){
-    const row=document.createElement("div");
-    row.className="published-manage-row";
-    const info=document.createElement("div");
-    const title=document.createElement("strong");
-    title.textContent=item.telecaller_name||item.title||"Dashboard";
-    const meta=document.createElement("span");
-    meta.className="muted";
-    const when=item.updated_at||item.created_at;
-    meta.textContent=`${item.lead_count??"—"} leads${when?" · "+new Date(String(when).endsWith("Z")?when:when+"Z").toLocaleString():""}`;
-    info.append(title,document.createElement("br"),meta);
-    const del=document.createElement("button");
-    del.type="button";
-    del.className="danger-button";
-    del.textContent="Delete";
-    del.onclick=()=>deletePublishedDashboard(item);
-    row.append(info,del);
-    wrap.append(row);
-  }
-  if(items.length>1){
-    const all=document.createElement("button");
-    all.type="button";
-    all.className="danger-button";
-    all.textContent="Delete All";
-    all.onclick=()=>deleteAllPublishedDashboards();
-    wrap.append(all);
-  }
-  mount.append(wrap);
+  mount.classList.add("hidden");
 }
 
 async function deleteAllPublishedDashboards(){
@@ -2134,18 +2172,6 @@ async function deleteAllPublishedDashboards(){
   }
 }
 
-async function deletePublishedDashboard(item){
-  const name=item.telecaller_name||item.title||"this TeleCaller";
-  if(!confirm(`Delete the published dashboard for ${name}? This cannot be undone.`))return;
-  try{
-    await DashboardApi.remove(item.id);
-    toast(`Deleted ${name}`);
-    await refreshPublishedDashboards();
-  }catch(err){
-    toast(err.message||"Could not delete dashboard");
-  }
-}
-
 async function refreshPublishedDashboards(){
   const mount=els["published-list"];
   const panel=els["published-dashboard-panel"];
@@ -2157,19 +2183,18 @@ async function refreshPublishedDashboards(){
     destroyReviewDashboard();
     return;
   }
-  mount.classList.remove("hidden");
-  mount.innerHTML='<div class="empty-card">Loading…</div>';
+  clearPublishedManageList();
   try{
     const data=await DashboardApi.combined();
     const results=data.results||[];
     const items=data.dashboards||[];
     if(!results.length&&!items.length){
+      mount.classList.remove("hidden");
       mount.innerHTML='<div class="empty-card">No published dashboards yet.</div>';
       panel?.classList.add("hidden");
       destroyReviewDashboard();
       return;
     }
-    renderPublishedManageList(items);
     if(els["published-dash-title"])els["published-dash-title"].textContent=data.title||"Dashboard";
     if(els["published-dash-meta"]){
       const when=data.updated_at?new Date(String(data.updated_at).endsWith("Z")?data.updated_at:data.updated_at+"Z").toLocaleString():"";
@@ -2181,15 +2206,7 @@ async function refreshPublishedDashboards(){
     const actions=els["published-dash-actions"];
     if(actions){
       actions.replaceChildren();
-      if(items.length===1&&canDeletePublishedDashboard()){
-        const del=document.createElement("button");
-        del.type="button";
-        del.className="danger-button";
-        del.textContent="Delete board";
-        del.onclick=()=>deletePublishedDashboard(items[0]);
-        actions.append(del);
-      }
-      if(items.length>1&&canManagePublishedDashboards()){
+      if(canManagePublishedDashboards()&&items.length){
         const all=document.createElement("button");
         all.type="button";
         all.className="danger-button";

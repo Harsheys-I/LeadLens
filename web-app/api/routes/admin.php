@@ -110,9 +110,7 @@ function ll_admin_users(?int $id): void
     if (!$row) {
       ll_error('User not found', 404);
     }
-    if (($row['role_key'] ?? '') === 'super' && !$actor['is_super']) {
-      ll_error('Only Super User can edit Super User accounts', 403);
-    }
+    ll_assert_user_editable($actor, $row);
     $body = ll_read_json_body();
     $fields = [];
     $params = [];
@@ -140,10 +138,13 @@ function ll_admin_users(?int $id): void
     }
     if (array_key_exists('role_id', $body)) {
       $roleId = (int) $body['role_id'];
-      ll_assert_role_assignable($actor, $roleId);
-      if (($row['role_key'] ?? '') === 'super' && $roleId !== (int) $row['role_id']) {
-        ll_error('Cannot change Super User role');
+      if ((int) $id === (int) $actor['id']) {
+        ll_error('Cannot change your own role', 403);
       }
+      if (($row['role_key'] ?? '') === 'super' && $roleId !== (int) $row['role_id']) {
+        ll_error('Cannot change Super User role', 403);
+      }
+      ll_assert_role_assignable($actor, $roleId);
       $fields[] = 'role_id = ?';
       $params[] = $roleId;
     }
@@ -197,6 +198,7 @@ function ll_admin_users(?int $id): void
     if ((int) $row['id'] === (int) $actor['id']) {
       ll_error('Cannot delete your own account');
     }
+    ll_assert_user_editable($actor, $row);
     $pdo->prepare('DELETE FROM users WHERE id = ?')->execute([$id]);
     ll_ok(['deleted' => true]);
   }
@@ -204,6 +206,25 @@ function ll_admin_users(?int $id): void
   ll_error('Method not allowed', 405);
 }
 
+/** Target user must be strictly below actor rank; Super accounts are Super-only. */
+function ll_assert_user_editable(array $actor, array $targetRow): void
+{
+  if (($targetRow['role_key'] ?? '') === 'super' && empty($actor['is_super'])) {
+    ll_error('Only Super User can edit Super User accounts', 403);
+  }
+  if (!empty($actor['is_super'])) {
+    return;
+  }
+  $targetRank = (int) ($targetRow['role_rank'] ?? 0);
+  if ($targetRank >= ll_user_rank($actor)) {
+    ll_error('Cannot edit a user at or above your rank', 403);
+  }
+}
+
+/**
+ * Assignable roles must be strictly below the actor's rank.
+ * Non-super cannot assign Super. Super may assign any non-Super role.
+ */
 function ll_assert_role_assignable(array $actor, int $roleId): void
 {
   $stmt = ll_pdo()->prepare('SELECT id, rank, role_key FROM roles WHERE id = ? LIMIT 1');
@@ -212,8 +233,30 @@ function ll_assert_role_assignable(array $actor, int $roleId): void
   if (!$role) {
     ll_error('Role not found');
   }
-  if ((int) $role['rank'] > ll_user_rank($actor) && !$actor['is_super']) {
-    ll_error('Cannot assign a role higher than your own', 403);
+  if (($role['role_key'] ?? '') === 'super' && empty($actor['is_super'])) {
+    ll_error('Cannot assign Super User role', 403);
+  }
+  if (!empty($actor['is_super'])) {
+    return;
+  }
+  if ((int) $role['rank'] >= ll_user_rank($actor)) {
+    ll_error('Cannot assign a role at or above your own rank', 403);
+  }
+}
+
+/** Role create/update/delete: target rank must be strictly below actor (Super locked). */
+function ll_assert_role_manageable(array $actor, array $roleRow, ?int $newRank = null): void
+{
+  if (($roleRow['role_key'] ?? '') === 'super') {
+    ll_error('Super User role cannot be edited', 403);
+  }
+  if (!empty($actor['is_super'])) {
+    return;
+  }
+  $currentRank = (int) ($roleRow['rank'] ?? 0);
+  $rank = $newRank !== null ? $newRank : $currentRank;
+  if ($currentRank >= ll_user_rank($actor) || $rank >= ll_user_rank($actor)) {
+    ll_error('Cannot manage a role at or above your own rank', 403);
   }
 }
 
@@ -250,11 +293,11 @@ function ll_admin_roles(?int $id): void
     if ($name === '') {
       ll_error('Role name is required');
     }
-    if ($rank >= 100) {
-      ll_error('Cannot create another Super User rank');
+    if ($rank >= 100 || strtolower(preg_replace('/[^a-z0-9_]+/', '_', $name) ?: '') === 'super') {
+      ll_error('Cannot create another Super User rank', 403);
     }
-    if ($rank > ll_user_rank($actor) && !$actor['is_super']) {
-      ll_error('Cannot create a role higher than your rank', 403);
+    if (empty($actor['is_super']) && $rank >= ll_user_rank($actor)) {
+      ll_error('Cannot create a role at or above your own rank', 403);
     }
     $key = preg_replace('/[^a-z0-9_]+/', '_', strtolower($name)) ?: ('role_' . time());
     try {
@@ -277,10 +320,6 @@ function ll_admin_roles(?int $id): void
     if (!$row) {
       ll_error('Role not found', 404);
     }
-    // Super User role is permanently locked — no name/rank/permission edits.
-    if (($row['role_key'] ?? '') === 'super') {
-      ll_error('Super User role cannot be edited', 403);
-    }
     $body = ll_read_json_body();
     $name = array_key_exists('name', $body) ? trim((string) $body['name']) : $row['name'];
     $rank = array_key_exists('rank', $body) ? (int) $body['rank'] : (int) $row['rank'];
@@ -292,11 +331,9 @@ function ll_admin_roles(?int $id): void
       ll_error('Role name is required');
     }
     if ($rank >= 100) {
-      ll_error('Cannot elevate role to Super User');
+      ll_error('Cannot elevate role to Super User', 403);
     }
-    if ($rank > ll_user_rank($actor) && !$actor['is_super']) {
-      ll_error('Cannot set rank higher than your own', 403);
-    }
+    ll_assert_role_manageable($actor, $row, $rank);
 
     $pdo->prepare(
       'UPDATE roles SET name = ?, rank = ?, permissions = ?, updated_at = UTC_TIMESTAMP() WHERE id = ?'
@@ -312,9 +349,10 @@ function ll_admin_roles(?int $id): void
     if (!$row) {
       ll_error('Role not found', 404);
     }
-    if ((int) $row['is_system'] === 1 || $row['role_key'] === 'super') {
+    if ((int) $row['is_system'] === 1 || ($row['role_key'] ?? '') === 'super') {
       ll_error('System roles cannot be deleted', 403);
     }
+    ll_assert_role_manageable($actor, $row);
     $cstmt = $pdo->prepare('SELECT COUNT(*) FROM users WHERE role_id = ?');
     $cstmt->execute([$id]);
     if ((int) $cstmt->fetchColumn() > 0) {
