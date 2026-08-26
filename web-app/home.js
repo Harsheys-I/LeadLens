@@ -1,6 +1,6 @@
-import {login, logout, loadSession, changePassword, updateProfile, moduleTilesForUser, hasSessionHint, getUser} from './auth.js?v=5.0.5';
-import {AuthApi} from './api-client.js?v=5.0.5';
-import {mountNotifications} from './notifications-ui.js?v=5.0.5';
+import {login, logout, loadSession, changePassword, updateProfile, moduleTilesForUser, hasSessionHint, getUser} from './auth.js?v=5.0.7';
+import {AuthApi} from './api-client.js?v=5.0.7';
+import {mountNotifications} from './notifications-ui.js?v=5.0.7';
 
 const $ = id => document.getElementById(id);
 let notifCtl = null;
@@ -41,7 +41,7 @@ function renderTiles(user){
     const btn = document.createElement(tile.soon ? 'div' : 'a');
     btn.className = 'home-tile' + (tile.soon ? ' is-soon' : '');
     if (!tile.soon) btn.href = tile.href;
-    btn.innerHTML = `${tile.icon ? `<span class="home-tile-visual">${tile.icon}</span>` : ''}<strong>${tile.title}</strong><span>${tile.desc}</span>${tile.soon ? '<em>Coming soon</em>' : ''}`;
+    btn.innerHTML = `${tile.icon ? `<span class="home-tile-visual">${tile.icon}</span>` : ''}<strong class="home-tile-title">${tile.title}</strong><span class="home-tile-desc">${tile.desc}</span>${tile.soon ? '<em>Coming soon</em>' : ''}`;
     if (tile.soon) {
       btn.addEventListener('click', () => toast(`${tile.title} is coming soon.`));
     }
