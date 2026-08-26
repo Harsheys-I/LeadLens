@@ -551,5 +551,6 @@ $('account-save')?.addEventListener('click', async () => {
   showView(first?.dataset.view || 'users');
   notifCtl = mountNotifications({
     onOpenAccessRequests: () => showView('users'),
+    onDashboardUpdate: () => { location.href = '/TeleCallerAudit/#published'; },
   });
 })();

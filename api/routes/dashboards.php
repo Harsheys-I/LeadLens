@@ -50,6 +50,7 @@ function ll_route_dashboards(string $action, ?int $id): void
        VALUES (?, ?, ?, ?, ?)'
     );
     $created = [];
+    $pending = [];
     foreach ($items as $item) {
       if (!is_array($item)) {
         continue;
@@ -63,9 +64,6 @@ function ll_route_dashboards(string $action, ?int $id): void
       if (!is_array($incoming)) {
         ll_error('Each dashboard needs a results array');
       }
-
-      // Replace (not merge): drop any prior board for this TeleCaller, then insert fresh.
-      $del->execute([$telecaller]);
 
       $meta = [
         'source_file' => $item['source_file'] ?? null,
@@ -88,23 +86,50 @@ function ll_route_dashboards(string $action, ?int $id): void
         ll_error('Failed to encode dashboard payload');
       }
       $metaJson = json_encode($meta, JSON_UNESCAPED_UNICODE);
+      if ($metaJson === false) {
+        ll_error('Failed to encode dashboard meta');
+      }
 
-      $ins->execute([$telecaller, $title, $payload, $metaJson, (int) $user['id']]);
-      $dashId = (int) $pdo->lastInsertId();
-
-      $created[] = [
-        'id' => $dashId,
-        'telecaller_name' => $telecaller,
+      $pending[] = [
+        'telecaller' => $telecaller,
         'title' => $title,
-        'replaced' => true,
-        'merged' => false,
+        'payload' => $payload,
+        'metaJson' => $metaJson,
         'lead_count' => count($incoming),
       ];
     }
-    if (!$created) {
+    if (!$pending) {
       ll_error('No valid dashboards to publish');
     }
-    ll_notify_dashboard_publish($created, $user);
+
+    $pdo->beginTransaction();
+    try {
+      foreach ($pending as $row) {
+        // Replace (not merge): drop any prior board for this TeleCaller, then insert fresh.
+        $del->execute([$row['telecaller']]);
+        $ins->execute([$row['telecaller'], $row['title'], $row['payload'], $row['metaJson'], (int) $user['id']]);
+        $created[] = [
+          'id' => (int) $pdo->lastInsertId(),
+          'telecaller_name' => $row['telecaller'],
+          'title' => $row['title'],
+          'replaced' => true,
+          'merged' => false,
+          'lead_count' => $row['lead_count'],
+        ];
+      }
+      $pdo->commit();
+    } catch (Throwable $e) {
+      if ($pdo->inTransaction()) {
+        $pdo->rollBack();
+      }
+      ll_error('Publish failed: ' . $e->getMessage(), 500);
+    }
+
+    try {
+      ll_notify_dashboard_publish($created, $user);
+    } catch (Throwable $e) {
+      // Boards are saved; notification failure must not fail the publish response.
+    }
     ll_ok(['published' => $created], 201);
   }
 
@@ -414,9 +439,10 @@ function ll_notify_dashboard_publish(array $created, array $actor): void
      INNER JOIN roles r ON r.id = u.role_id
      WHERE u.is_active = 1"
   )->fetchAll();
+  $actorId = (int) ($actor['id'] ?? 0);
   foreach ($users as $row) {
     $uid = (int) $row['id'];
-    if (isset($notified[$uid])) {
+    if (isset($notified[$uid]) || ($actorId > 0 && $uid === $actorId)) {
       continue;
     }
     $public = [

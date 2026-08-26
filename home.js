@@ -3,6 +3,7 @@ import {AuthApi} from './api-client.js?v=5.0.3';
 import {mountNotifications} from './notifications-ui.js?v=5.0.3';
 
 const $ = id => document.getElementById(id);
+let notifCtl = null;
 const panelLogin = $('panel-login');
 const panelRequest = $('panel-request');
 const panelHome = $('panel-home');
@@ -94,7 +95,12 @@ async function enterHome(user){
   $('home-user-label').textContent = `${user.display_name || user.username} · ${user.role_name}`;
   renderTiles(user);
   showPanel('home');
-  mountNotifications({variant: 'chrome'});
+  notifCtl?.destroy?.();
+  notifCtl = mountNotifications({
+    variant: 'chrome',
+    onOpenAccessRequests: () => { location.href = '/admin/'; },
+    onDashboardUpdate: () => { location.href = '/TeleCallerAudit/#published'; },
+  });
   if (user.must_change_password) openPasswordModal(user);
 
   const params = new URLSearchParams(location.search);
@@ -145,6 +151,8 @@ $('request-form').onsubmit = async (e) => {
 };
 
 $('home-logout').onclick = async () => {
+  notifCtl?.destroy?.();
+  notifCtl = null;
   await logout();
   showPanel('login');
   toast('Signed out');

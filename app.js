@@ -45,6 +45,8 @@ function canManagePublishedDashboards(){
 }
 
 function effectiveApiKey(){
+  const user=getUser();
+  if(serverKeyConfigured&&!user?.is_super)return SERVER_API_KEY;
   const local=getApiKey();
   if(local)return local;
   if(serverKeyConfigured)return SERVER_API_KEY;
@@ -83,6 +85,9 @@ async function loadServerSettingsAndKey(){
       }),
     ]);
     serverKeyConfigured=Boolean(keyStatus && (keyStatus.configured===true || keyStatus.configured===1 || keyStatus.configured==="true"));
+    if(serverKeyConfigured&&!getUser()?.is_super&&getApiKey()){
+      forgetApiKey();
+    }
     if(audit?.settings&&typeof audit.settings==="object"){
       settings=normalizeSettings({...DEFAULT_SETTINGS,...audit.settings});
       saveSettings(settings); // local mirror only
@@ -184,8 +189,9 @@ function syncApiKeySettingsUi(){
   }
   if(rememberLabel)rememberLabel.classList.toggle("hidden",!isSuper&&serverKeyConfigured);
   if(forgetBtn){
-    forgetBtn.textContent=isSuper&&serverKeyConfigured?"Clear server key":"Forget key";
-    forgetBtn.classList.toggle("hidden",!isSuper&&serverKeyConfigured);
+    const hasLocal=Boolean(getApiKey());
+    forgetBtn.textContent=isSuper&&serverKeyConfigured?"Clear server key":(hasLocal?"Forget local key":"Forget key");
+    forgetBtn.classList.toggle("hidden",!isSuper&&serverKeyConfigured&&!hasLocal);
   }
 }
 // Only hard-block a save for these; soft failures (network/quota/other) still save with a caution.
@@ -2063,9 +2069,17 @@ async function bootTeleCallerAudit(){
   if(hasPermission("telecaller.bucket1")||hasPermission("telecaller.settings"))maybePromptForApiKey();
   mountNotifications({
     variant:"chrome",
-    onOpenAccessRequests:()=>{location.href="/admin/";}
+    onOpenAccessRequests:()=>{location.href="/admin/";},
+    onDashboardUpdate:()=>{
+      if(!hasPermission("telecaller.dashboard"))return;
+      location.hash="#published";
+      showView("published");
+    },
   });
   if(location.hash==="#published"&&hasPermission("telecaller.dashboard"))showView("published");
+  window.addEventListener("hashchange",()=>{
+    if(location.hash==="#published"&&hasPermission("telecaller.dashboard"))showView("published");
+  });
   setInterval(()=>{
     if(currentJob?.status==="running"||currentJob?.status==="reviewing")renderProgress(currentJob);
     if(reviewSessionIds.length)scheduleReviewProgress();
