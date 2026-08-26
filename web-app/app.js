@@ -1,12 +1,13 @@
-import {APP_VERSION,DEFAULT_SETTINGS,DEFAULT_OUTPUT_FIELDS,SETTINGS_SEED,MAX_BATCH_SIZE,MAX_CONCURRENCY,normalizeSettings,normalizeInputFields,slugFieldId,parseWorkbook,parseAuditedWorkbook,auditBatch,downloadWorkbook,downloadReviewPack,splitLeadsByTelecaller,splitResultsByTelecaller,validateApiKey,HIGH_SEVERITY_ERRORS,SERVER_API_KEY} from "./audit.js?v=5.0.3";
-import {putJob,getJob,getJobs,deleteJob,clearJobs,loadSettings,saveSettings,getApiKey,apiKeyIsRemembered,saveApiKey,forgetApiKey,setStorageUserId,storageKey} from "./db.js?v=5.0.3";
-import {renderReviewDashboard,destroyReviewDashboard} from "./dashboard-view.js?v=5.0.3";
-import {requireAuth,logout,hasPermission,getUser,changePassword,updateProfile} from "./auth.js?v=5.0.3";
-import {DashboardApi,SettingsApi} from "./api-client.js?v=5.0.3";
-import {mountNotifications} from "./notifications-ui.js?v=5.0.3";
+import {APP_VERSION,DEFAULT_SETTINGS,DEFAULT_OUTPUT_FIELDS,SETTINGS_SEED,MAX_BATCH_SIZE,MAX_CONCURRENCY,normalizeSettings,normalizeInputFields,slugFieldId,parseWorkbook,parseAuditedWorkbook,auditBatch,downloadWorkbook,downloadReviewPack,splitLeadsByTelecaller,splitResultsByTelecaller,validateApiKey,HIGH_SEVERITY_ERRORS,SERVER_API_KEY} from "./audit.js?v=5.0.5";
+import {getJob,getJobs,loadSettings,saveSettings,getApiKey,apiKeyIsRemembered,saveApiKey,forgetApiKey,setStorageUserId,storageKey} from "./db.js?v=5.0.5";
+import {renderReviewDashboard,destroyReviewDashboard} from "./dashboard-view.js?v=5.0.5";
+import {requireAuth,logout,hasPermission,getUser,changePassword,updateProfile} from "./auth.js?v=5.0.5";
+import {DashboardApi,SettingsApi} from "./api-client.js?v=5.0.5";
+import {mountNotifications} from "./notifications-ui.js?v=5.0.5";
+import {persistJob,removeJobSynced,clearJobsSynced,pullJobsFromServer} from "./jobs-sync.js?v=5.0.5";
 
 const $=id=>document.getElementById(id);
-const ids=["page-title","key-state","run-name","pause-run","download-result","progress-label","progress-percent","progress-bar","metric-leads","metric-excel-rows","metric-calls","metric-batch","metric-completed","metric-status","metric-input-tokens","metric-cached-tokens","metric-output-tokens","metric-duration","metric-cost","live-log","clear-console","history-list","clear-history","api-key","remember-key","toggle-key","save-key","forget-key","key-message","batch-size","concurrency","model","input-field-config","add-input-field","ai-field-config","rule-config","add-rule","output-field-config","yes-values","no-values","additional-instructions","input-price","cached-price","output-price","save-settings","reset-settings","settings-message","toast","mobile-menu","active-job-switch","sort-field","sort-direction","app-version","export-settings","import-settings","import-settings-file","update-banner","update-banner-text","reload-app","key-modal","onboard-key","onboard-toggle","onboard-remember","onboard-message","onboard-save","onboard-skip","sidebar-version","sidebar-notes","review-drop-zone","review-file-input","review-drop-hint","review-file-list","review-validation","start-review","review-run-panel","review-aggregate","review-cards","review-dashboard-panel","review-dashboard-mount","download-review-excel","review-open-console","review-precounts","review-live-progress","review-progress-label","review-progress-percent","review-progress-bar","review-post-actions","create-review-dashboard","upload-dashboard-btn","upload-dashboard-modal","upload-telecaller-list","upload-dash-message","upload-dash-confirm","upload-dash-cancel","published-list","refresh-published","published-dashboard-panel","published-dash-title","published-dash-meta","published-dash-actions","published-dashboard-mount","shell-user-label","shell-logout"];
+const ids=["page-title","key-state","run-name","pause-run","download-result","progress-label","progress-percent","progress-bar","metric-leads","metric-excel-rows","metric-calls","metric-batch","metric-completed","metric-status","metric-input-tokens","metric-cached-tokens","metric-output-tokens","metric-duration","metric-cost","live-log","clear-console","history-list","clear-history","api-key","remember-key","toggle-key","save-key","forget-key","key-message","batch-size","concurrency","model","input-field-config","add-input-field","ai-field-config","rule-config","add-rule","output-field-config","yes-values","no-values","additional-instructions","input-price","cached-price","output-price","save-settings","reset-settings","settings-message","toast","mobile-menu","active-job-switch","sort-field","sort-direction","app-version","export-settings","import-settings","import-settings-file","update-banner","update-banner-text","reload-app","key-modal","onboard-key","onboard-toggle","onboard-remember","onboard-message","onboard-save","onboard-skip","sidebar-version","sidebar-notes","review-drop-zone","review-file-input","review-drop-hint","review-file-list","review-validation","start-review","review-run-panel","review-aggregate","review-cards","review-dashboard-panel","review-dashboard-mount","download-review-excel","review-open-console","review-precounts","review-live-progress","review-progress-label","review-progress-percent","review-progress-bar","review-post-actions","create-review-dashboard","upload-dashboard-btn","upload-dashboard-modal","upload-telecaller-list","upload-dash-message","upload-dash-confirm","upload-dash-cancel","published-list","refresh-published","published-dashboard-panel","published-dash-title","published-dash-meta","published-dash-actions","published-dashboard-mount","shell-user-label","shell-logout","shell-account"];
 const els=Object.fromEntries(ids.map(id=>[id,$(id)]));
 const titles={review:"Bucket 1 lead audit",console:"Run console",published:"Dashboard",history:"History",settings:"Settings"};
 /** When false, completed audits do not auto-render charts until Create Dashboard. */
@@ -461,7 +462,7 @@ function schedulePendingPersist(job){
     pendingPersistTimers.delete(job.id);
     withJobSave(job.id,async()=>{
       job.updatedAt=timestamp();
-      await putJob(job);
+      await persistJob(job);
     }).catch(error=>{
       addLog(job,`Could not save pending checkpoint: ${error.message}`,"error");
       toast("Checkpoint save failed — free disk space or resume after reload.");
@@ -512,7 +513,7 @@ async function commitBatch(job,index,rows){
     if(merged){
       clearPendingPersist(job.id);
       job.updatedAt=timestamp();
-      await putJob(job);
+      await persistJob(job);
       const pendingLeft=Object.keys(job.pendingBatches).length;
       addLog(job,merged===1
         ?`Checkpoint batch ${from+1}. ${auditedDoneCount(job)}/${job.totalLeads} audited (${job.results.length} saved)${pendingLeft?` · ${pendingLeft} finished API batch(es) waiting for order`:""}.`
@@ -540,7 +541,7 @@ async function flushPendingBatches(job){
       merged++;
     }
     job.updatedAt=timestamp();
-    await putJob(job);
+    await persistJob(job);
     if(merged)addLog(job,`Flushed checkpoints ${from+1}–${job.nextBatch}. ${job.results.length}/${job.totalLeads} call rows saved (${uniqueLeadCount(job)} leads).`);
   });
 }
@@ -576,7 +577,7 @@ async function runJob(job,{navigate=false}={}){
   }else{
     addLog(job,`Run started: live pool of ${concurrency} (next batch fires the instant one frees a slot), batch size ${job.settings.batchSize} leads, model ${job.settings.model}, app ${APP_VERSION}. Checkpoints stay in order — later batches may finish API first and wait.`);
   }
-  await putJob(job);
+  await persistJob(job);
   // Reviews: only paint Run Console when this job is already selected (parallel workers must not steal).
   // Audits/parents: allow switch when no active controller on the current console job.
   if(currentJob?.id===job.id||((!isReview||isParent)&&(!currentJob||!controllers.has(currentJob.id))))renderProgress(job);
@@ -672,7 +673,7 @@ async function runJob(job,{navigate=false}={}){
     const billable=Math.max(0,number(job.tokenUsage.input)-number(job.tokenUsage.cached));
     const label=isParent?(job.sourceFormat==="audit"?"Excel Audit":"Excel RAW"):isReview?"TeleCaller report":"Audit";
     addLog(job,`${label} complete in ${durationText(job.elapsedMs)}. Cost est. ${estimatedCost(job).toFixed(4)}. Cached ${number(job.tokenUsage.cached).toLocaleString()} · billable input ${billable.toLocaleString()} · output ${number(job.tokenUsage.output).toLocaleString()}.`,"success");
-    await putJob(job);
+    await persistJob(job);
     if(currentJob?.id===job.id)renderProgress(job);
     if(isReview||isParent)scheduleReviewProgress();
     toast(`${job.fileName}: ${isParent||isReview?"report":"audit"} complete.`);
@@ -691,7 +692,7 @@ async function runJob(job,{navigate=false}={}){
       if(job.telecallerName)addLog(job,`TeleCaller “${job.telecallerName}” did not finish. Open this run in the job switcher for the full log.`,"error");
     }
     job.updatedAt=timestamp();
-    await putJob(job);
+    await persistJob(job);
     if(currentJob?.id===job.id)renderProgress(job);
     if(isReview||isParent)scheduleReviewProgress();
   }finally{
@@ -832,7 +833,7 @@ async function spawnCombinedReviewChildren(parentJob){
         child.reviewStatus="skipped";
         child.finishedAt=child.finishedAt||timestamp();
         child.updatedAt=timestamp();
-        await putJob(child);
+        await persistJob(child);
         liveJobs.set(child.id,child);
         if(!reviewSessionIds.includes(child.id))reviewSessionIds.push(child.id);
       }
@@ -862,14 +863,14 @@ async function spawnCombinedReviewChildren(parentJob){
     child.reviewStatus="skipped";
     child.finishedAt=timestamp();
     child.updatedAt=timestamp();
-    await putJob(child);
+    await persistJob(child);
     liveJobs.set(child.id,child);
     children.push(child);
     if(!reviewSessionIds.includes(child.id))reviewSessionIds.push(child.id);
   }
   parentJob.childReviewIds=children.map(child=>child.id);
   parentJob.updatedAt=timestamp();
-  await putJob(parentJob);
+  await persistJob(parentJob);
   saveReviewSessionIds();
   addLog(parentJob,`Split into ${children.length} TeleCaller dashboard${children.length===1?"":"s"} (audit metrics only — no AI review pass).`,"success");
   scheduleReviewProgress();
@@ -1108,7 +1109,7 @@ async function startReview(){
       reviewPricing:deepCopy(settings.reviewPricing),
       settings:deepCopy(settings)
     };
-    await putJob(parent);
+    await persistJob(parent);
     liveJobs.set(parent.id,parent);
     reviewSessionIds.push(parent.id);
     saveReviewSessionIds();
@@ -1127,7 +1128,7 @@ async function startReview(){
       parent.finishedAt=timestamp();
       parent.updatedAt=timestamp();
       addLog(parent,`Excel Audit complete — ${parent.childReviewIds?.length||0} TeleCaller dashboard(s) ready.`,"success");
-      await putJob(parent);
+      await persistJob(parent);
       if(currentJob?.id===parent.id)renderProgress(parent);
       scheduleReviewProgress();
       toast("TeleCaller dashboard ready.");
@@ -1137,7 +1138,7 @@ async function startReview(){
       stopClock(parent);
       parent.updatedAt=timestamp();
       addLog(parent,`FAILED: ${parent.error}`,"error");
-      await putJob(parent);
+      await persistJob(parent);
       if(currentJob?.id===parent.id)renderProgress(parent);
       scheduleReviewProgress();
       toast(parent.error);
@@ -1162,7 +1163,7 @@ async function startReview(){
   const parent=createCombinedParentJob(file);
   parent.sourceFormat="raw";
   parent.expectedTelecallerCount=splits.length||0;
-  await putJob(parent);
+  await persistJob(parent);
   liveJobs.set(parent.id,parent);
   reviewSessionIds.push(parent.id);
   saveReviewSessionIds();
@@ -1219,7 +1220,7 @@ function drainReviewQueue(){
             if(parent){
               addLog(parent,`TeleCaller review FAILED · ${who}: ${reason}`,"error");
               parent.updatedAt=timestamp();
-              await putJob(parent);
+              await persistJob(parent);
               liveJobs.set(parent.id,parent);
               if(currentJob?.id===parent.id){displayLogs=true;renderProgress(parent);}
             }
@@ -1457,6 +1458,7 @@ async function download(job){
 }
 
 async function renderHistory(){
+  try{await pullJobsFromServer();}catch{/* offline */}
   const jobs=await getJobs();
   els["history-list"].replaceChildren();
   if(!jobs.length){els["history-list"].innerHTML='<div class="empty-card">No audits yet.</div>';return;}
@@ -1468,9 +1470,10 @@ async function renderHistory(){
     status.className=`status ${legacy?"legacy":job.status}`;
     status.textContent=legacy?"legacy — rerun":job.status;
     meta.className="history-meta";
+    const ownerBit=job.ownerName?` · by ${job.ownerName}`:"";
     meta.textContent=legacy
-      ?`${timeText(job.createdAt)} · previous engine result — upload the file and run it again for v2 rules.`
-      :`${timeText(job.createdAt)} · ${job.mode==="telecaller-review"?`Review · ${job.telecallerName||"TeleCaller"} · `:job.mode==="telecaller-review-parent"?`${job.sourceFormat==="audit"?"Excel Audit":"Excel RAW"} · `:""}${uniqueLeadCount(job)} leads · ${job.callCount??job.rowCount??"—"} calls · ${auditedDoneCount(job)}/${job.totalLeads} audited · ${durationText(job.elapsedMs||0)} · cost ${estimatedCost(job).toFixed(4)} · cached ${number(job.tokenUsage?.cached).toLocaleString()}`;
+      ?`${timeText(job.createdAt)} · previous engine result — upload the file and run it again for v2 rules.${ownerBit}`
+      :`${timeText(job.createdAt)} · ${job.mode==="telecaller-review"?`Review · ${job.telecallerName||"TeleCaller"} · `:job.mode==="telecaller-review-parent"?`${job.sourceFormat==="audit"?"Excel Audit":"Excel RAW"} · `:""}${uniqueLeadCount(job)} leads · ${job.callCount??job.rowCount??"—"} calls · ${auditedDoneCount(job)}/${job.totalLeads} audited · ${durationText(job.elapsedMs||0)} · cost ${estimatedCost(job).toFixed(4)} · cached ${number(job.tokenUsage?.cached).toLocaleString()}${ownerBit}`;
     info.append(title,document.createTextNode(" "),status,meta);
     actions.className="history-actions";
     const view=document.createElement("button");
@@ -1505,8 +1508,8 @@ async function renderHistory(){
     remove.textContent="Delete";
     remove.onclick=async()=>{
       if(controllers.has(job.id)){toast("Pause the run before deleting.");return;}
-      if(confirm("Delete this audit, checkpoint and local logs?")){
-        await deleteJob(job.id);
+      if(confirm("Delete this audit from shared team history and this browser?")){
+        await removeJobSynced(job.id);
         if(currentJob?.id===job.id){currentJob=null;setActiveJobId("");}
         renderHistory();
       }
@@ -1770,7 +1773,7 @@ async function restoreFromStorage(){
       job.status="paused";
       job.updatedAt=timestamp();
       addLog(job,"Browser reloaded during this run. Progress was restored from local storage — resume to continue.","warn");
-      await putJob(job);
+      await persistJob(job);
       changed=true;
     }
   }
@@ -1930,12 +1933,12 @@ if(els["review-open-console"])els["review-open-console"].onclick=()=>{
 
 els["clear-history"]?.addEventListener("click",async()=>{
   if(controllers.size){toast("Pause all running audits before clearing history.");return;}
-  if(confirm("Delete all locally stored audits, checkpoints, token history and logs?")){
-    await clearJobs();
+  if(confirm("Delete all shared team history and local audits, checkpoints, token history and logs?")){
+    await clearJobsSynced();
     currentJob=null;
     setActiveJobId("");
     renderHistory();
-    toast("Local history cleared.");
+    toast("Shared history cleared.");
   }
 });
 els["toggle-key"]?.addEventListener("click",()=>{const hidden=els["api-key"].type==="password";els["api-key"].type=hidden?"text":"password";els["toggle-key"].textContent=hidden?"Hide":"Show";});

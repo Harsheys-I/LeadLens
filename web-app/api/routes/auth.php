@@ -108,8 +108,8 @@ function ll_route_auth(string $action): void
       if ($fullName === '') {
         ll_error('Full name is required');
       }
-      if ($email === '' || !filter_var($email, FILTER_VALIDATE_EMAIL)) {
-        ll_error('A valid email is required');
+      if ($email !== '' && !filter_var($email, FILTER_VALIDATE_EMAIL)) {
+        ll_error('A valid email is required when provided');
       }
 
       $pdo = ll_pdo();

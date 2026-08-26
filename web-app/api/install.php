@@ -131,6 +131,22 @@ function ll_install_run(): void
     CONSTRAINT fk_app_settings_user FOREIGN KEY (updated_by) REFERENCES users(id) ON DELETE SET NULL
   ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
 
+  $pdo->exec("CREATE TABLE IF NOT EXISTS audit_jobs (
+    job_id CHAR(36) NOT NULL PRIMARY KEY,
+    owner_user_id INT UNSIGNED NULL,
+    owner_name VARCHAR(120) NOT NULL DEFAULT '',
+    file_name VARCHAR(255) NOT NULL DEFAULT '',
+    status VARCHAR(40) NOT NULL DEFAULT '',
+    mode VARCHAR(60) NOT NULL DEFAULT '',
+    payload LONGTEXT NOT NULL,
+    client_updated_at VARCHAR(40) NOT NULL DEFAULT '',
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    KEY idx_audit_jobs_client_updated (client_updated_at),
+    KEY idx_audit_jobs_owner (owner_user_id),
+    CONSTRAINT fk_audit_jobs_owner FOREIGN KEY (owner_user_id) REFERENCES users(id) ON DELETE SET NULL
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+
   $roles = [
     ['Super User', 'super', 100, ll_default_role_permissions('super'), 1],
     ['Admin', 'admin', 50, ll_default_role_permissions('admin'), 1],

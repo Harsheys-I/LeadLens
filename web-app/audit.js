@@ -1,6 +1,6 @@
-import {buildTelecallerDashboardBlob} from "./dashboard-export.js?v=5.0.3";
+import {buildTelecallerDashboardBlob} from "./dashboard-export.js?v=5.0.5";
 
-export const APP_VERSION = "5.0.3";
+export const APP_VERSION = "5.0.5";
 /** Sentinel: use server OpenAI proxy (no raw key in the browser). */
 export const SERVER_API_KEY = "__server__";
 /** Bump when default AI rules / field defaults must refresh existing localStorage settings. */
@@ -159,7 +159,7 @@ export function buildChatCompletionBody(model,{temperature,maxTokens,messages,..
 
 /* Large stable prefix FIRST so OpenAI prompt caching can activate (>=1024 tokens;
    some models need closer to 2048). Run-specific rules come after; lead data last. */
-const CACHE_HANDBOOK = `LeadLens QA v5.0.3 — stable cacheable auditor handbook. Evidence only. Never invent facts, dates, budgets, locations, or prior calls.
+const CACHE_HANDBOOK = `LeadLens QA v5.0.5 — stable cacheable auditor handbook. Evidence only. Never invent facts, dates, budgets, locations, or prior calls.
 
 PURPOSE
 You audit Indian real-estate telecalling follow-up notes. Judge only the supplied fields for THIS call id. Optional day[] lists sibling calls on the same latest calendar day — context only; still return one result for THIS id.
@@ -1381,13 +1381,22 @@ export async function auditBatch(apiKey,rawSettings,batch,signal,log,onUsage){
   const maps=buildErrorMaps(settings);
   async function requestWithRetry(leads,label){
     let result,lastError;
-    for(let attempt=1;attempt<=3;attempt++){
+    let attempt=1;
+    while(!result){
       try{result=await requestAudit(apiKey,settings,leads,signal,log,onUsage);break;}
       catch(error){
         if(error.name==="AbortError")throw error;
         lastError=error;
+        const is429=/OpenAI 429/.test(String(error.message||""));
+        if(is429){
+          log(`${label}: rate limited (429). Waiting 30s then retrying…`,"warn");
+          await new Promise(resolve=>setTimeout(resolve,30000));
+          continue;
+        }
         log(`${label} attempt ${attempt} failed: ${error.message}`,"error");
-        if(attempt<3)await new Promise(resolve=>setTimeout(resolve,attempt*1500));
+        if(attempt>=3)break;
+        await new Promise(resolve=>setTimeout(resolve,attempt*1500));
+        attempt++;
       }
     }
     if(!result)throw lastError;

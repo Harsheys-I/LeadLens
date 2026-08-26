@@ -1,7 +1,7 @@
 /**
  * Shared notifications bell + drawer for LeadLens shells (home, Admin, TeleCaller Audit).
  */
-import {NotifApi} from './api-client.js?v=5.0.3';
+import {NotifApi} from './api-client.js?v=5.0.5';
 
 const BELL_SVG = `<svg class="notif-bell-icon" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
   <path d="M15 17h5l-1.4-1.4A2 2 0 0 1 18 14.2V11a6 6 0 1 0-12 0v3.2c0 .5-.2 1-.6 1.4L4 17h5"/>
@@ -79,6 +79,7 @@ export function mountNotifications(opts = {}){
   const badge = document.getElementById('notif-count');
   const unreadLabel = document.getElementById('notif-unread-label');
   const markAll = document.getElementById('notif-mark-all');
+  const clearAll = document.getElementById('notif-clear-all');
   const closeBtn = document.getElementById('notif-close');
   if (!bell || !drawer || !list) {
     return {refresh: async () => {}, destroy: () => {}};
@@ -112,8 +113,7 @@ export function mountNotifications(opts = {}){
         return;
       }
       for (const n of items) {
-        const row = document.createElement('button');
-        row.type = 'button';
+        const row = document.createElement('div');
         row.className = 'notif-item' + (n.is_read ? '' : ' unread');
         const when = formatWhen(n.created_at);
         row.innerHTML = `${typeIcon(n.type)}
@@ -124,8 +124,10 @@ export function mountNotifications(opts = {}){
             </span>
             <span class="notif-item-copy">${escapeHtml(n.body || '')}</span>
             ${when ? `<span class="notif-item-time">${escapeHtml(when)}</span>` : ''}
-          </span>`;
-        row.onclick = async () => {
+          </span>
+          <button type="button" class="notif-dismiss" aria-label="Clear notification" title="Clear">×</button>`;
+        row.addEventListener('click', async (e) => {
+          if (e.target.closest('.notif-dismiss')) return;
           if (!n.is_read) {
             try { await NotifApi.markRead(n.id); } catch { /* ignore */ }
           }
@@ -138,7 +140,13 @@ export function mountNotifications(opts = {}){
             openDashboardFromNotification(opts);
           }
           refresh();
-        };
+        });
+        row.querySelector('.notif-dismiss')?.addEventListener('click', async (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          try { await NotifApi.clearOne(n.id); } catch { /* ignore */ }
+          refresh();
+        });
         list.append(row);
       }
     } catch {
@@ -162,6 +170,11 @@ export function mountNotifications(opts = {}){
   closeBtn?.addEventListener('click', closeDrawer, {signal: ac.signal});
   markAll?.addEventListener('click', async () => {
     try { await NotifApi.markAllRead(); } catch { /* ignore */ }
+    refresh();
+  }, {signal: ac.signal});
+  clearAll?.addEventListener('click', async () => {
+    if (!confirm('Clear all notifications?')) return;
+    try { await NotifApi.clearAll(); } catch { /* ignore */ }
     refresh();
   }, {signal: ac.signal});
   drawer.addEventListener('click', (e) => {

@@ -33,6 +33,10 @@ try {
       require __DIR__ . '/routes/settings.php';
       ll_route_settings($action);
       break;
+    case 'jobs':
+      require __DIR__ . '/routes/jobs.php';
+      ll_route_jobs($action, $id, $parts);
+      break;
     case 'openai':
       require __DIR__ . '/routes/openai.php';
       ll_route_openai($action, $parts);

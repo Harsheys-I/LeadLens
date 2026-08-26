@@ -1,6 +1,6 @@
-import {requireAuth, logout, getUser, hasPermission, requirePermission, changePassword, updateProfile} from '../auth.js?v=5.0.3';
-import {AdminApi, DashboardApi} from '../api-client.js?v=5.0.3';
-import {mountNotifications} from '../notifications-ui.js?v=5.0.3';
+import {requireAuth, logout, getUser, hasPermission, requirePermission, changePassword, updateProfile} from '../auth.js?v=5.0.5';
+import {AdminApi, DashboardApi} from '../api-client.js?v=5.0.5';
+import {mountNotifications} from '../notifications-ui.js?v=5.0.5';
 
 const $ = id => document.getElementById(id);
 const titles = {users: 'User creation', roles: 'Roles'};
@@ -165,7 +165,7 @@ function renderAccessQueue(requests){
     const row = document.createElement('div');
     row.className = 'access-request-card';
     row.innerHTML = `<div><strong>${escapeHtml(req.full_name)}</strong>
-      <p>${escapeHtml(req.email)}${req.preferred_module ? ' · ' + escapeHtml(req.preferred_module) : ''}</p>
+      <p>${[req.email, req.preferred_module].filter(Boolean).map(escapeHtml).join(' · ')}</p>
       <p class="muted">${escapeHtml(req.reason || '')}</p></div>`;
     const actions = document.createElement('div');
     actions.className = 'inline-actions';
@@ -263,7 +263,7 @@ function closeUserModal(){
 
 function openApprove(req){
   $('approve-id').value = req.id;
-  $('approve-summary').textContent = `${req.full_name} · ${req.email}`;
+  $('approve-summary').textContent = [req.full_name, req.email].filter(Boolean).join(' · ');
   $('approve-username').value = req.requested_username || '';
   $('approve-display').value = req.full_name || '';
   $('approve-password').value = '';

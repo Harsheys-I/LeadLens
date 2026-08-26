@@ -1,6 +1,6 @@
-import {login, logout, loadSession, changePassword, updateProfile, moduleTilesForUser, hasSessionHint, getUser} from './auth.js?v=5.0.3';
-import {AuthApi} from './api-client.js?v=5.0.3';
-import {mountNotifications} from './notifications-ui.js?v=5.0.3';
+import {login, logout, loadSession, changePassword, updateProfile, moduleTilesForUser, hasSessionHint, getUser} from './auth.js?v=5.0.5';
+import {AuthApi} from './api-client.js?v=5.0.5';
+import {mountNotifications} from './notifications-ui.js?v=5.0.5';
 
 const $ = id => document.getElementById(id);
 let notifCtl = null;
@@ -41,7 +41,7 @@ function renderTiles(user){
     const btn = document.createElement(tile.soon ? 'div' : 'a');
     btn.className = 'home-tile' + (tile.soon ? ' is-soon' : '');
     if (!tile.soon) btn.href = tile.href;
-    btn.innerHTML = `<strong>${tile.title}</strong><span>${tile.desc}</span>${tile.soon ? '<em>Coming soon</em>' : ''}`;
+    btn.innerHTML = `${tile.icon ? `<span class="home-tile-visual">${tile.icon}</span>` : ''}<strong>${tile.title}</strong><span>${tile.desc}</span>${tile.soon ? '<em>Coming soon</em>' : ''}`;
     if (tile.soon) {
       btn.addEventListener('click', () => toast(`${tile.title} is coming soon.`));
     }
@@ -138,7 +138,7 @@ $('request-form').onsubmit = async (e) => {
   try {
     await AuthApi.requestAccess({
       full_name: $('req-name').value.trim(),
-      email: $('req-email').value.trim(),
+      email: '',
       requested_username: $('req-username').value.trim(),
       preferred_module: $('req-module').value,
       reason: $('req-reason').value.trim(),
