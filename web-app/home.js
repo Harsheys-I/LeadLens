@@ -1,6 +1,6 @@
-import {login, logout, loadSession, changePassword, updateProfile, moduleTilesForUser, hasSessionHint, getUser} from './auth.js?v=5.0.7';
-import {AuthApi} from './api-client.js?v=5.0.7';
-import {mountNotifications} from './notifications-ui.js?v=5.0.7';
+import {login, logout, loadSession, changePassword, updateProfile, moduleTilesForUser, hasSessionHint, getUser} from './auth.js?v=5.0.8';
+import {AuthApi} from './api-client.js?v=5.0.8';
+import {mountNotifications} from './notifications-ui.js?v=5.0.8';
 
 const $ = id => document.getElementById(id);
 let notifCtl = null;

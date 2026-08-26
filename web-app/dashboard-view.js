@@ -2,7 +2,7 @@
  * In-app TeleCaller Review dashboard (KPIs, scorecard, Chart.js charts, error table).
  */
 
-import {buildDashboardModel} from "./dashboard-metrics.js?v=5.0.7";
+import {buildDashboardModel} from "./dashboard-metrics.js?v=5.0.8";
 
 /** Panel switcher labels (presentation) → internal section titles stay as-built. */
 const DASHBOARD_PANELS = [
@@ -21,6 +21,37 @@ const CHART_COLORS = {
   muted: "#6c7771",
   palette: ["#12372a", "#1f5d45", "#3f8c68", "#c57924", "#a33a32", "#2a5f9e", "#6c7771", "#9bb7a8"]
 };
+
+const EYE_SVG = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+  <path d="M2.5 12s3.6-7 9.5-7 9.5 7 9.5 7-3.6 7-9.5 7-9.5-7-9.5-7z"/>
+  <circle cx="12" cy="12" r="3"/>
+</svg>`;
+
+/** Fields shown in the lead-detail modal (label → row key). Order is presentation order. */
+const LEAD_DETAIL_FIELDS = [
+  ["Project", "project"],
+  ["Mobile", "mobile"],
+  ["TeleCaller", "telecaller"],
+  ["Error Type", "errorType"],
+  ["Severity", "severity"],
+  ["Details", "details"],
+  ["Action", "action"],
+  ["Comments", "comments"],
+  ["Status", "status"],
+  ["Connected", "connected"],
+  ["Comment Quality", "commentQuality"],
+  ["Buying Intent", "buyingIntent"],
+  ["Location", "location"],
+  ["Requirement", "requirement"],
+  ["Budget", "budget"],
+  ["Parameter", "parameter"],
+  ["Registration", "registration"],
+  ["Next Follow-up", "next"],
+  ["Overdue (days)", "overdue"],
+  ["Source", "source"],
+  ["Source Name", "sourceName"],
+  ["Audit Status", "auditStatus"]
+];
 
 /** @type {Map<string, {destroy: Function, resize?: Function}>} */
 const chartRegistry = new Map();
@@ -440,6 +471,130 @@ function wireClipHovers(root){
   root.addEventListener("scroll", hide, true);
 }
 
+function formatLeadDetailValue(key, value){
+  if(value == null || value === "") return "";
+  if(value instanceof Date && !Number.isNaN(value.valueOf())){
+    const hasTime = value.getHours() || value.getMinutes() || value.getSeconds();
+    if(hasTime){
+      return value.toLocaleString(undefined, {
+        day: "2-digit", month: "short", year: "numeric",
+        hour: "2-digit", minute: "2-digit"
+      });
+    }
+    return value.toLocaleDateString(undefined, {day: "2-digit", month: "short", year: "numeric"});
+  }
+  if(key === "commentQuality" && (value === 0 || value)) return String(value);
+  if(key === "overdue" && (value === 0 || value)) return String(value);
+  return String(value);
+}
+
+function onLeadModalKeydown(e){
+  if(e.key === "Escape"){
+    e.preventDefault();
+    closeLeadDetailModal();
+  }
+}
+
+function closeLeadDetailModal(){
+  const modal = document.getElementById("dashboard-lead-modal");
+  if(!modal) return;
+  modal.classList.add("hidden");
+  modal.setAttribute("aria-hidden", "true");
+  document.removeEventListener("keydown", onLeadModalKeydown);
+}
+
+function ensureLeadDetailModal(){
+  let modal = document.getElementById("dashboard-lead-modal");
+  if(modal) return modal;
+
+  modal = el("div", "dashboard-lead-modal hidden");
+  modal.id = "dashboard-lead-modal";
+  modal.setAttribute("role", "dialog");
+  modal.setAttribute("aria-modal", "true");
+  modal.setAttribute("aria-labelledby", "dashboard-lead-modal-title");
+  modal.setAttribute("aria-hidden", "true");
+
+  const backdrop = el("div", "dashboard-lead-modal-backdrop");
+  backdrop.addEventListener("click", closeLeadDetailModal);
+
+  const card = el("div", "dashboard-lead-modal-card");
+  card.setAttribute("role", "document");
+  card.addEventListener("click", e => e.stopPropagation());
+
+  const head = el("div", "dashboard-lead-modal-head");
+  const title = el("h2", null, "Lead details");
+  title.id = "dashboard-lead-modal-title";
+  const closeBtn = el("button", "dashboard-lead-modal-close", "×");
+  closeBtn.type = "button";
+  closeBtn.setAttribute("aria-label", "Close lead details");
+  closeBtn.addEventListener("click", closeLeadDetailModal);
+  head.append(title, closeBtn);
+
+  const body = el("div", "dashboard-lead-modal-body");
+  body.id = "dashboard-lead-modal-body";
+
+  card.append(head, body);
+  modal.append(backdrop, card);
+  document.body.append(modal);
+  return modal;
+}
+
+function openLeadDetailModal(row){
+  hideClipPopover();
+  const modal = ensureLeadDetailModal();
+  const body = modal.querySelector("#dashboard-lead-modal-body");
+  if(!body) return;
+  body.replaceChildren();
+
+  const grid = el("div", "dashboard-lead-detail-grid");
+  for(const [label, key] of LEAD_DETAIL_FIELDS){
+    const text = formatLeadDetailValue(key, row?.[key]);
+    if(!text && key !== "commentQuality" && key !== "overdue") continue;
+    if((key === "commentQuality" || key === "overdue") && (row?.[key] == null || row?.[key] === "")) continue;
+
+    const item = el("div", key === "comments" || key === "details" || key === "action" || key === "errorType"
+      ? "dashboard-lead-detail-item dashboard-lead-detail-wide"
+      : "dashboard-lead-detail-item");
+    item.append(el("span", "dashboard-lead-detail-label", label));
+    const value = el("div", "dashboard-lead-detail-value", text || "—");
+    if(key === "severity"){
+      value.classList.add(`dashboard-sev`, `dashboard-sev-${String(row?.severity || "").toLowerCase()}`);
+    }
+    item.append(value);
+    grid.append(item);
+  }
+  if(!grid.childElementCount){
+    body.append(el("p", "dashboard-lead-detail-empty", "No details available for this row."));
+  }else{
+    body.append(grid);
+  }
+
+  modal.classList.remove("hidden");
+  modal.setAttribute("aria-hidden", "false");
+  document.removeEventListener("keydown", onLeadModalKeydown);
+  document.addEventListener("keydown", onLeadModalKeydown);
+  const closeBtn = modal.querySelector(".dashboard-lead-modal-close");
+  closeBtn?.focus();
+}
+
+function buildViewLeadButton(row){
+  const td = el("td", "dashboard-errors-view-cell");
+  const btn = el("button", "dashboard-eye-btn");
+  btn.type = "button";
+  btn.setAttribute("aria-label", "View lead details");
+  btn.title = "View lead details";
+  btn.innerHTML = EYE_SVG;
+  btn.addEventListener("click", e => {
+    e.preventDefault();
+    e.stopPropagation();
+    openLeadDetailModal(row);
+  });
+  btn.addEventListener("mousedown", e => e.stopPropagation());
+  btn.addEventListener("pointerdown", e => e.stopPropagation());
+  td.append(btn);
+  return td;
+}
+
 function renderErrorDetails(rows){
   const wrap = el("div", "dashboard-table-wrap dashboard-errors-wrap");
   const table = el("table", "dashboard-table dashboard-errors");
@@ -448,12 +603,16 @@ function renderErrorDetails(rows){
   for(const h of ["Project", "Mobile", "TeleCaller", "Error Type", "Details", "Action", "Severity"]){
     headRow.append(el("th", null, h));
   }
+  const viewTh = el("th", "dashboard-errors-view-col");
+  viewTh.setAttribute("scope", "col");
+  viewTh.innerHTML = `<span class="dashboard-errors-view-label">View</span>`;
+  headRow.append(viewTh);
   thead.append(headRow);
   const tbody = document.createElement("tbody");
   if(!rows.length){
     const tr = document.createElement("tr");
     const td = el("td", "dashboard-empty", "No errors for the current filters.");
-    td.colSpan = 7;
+    td.colSpan = 8;
     tr.append(td);
     tbody.append(tr);
   }else{
@@ -467,7 +626,8 @@ function renderErrorDetails(rows){
         el("td", null, row.errorType || ""),
         clipCell("dashboard-clip", row.details || ""),
         clipCell("dashboard-clip", row.action || ""),
-        clipCell(sevClass, row.severity || "")
+        clipCell(sevClass, row.severity || ""),
+        buildViewLeadButton(row)
       );
       tbody.append(tr);
     }
@@ -585,6 +745,7 @@ export function renderReviewDashboard(container, jobs, options = {}){
   const paint = () => {
     destroyCharts();
     hideClipPopover();
+    closeLeadDetailModal();
     container.replaceChildren();
     container.classList.add("dashboard-root", "dashboard-with-filters");
 
@@ -627,5 +788,6 @@ export function renderReviewDashboard(container, jobs, options = {}){
 export function destroyReviewDashboard(){
   destroyCharts();
   hideClipPopover();
+  closeLeadDetailModal();
   document.body.classList.remove("dashboard-filters-open");
 }

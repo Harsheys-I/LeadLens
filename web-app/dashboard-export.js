@@ -134,6 +134,8 @@ export function mapResultsToRawDataRows(results, {highSeverityErrors} = {}){
       source: clean(row.source),
       sourceName: clean(row.sourceName),
       commentQuality: Number.isFinite(Number(row.commentQuality)) ? Number(row.commentQuality) : 0,
+      buyingIntent: clean(row.buyingIntent),
+      budget: clean(row.budget),
       errorType: labels.length ? labels.join(" | ") : "None",
       errorLabels: labels,
       errorDetails: clean(row.observation),
