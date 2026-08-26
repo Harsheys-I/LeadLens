@@ -1,10 +1,10 @@
-import {buildTelecallerDashboardBlob} from "./dashboard-export.js?v=5.0.7";
+import {buildTelecallerDashboardBlob} from "./dashboard-export.js?v=5.0.8";
 
-export const APP_VERSION = "5.0.7";
+export const APP_VERSION = "5.0.8";
 /** Sentinel: use server OpenAI proxy (no raw key in the browser). */
 export const SERVER_API_KEY = "__server__";
 /** Bump when default AI rules / field defaults must refresh existing localStorage settings. */
-export const SETTINGS_SEED = 16;
+export const SETTINGS_SEED = 17;
 
 /** Settings limits — batch size is leads per request; concurrency is parallel requests. */
 export const MAX_BATCH_SIZE = 20;
@@ -119,8 +119,8 @@ export const DEFAULT_RULES = [
   {field:"Follow-up Missed",instruction:`If n (this call's Next Followup) is a past calendar date before today → emit "${FOLLOWUP_MISSED_ERROR}". Do not emit any other follow-up timing errors.`,errors:FOLLOWUP_MISSED_ERROR},
   {field:"Comment quality",instruction:"Score q strictly. q must reflect how well Comments capture the real telecaller–customer conversation (need, budget, location preference, objection, decision-maker, next step). One-word/CRM crumbs like visited/RNR/CNP/busy/followup = q 0-2 max. Generic connected notes without customer detail = q <=4. Only rich descriptive talk earns 8-10. When c is an array, score THIS call's latest comment (last entry), using earlier entries only as context.",errors:""},
   {field:"Customer Requirement",instruction:`Only review the Customer Requirement when the call actually connected (Connected / k = Yes). On a connected call, rq should describe what the customer genuinely wants — for example a home configuration (2BHK/3BHK/plot), a budget, a preferred location/locality, facing, or a possession timeline. If rq is blank or only a placeholder such as ".", "-", "**", "NA" or "nil", raise "${EMPTY_REQUIREMENT}". If rq instead holds call notes or jargon rather than a real need — for example RNR, CNP, Visited, Site visit, Busy, Follow-up, Callback, Interested/Not interested — raise "${WRONG_REQUIREMENT}". When the call did not connect (Connected / k = No or blank), leave the requirement alone and never raise either of these two errors.`,errors:`${EMPTY_REQUIREMENT} | ${WRONG_REQUIREMENT}`},
-  {field:"AI Observation",instruction:"Write o as a layman supervisor speaking to a telecaller (18-28 words). Cover every Error Type you put in e using evidence from Comments (c) and Connected (k) — e.g. 'the call connected' / 'never connected', never Connected=Yes/No dumps. Name the gap in plain words (status too warm for unanswered history, location missing, first contact late, overdue follow-up, junk requirement, thin note). Forbidden: copying or paraphrasing c; stacking raw error labels; template fragments. When e is empty, judge note quality / connectedness only.",errors:""},
-  {field:"AI Recommendation",instruction:"Write r as layman next-step coaching (20-40 words) grounded in comment history + Connected (k) + the Error Types in e. Tell the caller what to ask, capture, or correct on the next attempt (config, locality, budget, status ladder, dated follow-up). Not a rewrite of the comment. Not vague ('follow up', 'update remarks', 'call again'). Not Connected=Yes/No or error-label dumps.",errors:""},
+  {field:"AI Observation",instruction:"Write o as a layman supervisor speaking to a telecaller (18-28 words). Cross-check every Error Type in e against Comments (c): say specifically what in the comments supports (or conflicts with) each error. Also use Connected (k) naturally ('the call connected' / 'never connected'), never Connected=Yes/No dumps. Name the gap in plain words (status too warm for unanswered history, location missing, first contact late, overdue follow-up, junk requirement, thin note). Forbidden: copying or paraphrasing c; stacking raw error labels; template fragments. When e is empty, judge note quality / connectedness only.",errors:""},
+  {field:"AI Recommendation",instruction:"Write r as layman coaching (20-40 words) grounded in comment history + Connected (k) + Error Types in e. Cover both: (1) how to fix those errors next time with concrete habits matching each error (call on time / within SLA, write detailed comments, fill location/budget/requirement, align status to history, set a dated follow-up); (2) clearly state what to do next on the next call / follow-up (what to ask, capture, or correct). Not a rewrite of the comment. Not vague ('follow up', 'update remarks', 'call again'). Not Connected=Yes/No or error-label dumps.",errors:""},
   {field:"Buying intent",instruction:"i=1 only for genuine positive purchase interest in THIS call's latest comment/status; else i=0. Earlier history alone does not set i=1 if the latest comment cooled. All-RNR / k=No ⇒ i=0.",errors:""}
 ];
 /* gpt-5-nano OpenAI list price (USD/1M): $0.05 input, $0.005 cached, $0.40 output.
@@ -159,7 +159,7 @@ export function buildChatCompletionBody(model,{temperature,maxTokens,messages,..
 
 /* Large stable prefix FIRST so OpenAI prompt caching can activate (>=1024 tokens;
    some models need closer to 2048). Run-specific rules come after; lead data last. */
-const CACHE_HANDBOOK = `LeadLens QA v5.0.7 — stable cacheable auditor handbook. Evidence only. Never invent facts, dates, budgets, locations, or prior calls.
+const CACHE_HANDBOOK = `LeadLens QA v5.0.8 — stable cacheable auditor handbook. Evidence only. Never invent facts, dates, budgets, locations, or prior calls.
 
 PURPOSE
 You audit Indian real-estate telecalling follow-up notes. Judge only the supplied fields for THIS call id. Optional day[] lists sibling calls on the same latest calendar day — context only; still return one result for THIS id.
@@ -184,8 +184,8 @@ For each id return:
 - q: integer 0-10 comment quality
 - e: array of exact Error Type labels from the allowed list (full text, never numeric codes)
 - i: 0 or 1 buying intent
-- o: 18-28 words QA observation (analysis, not a comment copy)
-- r: 20-40 words concrete coaching recommendation
+- o: 18-28 words QA observation that cross-checks Error Types in e against Comments (analysis, not a comment copy)
+- r: 20-40 words coaching — how to fix those errors next time + clear next-call / follow-up actions
 No severity field. No markdown. No extra keys.
 
 ERROR TYPES (emit exact labels only — no codes, no paraphrases, no other labels)
@@ -251,13 +251,13 @@ If k is No or "", NEVER emit those three — even if rq/b are empty, "**", ".", 
 STYLE — OBSERVATION (o) AND RECOMMENDATION (r)
 Voice: layman QA supervisor speaking to the telecaller — clear, specific, human. No CRM jargon dumps.
 
-o (18–28 words): Explain the Error Types you emit in e using Comments (c) + Connected (k). Weave connectedness naturally ("the call connected" / "the call never connected") — NEVER "Connected=Yes" / "Connected=No". Cover each issued error in plain words (status too warm for unanswered history, preferred location missing, first contact late, overdue follow-up, junk requirement, thin note). Exact error labels optional if meaning is obvious. Do NOT copy, trim, or paraphrase Comments. When e is empty, judge note quality / connectedness only.
+o (18–28 words): Cross-check each Error Type in e against Comments (c) — cite what in the comments aligns or conflicts with that error. Also use Connected (k) naturally ("the call connected" / "the call never connected") — NEVER "Connected=Yes" / "Connected=No". Cover each issued error in plain words (status too warm for unanswered history, preferred location missing, first contact late, overdue follow-up, junk requirement, thin note). Exact error labels optional if meaning is obvious. Do NOT copy, trim, or paraphrase Comments. When e is empty, judge note quality / connectedness only.
 Bad o: "Connected=Yes. Comment lacks a real telecaller–customer conversation. Connected call missing usable location."
-Good o: "The call connected, but the note is thin and the customer's preferred location was not captured on this call." / "Every attempt went unanswered and the call never connected, yet status is still Warm."
+Good o: "Comments are only RNR/WA FU with no customer talk, so Warm status conflicts with the unanswered history; preferred location was never captured." / "The call connected, but the thin note and empty locality field leave no evidence for a warm pipeline claim."
 
-r (20–40 words): Practical next-step coaching from full comment history + Connected + the Error Types in e. Concrete ask / capture / correct actions for the next call — not a rewrite of the note, not vague ("follow up", "update remarks", "call again"), not robotic label dumps.
+r (20–40 words): Coaching from full comment history + Connected + Error Types in e. Must include (1) how to avoid those same errors next time with concrete habits matching the error (call within SLA, write detailed conversation notes, fill location/budget/requirement, step status down when history is all-RNR, set a dated follow-up) and (2) what to do next on the upcoming call / follow-up. Not a rewrite of the note, not vague ("follow up", "update remarks", "call again"), not robotic label dumps.
 Bad r: "Follow up and update comments."
-Good r: "On the next connected call ask preferred config, micro-market, and budget band; replace junk requirement text with a real need; set a same-day follow-up date."
+Good r: "Next time call within 30 minutes of registration and write a full need+locality note; on the next connected call ask preferred config, micro-market, and budget, then set a same-day follow-up date."
 Never dump the full comment into o or r. Never restate this handbook.
 
 EXAMPLES

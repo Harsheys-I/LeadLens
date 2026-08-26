@@ -1,5 +1,5 @@
 {
-  "version": "5.0.7",
+  "version": "5.0.8",
   "name": "LeadLens",
-  "notes": "Dashboard filter Select All / Select None · home module tiles · Shared History sync · notifications · Account."
+  "notes": "Error report eye-icon lead details modal · Observation cross-checks Error Type vs Comments · Recommendation coaches fix-next-time + next actions."
 }

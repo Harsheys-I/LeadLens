@@ -3,7 +3,7 @@
  * Reuses mapResultsToRawDataRows for severity / overdue / error labels.
  */
 
-import {mapResultsToRawDataRows} from "./dashboard-export.js?v=5.0.7";
+import {mapResultsToRawDataRows} from "./dashboard-export.js?v=5.0.8";
 
 const MONTHS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
 
@@ -220,7 +220,22 @@ export function buildDashboardModel(results, filters = {}, options = {}){
       errorType: row.errorType,
       details: row.errorDetails,
       action: row.recommendedAction,
-      severity: row.severity
+      severity: row.severity,
+      comments: row.comments,
+      status: row.status,
+      connected: row.connected,
+      location: row.location,
+      requirement: row.requirement,
+      budget: row.budget,
+      parameter: row.parameter,
+      commentQuality: row.commentQuality,
+      buyingIntent: row.buyingIntent,
+      registration: row.registration,
+      next: row.next,
+      overdue: row.overdue,
+      source: row.source,
+      sourceName: row.sourceName,
+      auditStatus: row.auditStatus
     }));
 
   return {
