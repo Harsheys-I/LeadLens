@@ -1,6 +1,6 @@
-import {requireAuth, logout, getUser, hasPermission, requirePermission, changePassword, updateProfile} from '../auth.js?v=5.1.0';
-import {AdminApi, DashboardApi} from '../api-client.js?v=5.1.0';
-import {mountNotifications} from '../notifications-ui.js?v=5.1.0';
+import {requireAuth, logout, getUser, hasPermission, requirePermission, changePassword, updateProfile} from '../auth.js?v=5.1.1';
+import {AdminApi, DashboardApi} from '../api-client.js?v=5.1.1';
+import {mountNotifications} from '../notifications-ui.js?v=5.1.1';
 
 const $ = id => document.getElementById(id);
 const titles = {users: 'User creation', roles: 'Roles'};
