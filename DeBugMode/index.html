@@ -7,9 +7,9 @@
   <meta name="description" content="LeadLens DeBug Mode">
   <title>LeadLens · DeBug Mode</title>
   <link rel="manifest" href="../manifest.webmanifest">
-  <link rel="stylesheet" href="../styles.css?v=5.2.0">
+  <link rel="stylesheet" href="../styles.css?v=5.2.1">
   <script defer src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-  <script type="module" src="../debug-mode.js?v=5.2.0"></script>
+  <script type="module" src="../debug-mode.js?v=5.2.1"></script>
 </head>
 <body>
   <div id="update-banner" class="update-banner hidden" role="status">
@@ -23,7 +23,7 @@
         <button class="nav-item active" data-view="run"><span>◎</span>Run</button>
         <button class="nav-item" data-view="settings"><span>⚙</span>Settings</button>
       </nav>
-      <div class="privacy-note"><strong id="sidebar-version">v5.2.0</strong><span id="sidebar-notes">DeBug Mode — Error Focus Lab. Per-error prompts + CSV batches + Structured Outputs.</span></div>
+      <div class="privacy-note"><strong id="sidebar-version">v5.2.1</strong><span id="sidebar-notes">DeBug Mode — Error Focus Lab. Per-error prompts + CSV batches + Structured Outputs.</span></div>
     </aside>
 
     <main>
@@ -51,13 +51,17 @@
         <div id="debug-file-list" class="file-list hidden"></div>
         <div id="debug-validation" class="validation hidden" role="status"></div>
         <div id="debug-precounts" class="review-precounts hidden" aria-live="polite"></div>
-        <div class="action-row"><button id="start-debug" class="primary-button" disabled>Start DeBug <span>→</span></button></div>
+        <div class="action-row">
+          <button id="start-debug" class="primary-button" disabled>Start DeBug <span>→</span></button>
+          <button id="re-audit" type="button" class="secondary-button" disabled>Re-Audit</button>
+        </div>
 
         <div id="debug-run-panel" class="review-run-panel hidden">
           <div class="section-head">
-            <div><h2>Live DeBug</h2><p>Progress and log for this run. Pause anytime; resume continues remaining batches.</p></div>
+            <div><h2>Live DeBug</h2><p>Progress and log for this run. Pause anytime; resume continues remaining batches. Re-Audit reruns the same loaded file with current settings.</p></div>
             <div class="inline-actions">
               <button id="pause-run" type="button" class="secondary-button" disabled>Pause</button>
+              <button id="re-audit-panel" type="button" class="secondary-button" disabled>Re-Audit</button>
               <button id="download-result" type="button" class="primary-button" disabled>Save Audit Excel</button>
               <button id="compare-telecaller" type="button" class="secondary-button" disabled>Compare to TeleCaller Audit</button>
             </div>
@@ -69,14 +73,14 @@
           <div class="metrics"><div><span>Leads</span><strong id="metric-leads">—</strong></div><div><span>Calls</span><strong id="metric-calls">—</strong></div><div><span>Audited</span><strong id="metric-completed">—</strong></div><div><span>Batch</span><strong id="metric-batch">—</strong></div><div><span>Status</span><strong id="metric-status">Idle</strong></div><div><span>Input tokens</span><strong id="metric-input-tokens">—</strong></div><div><span>Cached input</span><strong id="metric-cached-tokens">—</strong></div><div><span>Output tokens</span><strong id="metric-output-tokens">—</strong></div><div><span>Run time</span><strong id="metric-duration">—</strong></div><div><span>Run cost</span><strong id="metric-cost">—</strong></div></div>
           <div id="debug-results-panel" class="debug-results-panel hidden">
             <div class="section-head">
-              <div><h2>Results</h2><p>Filter by All / Flagged / Clean or a single active error. Counts use AI labels from this run’s focus set.</p></div>
+              <div><h2>Results</h2><p>Filter by All / Flagged / Clean or a single active error. Errors are AI labels only (no local Follow-up/Budget/Location/Parameter). Observation explains why each flagged error was raised.</p></div>
             </div>
             <div id="debug-error-counts" class="debug-error-counts"></div>
             <div id="debug-result-filters" class="debug-filter-row" role="toolbar" aria-label="Result filters"></div>
             <div class="debug-results-table-wrap">
               <table class="debug-results-table">
                 <thead>
-                  <tr><th>Mobile</th><th>Status</th><th>Connected</th><th>Errors</th><th>Observation</th></tr>
+                  <tr><th>Mobile</th><th>Status</th><th>Connected</th><th>AI Errors</th><th>Why (Observation)</th></tr>
                 </thead>
                 <tbody id="debug-results-body"></tbody>
               </table>
@@ -84,13 +88,13 @@
           </div>
           <div id="debug-compare-panel" class="debug-compare-panel hidden">
             <div class="section-head">
-              <div><h2>Compare vs TeleCaller</h2><p id="debug-compare-summary">Agreement on active AI errors for the same leads.</p></div>
+              <div><h2>Compare vs TeleCaller</h2><p id="debug-compare-summary">Agreement on active AI errors for the same leads (stock handbook + audit_settings).</p></div>
             </div>
             <div id="debug-compare-metrics" class="debug-error-counts"></div>
             <div class="debug-results-table-wrap">
               <table class="debug-results-table">
                 <thead>
-                  <tr><th>Mobile</th><th>Status</th><th>Only DeBug</th><th>Only TeleCaller</th><th>Both</th></tr>
+                  <tr><th>Mobile</th><th>Status</th><th>Only DeBug</th><th>Only TeleCaller</th><th>Both</th><th>DeBug why</th></tr>
                 </thead>
                 <tbody id="debug-compare-body"></tbody>
               </table>

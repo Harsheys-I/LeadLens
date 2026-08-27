@@ -404,7 +404,10 @@ body .dashboard-filter-reset{width:100%;justify-self:stretch;margin-top:4px}
 }
 .debug-results-table th{position:sticky;top:0;background:#f7faf8;font-size:11px;letter-spacing:.04em;text-transform:uppercase;color:var(--muted)}
 .debug-results-table td:last-child{min-width:220px}
+.debug-obs-cell{max-width:360px;white-space:normal;line-height:1.35;color:var(--green-2);font-weight:500}
+.debug-errors-cell{font-weight:600;color:var(--green)}
 @media(max-width:850px){
   .debug-focus-toolbar{flex-direction:column;align-items:stretch}
   .debug-results-table td:last-child{min-width:160px}
+  .debug-obs-cell{max-width:220px}
 }

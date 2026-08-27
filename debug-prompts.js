@@ -25,15 +25,20 @@ INPUT (CSV columns — names may vary; use what is present)
 - rq: Customer Requirement (may be omitted when blank locally)
 - b: Estimated Budget (may be omitted when blank locally)
 - k: Connected Yes / No / "" (Yes = any call on the lead connected)
-- le: precomputed local error labels. Explain them in o/r. NEVER copy le labels into e.
+- le: precomputed local error labels (app-owned). NEVER copy le into e. Do NOT explain le in o — DeBug ignores local labels.
 
 OUTPUT (JSON schema a[] only — one object per id)
 - q: integer 0–10 comment quality
 - e: array of exact Error Type labels from the ALLOWED list at the end of this prompt only (full text, never codes)
 - i: 0 or 1 buying intent (1 only for genuine purchase interest)
-- o: 18–28 words layman QA observation — analysis, not a comment copy; never "Connected=Yes/No"
-- r: 20–40 words coaching — fix those errors next time + clear next action
+- o: 18–32 words — MUST explain WHY each label in e was raised, with concrete evidence from s/c/rq/k (quote or paraphrase the mismatch). If e is empty, one short clean-note sentence. Never generic "notes are thin" without tying to a specific e label. Never "Connected=Yes/No".
+- r: 20–40 words coaching — how to fix those flagged AI errors next time + clear next action
 No severity. No markdown. No extra keys. Prefer e:[] when unsure.
+
+OBSERVATION RULE (o) — CRITICAL
+For every label in e, o must name the error (short) and the evidence that triggered it.
+Example shape: "Status Warm vs cooled NI/RNR trail — raise status misalignment." / "rq is only '-' on connected call — requirement empty."
+If e has 2+ labels, cover each briefly. Do not write a generic note-quality blurb that ignores e.
 
 COMMENT QUALITY q — STRICT
 10: rich conversation; 8–9 strong; 6–7 partial; 4–5 thin; 2–3 boilerplate; 0–1 empty/crumb.
@@ -41,7 +46,7 @@ HARD CAPS: visited / visit / RNR / CNP / busy / followup / SV alone or near-alon
 
 LOCAL ERRORS (le)
 Follow-up Missed, Estimate Budget Empty, Customer Location Empty, Analysis Parameter Empty arrive in le only.
-Explain every le label in o/r. Never copy them into e. Never invent TAT / SLA labels.
+Never copy them into e. Never invent TAT / SLA labels. Do not spend o words on le.
 
 STYLE
 Voice: layman QA supervisor. Never dump full comments into o/r. Never restate this preamble.`;
@@ -68,7 +73,7 @@ DO NOT emit when:
 
 Buying intent: i=0 for all-RNR + k=No, passive NI / cooldown. i=1 only for genuine purchase interest.
 
-o/r: when status is too warm for unanswered or cooled history, say so plainly. For ~8+ calls all RNR / clear NI/dead → r must say change status to Lost and close the lead — not "capture details if connects".`,
+o MUST say why status mismatches (e.g. "s=Warm but latest notes are NI + trailing RNR"). For ~8+ calls all RNR / clear NI/dead → r must say change status to Lost and close the lead — not "capture details if connects".`,
 
   "Customer Requirement Empty": `CUSTOMER REQUIREMENT EMPTY (placeholder / blankish rq)
 Only review when k=Yes AND rq is present (not omitted) and not a fully empty string. Fully blank rq is already in le — do not emit this label for missing rq.
@@ -78,7 +83,8 @@ If rq is only a placeholder such as ".", "-", "**", "NA", or "nil", raise "Custo
 
 CONNECTED GATE: if k is No or "", NEVER emit this label.
 If le already contains "Customer Requirement Empty", do not also emit "Incorrect Customer Requirement".
-Do not use this label for call jargon in rq (that is Incorrect Customer Requirement).`,
+Do not use this label for call jargon in rq (that is Incorrect Customer Requirement).
+o MUST cite the placeholder value (e.g. "rq is only '-' on connected call").`,
 
   "Incorrect Customer Requirement": `INCORRECT CUSTOMER REQUIREMENT (junk / call notes in rq)
 Only review when k=Yes AND rq is present (not omitted) and not a fully empty string.
@@ -88,14 +94,16 @@ INVALID on connected non-blank rq — raise "Incorrect Customer Requirement": RN
 
 Placeholder-only (., -, NA, nil, **) is "Customer Requirement Empty", not this label.
 If le already contains "Customer Requirement Empty", do not also emit this label.
-CONNECTED GATE: if k is No or "", NEVER emit this label.`,
+CONNECTED GATE: if k is No or "", NEVER emit this label.
+o MUST name the junk rq token (e.g. "rq contains 'RNR' — not a requirement").`,
 
   "Customer Comment Quality Not Appropriate": `CUSTOMER COMMENT QUALITY NOT APPROPRIATE
 When k=Yes (any call connected): comments should capture requirement detail such as facing (east/west/north/south/corner), size/dimension (BHK, sqft, plot size), investment vs self purpose, and immediate vs future plan.
 If connected comments lack those requirement details → emit "Customer Comment Quality Not Appropriate".
 When k=No or "", never emit this label.
 
-Still score q honestly. Thin connected notes get low q and may also get this error when requirement detail is missing.`
+Still score q honestly. Thin connected notes get low q and may also get this error when requirement detail is missing.
+o MUST say which requirement details are missing (facing / size / purpose / timeline) — not just "poor comments".`
 };
 
 export function emptyErrorPrompts(){

@@ -1,5 +1,5 @@
 {
-  "version": "5.2.0",
+  "version": "5.2.1",
   "name": "LeadLens",
-  "notes": "v5.2.0: DeBug Error Focus Lab — per-error prompts, dynamic Structured Outputs enum, results filter, TeleCaller compare."
+  "notes": "v5.2.1: DeBug Re-Audit, Compare fix (audit_settings + index pairing), observation WHY, strip local errors from lab results."
 }
