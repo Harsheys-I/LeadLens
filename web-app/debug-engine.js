@@ -6,16 +6,18 @@ import {
   SERVER_API_KEY,
   AUDIT_RESPONSE_SCHEMA,
   AI_ALLOWED_ERRORS,
+  HIGH_SEVERITY_ERRORS,
   buildChatCompletionBody,
   normalizeSettings,
   auditBatch,
-} from "./audit.js?v=5.2.0";
+} from "./audit.js?v=5.2.1";
 import {
   LAB_ERROR_TYPES,
   SHARED_PREAMBLE,
   DEFAULT_ERROR_PROMPTS,
-} from "./debug-prompts.js?v=5.2.0";
+} from "./debug-prompts.js?v=5.2.1";
 
+/** App-local labels — never shown in DeBug focus-lab results / Excel. */
 const LOCAL_OWNED_ERRORS = new Set([
   "Follow-up Missed",
   "Analysis Parameter Empty",
@@ -74,7 +76,7 @@ export function composeDebugPrompt(settings){
     const body=String(prompts[label]??"").trim();
     parts.push(`## Error focus: ${label}\n${body}`);
   }
-  parts.push(`ALLOWED e labels (exact text only): ${active.join(" | ")}\nPrefer e:[] when unsure. Never invent other labels.`);
+  parts.push(`ALLOWED e labels (exact text only): ${active.join(" | ")}\nPrefer e:[] when unsure. Never invent other labels.\nFor each id, o must explain WHY every label in e was raised (evidence from s/c/rq/k).`);
   return parts.join("\n\n");
 }
 
@@ -103,14 +105,19 @@ function parseErrorTypes(value){
   return text.split(",").map(part=>part.trim()).filter(Boolean);
 }
 
-/** Keep local-owned labels; keep AI labels only when in activeErrorTypes. */
+/**
+ * DeBug focus lab: keep ONLY active AI labels.
+ * Strip all LOCAL_OWNED_ERRORS and any non-active AI labels (incl. hard-rule status when not selected).
+ */
 export function filterDebugResultErrors(row,activeErrorTypes){
   const active=new Set(normalizeActiveErrorTypes(activeErrorTypes));
   const errors=parseErrorTypes(row?.errorTypes);
-  const kept=errors.filter(label=>LOCAL_OWNED_ERRORS.has(label)||active.has(label));
+  const kept=errors.filter(label=>active.has(label)&&!LOCAL_OWNED_ERRORS.has(label)&&AI_ALLOWED_ERRORS.has(label));
+  const severity=!kept.length?"NONE":kept.some(label=>HIGH_SEVERITY_ERRORS.has(label))?"HIGH":"MEDIUM";
   return{
     ...row,
-    errorTypes:kept.length?kept.join(", "):"None"
+    errorTypes:kept.length?kept.join(", "):"None",
+    errorSeverity:severity
   };
 }
 
@@ -127,7 +134,7 @@ async function requestDebugAudit(apiKey,settings,leads,signal,log,onUsage){
     maxTokens:Math.max(500,leads.length*140),
     messages:[
       {role:"system",content:system},
-      {role:"user",content:`Audit ${leads.length} call(s). Echo each id.\n\n${csv}`}
+      {role:"user",content:`Audit ${leads.length} call(s). Echo each id. For each id, o must explain WHY each e label was raised.\n\n${csv}`}
     ],
     response_format:{type:"json_schema",json_schema:{name:"ll_audit",strict:true,schema}}
   });
@@ -156,7 +163,7 @@ async function requestDebugAudit(apiKey,settings,leads,signal,log,onUsage){
   const active=new Set(normalizeActiveErrorTypes(settings.activeErrorTypes));
   for(const item of parsed.a){
     if(Array.isArray(item.e)){
-      item.e=item.e.map(token=>String(token||"").trim()).filter(label=>active.has(label)&&AI_ALLOWED_ERRORS.has(label));
+      item.e=item.e.map(token=>String(token||"").trim()).filter(label=>active.has(label)&&AI_ALLOWED_ERRORS.has(label)&&!LOCAL_OWNED_ERRORS.has(label));
     }
   }
   const input=usage?.prompt_tokens??usage?.input_tokens??0;
@@ -167,7 +174,7 @@ async function requestDebugAudit(apiKey,settings,leads,signal,log,onUsage){
   return parsed.a;
 }
 
-/** Same merge/retry as TeleCaller auditBatch; composed prompt + dynamic schema + stricter e filter. */
+/** Same merge/retry as TeleCaller auditBatch; composed prompt + dynamic schema + strip local errors after merge. */
 export async function debugAuditBatch(apiKey,rawSettings,batch,signal,log,onUsage){
   const settings=normalizeSettings(rawSettings);
   settings.activeErrorTypes=normalizeActiveErrorTypes(rawSettings?.activeErrorTypes??settings.activeErrorTypes);
@@ -175,7 +182,14 @@ export async function debugAuditBatch(apiKey,rawSettings,batch,signal,log,onUsag
     ?rawSettings.errorPrompts
     :(settings.errorPrompts||{});
   settings.focusErrorType=String(rawSettings?.focusErrorType||settings.focusErrorType||settings.activeErrorTypes[0]||"");
-  const rows=await auditBatch(apiKey,settings,batch,signal,log,onUsage,requestDebugAudit);
+  // Prevent local-owned labels from being attached during merge (auditBatch still may add them; we strip after).
+  const scrubbed=batch.map(lead=>{
+    const next={...lead};
+    if(Array.isArray(next.localErrors))next.localErrors=next.localErrors.filter(label=>!LOCAL_OWNED_ERRORS.has(label));
+    if(Array.isArray(next.deterministicErrors))next.deterministicErrors=next.deterministicErrors.filter(label=>!LOCAL_OWNED_ERRORS.has(label));
+    return next;
+  });
+  const rows=await auditBatch(apiKey,settings,scrubbed,signal,log,onUsage,requestDebugAudit);
   return rows.map(row=>filterDebugResultErrors(row,settings.activeErrorTypes));
 }
 
@@ -189,26 +203,34 @@ function rowKey(row){
 }
 
 function activeIntersection(errorTypes,activeSet){
-  return parseErrorTypes(errorTypes).filter(label=>activeSet.has(label));
+  return parseErrorTypes(errorTypes)
+    .filter(label=>activeSet.has(label)&&!LOCAL_OWNED_ERRORS.has(label)&&AI_ALLOWED_ERRORS.has(label));
 }
 
 /**
  * Diff DeBug results vs TeleCaller stock results for active AI error labels.
- * @returns {{agreement, onlyDebug, onlyTele, rows}}
+ * Prefer index pairing (same leads / same batch order); fall back to rowKey.
+ * @returns {{agreement, onlyDebug, onlyTele, rows, unmatched}}
  */
 export function compareDebugVsTelecaller(debugRows,teleRows,activeErrorTypes){
   const active=normalizeActiveErrorTypes(activeErrorTypes);
   const activeSet=new Set(active);
+  const teleList=Array.isArray(teleRows)?teleRows:[];
   const teleByKey=new Map();
-  (teleRows||[]).forEach((row,index)=>{
+  teleList.forEach((row,index)=>{
     const key=rowKey(row);
-    if(!teleByKey.has(key))teleByKey.set(key,row);
+    if(key&&!teleByKey.has(key))teleByKey.set(key,row);
     teleByKey.set(`#${index}`,row);
   });
-  let agreement=0,onlyDebug=0,onlyTele=0;
+  let agreement=0,onlyDebug=0,onlyTele=0,unmatched=0;
   const rows=[];
   (debugRows||[]).forEach((debugRow,index)=>{
-    const teleRow=teleByKey.get(rowKey(debugRow))||teleByKey.get(`#${index}`)||null;
+    // Index-first: both runs share lead order when batched identically.
+    let teleRow=teleList[index]??null;
+    if(!teleRow){
+      teleRow=teleByKey.get(rowKey(debugRow))||null;
+      if(!teleRow)unmatched++;
+    }
     const dSet=new Set(activeIntersection(debugRow?.errorTypes,activeSet));
     const tSet=new Set(activeIntersection(teleRow?.errorTypes,activeSet));
     const both=[...dSet].filter(label=>tSet.has(label));
@@ -229,16 +251,28 @@ export function compareDebugVsTelecaller(debugRows,teleRows,activeErrorTypes){
         teleErrors:[...tSet],
         onlyDebug:debugOnly,
         onlyTele:teleOnly,
-        both
+        both,
+        debugObservation:String(debugRow?.observation||"").trim(),
+        teleObservation:String(teleRow?.observation||"").trim()
       });
     }
   });
-  return{agreement,onlyDebug,onlyTele,active,rows,total:debugRows?.length||0};
+  return{agreement,onlyDebug,onlyTele,active,rows,total:debugRows?.length||0,unmatched,teleTotal:teleList.length};
+}
+
+/** Strip DeBug-only keys so stock handbook path cannot pick up composed prompts. */
+function stockAuditSettings(rawSettings){
+  const settings=normalizeSettings(rawSettings&&typeof rawSettings==="object"?rawSettings:{});
+  delete settings.errorPrompts;
+  delete settings.activeErrorTypes;
+  delete settings.focusErrorType;
+  delete settings.customPrompt;
+  return settings;
 }
 
 /** Run stock TeleCaller auditBatch over the same leads (does not mutate production settings). */
 export async function telecallerAuditBatch(apiKey,rawSettings,batch,signal,log,onUsage){
-  return auditBatch(apiKey,normalizeSettings(rawSettings),batch,signal,log,onUsage);
+  return auditBatch(apiKey,stockAuditSettings(rawSettings),batch,signal,log,onUsage);
 }
 
 export{
@@ -246,5 +280,6 @@ export{
   requestDebugAudit,
   LAB_ERROR_TYPES,
   SHARED_PREAMBLE,
-  DEFAULT_ERROR_PROMPTS
+  DEFAULT_ERROR_PROMPTS,
+  LOCAL_OWNED_ERRORS
 };

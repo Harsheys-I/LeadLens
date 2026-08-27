@@ -14,27 +14,27 @@ import {
   downloadWorkbook,
   validateApiKey,
   SERVER_API_KEY,
-} from "./audit.js?v=5.2.0";
-import {getApiKey,apiKeyIsRemembered,saveApiKey,forgetApiKey,setStorageUserId,storageKey} from "./db.js?v=5.2.0";
-import {requireAuth,logout,getUser,changePassword,updateProfile} from "./auth.js?v=5.2.0";
-import {SettingsApi} from "./api-client.js?v=5.2.0";
-import {mountNotifications} from "./notifications-ui.js?v=5.2.0";
+} from "./audit.js?v=5.2.1";
+import {getApiKey,apiKeyIsRemembered,saveApiKey,forgetApiKey,setStorageUserId,storageKey} from "./db.js?v=5.2.1";
+import {requireAuth,logout,getUser,changePassword,updateProfile} from "./auth.js?v=5.2.1";
+import {SettingsApi} from "./api-client.js?v=5.2.1";
+import {mountNotifications} from "./notifications-ui.js?v=5.2.1";
 import {
   debugAuditBatch,
   telecallerAuditBatch,
   compareDebugVsTelecaller,
   activePromptsReady,
   normalizeActiveErrorTypes,
-} from "./debug-engine.js?v=5.2.0";
+} from "./debug-engine.js?v=5.2.1";
 import {
   LAB_ERROR_TYPES,
   DEFAULT_ERROR_PROMPTS,
   emptyErrorPrompts,
-} from "./debug-prompts.js?v=5.2.0";
+} from "./debug-prompts.js?v=5.2.1";
 
 const $=id=>document.getElementById(id);
 const ids=[
-  "page-title","key-state","pause-run","download-result","compare-telecaller","progress-label","progress-percent","progress-bar",
+  "page-title","key-state","pause-run","download-result","compare-telecaller","re-audit","re-audit-panel","progress-label","progress-percent","progress-bar",
   "metric-leads","metric-calls","metric-batch","metric-completed","metric-status","metric-input-tokens",
   "metric-cached-tokens","metric-output-tokens","metric-duration","metric-cost","live-log","clear-console",
   "api-key","remember-key","toggle-key","save-key","forget-key","key-message","batch-size","concurrency","model",
@@ -51,7 +51,7 @@ const ids=[
 ];
 const els=Object.fromEntries(ids.map(id=>[id,$(id)]));
 const titles={run:"Run",settings:"Settings"};
-const ENGINE_VERSION="debug-csv-v2";
+const ENGINE_VERSION="debug-csv-v3";
 const SYSTEM_OUTPUT_IDS=new Set(DEFAULT_OUTPUT_FIELDS.map(field=>field.id));
 const BLOCK_KEY_REASONS=new Set(["empty","format","unauthorized","forbidden"]);
 const SHORT_ERROR_LABEL={
@@ -91,9 +91,12 @@ const DEFAULT_DEBUG_SETTINGS=normalizeDebugSettings({
 });
 
 let currentJob=null,displayLogs=true,parsedFile=null,serverKeyConfigured=false;
+/** Kept after Start so Re-Audit can rerun without re-upload (same leads/job input). */
+let loadedBundle=null;
 let settings=normalizeDebugSettings(DEFAULT_DEBUG_SETTINGS);
 let resultFilter="all";
 const controllers=new Map();
+const compareControllers=new Map();
 
 function loadDebugSettingsLocal(defaults){
   try{return{...defaults,...JSON.parse(localStorage.getItem(storageKey("debugSettings"))||"{}")};}
@@ -387,10 +390,20 @@ function filteredResults(job){
   return rows.filter(row=>parseErrorList(row.errorTypes).includes(resultFilter));
 }
 
+function syncReAuditButton(job=currentJob){
+  const hasLeads=Boolean((loadedBundle?.leads||[]).length||(job?.leads||[]).length);
+  const busy=job?.status==="running"||job?.compareStatus==="running";
+  for(const id of ["re-audit","re-audit-panel"]){
+    const btn=els[id]||document.getElementById(id);
+    if(!btn)continue;
+    btn.disabled=!hasLeads||busy;
+  }
+}
+
 function renderResultsPanel(job){
   const panel=els["debug-results-panel"];
   if(!panel)return;
-  if(!job||job.status!=="completed"||!(job.results||[]).length){
+  if(!job||!(job.results||[]).length||!["completed","failed","paused"].includes(job.status)){
     panel.classList.add("hidden");
     return;
   }
@@ -444,18 +457,24 @@ function renderResultsPanel(job){
     }else{
       for(const row of rows.slice(0,400)){
         const tr=document.createElement("tr");
+        const observation=String(row.observation||"").trim()||"—";
         const cells=[
           row.mobile||"—",
           row.status||"—",
           row.connected||"—",
           row.errorTypes||"None",
-          row.observation||""
+          observation
         ];
-        for(const text of cells){
+        cells.forEach((text,idx)=>{
           const td=document.createElement("td");
           td.textContent=text;
+          if(idx===3)td.className="debug-errors-cell";
+          if(idx===4){
+            td.className="debug-obs-cell";
+            td.title=observation;
+          }
           tr.append(td);
-        }
+        });
         body.append(tr);
       }
     }
@@ -472,7 +491,14 @@ function renderComparePanel(job){
   }
   panel.classList.remove("hidden");
   if(els["debug-compare-summary"]){
-    els["debug-compare-summary"].textContent=`Active errors: ${cmp.active.map(shortLabel).join(", ")}. Rows agreeing on those labels vs diffs.`;
+    const parts=[
+      `Active AI errors: ${cmp.active.map(shortLabel).join(", ")}.`,
+      `Agreement ${cmp.agreement}/${cmp.total}.`,
+      `Stock TeleCaller handbook + audit_settings (not DeBug prompts).`
+    ];
+    if(cmp.unmatched)parts.push(`Unmatched rows: ${cmp.unmatched}.`);
+    if(cmp.teleTotal!=null&&cmp.teleTotal!==cmp.total)parts.push(`TeleCaller rows: ${cmp.teleTotal}.`);
+    els["debug-compare-summary"].textContent=parts.join(" ");
   }
   const metrics=els["debug-compare-metrics"];
   if(metrics){
@@ -497,22 +523,25 @@ function renderComparePanel(job){
     if(!cmp.rows.length){
       const tr=document.createElement("tr");
       const td=document.createElement("td");
-      td.colSpan=5;
+      td.colSpan=6;
       td.textContent="No differences on active AI errors.";
       tr.append(td);
       body.append(tr);
     }else{
       for(const row of cmp.rows.slice(0,400)){
         const tr=document.createElement("tr");
+        const obs=row.debugObservation||"—";
         for(const text of [
           row.mobile||"—",
           row.status||"—",
           row.onlyDebug.join(", ")||"—",
           row.onlyTele.join(", ")||"—",
-          row.both.join(", ")||"—"
+          row.both.join(", ")||"—",
+          obs
         ]){
           const td=document.createElement("td");
           td.textContent=text;
+          if(text===obs){td.className="debug-obs-cell";td.title=obs;}
           tr.append(td);
         }
         body.append(tr);
@@ -552,9 +581,10 @@ function renderProgress(job){
   }
   if(els["download-result"])els["download-result"].disabled=job.status!=="completed";
   if(els["compare-telecaller"]){
-    els["compare-telecaller"].disabled=job.status!=="completed"||job.compareStatus==="running";
+    els["compare-telecaller"].disabled=job.status!=="completed"||job.compareStatus==="running"||job.status==="running";
     els["compare-telecaller"].textContent=job.compareStatus==="running"?"Comparing…":"Compare to TeleCaller Audit";
   }
+  syncReAuditButton(job);
   renderActiveChips(activeForJob(job));
   renderResultsPanel(job);
   renderComparePanel(job);
@@ -628,6 +658,9 @@ async function runJob(job){
   job.leads=Array.isArray(job.leads)?job.leads:[];
   job.compare=null;
   job.compareStatus="";
+  job.telecallerResults=null;
+  compareControllers.get(job.id)?.abort();
+  compareControllers.delete(job.id);
   displayLogs=true;
   resultFilter="all";
 
@@ -725,32 +758,66 @@ async function runJob(job){
 }
 
 async function runTelecallerCompare(job){
-  if(!job||job.status!=="completed")return;
+  if(!job||job.status!=="completed"){
+    toast("Finish a DeBug run before Compare.");
+    return;
+  }
+  if(!(job.results||[]).length){
+    toast("No DeBug results to compare.");
+    return;
+  }
+  if(!(job.leads||[]).length){
+    toast("No leads in memory for Compare.");
+    return;
+  }
   if(job.compareStatus==="running")return;
   const key=effectiveApiKey();
   if(!key){showView("settings");toast("Add an OpenAI API key first.");return;}
+
+  // Abort any prior compare for this job.
+  compareControllers.get(job.id)?.abort();
+  const controller=new AbortController();
+  compareControllers.set(job.id,controller);
+
+  job.compare=null;
   job.compareStatus="running";
+  job.telecallerResults=null;
   renderProgress(job);
-  addLog(job,"Compare: loading TeleCaller audit settings and re-auditing same leads…");
+  addLog(job,"Compare: loading TeleCaller audit_settings, then stock handbook audit on the same leads…");
+
   try{
-    let auditSettings=DEFAULT_SETTINGS;
+    let auditSettings=normalizeSettings(DEFAULT_SETTINGS);
+    let settingsSource="defaults";
     try{
       const payload=await SettingsApi.getAudit();
-      if(payload?.settings&&typeof payload.settings==="object")auditSettings=normalizeSettings(payload.settings);
-    }catch{/* use defaults */}
-    // Match DeBug run sizing so batches align for fair cost/throughput comparison.
+      if(payload?.settings&&typeof payload.settings==="object"){
+        auditSettings=normalizeSettings(payload.settings);
+        settingsSource="server audit_settings";
+      }
+    }catch(err){
+      addLog(job,`Compare: could not load audit_settings (${err.message||err}); using defaults.`,"warn");
+    }
+    // Throughput only — never reuse DeBug model/prompts/error focus.
     auditSettings={
       ...auditSettings,
-      batchSize:job.settings?.batchSize||auditSettings.batchSize,
-      concurrency:job.settings?.concurrency||auditSettings.concurrency,
-      model:auditSettings.model||job.settings?.model
+      batchSize:Math.max(1,Number(job.settings?.batchSize)||Number(auditSettings.batchSize)||1),
+      concurrency:Math.min(MAX_CONCURRENCY,Math.max(1,Number(job.settings?.concurrency)||Number(auditSettings.concurrency)||1)),
+      model:String(auditSettings.model||DEFAULT_SETTINGS.model).trim()||DEFAULT_SETTINGS.model
     };
-    const controller=new AbortController();
-    const concurrency=Math.min(MAX_CONCURRENCY,Math.max(1,Number(job.settings.concurrency)||1));
-    const batchSize=Math.max(1,Number(job.settings.batchSize)||1);
+    delete auditSettings.errorPrompts;
+    delete auditSettings.activeErrorTypes;
+    delete auditSettings.focusErrorType;
+    delete auditSettings.customPrompt;
+
+    addLog(job,`Compare: TeleCaller path · ${settingsSource} · model ${auditSettings.model} · batch ${auditSettings.batchSize} · pool ${auditSettings.concurrency}.`);
+
+    const concurrency=auditSettings.concurrency;
+    const batchSize=auditSettings.batchSize;
     const leadGroups=groupCallRowsByLead(job.leads);
     const totalBatches=Math.ceil(leadGroups.length/batchSize)||0;
-    const teleResults=[];
+    if(!totalBatches)throw new Error("No lead batches to compare.");
+
+    const teleResults=new Array(totalBatches);
     const queue=[...Array(totalBatches).keys()];
     const persistUsage=usage=>{
       job.tokenUsage=job.tokenUsage||{input:0,cached:0,output:0};
@@ -776,25 +843,163 @@ async function runTelecallerCompare(job){
           );
           teleResults[index]=rows;
         }catch(error){
+          if(error.name==="AbortError"){
+            if(!fatalError)fatalError=error;
+            queue.length=0;
+            return;
+          }
           fatalError=error;
+          queue.length=0;
           controller.abort();
         }
       }
     });
     await Promise.all(workers);
     if(fatalError)throw fatalError;
-    const flat=teleResults.flatMap(rows=>rows||[]);
+
+    // Preserve batch order (dense) — do not flatMap sparse holes.
+    const flat=[];
+    for(let i=0;i<totalBatches;i++){
+      const rows=teleResults[i];
+      if(!Array.isArray(rows))throw new Error(`TeleCaller batch ${i+1}/${totalBatches} missing after Compare.`);
+      flat.push(...rows);
+    }
+    if(flat.length!==(job.results||[]).length){
+      addLog(job,`Compare: row count DeBug ${job.results.length} vs TeleCaller ${flat.length} — pairing by index then key.`,"warn");
+    }
     job.telecallerResults=flat;
     job.compare=compareDebugVsTelecaller(job.results,flat,activeForJob(job));
     job.compareStatus="done";
-    addLog(job,`Compare done: agreement ${job.compare.agreement}, only-DeBug ${job.compare.onlyDebug}, only-TeleCaller ${job.compare.onlyTele}.`,"success");
+    addLog(job,`Compare done: agreement ${job.compare.agreement}/${job.compare.total}, only-DeBug ${job.compare.onlyDebug}, only-TeleCaller ${job.compare.onlyTele}.`,"success");
     toast("Compare complete.");
   }catch(error){
     job.compareStatus="failed";
-    addLog(job,`Compare failed: ${error.message||error}`,"error");
-    toast(error.message||"Compare failed");
+    const msg=error?.name==="AbortError"?"Compare aborted.":(error.message||String(error));
+    addLog(job,`Compare failed: ${msg}`,"error");
+    toast(msg||"Compare failed");
+  }finally{
+    compareControllers.delete(job.id);
+    renderProgress(job);
   }
+}
+
+function buildJobFromBundle(bundle,liveSettings){
+  return{
+    id:crypto.randomUUID(),
+    engineVersion:ENGINE_VERSION,
+    appVersion:APP_VERSION,
+    mode:"debug",
+    fileName:bundle.fileName,
+    sheetName:bundle.sheetName||"",
+    createdAt:timestamp(),
+    updatedAt:timestamp(),
+    status:"queued",
+    totalLeads:bundle.leads.length,
+    leadCount:bundle.leadCount||0,
+    callCount:bundle.callCount||bundle.leads.length,
+    latestDayCalls:bundle.latestDayCalls||bundle.leads.length,
+    rowCount:bundle.rowCount||0,
+    nextBatch:0,
+    pendingBatches:{},
+    leads:bundle.leads,
+    results:[],
+    logs:[],
+    tokenUsage:{input:0,cached:0,output:0},
+    elapsedMs:0,
+    pricing:deepCopy(liveSettings.pricing),
+    settings:deepCopy(liveSettings),
+    compare:null,
+    compareStatus:"",
+    telecallerResults:null
+  };
+}
+
+async function abortInFlight(job){
+  if(!job)return;
+  compareControllers.get(job.id)?.abort();
+  compareControllers.delete(job.id);
+  const ctrl=controllers.get(job.id);
+  if(ctrl){
+    ctrl.abort();
+    // Wait briefly for runJob finally to clear the controller map.
+    for(let i=0;i<40&&controllers.has(job.id);i++)await new Promise(r=>setTimeout(r,50));
+  }
+}
+
+async function startDebug(){
+  if(!parsedFile?.leads?.length)return;
+  const key=effectiveApiKey();
+  if(!key){showView("settings");toast("Add an OpenAI API key first.");return;}
+  const live=collectSettings();
+  const ready=activePromptsReady(live);
+  if(!ready.ok){showView("settings");toast(`Fill prompts for: ${ready.missing.map(shortLabel).join(", ")}`);return;}
+  settings=live;
+  saveDebugSettingsLocal(settings);
+
+  loadedBundle={
+    fileName:parsedFile.fileName,
+    sheetName:parsedFile.sheetName||"",
+    leads:parsedFile.leads,
+    leadCount:parsedFile.leadCount||0,
+    callCount:parsedFile.callCount||parsedFile.leads.length,
+    latestDayCalls:parsedFile.latestDayCalls||parsedFile.leads.length,
+    rowCount:parsedFile.rowCount||0
+  };
+
+  if(currentJob)await abortInFlight(currentJob);
+
+  const job=buildJobFromBundle(loadedBundle,settings);
+  // Keep file list / Re-Audit source; clear the file input only.
+  if(els["debug-file-input"])els["debug-file-input"].value="";
+  renderFileList();
+  updateValidation();
+  els["debug-run-panel"]?.classList.remove("hidden");
+  currentJob=job;
   renderProgress(job);
+  await runJob(job);
+}
+
+async function reAudit(){
+  const bundle=loadedBundle?.leads?.length
+    ?loadedBundle
+    :(currentJob?.leads?.length?{
+      fileName:currentJob.fileName,
+      sheetName:currentJob.sheetName||"",
+      leads:currentJob.leads,
+      leadCount:currentJob.leadCount||0,
+      callCount:currentJob.callCount||currentJob.leads.length,
+      latestDayCalls:currentJob.latestDayCalls||currentJob.leads.length,
+      rowCount:currentJob.rowCount||0
+    }:null);
+  if(!bundle?.leads?.length){
+    toast("Upload an Excel file first.");
+    return;
+  }
+  loadedBundle=bundle;
+  const key=effectiveApiKey();
+  if(!key){showView("settings");toast("Add an OpenAI API key first.");return;}
+  const live=collectSettings();
+  const ready=activePromptsReady(live);
+  if(!ready.ok){showView("settings");toast(`Fill prompts for: ${ready.missing.map(shortLabel).join(", ")}`);return;}
+  settings=live;
+  saveDebugSettingsLocal(settings);
+
+  if(currentJob)await abortInFlight(currentJob);
+
+  const job=buildJobFromBundle(bundle,settings);
+  els["debug-run-panel"]?.classList.remove("hidden");
+  currentJob=job;
+  addLog(job,`Re-Audit: same file “${job.fileName}” with current settings (${activeForJob(job).map(shortLabel).join(", ")}).`);
+  renderProgress(job);
+  toast("Re-Audit started.");
+  await runJob(job);
+}
+
+function download(job){
+  if(!job||job.status!=="completed")return;
+  const live=collectSettings();
+  downloadWorkbook(job,live);
+  toast("Audit Excel downloaded.");
 }
 
 function configRow(className){const row=document.createElement("div");row.className=className;return row;}
@@ -1045,12 +1250,14 @@ async function importSettingsFile(file){
 function renderFileList(){
   const box=els["debug-file-list"];
   if(!box)return;
-  if(!parsedFile){box.classList.add("hidden");box.replaceChildren();return;}
+  const source=parsedFile||(loadedBundle?{fileName:loadedBundle.fileName,leads:loadedBundle.leads,leadCount:loadedBundle.leadCount}:null);
+  if(!source){box.classList.add("hidden");box.replaceChildren();return;}
   box.classList.remove("hidden");
   box.replaceChildren();
   const row=document.createElement("div");
   row.className="file-row";
-  row.textContent=`${parsedFile.fileName} · ${parsedFile.leads?.length||0} latest-day calls · ${parsedFile.leadCount||0} leads`;
+  const suffix=parsedFile?"":" · loaded for Re-Audit";
+  row.textContent=`${source.fileName} · ${source.leads?.length||0} latest-day calls · ${source.leadCount||0} leads${suffix}`;
   box.append(row);
 }
 
@@ -1059,9 +1266,20 @@ function updateValidation(){
   const pre=els["debug-precounts"];
   const start=els["start-debug"];
   if(!box||!start)return;
+  syncReAuditButton();
   if(!parsedFile){
-    box.classList.add("hidden");
-    pre?.classList.add("hidden");
+    if(loadedBundle?.leads?.length){
+      box.classList.remove("hidden");
+      box.className="validation";
+      box.textContent=`Loaded: ${loadedBundle.fileName} · ${loadedBundle.leadCount||0} leads · use Re-Audit to rerun, or upload a new file.`;
+      if(pre){
+        pre.classList.remove("hidden");
+        pre.textContent=`In memory · ${Number(loadedBundle.callCount||loadedBundle.leads.length).toLocaleString()} calls · ready for Re-Audit`;
+      }
+    }else{
+      box.classList.add("hidden");
+      pre?.classList.add("hidden");
+    }
     start.disabled=true;
     return;
   }
@@ -1090,6 +1308,7 @@ function updateValidation(){
     pre.textContent=`Sheet “${parsedFile.sheetName||"—"}” · ${Number(parsedFile.rowCount||0).toLocaleString()} Excel rows · ${Number(parsedFile.callCount||parsedFile.leads.length).toLocaleString()} calls · latest-day ${parsedFile.leads.length}`;
   }
   start.disabled=!(parsedFile.leads||[]).length;
+  syncReAuditButton();
 }
 
 async function handleFiles(fileList){
@@ -1103,71 +1322,28 @@ async function handleFiles(fileList){
     const file=files[0];
     const parsed=parseWorkbook(await file.arrayBuffer(),settings);
     parsedFile={...parsed,fileName:file.name,fileSize:file.size,sourceFormat:"raw"};
+    loadedBundle={
+      fileName:parsedFile.fileName,
+      sheetName:parsedFile.sheetName||"",
+      leads:parsedFile.leads,
+      leadCount:parsedFile.leadCount||0,
+      callCount:parsedFile.callCount||parsedFile.leads.length,
+      latestDayCalls:parsedFile.latestDayCalls||parsedFile.leads.length,
+      rowCount:parsedFile.rowCount||0
+    };
   }catch(error){
     parsedFile=null;
+    loadedBundle=null;
     box.className="validation error";
     box.textContent=error.message||"Could not read workbook.";
     els["start-debug"].disabled=true;
+    syncReAuditButton();
     renderFileList();
     return;
   }
   if(files.length>1)toast("Only the first file is used.");
   renderFileList();
   updateValidation();
-}
-
-async function startDebug(){
-  if(!parsedFile?.leads?.length)return;
-  const key=effectiveApiKey();
-  if(!key){showView("settings");toast("Add an OpenAI API key first.");return;}
-  const live=collectSettings();
-  const ready=activePromptsReady(live);
-  if(!ready.ok){showView("settings");toast(`Fill prompts for: ${ready.missing.map(shortLabel).join(", ")}`);return;}
-  settings=live;
-  saveDebugSettingsLocal(settings);
-
-  const job={
-    id:crypto.randomUUID(),
-    engineVersion:ENGINE_VERSION,
-    appVersion:APP_VERSION,
-    mode:"debug",
-    fileName:parsedFile.fileName,
-    sheetName:parsedFile.sheetName||"",
-    createdAt:timestamp(),
-    updatedAt:timestamp(),
-    status:"queued",
-    totalLeads:parsedFile.leads.length,
-    leadCount:parsedFile.leadCount||0,
-    callCount:parsedFile.callCount||parsedFile.leads.length,
-    latestDayCalls:parsedFile.latestDayCalls||parsedFile.leads.length,
-    rowCount:parsedFile.rowCount||0,
-    nextBatch:0,
-    pendingBatches:{},
-    leads:parsedFile.leads,
-    results:[],
-    logs:[],
-    tokenUsage:{input:0,cached:0,output:0},
-    elapsedMs:0,
-    pricing:deepCopy(settings.pricing),
-    settings:deepCopy(settings),
-    compare:null,
-    compareStatus:""
-  };
-  parsedFile=null;
-  renderFileList();
-  updateValidation();
-  if(els["debug-file-input"])els["debug-file-input"].value="";
-  els["debug-run-panel"]?.classList.remove("hidden");
-  currentJob=job;
-  renderProgress(job);
-  await runJob(job);
-}
-
-function download(job){
-  if(!job||job.status!=="completed")return;
-  const live=collectSettings();
-  downloadWorkbook(job,live);
-  toast("Audit Excel downloaded.");
 }
 
 async function loadServerSettingsAndKey(){
@@ -1283,6 +1459,8 @@ els["pause-run"]?.addEventListener("click",async()=>{
 });
 els["download-result"]?.addEventListener("click",()=>currentJob&&download(currentJob));
 els["compare-telecaller"]?.addEventListener("click",()=>currentJob&&runTelecallerCompare(currentJob));
+els["re-audit"]?.addEventListener("click",()=>reAudit());
+els["re-audit-panel"]?.addEventListener("click",()=>reAudit());
 els["clear-console"]?.addEventListener("click",()=>{displayLogs=false;renderLogs(currentJob);});
 
 els["focus-error-type"]?.addEventListener("change",()=>{
@@ -1322,6 +1500,7 @@ if(els["debug-drop-zone"]){
 }
 if(els["debug-file-input"])els["debug-file-input"].onchange=event=>handleFiles(event.target.files);
 if(els["start-debug"])els["start-debug"].onclick=startDebug;
+syncReAuditButton();
 
 els["toggle-key"]?.addEventListener("click",()=>{const hidden=els["api-key"].type==="password";els["api-key"].type=hidden?"text":"password";els["toggle-key"].textContent=hidden?"Hide":"Show";});
 els["save-key"]?.addEventListener("click",async()=>{
