@@ -2,7 +2,7 @@
  * In-app TeleCaller Review dashboard (KPIs, scorecard, Chart.js charts, error table).
  */
 
-import {buildDashboardModel} from "./dashboard-metrics.js?v=5.1.0";
+import {buildDashboardModel, OVERDUE_BUCKETS} from "./dashboard-metrics.js?v=5.1.1";
 
 /** Panel switcher labels (presentation) → internal section titles stay as-built. */
 const DASHBOARD_PANELS = [
@@ -107,7 +107,8 @@ function readFilters(form){
     dateFrom: String(data.get("dateFrom") || ""),
     dateTo: String(data.get("dateTo") || ""),
     severities: readMulti(form, "severities"),
-    errorTypes: readMulti(form, "errorTypes")
+    errorTypes: readMulti(form, "errorTypes"),
+    overdueBuckets: readMulti(form, "overdueBuckets")
   };
 }
 
@@ -169,7 +170,8 @@ function buildFilters(filterOptions, filters){
     ["telecallers", "TeleCaller", filterOptions.telecallers, filters.telecallers],
     ["projects", "Project", filterOptions.projects, filters.projects],
     ["severities", "Severity", filterOptions.severities, filters.severities],
-    ["errorTypes", "Error Type", filterOptions.errorTypes, filters.errorTypes]
+    ["errorTypes", "Error Type", filterOptions.errorTypes, filters.errorTypes],
+    ["overdueBuckets", "Overdue (days)", filterOptions.overdueBuckets || OVERDUE_BUCKETS, filters.overdueBuckets]
   ];
 
   for(const [name, label, options, selected] of fields){
@@ -314,7 +316,7 @@ function barScaleOptions(){
   };
 }
 
-function renderCharts(charts){
+function renderCharts(charts, {onOverdueBucketClick} = {}){
   destroyCharts();
   const mount = el("div", "dashboard-charts");
   const Chart = requireChart();
@@ -340,12 +342,18 @@ function renderCharts(charts){
     }],
     ["commentQuality", "Comment Quality Score", "pie", charts.commentQualityDistribution, {
       plugins: {legend: {display: true, position: "bottom", labels: {color: CHART_COLORS.ink, boxWidth: 12, padding: 10}}}
+    }],
+    ["overdue", "Overdue Days", "pie", charts.overdueDistribution, {
+      plugins: {legend: {display: true, position: "bottom", labels: {color: CHART_COLORS.ink, boxWidth: 12, padding: 10}}}
     }]
   ];
 
   for(const [id, title, type, series, options, solidColor] of specs){
     const card = el("div", "dashboard-chart-card");
     card.append(el("h3", null, title));
+    if(id === "overdue"){
+      card.append(el("p", "dashboard-section-note", "Click a slice to filter · 0–5, >5–50, >50–100 · Lost/Beyond Budget excluded"));
+    }
     const canvasWrap = el("div", "dashboard-chart-canvas");
     const canvas = document.createElement("canvas");
     canvas.setAttribute("aria-label", title);
@@ -362,6 +370,17 @@ function renderCharts(charts){
         : labels.map((_, i) => CHART_COLORS.palette[i % CHART_COLORS.palette.length]))
       : solidColor;
 
+    const chartOptions = baseChartOptions(options);
+    if(id === "overdue" && typeof onOverdueBucketClick === "function"){
+      chartOptions.onClick = (_evt, elements) => {
+        if(!elements?.length) return;
+        const idx = elements[0].index;
+        const label = labels[idx];
+        if(label) onOverdueBucketClick(label);
+      };
+      canvas.style.cursor = "pointer";
+    }
+
     const chart = new Chart(canvas.getContext("2d"), {
       type,
       data: {
@@ -374,7 +393,7 @@ function renderCharts(charts){
           maxBarThickness: 42
         }]
       },
-      options: baseChartOptions(options)
+      options: chartOptions
     });
     chartRegistry.set(id, chart);
   }
@@ -484,7 +503,10 @@ function formatLeadDetailValue(key, value){
     return value.toLocaleDateString(undefined, {day: "2-digit", month: "short", year: "numeric"});
   }
   if(key === "commentQuality" && (value === 0 || value)) return String(value);
-  if(key === "overdue" && (value === 0 || value)) return String(value);
+  if(key === "overdue"){
+    if(value === "-" || value === 0 || value) return String(value);
+    return "";
+  }
   return String(value);
 }
 
@@ -738,7 +760,8 @@ export function renderReviewDashboard(container, jobs, options = {}){
     dateFrom: "",
     dateTo: "",
     severities: [],
-    errorTypes: []
+    errorTypes: [],
+    overdueBuckets: []
   };
   let activePanel = "summary";
 
@@ -759,7 +782,15 @@ export function renderReviewDashboard(container, jobs, options = {}){
     body.append(bar);
     body.append(section("Executive KPIs", null, renderKpis(model.kpis, {showComparativeKpis}), "summary"));
     body.append(section("TeleCaller Performance", null, renderScorecard(model.scorecard), "performance"));
-    body.append(section("Charts", null, renderCharts(model.charts), "graphs"));
+    body.append(section("Charts", null, renderCharts(model.charts, {
+      onOverdueBucketClick: (label) => {
+        const set = new Set(filters.overdueBuckets || []);
+        if(set.has(label)) set.delete(label);
+        else set.add(label);
+        filters = {...filters, overdueBuckets: [...set]};
+        paint();
+      }
+    }), "graphs"));
     body.append(section("Detailed Error Report", `${num(model.errorDetails.length)} error row(s)`, renderErrorDetails(model.errorDetails), "errors"));
     container.append(body, aside);
     activePanel = applyActivePanel(body, activePanel);
@@ -776,7 +807,8 @@ export function renderReviewDashboard(container, jobs, options = {}){
         dateFrom: "",
         dateTo: "",
         severities: [],
-        errorTypes: []
+        errorTypes: [],
+        overdueBuckets: []
       };
       paint();
     });

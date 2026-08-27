@@ -3,9 +3,12 @@
  * Reuses mapResultsToRawDataRows for severity / overdue / error labels.
  */
 
-import {mapResultsToRawDataRows} from "./dashboard-export.js?v=5.1.0";
+import {mapResultsToRawDataRows} from "./dashboard-export.js?v=5.1.1";
 
 const MONTHS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+
+/** Inclusive bands for overdue pie + filter. Negatives / blank / Lost|Beyond Budget / >100 excluded. */
+export const OVERDUE_BUCKETS = ["0-5", ">5-50", ">50-100"];
 
 function formatDashDate(date){
   if(!(date instanceof Date) || Number.isNaN(date.valueOf())) return "";
@@ -30,12 +33,21 @@ function parseFilterDate(value){
   return Number.isNaN(d.valueOf()) ? null : startOfDay(d);
 }
 
+/** ~accuracy/20 stars via five equal 20pp bands (round). 53% → ★★★☆☆, 41% → ★★☆☆☆. */
 function accuracyRating(accuracy){
-  if(accuracy >= 0.95) return "★★★★★";
-  if(accuracy >= 0.9) return "★★★★☆";
-  if(accuracy >= 0.8) return "★★★☆☆";
-  if(accuracy >= 0.7) return "★★☆☆☆";
-  return "★☆☆☆☆";
+  const pct = Math.max(0, Math.min(100, (Number(accuracy) || 0) * 100));
+  const filled = Math.min(5, Math.max(0, Math.round(pct / 20)));
+  return `${"★".repeat(filled)}${"☆".repeat(5 - filled)}`;
+}
+
+/** Map numeric overdue days → pie bucket, or null when N/A / out of range. */
+export function overdueBucket(days){
+  const n = Number(days);
+  if(!Number.isFinite(n) || n < 0) return null;
+  if(n <= 5) return "0-5";
+  if(n <= 50) return ">5-50";
+  if(n <= 100) return ">50-100";
+  return null;
 }
 
 function uniqueSorted(values){
@@ -61,6 +73,7 @@ function applyFilters(rows, filters = {}){
   const projects = normalizeFilterList(filters.projects ?? filters.project);
   const severities = normalizeFilterList(filters.severities ?? filters.severity);
   const errorTypes = normalizeFilterList(filters.errorTypes ?? filters.errorType);
+  const overdueBuckets = normalizeFilterList(filters.overdueBuckets ?? filters.overdueBucket);
   const dateFrom = parseFilterDate(filters.dateFrom);
   const dateTo = parseFilterDate(filters.dateTo);
 
@@ -72,6 +85,10 @@ function applyFilters(rows, filters = {}){
       const labels = row.errorLabels || [];
       const hit = errorTypes.some(et => labels.includes(et) || row.errorType === et);
       if(!hit) return false;
+    }
+    if(overdueBuckets.length){
+      const bucket = row.overdueBucket || overdueBucket(row.overdueDays);
+      if(!bucket || !overdueBuckets.includes(bucket)) return false;
     }
     if(dateFrom || dateTo){
       if(!(row.registration instanceof Date) || Number.isNaN(row.registration.valueOf())) return false;
@@ -104,11 +121,15 @@ function commentQualityBucket(score){
 
 /**
  * @param {object[]} results LeadLens audit result rows
- * @param {{telecaller?:string|string[],telecallers?:string[],project?:string|string[],projects?:string[],dateFrom?:string|Date,dateTo?:string|Date,severity?:string|string[],severities?:string[],errorType?:string|string[],errorTypes?:string[]}} [filters]
+ * @param {{telecaller?:string|string[],telecallers?:string[],project?:string|string[],projects?:string[],dateFrom?:string|Date,dateTo?:string|Date,severity?:string|string[],severities?:string[],errorType?:string|string[],errorTypes?:string[],overdueBucket?:string|string[],overdueBuckets?:string[]}} [filters]
  * @param {{highSeverityErrors?: Set<string>|string[]}} [options]
  */
 export function buildDashboardModel(results, filters = {}, options = {}){
-  const allRows = mapResultsToRawDataRows(results || [], {highSeverityErrors: options.highSeverityErrors});
+  const allRows = mapResultsToRawDataRows(results || [], {highSeverityErrors: options.highSeverityErrors}).map(row => {
+    const days = row.overdueDays;
+    const bucket = overdueBucket(days);
+    return {...row, overdueBucket: bucket};
+  });
   const rows = applyFilters(allRows, filters);
 
   const allErrorLabels = [];
@@ -120,7 +141,8 @@ export function buildDashboardModel(results, filters = {}, options = {}){
     telecallers: uniqueSorted(allRows.map(r => r.telecaller)),
     projects: uniqueSorted(allRows.map(r => r.project)),
     severities: ["Critical", "Medium"],
-    errorTypes: uniqueSorted(allErrorLabels)
+    errorTypes: uniqueSorted(allErrorLabels),
+    overdueBuckets: OVERDUE_BUCKETS.slice()
   };
 
   const totalLeads = rows.length;
@@ -177,12 +199,15 @@ export function buildDashboardModel(results, filters = {}, options = {}){
   const projectErrorCounts = new Map();
   const severityCounts = new Map([["Critical", 0], ["Medium", 0]]);
   const commentQualityCounts = new Map(CQ_BUCKETS.map(label => [label, 0]));
+  const overdueCounts = new Map(OVERDUE_BUCKETS.map(label => [label, 0]));
   for(const row of rows){
     if(row.severity === "Critical" || row.severity === "Medium"){
       countMapInc(severityCounts, row.severity);
     }
     const cqBucket = commentQualityBucket(row.commentQuality);
     if(cqBucket) countMapInc(commentQualityCounts, cqBucket);
+    const odBucket = row.overdueBucket || overdueBucket(row.overdueDays);
+    if(odBucket) countMapInc(overdueCounts, odBucket);
     if(row.errorFlag){
       countMapInc(projectErrorCounts, row.project || "(No project)");
       const labels = row.errorLabels?.length ? row.errorLabels : (row.errorType && row.errorType !== "None" ? [row.errorType] : []);
@@ -208,6 +233,10 @@ export function buildDashboardModel(results, filters = {}, options = {}){
     commentQualityDistribution: {
       labels: CQ_BUCKETS.slice(),
       values: CQ_BUCKETS.map(label => commentQualityCounts.get(label) || 0)
+    },
+    overdueDistribution: {
+      labels: OVERDUE_BUCKETS.slice(),
+      values: OVERDUE_BUCKETS.map(label => overdueCounts.get(label) || 0)
     }
   };
 

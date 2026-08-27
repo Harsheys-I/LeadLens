@@ -102,6 +102,11 @@ function leadKey(row){
   return `${String(row?.mobile ?? "").trim().toLowerCase()}\u0001${String(row?.project ?? "").trim().toLowerCase()}`;
 }
 
+function isClosedLeadStatus(status){
+  const n = String(status ?? "").trim().toLowerCase().replace(/[_-]+/g, " ").replace(/\s+/g, " ");
+  return n === "lost" || n === "beyond budget";
+}
+
 /** Map LeadLens audit result rows → RawData row objects. */
 export function mapResultsToRawDataRows(results, {highSeverityErrors} = {}){
   const today = startOfLocalDay(new Date());
@@ -112,13 +117,16 @@ export function mapResultsToRawDataRows(results, {highSeverityErrors} = {}){
     const reg = parseLooseDate(row.registration);
     const next = parseLooseDate(row.next);
     const regDay = reg ? startOfLocalDay(reg) : null;
-    let overdue = "";
-    if(row.overdue !== undefined && row.overdue !== null && row.overdue !== ""){
+    const closed = isClosedLeadStatus(row.status);
+    let overdueDays = null;
+    if(row.overdue !== undefined && row.overdue !== null && row.overdue !== "" && row.overdue !== "-"){
       const n = Number(row.overdue);
-      if(Number.isFinite(n)) overdue = Math.round(n);
+      if(Number.isFinite(n)) overdueDays = Math.round(n);
     }else if(next){
-      overdue = Math.round((today - startOfLocalDay(next)) / 86400000);
+      overdueDays = Math.round((today - startOfLocalDay(next)) / 86400000);
     }
+    // Lost / Beyond Budget: display "-" and exclude from overdue pie (overdueDays null).
+    const overdue = closed ? "-" : (overdueDays === null ? "" : overdueDays);
     return {
       project: clean(row.project),
       mobile: clean(row.mobile),
@@ -131,6 +139,7 @@ export function mapResultsToRawDataRows(results, {highSeverityErrors} = {}){
       nextSerial: next ? toExcelDateTimeSerial(next) : null,
       location: clean(row.location),
       overdue,
+      overdueDays: closed ? null : overdueDays,
       parameter: clean(row.parameter),
       connected: clean(row.connected),
       requirement: clean(row.requirement),
@@ -193,7 +202,8 @@ function buildRawDataRowsXml(rawRows){
     cells.push(inlineStr(`F${r}`, row.comments));
     if(row.nextSerial != null) cells.push(numberCell(`G${r}`, row.nextSerial, STYLE.datetime));
     cells.push(inlineStr(`H${r}`, row.location));
-    if(row.overdue !== "") cells.push(numberCell(`I${r}`, row.overdue, STYLE.int));
+    if(row.overdue === "-") cells.push(inlineStr(`I${r}`, "-"));
+    else if(row.overdue !== "") cells.push(numberCell(`I${r}`, row.overdue, STYLE.int));
     cells.push(inlineStr(`J${r}`, row.parameter));
     cells.push(inlineStr(`K${r}`, row.connected));
     cells.push(inlineStr(`L${r}`, row.requirement));

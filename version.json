@@ -1,5 +1,5 @@
 {
-  "version": "5.1.0",
+  "version": "5.1.1",
   "name": "LeadLens",
-  "notes": "Audit rules v5.1.0: AI owns status/requirement/comment quality/intent; local owns follow-up, overdue, blank budget/location/parameter; Fresh Call TAT removed."
+  "notes": "v5.1.1: rating bands; overdue pie/filter; Lost/Beyond Budget overdue '-'; fulfilled follow-up → overdue 0; Cold/RNR + cooled + Lost/NI status floors; close-lead after dead signals; no set-follow-up when n exists."
 }
