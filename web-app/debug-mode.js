@@ -14,23 +14,23 @@ import {
   downloadWorkbook,
   validateApiKey,
   SERVER_API_KEY,
-} from "./audit.js?v=5.2.1";
-import {getApiKey,apiKeyIsRemembered,saveApiKey,forgetApiKey,setStorageUserId,storageKey} from "./db.js?v=5.2.1";
-import {requireAuth,logout,getUser,changePassword,updateProfile} from "./auth.js?v=5.2.1";
-import {SettingsApi} from "./api-client.js?v=5.2.1";
-import {mountNotifications} from "./notifications-ui.js?v=5.2.1";
+} from "./audit.js?v=5.2.1d";
+import {getApiKey,apiKeyIsRemembered,saveApiKey,forgetApiKey,setStorageUserId,storageKey} from "./db.js?v=5.2.1d";
+import {requireAuth,logout,getUser,changePassword,updateProfile} from "./auth.js?v=5.2.1d";
+import {SettingsApi} from "./api-client.js?v=5.2.1d";
+import {mountNotifications} from "./notifications-ui.js?v=5.2.1d";
 import {
   debugAuditBatch,
   telecallerAuditBatch,
   compareDebugVsTelecaller,
   activePromptsReady,
   normalizeActiveErrorTypes,
-} from "./debug-engine.js?v=5.2.1";
+} from "./debug-engine.js?v=5.2.1d";
 import {
   LAB_ERROR_TYPES,
   DEFAULT_ERROR_PROMPTS,
   emptyErrorPrompts,
-} from "./debug-prompts.js?v=5.2.1";
+} from "./debug-prompts.js?v=5.2.1d";
 
 const $=id=>document.getElementById(id);
 const ids=[
