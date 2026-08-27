@@ -7,9 +7,9 @@
   <meta name="description" content="LeadLens DeBug Mode">
   <title>LeadLens · DeBug Mode</title>
   <link rel="manifest" href="../manifest.webmanifest">
-  <link rel="stylesheet" href="../styles.css?v=5.1.1">
+  <link rel="stylesheet" href="../styles.css?v=5.2.0">
   <script defer src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-  <script type="module" src="../debug-mode.js?v=5.1.1"></script>
+  <script type="module" src="../debug-mode.js?v=5.2.0"></script>
 </head>
 <body>
   <div id="update-banner" class="update-banner hidden" role="status">
@@ -23,7 +23,7 @@
         <button class="nav-item active" data-view="run"><span>◎</span>Run</button>
         <button class="nav-item" data-view="settings"><span>⚙</span>Settings</button>
       </nav>
-      <div class="privacy-note"><strong id="sidebar-version">v5.1.1</strong><span id="sidebar-notes">DeBug Mode — SuperUser only. Custom prompt + CSV batches + Structured Outputs.</span></div>
+      <div class="privacy-note"><strong id="sidebar-version">v5.2.0</strong><span id="sidebar-notes">DeBug Mode — Error Focus Lab. Per-error prompts + CSV batches + Structured Outputs.</span></div>
     </aside>
 
     <main>
@@ -42,10 +42,11 @@
       </header>
 
       <section id="view-run" class="view active">
-        <div class="intro"><h2>DeBug Mode</h2><p>Upload <strong>Excel RAW</strong>, run with your full custom prompt (CSV batches), then save the audit Excel. SuperUser only.</p></div>
+        <div class="intro"><h2>Error Focus Lab</h2><p>Upload <strong>Excel RAW</strong>, run with selected error prompts (CSV batches), review flagged vs clean, then optionally compare to TeleCaller. SuperUser only.</p></div>
+        <div id="debug-active-chips" class="debug-chip-row" aria-live="polite"></div>
         <div id="debug-drop-zone" class="drop-zone" role="button" tabindex="0" aria-label="Upload Excel for DeBug Mode">
           <input id="debug-file-input" type="file" accept=".xlsx,.xls,.xlsm" hidden>
-          <div class="upload-icon">⇧</div><h3>Drop Excel here</h3><p id="debug-drop-hint">CRM / RAW export · latest-day preprocess · CSV + custom prompt · XLSX, XLS or XLSM</p>
+          <div class="upload-icon">⇧</div><h3>Drop Excel here</h3><p id="debug-drop-hint">CRM / RAW export · latest-day preprocess · CSV + composed error prompts · XLSX, XLS or XLSM</p>
         </div>
         <div id="debug-file-list" class="file-list hidden"></div>
         <div id="debug-validation" class="validation hidden" role="status"></div>
@@ -58,6 +59,7 @@
             <div class="inline-actions">
               <button id="pause-run" type="button" class="secondary-button" disabled>Pause</button>
               <button id="download-result" type="button" class="primary-button" disabled>Save Audit Excel</button>
+              <button id="compare-telecaller" type="button" class="secondary-button" disabled>Compare to TeleCaller Audit</button>
             </div>
           </div>
           <div id="debug-live-progress" class="review-live-progress">
@@ -65,6 +67,35 @@
             <div class="progress-track"><div id="progress-bar" class="progress-bar"></div></div>
           </div>
           <div class="metrics"><div><span>Leads</span><strong id="metric-leads">—</strong></div><div><span>Calls</span><strong id="metric-calls">—</strong></div><div><span>Audited</span><strong id="metric-completed">—</strong></div><div><span>Batch</span><strong id="metric-batch">—</strong></div><div><span>Status</span><strong id="metric-status">Idle</strong></div><div><span>Input tokens</span><strong id="metric-input-tokens">—</strong></div><div><span>Cached input</span><strong id="metric-cached-tokens">—</strong></div><div><span>Output tokens</span><strong id="metric-output-tokens">—</strong></div><div><span>Run time</span><strong id="metric-duration">—</strong></div><div><span>Run cost</span><strong id="metric-cost">—</strong></div></div>
+          <div id="debug-results-panel" class="debug-results-panel hidden">
+            <div class="section-head">
+              <div><h2>Results</h2><p>Filter by All / Flagged / Clean or a single active error. Counts use AI labels from this run’s focus set.</p></div>
+            </div>
+            <div id="debug-error-counts" class="debug-error-counts"></div>
+            <div id="debug-result-filters" class="debug-filter-row" role="toolbar" aria-label="Result filters"></div>
+            <div class="debug-results-table-wrap">
+              <table class="debug-results-table">
+                <thead>
+                  <tr><th>Mobile</th><th>Status</th><th>Connected</th><th>Errors</th><th>Observation</th></tr>
+                </thead>
+                <tbody id="debug-results-body"></tbody>
+              </table>
+            </div>
+          </div>
+          <div id="debug-compare-panel" class="debug-compare-panel hidden">
+            <div class="section-head">
+              <div><h2>Compare vs TeleCaller</h2><p id="debug-compare-summary">Agreement on active AI errors for the same leads.</p></div>
+            </div>
+            <div id="debug-compare-metrics" class="debug-error-counts"></div>
+            <div class="debug-results-table-wrap">
+              <table class="debug-results-table">
+                <thead>
+                  <tr><th>Mobile</th><th>Status</th><th>Only DeBug</th><th>Only TeleCaller</th><th>Both</th></tr>
+                </thead>
+                <tbody id="debug-compare-body"></tbody>
+              </table>
+            </div>
+          </div>
           <div class="console-panel"><div class="panel-head"><div><span class="live-dot"></span><strong>Live log</strong></div><button id="clear-console" class="text-button">Clear view</button></div><div id="live-log" class="log-list"><div class="empty-state">Run activity will appear here.</div></div></div>
         </div>
       </section>
@@ -122,8 +153,17 @@
             </section>
 
             <section class="settings-card">
-              <div class="card-title"><h2>5 · Custom prompt</h2><p>Full start-to-finish system prompt. Replaces handbook, rules, and additional instructions. CSV of each batch is appended as the user message.</p></div>
-              <label>Custom prompt<textarea id="custom-prompt" rows="16" required placeholder="Write the full auditor prompt here…"></textarea></label>
+              <div class="card-title"><h2>5 · Error Focus prompts</h2><p>Select one or more AI Error Types to run. Edit the focused prompt below. A shared preamble (CSV + q/i/o/r contract) is prepended automatically. Local-only labels stay app-computed.</p></div>
+              <div id="error-type-checks" class="debug-error-checks" role="group" aria-label="Active error types"></div>
+              <p id="error-run-hint" class="form-message muted">Running with 0 error(s): —</p>
+              <div class="debug-focus-toolbar">
+                <label class="debug-focus-select">Editing<select id="focus-error-type"></select></label>
+                <div class="inline-actions">
+                  <button id="load-starter-prompt" type="button" class="secondary-button">Load starter template</button>
+                  <button id="clear-error-prompt" type="button" class="text-button">Clear</button>
+                </div>
+              </div>
+              <label>Prompt for focused error<textarea id="error-prompt" rows="16" placeholder="Write the focused auditor rules for this error type…"></textarea></label>
             </section>
 
             <section class="settings-card">

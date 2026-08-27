@@ -1,5 +1,5 @@
 /**
- * DeBug Mode UI — SuperUser-only slim Run + Settings shell.
+ * DeBug Mode UI — SuperUser-only Error Focus Lab (Run + Settings).
  */
 import {
   APP_VERSION,
@@ -14,44 +14,86 @@ import {
   downloadWorkbook,
   validateApiKey,
   SERVER_API_KEY,
-} from "./audit.js?v=5.1.1";
-import {getApiKey,apiKeyIsRemembered,saveApiKey,forgetApiKey,setStorageUserId,storageKey} from "./db.js?v=5.1.1";
-import {requireAuth,logout,getUser,changePassword,updateProfile} from "./auth.js?v=5.1.1";
-import {SettingsApi} from "./api-client.js?v=5.1.1";
-import {mountNotifications} from "./notifications-ui.js?v=5.1.1";
-import {debugAuditBatch} from "./debug-engine.js?v=5.1.1";
+} from "./audit.js?v=5.2.0";
+import {getApiKey,apiKeyIsRemembered,saveApiKey,forgetApiKey,setStorageUserId,storageKey} from "./db.js?v=5.2.0";
+import {requireAuth,logout,getUser,changePassword,updateProfile} from "./auth.js?v=5.2.0";
+import {SettingsApi} from "./api-client.js?v=5.2.0";
+import {mountNotifications} from "./notifications-ui.js?v=5.2.0";
+import {
+  debugAuditBatch,
+  telecallerAuditBatch,
+  compareDebugVsTelecaller,
+  activePromptsReady,
+  normalizeActiveErrorTypes,
+} from "./debug-engine.js?v=5.2.0";
+import {
+  LAB_ERROR_TYPES,
+  DEFAULT_ERROR_PROMPTS,
+  emptyErrorPrompts,
+} from "./debug-prompts.js?v=5.2.0";
 
 const $=id=>document.getElementById(id);
 const ids=[
-  "page-title","key-state","pause-run","download-result","progress-label","progress-percent","progress-bar",
+  "page-title","key-state","pause-run","download-result","compare-telecaller","progress-label","progress-percent","progress-bar",
   "metric-leads","metric-calls","metric-batch","metric-completed","metric-status","metric-input-tokens",
   "metric-cached-tokens","metric-output-tokens","metric-duration","metric-cost","live-log","clear-console",
   "api-key","remember-key","toggle-key","save-key","forget-key","key-message","batch-size","concurrency","model",
   "input-field-config","add-input-field","ai-field-config","output-field-config","yes-values","no-values",
-  "custom-prompt","input-price","cached-price","output-price","save-settings","reset-settings","settings-message",
+  "error-type-checks","error-run-hint","focus-error-type","error-prompt","load-starter-prompt","clear-error-prompt",
+  "input-price","cached-price","output-price","save-settings","reset-settings","settings-message",
   "toast","mobile-menu","sort-field","sort-direction","app-version","export-settings","import-settings",
   "import-settings-file","update-banner","update-banner-text","reload-app","key-modal","onboard-key",
   "onboard-toggle","onboard-remember","onboard-message","onboard-save","onboard-skip","sidebar-version",
   "sidebar-notes","debug-drop-zone","debug-file-input","debug-drop-hint","debug-file-list","debug-validation",
-  "start-debug","debug-run-panel","debug-precounts","shell-user-label","shell-logout","shell-account"
+  "start-debug","debug-run-panel","debug-precounts","debug-active-chips","debug-results-panel","debug-error-counts",
+  "debug-result-filters","debug-results-body","debug-compare-panel","debug-compare-summary","debug-compare-metrics",
+  "debug-compare-body","shell-user-label","shell-logout","shell-account"
 ];
 const els=Object.fromEntries(ids.map(id=>[id,$(id)]));
 const titles={run:"Run",settings:"Settings"};
-const ENGINE_VERSION="debug-csv-v1";
+const ENGINE_VERSION="debug-csv-v2";
 const SYSTEM_OUTPUT_IDS=new Set(DEFAULT_OUTPUT_FIELDS.map(field=>field.id));
 const BLOCK_KEY_REASONS=new Set(["empty","format","unauthorized","forbidden"]);
-
-const DEFAULT_DEBUG_SETTINGS=normalizeDebugSettings({...DEFAULT_SETTINGS,customPrompt:""});
-
-let currentJob=null,displayLogs=true,parsedFile=null,serverKeyConfigured=false;
-let settings=normalizeDebugSettings(DEFAULT_DEBUG_SETTINGS);
-const controllers=new Map();
+const SHORT_ERROR_LABEL={
+  "Lead Status Not Aligned With Comments":"Status",
+  "Customer Requirement Empty":"Rq empty",
+  "Incorrect Customer Requirement":"Rq wrong",
+  "Customer Comment Quality Not Appropriate":"Comment quality"
+};
 
 function normalizeDebugSettings(saved={}){
   const merged=normalizeSettings(saved);
-  merged.customPrompt=String(saved.customPrompt??merged.customPrompt??"");
+  const prompts={...emptyErrorPrompts()};
+  const incoming=saved.errorPrompts&&typeof saved.errorPrompts==="object"?saved.errorPrompts:{};
+  for(const label of LAB_ERROR_TYPES){
+    prompts[label]=String(incoming[label]??"");
+  }
+  const legacy=String(saved.customPrompt??merged.customPrompt??"").trim();
+  const promptsEmpty=LAB_ERROR_TYPES.every(label=>!String(prompts[label]||"").trim());
+  if(legacy&&promptsEmpty){
+    prompts[LAB_ERROR_TYPES[0]]=legacy;
+  }
+  merged.errorPrompts=prompts;
+  merged.activeErrorTypes=normalizeActiveErrorTypes(saved.activeErrorTypes);
+  let focus=String(saved.focusErrorType||"").trim();
+  if(!LAB_ERROR_TYPES.includes(focus))focus=merged.activeErrorTypes[0]||LAB_ERROR_TYPES[0];
+  if(!merged.activeErrorTypes.includes(focus))focus=merged.activeErrorTypes[0];
+  merged.focusErrorType=focus;
+  delete merged.customPrompt;
   return merged;
 }
+
+const DEFAULT_DEBUG_SETTINGS=normalizeDebugSettings({
+  ...DEFAULT_SETTINGS,
+  errorPrompts:emptyErrorPrompts(),
+  activeErrorTypes:[LAB_ERROR_TYPES[0]],
+  focusErrorType:LAB_ERROR_TYPES[0]
+});
+
+let currentJob=null,displayLogs=true,parsedFile=null,serverKeyConfigured=false;
+let settings=normalizeDebugSettings(DEFAULT_DEBUG_SETTINGS);
+let resultFilter="all";
+const controllers=new Map();
 
 function loadDebugSettingsLocal(defaults){
   try{return{...defaults,...JSON.parse(localStorage.getItem(storageKey("debugSettings"))||"{}")};}
@@ -72,6 +114,14 @@ function toast(message){
   toast.timer=setTimeout(()=>els.toast.classList.remove("show"),3200);
 }
 
+function parseErrorList(value){
+  const text=String(value??"").trim();
+  if(!text||/^none$/i.test(text))return[];
+  return text.split(",").map(part=>part.trim()).filter(Boolean);
+}
+
+function shortLabel(label){return SHORT_ERROR_LABEL[label]||label;}
+
 function effectiveApiKey(){
   const local=getApiKey();
   if(local)return local;
@@ -85,6 +135,7 @@ function showView(name){
   if(els["page-title"])els["page-title"].textContent=titles[name]||titles.run;
   document.querySelector(".shell")?.classList.remove("menu-open");
   if(name==="settings")renderSettings();
+  if(name==="run")renderActiveChips();
 }
 
 function updateKeyState(){
@@ -238,6 +289,238 @@ function auditedDoneCount(job){
   return(job.results?.length||0)+pendingResultCount(job);
 }
 
+function activeForJob(job){
+  return normalizeActiveErrorTypes(job?.settings?.activeErrorTypes||settings.activeErrorTypes);
+}
+
+function renderActiveChips(active=settings.activeErrorTypes){
+  const box=els["debug-active-chips"];
+  if(!box)return;
+  const list=normalizeActiveErrorTypes(active);
+  box.replaceChildren();
+  const title=document.createElement("span");
+  title.className="debug-chip-label";
+  title.textContent=`Running with ${list.length} error${list.length===1?"":"s"}:`;
+  box.append(title);
+  for(const label of list){
+    const chip=document.createElement("span");
+    chip.className="debug-chip";
+    chip.textContent=shortLabel(label);
+    chip.title=label;
+    box.append(chip);
+  }
+}
+
+function renderErrorFocusSettings(){
+  const checks=els["error-type-checks"];
+  const focusSelect=els["focus-error-type"];
+  const hint=els["error-run-hint"];
+  const textarea=els["error-prompt"];
+  if(!checks||!focusSelect||!textarea)return;
+  const active=new Set(settings.activeErrorTypes);
+  checks.replaceChildren();
+  for(const label of LAB_ERROR_TYPES){
+    const row=document.createElement("label");
+    row.className="check-row debug-error-check";
+    const input=document.createElement("input");
+    input.type="checkbox";
+    input.checked=active.has(label);
+    input.dataset.errorLabel=label;
+    input.addEventListener("change",()=>{
+      settings=collectSettings();
+      if(!settings.activeErrorTypes.length){
+        settings.activeErrorTypes=[label];
+        input.checked=true;
+      }
+      if(!settings.activeErrorTypes.includes(settings.focusErrorType)){
+        settings.focusErrorType=settings.activeErrorTypes[0];
+      }
+      renderErrorFocusSettings();
+      renderActiveChips();
+    });
+    const span=document.createElement("span");
+    span.textContent=label;
+    row.append(input,span);
+    checks.append(row);
+  }
+  focusSelect.replaceChildren();
+  for(const label of LAB_ERROR_TYPES){
+    const option=document.createElement("option");
+    option.value=label;
+    option.textContent=label;
+    option.selected=label===settings.focusErrorType;
+    focusSelect.append(option);
+  }
+  textarea.value=settings.errorPrompts?.[settings.focusErrorType]||"";
+  if(hint){
+    const list=settings.activeErrorTypes;
+    hint.textContent=`Running with ${list.length} error(s): ${list.map(shortLabel).join(", ")}`;
+  }
+}
+
+function resultHasActiveAiError(row,active){
+  const errors=parseErrorList(row?.errorTypes);
+  return errors.some(label=>active.includes(label));
+}
+
+function countResultsByError(job){
+  const active=activeForJob(job);
+  const counts=Object.fromEntries(active.map(label=>[label,0]));
+  let flagged=0,clean=0;
+  for(const row of job?.results||[]){
+    const errors=parseErrorList(row.errorTypes);
+    const hit=errors.filter(label=>active.includes(label));
+    if(hit.length){
+      flagged++;
+      for(const label of hit)counts[label]=(counts[label]||0)+1;
+    }else clean++;
+  }
+  return{counts,flagged,clean,total:(job?.results||[]).length,active};
+}
+
+function filteredResults(job){
+  const rows=job?.results||[];
+  const active=activeForJob(job);
+  if(resultFilter==="all")return rows;
+  if(resultFilter==="flagged")return rows.filter(row=>resultHasActiveAiError(row,active));
+  if(resultFilter==="clean")return rows.filter(row=>!resultHasActiveAiError(row,active));
+  return rows.filter(row=>parseErrorList(row.errorTypes).includes(resultFilter));
+}
+
+function renderResultsPanel(job){
+  const panel=els["debug-results-panel"];
+  if(!panel)return;
+  if(!job||job.status!=="completed"||!(job.results||[]).length){
+    panel.classList.add("hidden");
+    return;
+  }
+  panel.classList.remove("hidden");
+  const {counts,flagged,clean,total,active}=countResultsByError(job);
+  const countBox=els["debug-error-counts"];
+  if(countBox){
+    countBox.replaceChildren();
+    const addMetric=(label,value)=>{
+      const div=document.createElement("div");
+      const span=document.createElement("span");
+      span.textContent=label;
+      const strong=document.createElement("strong");
+      strong.textContent=String(value);
+      div.append(span,strong);
+      countBox.append(div);
+    };
+    addMetric("Rows",total);
+    addMetric("Flagged",flagged);
+    addMetric("Clean",clean);
+    for(const label of active)addMetric(shortLabel(label),counts[label]||0);
+  }
+  const filters=els["debug-result-filters"];
+  if(filters){
+    filters.replaceChildren();
+    const makeBtn=(id,label)=>{
+      const btn=document.createElement("button");
+      btn.type="button";
+      btn.className=`debug-filter-chip${resultFilter===id?" active":""}`;
+      btn.textContent=label;
+      btn.onclick=()=>{resultFilter=id;renderResultsPanel(job);};
+      filters.append(btn);
+    };
+    makeBtn("all","All");
+    makeBtn("flagged",`Flagged (${flagged})`);
+    makeBtn("clean",`Clean (${clean})`);
+    for(const label of active)makeBtn(label,`${shortLabel(label)} (${counts[label]||0})`);
+  }
+  const body=els["debug-results-body"];
+  if(body){
+    body.replaceChildren();
+    const rows=filteredResults(job);
+    if(!rows.length){
+      const tr=document.createElement("tr");
+      const td=document.createElement("td");
+      td.colSpan=5;
+      td.className="empty-state";
+      td.textContent="No rows match this filter.";
+      tr.append(td);
+      body.append(tr);
+    }else{
+      for(const row of rows.slice(0,400)){
+        const tr=document.createElement("tr");
+        const cells=[
+          row.mobile||"—",
+          row.status||"—",
+          row.connected||"—",
+          row.errorTypes||"None",
+          row.observation||""
+        ];
+        for(const text of cells){
+          const td=document.createElement("td");
+          td.textContent=text;
+          tr.append(td);
+        }
+        body.append(tr);
+      }
+    }
+  }
+}
+
+function renderComparePanel(job){
+  const panel=els["debug-compare-panel"];
+  if(!panel)return;
+  const cmp=job?.compare;
+  if(!cmp){
+    panel.classList.add("hidden");
+    return;
+  }
+  panel.classList.remove("hidden");
+  if(els["debug-compare-summary"]){
+    els["debug-compare-summary"].textContent=`Active errors: ${cmp.active.map(shortLabel).join(", ")}. Rows agreeing on those labels vs diffs.`;
+  }
+  const metrics=els["debug-compare-metrics"];
+  if(metrics){
+    metrics.replaceChildren();
+    const add=(label,value)=>{
+      const div=document.createElement("div");
+      const span=document.createElement("span");
+      span.textContent=label;
+      const strong=document.createElement("strong");
+      strong.textContent=String(value);
+      div.append(span,strong);
+      metrics.append(div);
+    };
+    add("Total",cmp.total);
+    add("Agreement",cmp.agreement);
+    add("Only DeBug",cmp.onlyDebug);
+    add("Only TeleCaller",cmp.onlyTele);
+  }
+  const body=els["debug-compare-body"];
+  if(body){
+    body.replaceChildren();
+    if(!cmp.rows.length){
+      const tr=document.createElement("tr");
+      const td=document.createElement("td");
+      td.colSpan=5;
+      td.textContent="No differences on active AI errors.";
+      tr.append(td);
+      body.append(tr);
+    }else{
+      for(const row of cmp.rows.slice(0,400)){
+        const tr=document.createElement("tr");
+        for(const text of [
+          row.mobile||"—",
+          row.status||"—",
+          row.onlyDebug.join(", ")||"—",
+          row.onlyTele.join(", ")||"—",
+          row.both.join(", ")||"—"
+        ]){
+          const td=document.createElement("td");
+          td.textContent=text;
+          tr.append(td);
+        }
+        body.append(tr);
+      }
+    }
+  }
+}
+
 function renderProgress(job){
   if(!job)return;
   currentJob=job;
@@ -268,6 +551,13 @@ function renderProgress(job){
     els["pause-run"].textContent=job.status==="running"?"Pause":"Resume";
   }
   if(els["download-result"])els["download-result"].disabled=job.status!=="completed";
+  if(els["compare-telecaller"]){
+    els["compare-telecaller"].disabled=job.status!=="completed"||job.compareStatus==="running";
+    els["compare-telecaller"].textContent=job.compareStatus==="running"?"Comparing…":"Compare to TeleCaller Audit";
+  }
+  renderActiveChips(activeForJob(job));
+  renderResultsPanel(job);
+  renderComparePanel(job);
   renderLogs(job);
 }
 
@@ -320,8 +610,8 @@ async function runJob(job){
   const key=effectiveApiKey();
   if(!key){showView("settings");toast("Add an OpenAI API key first.");return;}
   if(key!==SERVER_API_KEY&&!/^sk-[A-Za-z0-9_-]{20,}$/.test(key)){showView("settings");toast("That does not look like an OpenAI API key.");return;}
-  const prompt=String(job.settings?.customPrompt||settings.customPrompt||"").trim();
-  if(!prompt){showView("settings");toast("Add a custom prompt in Settings before starting.");return;}
+  const ready=activePromptsReady(job.settings||settings);
+  if(!ready.ok){showView("settings");toast(`Fill prompts for: ${ready.missing.map(shortLabel).join(", ")}`);return;}
 
   const controller=new AbortController();
   controllers.set(job.id,controller);
@@ -336,10 +626,14 @@ async function runJob(job){
   job.pendingBatches=job.pendingBatches||{};
   job.results=Array.isArray(job.results)?job.results:[];
   job.leads=Array.isArray(job.leads)?job.leads:[];
+  job.compare=null;
+  job.compareStatus="";
   displayLogs=true;
+  resultFilter="all";
 
   const concurrency=Math.min(MAX_CONCURRENCY,Math.max(1,Number(job.settings.concurrency)||1));
-  addLog(job,`DeBug started: pool ${concurrency}, batch ${job.settings.batchSize}, model ${job.settings.model}, app ${APP_VERSION}.`);
+  const active=activeForJob(job);
+  addLog(job,`DeBug started: ${active.length} error(s) [${active.map(shortLabel).join(", ")}], pool ${concurrency}, batch ${job.settings.batchSize}, model ${job.settings.model}, app ${APP_VERSION}.`);
   renderProgress(job);
   els["debug-run-panel"]?.classList.remove("hidden");
 
@@ -373,7 +667,7 @@ async function runJob(job){
       const batch=leadSlice.flat();
       launched++;
       if(!quietLogs||launched<=concurrency||launched%concurrency===1||index===totalBatches-1){
-        addLog(job,`Dispatch batch ${index+1}/${totalBatches} (${leadSlice.length} leads · ${batch.length} call${batch.length===1?"":"s"}) · CSV prompt.`);
+        addLog(job,`Dispatch batch ${index+1}/${totalBatches} (${leadSlice.length} leads · ${batch.length} call${batch.length===1?"":"s"}) · composed prompts.`);
       }
       throttleProgress(job);
       try{
@@ -428,6 +722,79 @@ async function runJob(job){
   }finally{
     controllers.delete(job.id);
   }
+}
+
+async function runTelecallerCompare(job){
+  if(!job||job.status!=="completed")return;
+  if(job.compareStatus==="running")return;
+  const key=effectiveApiKey();
+  if(!key){showView("settings");toast("Add an OpenAI API key first.");return;}
+  job.compareStatus="running";
+  renderProgress(job);
+  addLog(job,"Compare: loading TeleCaller audit settings and re-auditing same leads…");
+  try{
+    let auditSettings=DEFAULT_SETTINGS;
+    try{
+      const payload=await SettingsApi.getAudit();
+      if(payload?.settings&&typeof payload.settings==="object")auditSettings=normalizeSettings(payload.settings);
+    }catch{/* use defaults */}
+    // Match DeBug run sizing so batches align for fair cost/throughput comparison.
+    auditSettings={
+      ...auditSettings,
+      batchSize:job.settings?.batchSize||auditSettings.batchSize,
+      concurrency:job.settings?.concurrency||auditSettings.concurrency,
+      model:auditSettings.model||job.settings?.model
+    };
+    const controller=new AbortController();
+    const concurrency=Math.min(MAX_CONCURRENCY,Math.max(1,Number(job.settings.concurrency)||1));
+    const batchSize=Math.max(1,Number(job.settings.batchSize)||1);
+    const leadGroups=groupCallRowsByLead(job.leads);
+    const totalBatches=Math.ceil(leadGroups.length/batchSize)||0;
+    const teleResults=[];
+    const queue=[...Array(totalBatches).keys()];
+    const persistUsage=usage=>{
+      job.tokenUsage=job.tokenUsage||{input:0,cached:0,output:0};
+      job.tokenUsage.input+=usage.input;
+      job.tokenUsage.cached+=usage.cached;
+      job.tokenUsage.output+=usage.output;
+      throttleProgress(job);
+    };
+    let fatalError=null;
+    const workers=Array.from({length:Math.min(concurrency,Math.max(queue.length,1))},async()=>{
+      while(!fatalError&&!controller.signal.aborted){
+        const index=queue.shift();
+        if(index===undefined)return;
+        const batch=leadGroups.slice(index*batchSize,(index+1)*batchSize).flat();
+        try{
+          const rows=await telecallerAuditBatch(
+            key,
+            auditSettings,
+            batch,
+            controller.signal,
+            (message,level)=>addLog(job,`TeleCaller · ${message}`,level),
+            persistUsage
+          );
+          teleResults[index]=rows;
+        }catch(error){
+          fatalError=error;
+          controller.abort();
+        }
+      }
+    });
+    await Promise.all(workers);
+    if(fatalError)throw fatalError;
+    const flat=teleResults.flatMap(rows=>rows||[]);
+    job.telecallerResults=flat;
+    job.compare=compareDebugVsTelecaller(job.results,flat,activeForJob(job));
+    job.compareStatus="done";
+    addLog(job,`Compare done: agreement ${job.compare.agreement}, only-DeBug ${job.compare.onlyDebug}, only-TeleCaller ${job.compare.onlyTele}.`,"success");
+    toast("Compare complete.");
+  }catch(error){
+    job.compareStatus="failed";
+    addLog(job,`Compare failed: ${error.message||error}`,"error");
+    toast(error.message||"Compare failed");
+  }
+  renderProgress(job);
 }
 
 function configRow(className){const row=document.createElement("div");row.className=className;return row;}
@@ -564,7 +931,6 @@ function renderSettings(){
   if(els.model)els.model.value=settings.model;
   if(els["yes-values"])els["yes-values"].value=settings.yesValues;
   if(els["no-values"])els["no-values"].value=settings.noValues;
-  if(els["custom-prompt"])els["custom-prompt"].value=settings.customPrompt||"";
   if(els["input-price"])els["input-price"].value=settings.pricing.input;
   if(els["cached-price"])els["cached-price"].value=settings.pricing.cached;
   if(els["output-price"])els["output-price"].value=settings.pricing.output;
@@ -575,6 +941,8 @@ function renderSettings(){
   renderAiFields();
   renderOutputFields();
   renderSortFields();
+  renderErrorFocusSettings();
+  renderActiveChips();
   updateKeyState();
   syncApiKeySettingsUi();
 }
@@ -586,7 +954,6 @@ function collectSettings(){
   next.model=(els.model?.value||"").trim();
   next.yesValues=(els["yes-values"]?.value||"").trim();
   next.noValues=(els["no-values"]?.value||"").trim();
-  next.customPrompt=(els["custom-prompt"]?.value||"");
   next.pricing={input:number(els["input-price"]?.value),cached:number(els["cached-price"]?.value),output:number(els["output-price"]?.value)};
   next.sort={field:els["sort-field"]?.value||"callDate",direction:els["sort-direction"]?.value==="desc"?"desc":"asc"};
   next.inputFields=normalizeInputFields([...document.querySelectorAll("[data-input-row]")].map(row=>{
@@ -614,6 +981,16 @@ function collectSettings(){
     const output=next.outputFields.find(item=>item.id===field.id);
     if(output)output.label=field.label;
     else next.outputFields.push({id:field.id,label:field.label,enabled:true});
+  }
+  // Preserve in-memory prompts; sync textarea for current focus.
+  const focus=(els["focus-error-type"]?.value||next.focusErrorType||LAB_ERROR_TYPES[0]).trim();
+  next.focusErrorType=LAB_ERROR_TYPES.includes(focus)?focus:next.activeErrorTypes[0];
+  const checked=[...document.querySelectorAll("#error-type-checks [data-error-label]:checked")].map(el=>el.dataset.errorLabel);
+  next.activeErrorTypes=normalizeActiveErrorTypes(checked.length?checked:next.activeErrorTypes);
+  if(!next.activeErrorTypes.includes(next.focusErrorType))next.focusErrorType=next.activeErrorTypes[0];
+  next.errorPrompts={...emptyErrorPrompts(),...next.errorPrompts};
+  if(els["error-prompt"]&&next.focusErrorType){
+    next.errorPrompts[next.focusErrorType]=els["error-prompt"].value||"";
   }
   return normalizeDebugSettings(next);
 }
@@ -744,7 +1121,8 @@ async function startDebug(){
   const key=effectiveApiKey();
   if(!key){showView("settings");toast("Add an OpenAI API key first.");return;}
   const live=collectSettings();
-  if(!String(live.customPrompt||"").trim()){showView("settings");toast("Custom prompt is required.");return;}
+  const ready=activePromptsReady(live);
+  if(!ready.ok){showView("settings");toast(`Fill prompts for: ${ready.missing.map(shortLabel).join(", ")}`);return;}
   settings=live;
   saveDebugSettingsLocal(settings);
 
@@ -771,7 +1149,9 @@ async function startDebug(){
     tokenUsage:{input:0,cached:0,output:0},
     elapsedMs:0,
     pricing:deepCopy(settings.pricing),
-    settings:deepCopy(settings)
+    settings:deepCopy(settings),
+    compare:null,
+    compareStatus:""
   };
   parsedFile=null;
   renderFileList();
@@ -902,7 +1282,36 @@ els["pause-run"]?.addEventListener("click",async()=>{
   else await runJob(currentJob);
 });
 els["download-result"]?.addEventListener("click",()=>currentJob&&download(currentJob));
+els["compare-telecaller"]?.addEventListener("click",()=>currentJob&&runTelecallerCompare(currentJob));
 els["clear-console"]?.addEventListener("click",()=>{displayLogs=false;renderLogs(currentJob);});
+
+els["focus-error-type"]?.addEventListener("change",()=>{
+  const prev=settings.focusErrorType;
+  settings.errorPrompts=settings.errorPrompts||emptyErrorPrompts();
+  if(prev&&els["error-prompt"])settings.errorPrompts[prev]=els["error-prompt"].value||"";
+  const nextFocus=els["focus-error-type"].value;
+  settings.focusErrorType=LAB_ERROR_TYPES.includes(nextFocus)?nextFocus:settings.activeErrorTypes[0];
+  if(els["error-prompt"])els["error-prompt"].value=settings.errorPrompts?.[settings.focusErrorType]||"";
+  renderErrorFocusSettings();
+});
+els["error-prompt"]?.addEventListener("input",()=>{
+  const focus=settings.focusErrorType||LAB_ERROR_TYPES[0];
+  settings.errorPrompts=settings.errorPrompts||emptyErrorPrompts();
+  settings.errorPrompts[focus]=els["error-prompt"].value||"";
+});
+els["load-starter-prompt"]?.addEventListener("click",()=>{
+  settings=collectSettings();
+  const focus=settings.focusErrorType||LAB_ERROR_TYPES[0];
+  settings.errorPrompts[focus]=DEFAULT_ERROR_PROMPTS[focus]||"";
+  if(els["error-prompt"])els["error-prompt"].value=settings.errorPrompts[focus];
+  if(els["settings-message"])els["settings-message"].textContent=`Loaded starter for ${shortLabel(focus)}.`;
+});
+els["clear-error-prompt"]?.addEventListener("click",()=>{
+  settings=collectSettings();
+  const focus=settings.focusErrorType||LAB_ERROR_TYPES[0];
+  settings.errorPrompts[focus]="";
+  if(els["error-prompt"])els["error-prompt"].value="";
+});
 
 if(els["debug-drop-zone"]){
   els["debug-drop-zone"].onclick=()=>els["debug-file-input"].click();
@@ -964,11 +1373,12 @@ els["save-settings"]?.addEventListener("click",async()=>{
     if(els["settings-message"])els["settings-message"].textContent=`Parallel batches must be 1–${MAX_CONCURRENCY}.`;
     return;
   }
-  if(!String(els["custom-prompt"]?.value||"").trim()){
-    if(els["settings-message"])els["settings-message"].textContent="Custom prompt is required.";
+  const next=collectSettings();
+  const ready=activePromptsReady(next);
+  if(!ready.ok){
+    if(els["settings-message"])els["settings-message"].textContent=`Fill prompts for active errors: ${ready.missing.map(shortLabel).join(", ")}.`;
     return;
   }
-  const next=collectSettings();
   await persistSettingsEverywhere(next);
   renderSettings();
   toast("DeBug settings saved.");
@@ -994,6 +1404,7 @@ async function bootDeBugMode(){
   settings=normalizeDebugSettings(loadDebugSettingsLocal(DEFAULT_DEBUG_SETTINGS));
   await loadServerSettingsAndKey();
   renderSettings();
+  renderActiveChips();
   if(els["shell-user-label"])els["shell-user-label"].textContent=user.display_name||user.username;
   showView("run");
   checkForUpdate();

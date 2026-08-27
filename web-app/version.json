@@ -1,5 +1,5 @@
 {
-  "version": "5.1.1",
+  "version": "5.2.0",
   "name": "LeadLens",
-  "notes": "v5.1.1: rating bands; overdue pie/filter; Lost/Beyond Budget overdue '-'; fulfilled follow-up → overdue 0; Cold/RNR + cooled + Lost/NI status floors; close-lead after dead signals; no set-follow-up when n exists."
+  "notes": "v5.2.0: DeBug Error Focus Lab — per-error prompts, dynamic Structured Outputs enum, results filter, TeleCaller compare."
 }

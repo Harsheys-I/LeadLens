@@ -1,6 +1,6 @@
-import {buildTelecallerDashboardBlob} from "./dashboard-export.js?v=5.1.1";
+import {buildTelecallerDashboardBlob} from "./dashboard-export.js?v=5.2.0";
 
-export const APP_VERSION = "5.1.1";
+export const APP_VERSION = "5.2.0";
 /** Sentinel: use server OpenAI proxy (no raw key in the browser). */
 export const SERVER_API_KEY = "__server__";
 /** Bump when default AI rules / field defaults must refresh existing localStorage settings. */
