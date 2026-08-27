@@ -1641,7 +1641,7 @@ export async function auditBatch(apiKey,rawSettings,batch,signal,log,onUsage,req
     const resultIdRaw=(result||[]).slice(0,5).map(item=>({raw:String(item?.id??""),cleaned:clean(item?.id)}));
     fetch('http://127.0.0.1:7843/ingest/f4ac7d78-fa93-4940-929e-852fd1791883',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'ab7011'},body:JSON.stringify({sessionId:'ab7011',runId:'pre-fix',hypothesisId:'B,C',location:'audit.js:auditBatch:omit',message:'Model omitted leads before recovery',data:{batchLen:batch.length,resultLen:(result||[]).length,missingLen:missing.length,missingSample,resultIdRaw,returnedCleanKeys:returnedClean,requestIsDebug:requestFn!==requestAudit},timestamp:Date.now()})}).catch(()=>{});
     // #endregion
-    log(`Model omitted ${missing.length} lead(s); retrying only those leads.`,"warn");
+    log(`Model omitted ${missing.length} lead(s); retrying only those leads. [dbg] got=${(result||[]).length} missSample=${missingSample.map(m=>m.raw).slice(0,2).join(" || ")} gotSample=${resultIdRaw.map(r=>r.raw).slice(0,2).join(" || ")||"(none)"}`,"warn");
     const recovered=await requestWithRetry(missing,"Recovery");
     recovered.forEach(item=>byId.set(clean(item.id),item));
     missing=batch.filter(lead=>!byId.has(clean(lead.leadId)));

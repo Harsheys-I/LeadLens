@@ -14,23 +14,23 @@ import {
   downloadWorkbook,
   validateApiKey,
   SERVER_API_KEY,
-} from "./audit.js?v=5.2.1d";
-import {getApiKey,apiKeyIsRemembered,saveApiKey,forgetApiKey,setStorageUserId,storageKey} from "./db.js?v=5.2.1d";
-import {requireAuth,logout,getUser,changePassword,updateProfile} from "./auth.js?v=5.2.1d";
-import {SettingsApi} from "./api-client.js?v=5.2.1d";
-import {mountNotifications} from "./notifications-ui.js?v=5.2.1d";
+} from "./audit.js?v=5.2.1e";
+import {getApiKey,apiKeyIsRemembered,saveApiKey,forgetApiKey,setStorageUserId,storageKey} from "./db.js?v=5.2.1e";
+import {requireAuth,logout,getUser,changePassword,updateProfile} from "./auth.js?v=5.2.1e";
+import {SettingsApi} from "./api-client.js?v=5.2.1e";
+import {mountNotifications} from "./notifications-ui.js?v=5.2.1e";
 import {
   debugAuditBatch,
   telecallerAuditBatch,
   compareDebugVsTelecaller,
   activePromptsReady,
   normalizeActiveErrorTypes,
-} from "./debug-engine.js?v=5.2.1d";
+} from "./debug-engine.js?v=5.2.1e";
 import {
   LAB_ERROR_TYPES,
   DEFAULT_ERROR_PROMPTS,
   emptyErrorPrompts,
-} from "./debug-prompts.js?v=5.2.1d";
+} from "./debug-prompts.js?v=5.2.1e";
 
 const $=id=>document.getElementById(id);
 const ids=[
@@ -709,7 +709,7 @@ async function runJob(job){
           job.settings,
           batch,
           controller.signal,
-          quietLogs?(message,level)=>{if(level==="error"||level==="warn")addLog(job,message,level);}:((message,level)=>addLog(job,message,level)),
+          quietLogs?(message,level)=>{if(level==="error"||level==="warn"||String(message||"").startsWith("[dbg]"))addLog(job,message,level);}:((message,level)=>addLog(job,message,level)),
           persistUsage
         );
         commitBatch(job,index,rows);

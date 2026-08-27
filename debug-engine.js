@@ -10,12 +10,12 @@ import {
   buildChatCompletionBody,
   normalizeSettings,
   auditBatch,
-} from "./audit.js?v=5.2.1d";
+} from "./audit.js?v=5.2.1e";
 import {
   LAB_ERROR_TYPES,
   SHARED_PREAMBLE,
   DEFAULT_ERROR_PROMPTS,
-} from "./debug-prompts.js?v=5.2.1d";
+} from "./debug-prompts.js?v=5.2.1e";
 
 /** App-local labels — never shown in DeBug focus-lab results / Excel. */
 const LOCAL_OWNED_ERRORS = new Set([
@@ -135,6 +135,7 @@ async function requestDebugAudit(apiKey,settings,leads,signal,log,onUsage){
   const csvIdCol=(csv.split(/\r?\n/)[0]||"").split(",")[0];
   const csvSampleRows=(csv.split(/\r?\n/)||[]).slice(1,4).map(line=>(line.split(",")[0]||"").slice(0,80));
   fetch('http://127.0.0.1:7843/ingest/f4ac7d78-fa93-4940-929e-852fd1791883',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'ab7011'},body:JSON.stringify({sessionId:'ab7011',runId:'pre-fix',hypothesisId:'A,D',location:'debug-engine.js:requestDebugAudit:pre',message:'DeBug request about to send',data:{sentCount:sentIds.length,sentSample:sentIds.slice(0,3),maxTokens,csvChars:csv.length,systemChars:system.length,csvIdCol,csvSampleRows},timestamp:Date.now()})}).catch(()=>{});
+  if(log)log(`[dbg] send n=${sentIds.length} maxTok=${maxTokens} csv=${csv.length} sample=${sentIds.slice(0,2).join(" || ")}`,"info");
   // #endregion
   const auditBody=buildChatCompletionBody(settings.model,{
     temperature:0,
@@ -183,6 +184,7 @@ async function requestDebugAudit(apiKey,settings,leads,signal,log,onUsage){
   const unmatchedReturn=returnedIds.filter(id=>!sentSet.has(id)).slice(0,5);
   // #region agent log
   fetch('http://127.0.0.1:7843/ingest/f4ac7d78-fa93-4940-929e-852fd1791883',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'ab7011'},body:JSON.stringify({sessionId:'ab7011',runId:'pre-fix',hypothesisId:'A,B,C',location:'debug-engine.js:requestDebugAudit:post',message:'DeBug response parsed',data:{sentCount:sentIds.length,returnedCount:returnedIds.length,matchedExact:matched,finishReason,maxTokens,inputTok:usage?.prompt_tokens??usage?.input_tokens??0,outputTok:usage?.completion_tokens??usage?.output_tokens??0,contentLen:String(content).length,sentSample:sentIds.slice(0,3),returnedSample:returnedIds.slice(0,3),unmatchedReturnSample:unmatchedReturn,emptyA:!returnedIds.length},timestamp:Date.now()})}).catch(()=>{});
+  if(log)log(`[dbg] recv n=${returnedIds.length}/${sentIds.length} match=${matched} finish=${finishReason||"?"} outTok=${usage?.completion_tokens??usage?.output_tokens??0}/${maxTokens} retSample=${returnedIds.slice(0,2).join(" || ")||"(empty)"}`,"info");
   // #endregion
   const active=new Set(normalizeActiveErrorTypes(settings.activeErrorTypes));
   for(const item of parsed.a){
