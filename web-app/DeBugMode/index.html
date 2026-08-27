@@ -1,0 +1,211 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#12372a">
+  <meta name="description" content="LeadLens DeBug Mode">
+  <title>LeadLens · DeBug Mode</title>
+  <link rel="manifest" href="../manifest.webmanifest">
+  <link rel="stylesheet" href="../styles.css?v=5.1.1">
+  <script defer src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+  <script type="module" src="../debug-mode.js?v=5.1.1"></script>
+</head>
+<body>
+  <div id="update-banner" class="update-banner hidden" role="status">
+    <div id="update-banner-text"></div>
+    <button id="reload-app" type="button" class="primary-button">Hard reload now</button>
+  </div>
+  <div class="shell">
+    <aside class="sidebar">
+      <a class="brand" href="/"><span class="brand-mark">L</span><span>LeadLens</span></a>
+      <nav aria-label="DeBug Mode navigation">
+        <button class="nav-item active" data-view="run"><span>◎</span>Run</button>
+        <button class="nav-item" data-view="settings"><span>⚙</span>Settings</button>
+      </nav>
+      <div class="privacy-note"><strong id="sidebar-version">v5.1.1</strong><span id="sidebar-notes">DeBug Mode — SuperUser only. Custom prompt + CSV batches + Structured Outputs.</span></div>
+    </aside>
+
+    <main>
+      <header class="topbar">
+        <button id="mobile-menu" class="icon-button" aria-label="Toggle navigation">☰</button>
+        <div><p class="eyebrow">DEBUG MODE</p><h1 id="page-title">Run</h1></div>
+        <div class="topbar-actions">
+          <div id="key-state" class="key-state">API key not set</div>
+          <span id="shell-user-label" class="topbar-user-label"></span>
+          <button type="button" id="notif-bell" class="notif-bell notif-bell-chrome" title="Notifications" aria-label="Notifications">
+            <span id="notif-count" class="notif-count hidden">0</span>
+          </button>
+          <button type="button" id="shell-account" class="secondary-button">Account</button>
+          <button type="button" id="shell-logout" class="secondary-button">Sign out</button>
+        </div>
+      </header>
+
+      <section id="view-run" class="view active">
+        <div class="intro"><h2>DeBug Mode</h2><p>Upload <strong>Excel RAW</strong>, run with your full custom prompt (CSV batches), then save the audit Excel. SuperUser only.</p></div>
+        <div id="debug-drop-zone" class="drop-zone" role="button" tabindex="0" aria-label="Upload Excel for DeBug Mode">
+          <input id="debug-file-input" type="file" accept=".xlsx,.xls,.xlsm" hidden>
+          <div class="upload-icon">⇧</div><h3>Drop Excel here</h3><p id="debug-drop-hint">CRM / RAW export · latest-day preprocess · CSV + custom prompt · XLSX, XLS or XLSM</p>
+        </div>
+        <div id="debug-file-list" class="file-list hidden"></div>
+        <div id="debug-validation" class="validation hidden" role="status"></div>
+        <div id="debug-precounts" class="review-precounts hidden" aria-live="polite"></div>
+        <div class="action-row"><button id="start-debug" class="primary-button" disabled>Start DeBug <span>→</span></button></div>
+
+        <div id="debug-run-panel" class="review-run-panel hidden">
+          <div class="section-head">
+            <div><h2>Live DeBug</h2><p>Progress and log for this run. Pause anytime; resume continues remaining batches.</p></div>
+            <div class="inline-actions">
+              <button id="pause-run" type="button" class="secondary-button" disabled>Pause</button>
+              <button id="download-result" type="button" class="primary-button" disabled>Save Audit Excel</button>
+            </div>
+          </div>
+          <div id="debug-live-progress" class="review-live-progress">
+            <div class="progress-copy"><strong id="progress-label">Waiting</strong><span id="progress-percent">0%</span></div>
+            <div class="progress-track"><div id="progress-bar" class="progress-bar"></div></div>
+          </div>
+          <div class="metrics"><div><span>Leads</span><strong id="metric-leads">—</strong></div><div><span>Calls</span><strong id="metric-calls">—</strong></div><div><span>Audited</span><strong id="metric-completed">—</strong></div><div><span>Batch</span><strong id="metric-batch">—</strong></div><div><span>Status</span><strong id="metric-status">Idle</strong></div><div><span>Input tokens</span><strong id="metric-input-tokens">—</strong></div><div><span>Cached input</span><strong id="metric-cached-tokens">—</strong></div><div><span>Output tokens</span><strong id="metric-output-tokens">—</strong></div><div><span>Run time</span><strong id="metric-duration">—</strong></div><div><span>Run cost</span><strong id="metric-cost">—</strong></div></div>
+          <div class="console-panel"><div class="panel-head"><div><span class="live-dot"></span><strong>Live log</strong></div><button id="clear-console" class="text-button">Clear view</button></div><div id="live-log" class="log-list"><div class="empty-state">Run activity will appear here.</div></div></div>
+        </div>
+      </section>
+
+      <section id="view-settings" class="view">
+        <div class="settings-page">
+          <div class="settings-toolbar" role="toolbar" aria-label="Settings actions">
+            <div class="settings-toolbar-copy">
+              <strong>DeBug settings</strong>
+              <span>Super User saves apply for everyone as <code>debug_settings</code> (separate from TeleCaller audit).</span>
+            </div>
+            <div class="inline-actions settings-toolbar-actions">
+              <button id="save-settings" type="button" class="primary-button">Save settings</button>
+              <button id="reset-settings" type="button" class="text-button">Restore defaults</button>
+              <span id="settings-message" class="form-message"></span>
+            </div>
+          </div>
+
+          <div class="settings-sections">
+            <form id="settings-form" class="settings-card">
+              <div class="card-title"><h2>1 · OpenAI connection</h2><p>Super User saves the key encrypted on the server. DeBug uses the server proxy.</p></div>
+              <p id="api-key-server-hint" class="muted form-message"></p>
+              <label>API key<div class="input-row"><input id="api-key" type="password" autocomplete="off" placeholder="sk-…"><button id="toggle-key" type="button" class="secondary-button">Show</button></div></label>
+              <label class="check-row"><input id="remember-key" type="checkbox"><span>Remember on this device <small>Optional local fallback. Prefer Save to server.</small></span></label>
+              <div class="inline-actions"><button id="save-key" type="button" class="primary-button">Save to server</button><button id="forget-key" type="button" class="text-button">Clear server key</button><span id="key-message" class="form-message"></span></div>
+            </form>
+
+            <section class="settings-card">
+              <div class="card-title"><h2>2 · Run &amp; cost</h2><p>Applied to new DeBug runs. <strong>Batch size</strong> is leads per API request (max 20). <strong>Parallel batches</strong> max 50.</p></div>
+              <div class="field-grid run-grid">
+                <label>Batch size (leads)<input id="batch-size" type="number" min="1" max="20" value="20"></label>
+                <label>Parallel batches<input id="concurrency" type="number" min="1" max="50" value="2"></label>
+                <label>Audit model<input id="model" type="text" value="gpt-4o-mini"></label>
+              </div>
+              <div class="field-grid pricing-grid settings-subgrid">
+                <label>Audit input ₹ / 1M<input id="input-price" type="number" min="0" step="0.000001"></label>
+                <label>Audit cached ₹ / 1M<input id="cached-price" type="number" min="0" step="0.000001"></label>
+                <label>Audit output ₹ / 1M<input id="output-price" type="number" min="0" step="0.000001"></label>
+              </div>
+            </section>
+
+            <section class="settings-card">
+              <div class="card-title"><h2>3 · Input Excel fields</h2><p>Add, remove, or reorder columns. Mobile and Project are required.</p></div>
+              <div id="input-field-config" class="config-list"></div>
+              <button id="add-input-field" type="button" class="secondary-button">Add input field</button>
+            </section>
+
+            <section class="settings-card">
+              <div class="card-title"><h2>4 · Fields sent to AI</h2><p>Comments always send full chronological history. Values go into the CSV batch.</p></div>
+              <div id="ai-field-config" class="config-list"></div>
+              <div class="field-grid settings-subgrid">
+                <label>Connected = Yes values<input id="yes-values" type="text"></label>
+                <label>Connected = No values<input id="no-values" type="text"></label>
+              </div>
+            </section>
+
+            <section class="settings-card">
+              <div class="card-title"><h2>5 · Custom prompt</h2><p>Full start-to-finish system prompt. Replaces handbook, rules, and additional instructions. CSV of each batch is appended as the user message.</p></div>
+              <label>Custom prompt<textarea id="custom-prompt" rows="16" required placeholder="Write the full auditor prompt here…"></textarea></label>
+            </section>
+
+            <section class="settings-card">
+              <div class="card-title"><h2>6 · Output Excel &amp; sort</h2><p>Choose columns to include. Sort By / Order are read live on every download.</p></div>
+              <div id="output-field-config" class="config-list output-list"></div>
+              <div class="field-grid sort-grid">
+                <label>Sort by<select id="sort-field"></select></label>
+                <label>Order<select id="sort-direction"><option value="asc">Ascending (A→Z, oldest first)</option><option value="desc">Descending (Z→A, newest first)</option></select></label>
+              </div>
+            </section>
+
+            <section class="settings-card">
+              <div class="card-title"><h2>7 · Backup &amp; version</h2><p>Export <code>debug_settings</code> as JSON. API keys are never included.</p></div>
+              <div class="version-row"><span>App version</span><strong id="app-version">…</strong></div>
+              <div class="inline-actions settings-actions">
+                <button id="export-settings" type="button" class="secondary-button">Export settings JSON</button>
+                <button id="import-settings" type="button" class="secondary-button">Import settings JSON</button>
+                <input id="import-settings-file" type="file" accept="application/json,.json" hidden>
+              </div>
+            </section>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+  <div id="key-modal" class="key-modal hidden" role="dialog" aria-modal="true" aria-labelledby="key-modal-title">
+    <div class="key-modal-card">
+      <p class="eyebrow">GET STARTED</p>
+      <h2 id="key-modal-title">Connect your OpenAI API key</h2>
+      <p class="key-modal-copy">Save the key to the server (encrypted). DeBug Mode uses the server proxy.</p>
+      <label>API key<div class="input-row"><input id="onboard-key" type="password" autocomplete="off" placeholder="sk-…"><button id="onboard-toggle" type="button" class="secondary-button">Show</button></div></label>
+      <label class="check-row"><input id="onboard-remember" type="checkbox"><span>Remember on this device</span></label>
+      <div id="onboard-message" class="form-message" role="status"></div>
+      <div class="inline-actions">
+        <button id="onboard-save" type="button" class="primary-button">Validate &amp; save to server</button>
+        <button id="onboard-skip" type="button" class="text-button">I'll add it later</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="account-modal" class="key-modal hidden" role="dialog" aria-modal="true">
+    <div class="key-modal-card">
+      <p class="eyebrow">ACCOUNT</p>
+      <h2>Your profile</h2>
+      <p class="key-modal-copy">Update username or password. Linked TeleCaller is Admin-managed.</p>
+      <label>Username<input id="account-username" type="text"></label>
+      <label>Display name<input id="account-display" type="text"></label>
+      <label>Linked TeleCaller<input id="account-telecaller" type="text" disabled></label>
+      <hr class="account-divider">
+      <p class="muted">Change password (optional)</p>
+      <label>Current password<input id="account-pw-current" type="password"></label>
+      <label>New password<input id="account-pw-new" type="password"></label>
+      <label>Confirm new password<input id="account-pw-confirm" type="password"></label>
+      <div id="account-message" class="form-message"></div>
+      <div class="inline-actions">
+        <button id="account-save" type="button" class="primary-button">Save</button>
+        <button id="account-cancel" type="button" class="text-button">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="notif-drawer" class="notif-drawer hidden" aria-live="polite" role="dialog" aria-label="Notifications">
+    <div class="notif-drawer-head">
+      <div class="notif-drawer-title">
+        <span class="notif-drawer-mark" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M15 17h5l-1.4-1.4A2 2 0 0 1 18 14.2V11a6 6 0 1 0-12 0v3.2c0 .5-.2 1-.6 1.4L4 17h5"/><path d="M9.5 17a2.5 2.5 0 0 0 5 0"/></svg>
+        </span>
+        <div>
+          <strong>Notifications</strong>
+          <p class="notif-drawer-sub" id="notif-unread-label">Loading…</p>
+        </div>
+      </div>
+      <div class="notif-drawer-actions">
+        <button type="button" id="notif-mark-all" class="notif-action-btn">Mark all read</button>
+        <button type="button" id="notif-clear-all" class="notif-action-btn">Clear all</button>
+        <button type="button" id="notif-close" class="notif-close-btn" aria-label="Close">×</button>
+      </div>
+    </div>
+    <div id="notif-list" class="notif-list"></div>
+  </div>
+</body>
+</html>

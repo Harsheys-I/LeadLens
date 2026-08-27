@@ -111,6 +111,19 @@ export function moduleTilesForUser(user = currentUser){
       </svg>`
     },
     {
+      id: 'debug',
+      title: 'DeBug Mode',
+      href: '/DeBugMode/',
+      superOnly: true,
+      soon: false,
+      desc: 'SuperUser CSV prompt auditor — custom prompt + Structured Outputs',
+      icon: `<svg viewBox="0 0 96 96" fill="none" aria-hidden="true">
+        <rect x="18" y="22" width="60" height="52" rx="8" stroke="currentColor" stroke-width="3.5"/>
+        <path d="M30 40h36M30 52h24M30 64h16" stroke="currentColor" stroke-width="3" stroke-linecap="round"/>
+        <path d="M58 58l8 8M66 58l-8 8" stroke="currentColor" stroke-width="3.5" stroke-linecap="round"/>
+      </svg>`
+    },
+    {
       id: 'admin',
       title: 'Admin',
       href: '/admin/',
@@ -125,6 +138,7 @@ export function moduleTilesForUser(user = currentUser){
     },
   ];
   return tiles.filter(t => {
+    if (t.superOnly) return Boolean(user.is_super);
     if (user.is_super) return true;
     return hasPermission(t.perm);
   });

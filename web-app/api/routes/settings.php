@@ -10,6 +10,9 @@ function ll_route_settings(string $action): void
     case 'audit':
       ll_settings_audit();
       break;
+    case 'debug':
+      ll_settings_debug();
+      break;
     case 'openai-key':
       ll_settings_openai_key();
       break;
@@ -19,6 +22,49 @@ function ll_route_settings(string $action): void
     default:
       ll_error('Not found', 404);
   }
+}
+
+function ll_settings_debug(): void
+{
+  $user = ll_require_user();
+  if (empty($user['is_super'])) {
+    ll_error('Forbidden', 403);
+  }
+  $method = ll_method();
+
+  if ($method === 'GET') {
+    $row = ll_setting_get('debug_settings');
+    $settings = null;
+    if ($row && $row['setting_value']) {
+      $decoded = json_decode((string) $row['setting_value'], true);
+      $settings = is_array($decoded) ? $decoded : null;
+    }
+    if (is_array($settings)) {
+      unset($settings['apiKey'], $settings['openaiKey'], $settings['openai_api_key']);
+    }
+    ll_ok([
+      'settings' => $settings,
+      'updated_at' => $row['updated_at'] ?? null,
+      'can_write' => true,
+    ]);
+  }
+
+  if ($method === 'PUT' || $method === 'POST') {
+    $body = ll_read_json_body();
+    $settings = $body['settings'] ?? $body;
+    if (!is_array($settings)) {
+      ll_error('settings object required');
+    }
+    unset($settings['apiKey'], $settings['openaiKey'], $settings['openai_api_key']);
+    $json = json_encode($settings, JSON_UNESCAPED_UNICODE);
+    if ($json === false) {
+      ll_error('Could not encode settings');
+    }
+    ll_setting_set('debug_settings', $json, (int) $user['id']);
+    ll_ok(['settings' => $settings, 'message' => 'Saved for everyone']);
+  }
+
+  ll_error('Method not allowed', 405);
 }
 
 function ll_settings_audit(): void

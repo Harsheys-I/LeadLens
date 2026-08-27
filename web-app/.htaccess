@@ -18,6 +18,7 @@ Options -Indexes
   RewriteCond %{REQUEST_FILENAME} !-f
   RewriteCond %{REQUEST_FILENAME} !-d
   RewriteRule ^TeleCallerAudit/?$ TeleCallerAudit/index.html [L]
+  RewriteRule ^DeBugMode/?$ DeBugMode/index.html [L]
   RewriteRule ^admin/?$ admin/index.html [L]
 </IfModule>
 
