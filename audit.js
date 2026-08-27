@@ -1,10 +1,10 @@
-import {buildTelecallerDashboardBlob} from "./dashboard-export.js?v=5.0.9";
+import {buildTelecallerDashboardBlob} from "./dashboard-export.js?v=5.1.0";
 
-export const APP_VERSION = "5.0.9";
+export const APP_VERSION = "5.1.0";
 /** Sentinel: use server OpenAI proxy (no raw key in the browser). */
 export const SERVER_API_KEY = "__server__";
 /** Bump when default AI rules / field defaults must refresh existing localStorage settings. */
-export const SETTINGS_SEED = 18;
+export const SETTINGS_SEED = 19;
 
 /** Settings limits — batch size is leads per request; concurrency is parallel requests. */
 export const MAX_BATCH_SIZE = 20;
@@ -12,7 +12,6 @@ export const MAX_CONCURRENCY = 50;
 
 export const ERROR_TYPES = [
   "Lead Status Not Aligned With Comments",
-  "Fresh Call TAT Missed",
   "Follow-up Missed",
   "Estimate Budget Empty",
   "Customer Requirement Empty",
@@ -23,13 +22,11 @@ export const ERROR_TYPES = [
 ];
 /** Critical severity only — everything else in ERROR_TYPES is Medium when present. */
 export const HIGH_SEVERITY_ERRORS = new Set([
-  "Fresh Call TAT Missed",
   "Follow-up Missed",
   "Customer Requirement Empty",
   "Customer Comment Quality Not Appropriate"
 ]);
 const STATUS_HISTORY_ERROR = "Lead Status Not Aligned With Comments";
-const FRESH_CALL_TAT_ERROR = "Fresh Call TAT Missed";
 const FOLLOWUP_MISSED_ERROR = "Follow-up Missed";
 const EMPTY_LOCATION = "Customer Location Empty";
 const EMPTY_REQUIREMENT = "Customer Requirement Empty";
@@ -44,6 +41,21 @@ const CONNECTED_ONLY_ERRORS = new Set([
   WRONG_REQUIREMENT,
   COMMENT_QUALITY_ERROR
 ]);
+/** Local-owned labels — used to strip leftover AI types from old in-flight batches. */
+const LOCAL_OWNED_ERRORS = new Set([
+  FOLLOWUP_MISSED_ERROR,
+  EMPTY_PARAMETER,
+  EMPTY_LOCATION,
+  EMPTY_BUDGET,
+  EMPTY_REQUIREMENT
+]);
+/** AI may emit only these labels; local-owned types are stripped on merge. */
+export const AI_ALLOWED_ERRORS = new Set([
+  STATUS_HISTORY_ERROR,
+  EMPTY_REQUIREMENT,
+  WRONG_REQUIREMENT,
+  COMMENT_QUALITY_ERROR
+]);
 /** Old numeric codes → labels (ignored in prompts; kept only to normalize leftover saved settings). */
 const LEGACY_ERROR_CODES = {
   "2":FOLLOWUP_MISSED_ERROR,
@@ -53,7 +65,7 @@ const LEGACY_ERROR_CODES = {
   "6":EMPTY_PARAMETER,
   "7":WRONG_REQUIREMENT
 };
-/** Renamed / alias labels → canonical ERROR_TYPES text. "TAT Error" is dropped (not mapped). */
+/** Renamed / alias labels → canonical ERROR_TYPES text. Retired TAT labels are dropped (not mapped). */
 const LEGACY_ERROR_LABELS = {
   "followup date is missed": FOLLOWUP_MISSED_ERROR,
   "follow up date is missed": FOLLOWUP_MISSED_ERROR,
@@ -62,8 +74,6 @@ const LEGACY_ERROR_LABELS = {
   "lead status not aligned with customer comments": STATUS_HISTORY_ERROR,
   "comment displaying -ve, but lead status is +ve": STATUS_HISTORY_ERROR,
   "comment displaying +ve, but lead status is -ve": STATUS_HISTORY_ERROR,
-  "missed 30min talk before": FRESH_CALL_TAT_ERROR,
-  "fresh call tat missed": FRESH_CALL_TAT_ERROR,
   "lead update not matching prior follow-up": FOLLOWUP_MISSED_ERROR,
   "customer location is empty": EMPTY_LOCATION,
   "customer requirement is empty": EMPTY_REQUIREMENT,
@@ -113,7 +123,7 @@ export const DEFAULT_OUTPUT_FIELDS = [
   {id:"callDate",label:"Lead Update Date",enabled:true},
   {id:"registration",label:"Lead Registration Date",enabled:true},
   {id:"telecaller",label:"Telecaller Name",enabled:true},{id:"status",label:"Lead Status",enabled:true},{id:"comments",label:"Comments",enabled:true},
-  {id:"next",label:"Next Followup Date",enabled:true},{id:"totalFollowups",label:"Total Followups",enabled:true},{id:"dayCallCount",label:"Calls on Latest Day",enabled:true},
+  {id:"next",label:"Next Followup Date",enabled:true},{id:"overdue",label:"Overdue",enabled:true},{id:"totalFollowups",label:"Total Followups",enabled:true},{id:"dayCallCount",label:"Calls on Latest Day",enabled:true},
   {id:"connected",label:"Connected",enabled:true},
   {id:"location",label:"Customer Location",enabled:true},
   {id:"requirement",label:"Customer Requirement",enabled:true},{id:"parameter",label:"Analysis Parameter",enabled:true},{id:"budget",label:"Estimated Budget",enabled:true},
@@ -122,13 +132,11 @@ export const DEFAULT_OUTPUT_FIELDS = [
 ];
 export const DEFAULT_RULES = [
   {field:"Lead Status + Comments",instruction:`Allowed Lead Status labels only (case-insensitive): Prospect, Hot, Warm, Cold, Beyond Budget, Lost. Heat ladder highest→lowest: ${STATUS_LADDER_TEXT}. c is ALWAYS the FULL chronological comment history (oldest→newest); judge CURRENT s against recent comments and the full trajectory. Emit "${STATUS_HISTORY_ERROR}" ONLY for a clear mismatch — prefer e:[] when status reasonably fits. HARD RULE — all-RNR / not connected: if EVERY non-empty comment in c is RNR-like (RNR, CNP, busy, ringing, WhatsApp follow-up/WA FU, no answer, switched off) AND k=No, then s MUST be lesser than Warm (only Cold, Beyond Budget, or Lost). Warm/Hot/Prospect in that case → emit. Cold with all-RNR + k=No is ALWAYS aligned — never emit and never claim Cold is unsupported by vague/RNR notes. Prospect ban: more than 2 continuous trailing RNR-like notes ⇒ s cannot be Prospect → emit. Warm-up mismatch: latest comment shows clear purchase interest but s is Cold/Beyond Budget/Lost → emit. DO NOT emit when: mixed history still supports Hot/Warm; status already stepped down from Prospect; all-RNR + Cold/Beyond Budget/Lost; thin admin notes without a hard rule hit; uncertain polarity. Do not emit any other status/comment polarity labels.`,errors:STATUS_HISTORY_ERROR},
-  {field:"Fresh Call TAT",instruction:`Inputs reg = Lead Generation / Registration DateTime, fu = FIRST Calling / Lead Update DateTime after near-duplicate filtering (oldest call, NOT the latest). Only when reg has a clock time AND falls between 09:00 and 17:00 inclusive: fu must be the SAME calendar day as reg. If fu is missing or a different calendar day → emit "${FRESH_CALL_TAT_ERROR}". Ignore clock minutes within the same day. If reg is outside 09:00–17:00, or reg is date-only (no usable time), do nothing for this check. Never emit "TAT Error" or any other TAT label.`,errors:FRESH_CALL_TAT_ERROR},
-  {field:"Follow-up Missed",instruction:`Compare n (this call's Next Followup) using CALENDAR DATE ONLY — ignore any clock time on n. If that date is before today's date → emit "${FOLLOWUP_MISSED_ERROR}". Same calendar day as today is NOT missed even if the time has passed. Do not emit any other follow-up timing / TAT / prior-follow-up errors.`,errors:FOLLOWUP_MISSED_ERROR},
   {field:"Comment quality",instruction:`Score q strictly. q must reflect how well Comments capture the real telecaller–customer conversation (need, budget, location preference, objection, decision-maker, next step). One-word/CRM crumbs like visited/RNR/CNP/busy/followup = q 0-2 max. Generic connected notes without customer detail = q <=4. Only rich descriptive talk earns 8-10. When c is an array, score THIS call's latest comment (last entry), using earlier entries only as context. Separately, when k=Yes and comments lack requirement detail (facing east/west/north/corner etc, size/dimension, investment vs self purpose, immediate vs future plan) → also emit "${COMMENT_QUALITY_ERROR}".`,errors:COMMENT_QUALITY_ERROR},
-  {field:"Customer Requirement",instruction:`Only review the Customer Requirement when any call connected (Connected / k = Yes). On a connected lead, rq should describe what the customer genuinely wants — for example a home configuration (2BHK/3BHK/plot), a budget, a preferred location/locality, facing, or a possession timeline. If rq is blank or only a placeholder such as ".", "-", "**", "NA" or "nil", raise "${EMPTY_REQUIREMENT}". If rq instead holds call notes or jargon rather than a real need — for example RNR, CNP, Visited, Site visit, Busy, Follow-up, Callback, Interested/Not interested — raise "${WRONG_REQUIREMENT}". When the call did not connect (Connected / k = No or blank), leave the requirement alone and never raise either of these two errors.`,errors:`${EMPTY_REQUIREMENT} | ${WRONG_REQUIREMENT}`},
-  {field:"Empty fields when connected",instruction:`When k=Yes (any call connected): if Estimated Budget b is blank/placeholder → emit "${EMPTY_BUDGET}"; Analysis Parameter empty is handled locally. Never invent "TAT Error".`,errors:EMPTY_BUDGET},
-  {field:"AI Observation",instruction:"Write o as a layman supervisor speaking to a telecaller (18-28 words). Cross-check every Error Type in e against Comments (c): say specifically what in the comments supports (or conflicts with) each error. Also use Connected (k) naturally ('the call connected' / 'never connected'), never Connected=Yes/No dumps. Name the gap in plain words (status too warm for unanswered history, location missing, first contact not same day, overdue follow-up date, junk requirement, thin requirement detail). Forbidden: copying or paraphrasing c; stacking raw error labels; template fragments; claiming Cold is wrong when comments are all RNR. When e is empty, judge note quality / connectedness only.",errors:""},
-  {field:"AI Recommendation",instruction:"Write r as layman coaching (20-40 words) grounded in comment history + Connected (k) + Error Types in e. Cover both: (1) how to fix those errors next time with concrete habits matching each error (same-day first call for daytime leads, write detailed comments with facing/size/purpose/timeline, fill location/budget/requirement, align status to history, set a dated follow-up); (2) clearly state what to do next on the next call / follow-up (what to ask, capture, or correct). Not a rewrite of the comment. Not vague ('follow up', 'update remarks', 'call again'). Not Connected=Yes/No or error-label dumps.",errors:""},
+  {field:"Customer Requirement",instruction:`Only review Customer Requirement when k=Yes AND rq is present and not a fully empty string (fully blank rq is already in le). On a connected lead, rq should describe what the customer genuinely wants — for example a home configuration (2BHK/3BHK/plot), a budget, a preferred location/locality, facing, or a possession timeline. If rq is only a placeholder such as ".", "-", "**", "NA" or "nil", raise "${EMPTY_REQUIREMENT}". If rq instead holds call notes or jargon rather than a real need — for example RNR, CNP, Visited, Site visit, Busy, Follow-up, Callback, Interested/Not interested — raise "${WRONG_REQUIREMENT}". When k is No or blank, or rq is omitted, never raise either of these two errors.`,errors:`${EMPTY_REQUIREMENT} | ${WRONG_REQUIREMENT}`},
+  {field:"Local-only errors",instruction:`Never emit Follow-up Missed, Estimate Budget Empty, Customer Location Empty, Analysis Parameter Empty, Fresh Call TAT Missed, TAT Error, or any TAT label. Those are precomputed in le. Explain labels in le in o/r, but do not copy them into e. Fully blank budget is local-only — even if b is omitted or empty, do not emit Estimate Budget Empty.`,errors:""},
+  {field:"AI Observation",instruction:"Write o as a layman supervisor speaking to a telecaller (18-28 words). Cross-check every Error Type in le ∪ e against Comments (c): say specifically what in the comments supports (or conflicts with) each error. Also use Connected (k) naturally ('the call connected' / 'never connected'), never Connected=Yes/No dumps. Name the gap in plain words (status too warm for unanswered history, location missing, overdue follow-up date, junk requirement, thin requirement detail). Forbidden: copying or paraphrasing c; stacking raw error labels; template fragments; claiming Cold is wrong when comments are all RNR. When le and e are both empty, judge note quality / connectedness only.",errors:""},
+  {field:"AI Recommendation",instruction:"Write r as layman coaching (20-40 words) grounded in comment history + Connected (k) + Error Types in le ∪ e. Cover both: (1) how to fix those errors next time with concrete habits matching each error (write detailed comments with facing/size/purpose/timeline, fill location/budget/requirement, align status to history, set a dated follow-up); (2) clearly state what to do next on the next call / follow-up (what to ask, capture, or correct). Not a rewrite of the comment. Not vague ('follow up', 'update remarks', 'call again'). Not Connected=Yes/No or error-label dumps.",errors:""},
   {field:"Buying intent",instruction:"i=1 only for genuine positive purchase interest in THIS call's latest comment/status; else i=0. Earlier history alone does not set i=1 if the latest comment cooled. All-RNR / k=No ⇒ i=0.",errors:""}
 ];
 /* gpt-5-nano OpenAI list price (USD/1M): $0.05 input, $0.005 cached, $0.40 output.
@@ -167,7 +175,7 @@ export function buildChatCompletionBody(model,{temperature,maxTokens,messages,..
 
 /* Large stable prefix FIRST so OpenAI prompt caching can activate (>=1024 tokens;
    some models need closer to 2048). Run-specific rules come after; lead data last. */
-const CACHE_HANDBOOK = `LeadLens QA v5.0.9 — stable cacheable auditor handbook. Evidence only. Never invent facts, dates, budgets, locations, or prior calls.
+const CACHE_HANDBOOK = `LeadLens QA v5.1.0 — stable cacheable auditor handbook. Evidence only. Never invent facts, dates, budgets, locations, or prior calls.
 
 PURPOSE
 You audit Indian real-estate telecalling follow-up notes. Judge only the supplied fields for THIS call id. Optional day[] lists sibling calls on the same latest calendar day — context only; still return one result for THIS id.
@@ -176,38 +184,31 @@ INPUT CONTRACT
 - id: opaque lead/call id. Echo it exactly. Never invent or drop ids.
 - s: Lead Status on THIS call
 - c: Comments — ALWAYS full chronological history array for the lead (oldest→newest). Status trajectory uses the entire array; q/i focus on the last entry
-- n: Next Followup Date for THIS call (DD/MM/YYYY calendar date only — ignore any time if present)
+- n: Next Followup Date for THIS call (DD/MM/YYYY calendar date only — ignore any time if present). Context for o/r only — NEVER emit Follow-up Missed
 - u: THIS call's Lead Update DateTime
-- pn: previous call's Next Followup DateTime (empty on the lead's first call) — context only; NEVER emit errors from pn
-- rq: Customer Requirement
-- b: Estimated Budget
+- rq: Customer Requirement (omitted when already flagged locally as fully blank)
+- b: Estimated Budget (omitted when already flagged locally as fully blank)
 - k: Connected Yes / No / "" (Yes means any call on the lead connected)
-- reg: Lead Generation / Registration DateTime (DD/MM/YYYY or DD/MM/YYYY HH:MM) — lead-level
-- fu: FIRST Calling / Lead Update DateTime after near-duplicate filtering (oldest call only — NOT the latest)
+- le: precomputed local error labels. Explain them in o/r. NEVER copy le labels into e.
 - day[] (optional): siblings [{d,s,c,n,rq,b,k}, ...] same calendar day
 Empty string means unknown / not captured.
 
 OUTPUT CONTRACT (JSON schema a[] only)
 For each id return:
 - q: integer 0-10 comment quality
-- e: array of exact Error Type labels from the allowed list (full text, never numeric codes)
+- e: array of exact Error Type labels from the AI-allowed list only (full text, never numeric codes)
 - i: 0 or 1 buying intent
-- o: 18-28 words QA observation that cross-checks Error Types in e against Comments (analysis, not a comment copy)
+- o: 18-28 words QA observation that cross-checks Error Types in le ∪ e against Comments (analysis, not a comment copy)
 - r: 20-40 words coaching — how to fix those errors next time + clear next-call / follow-up actions
 No severity field. No markdown. No extra keys.
 
-ERROR TYPES (emit exact labels only — no codes, no paraphrases, no other labels)
+ERROR TYPES YOU MAY EMIT (exact labels only — no codes, no paraphrases, no other labels)
 - Lead Status Not Aligned With Comments
-- Fresh Call TAT Missed
-- Follow-up Missed
-- Estimate Budget Empty
 - Customer Requirement Empty
-- Analysis Parameter Empty
 - Incorrect Customer Requirement
 - Customer Comment Quality Not Appropriate
-Do NOT emit "Customer Location Empty" — the app decides that locally.
-Do NOT emit "TAT Error" or any label other than the list above.
-Prefer e:[] over weak guesses — especially for "Lead Status Not Aligned With Comments". The app may also add some empty-field / SLA / history errors deterministically. NEVER invent labels outside this list.
+Do NOT emit Follow-up Missed, Estimate Budget Empty, Customer Location Empty, Analysis Parameter Empty, Fresh Call TAT Missed, TAT Error, or any TAT / SLA label. Those local-only issues arrive in le.
+Prefer e:[] over weak guesses — especially for "Lead Status Not Aligned With Comments". NEVER invent labels outside this list.
 
 COMMENT QUALITY q — STRICT
 Comments must reflect the actual telecaller–customer talk (need, budget, locality preference, objection, decision-maker, next step).
@@ -223,9 +224,11 @@ CUSTOMER COMMENT QUALITY NOT APPROPRIATE
 When k=Yes (any call connected): comments should capture requirement detail such as facing (east/west/north/south/corner), size/dimension (BHK, sqft, plot size), investment vs self purpose, and immediate vs future plan. If connected comments lack those requirement details → emit "Customer Comment Quality Not Appropriate". When k=No or "", never emit this label.
 
 CUSTOMER REQUIREMENT rq
+Only when k=Yes AND rq is present (not omitted) and not a fully empty string. Fully blank rq is already in le — do not emit a requirement error for missing rq.
 Valid examples: 2BHK, 30x40 plot, Whitefield, east facing, under 90L need, possession in 2027, etc.
 INVALID when connected and non-blank ("Incorrect Customer Requirement"): RNR, CNP, Visited, Site visit, Busy, Followup, Callback, Interested, Not interested, Connected, ringing, wrong number, status/comment dumps.
-Placeholder-only (., -, NA, nil) on connected call => "Customer Requirement Empty", not "Incorrect Customer Requirement".
+Placeholder-only (., -, NA, nil, **) on connected call => "Customer Requirement Empty", not "Incorrect Customer Requirement".
+If le already contains "Customer Requirement Empty", do not also emit "Incorrect Customer Requirement".
 
 BUYING INTENT i
 i=1 only for genuine purchase interest (site visit interest, options request, active shortlist, budget toward buy).
@@ -249,39 +252,30 @@ DO NOT emit when:
 Do not emit any other status/comment polarity labels.
 RNR/CNP/busy alone does not justify Warm/Hot/Prospect when the WHOLE history is RNR-like and k=No.
 
-FRESH CALL TAT (reg + fu) — SAME CALENDAR DAY
-reg = lead generation datetime; fu = FIRST calling/update datetime (oldest after near-dupe filter), never the latest call.
-ONLY when reg includes a usable clock time AND is between 09:00 and 17:00 inclusive: fu must be the SAME calendar day as reg.
-If fu is blank or on a different calendar day → emit "Fresh Call TAT Missed".
-Same-day calls pass even if hours differ — do NOT require a 30-minute window.
-If reg is outside 09:00–17:00, or reg is date-only with no clock time, skip this check entirely.
-Never emit "TAT Error".
-
-FOLLOW-UP MISSED (n) — DATE ONLY
-Strip any clock time from n. If that calendar date is before today's date → emit "Follow-up Missed".
-A follow-up dated today is NOT missed even if an earlier clock time has passed.
-Do not emit prior-follow-up timing / ±5min mismatch / "TAT Error" labels.
+LOCAL ERRORS (le) — DO NOT EMIT
+le is computed by the app: Follow-up Missed (overdue next-followup date), Estimate Budget Empty (fully blank budget on connected calls), Customer Location Empty, Analysis Parameter Empty.
+Explain every le label in o/r. Never copy those labels into e. Never invent TAT / same-day first-call / SLA errors.
 
 CONNECTED GATING
-"Customer Requirement Empty", "Estimate Budget Empty", "Incorrect Customer Requirement", and "Customer Comment Quality Not Appropriate" are ALLOWED ONLY when k=Yes.
-If k is No or "", NEVER emit those four — even if rq/b are empty, "**", ".", or junk.
+"Customer Requirement Empty", "Incorrect Customer Requirement", and "Customer Comment Quality Not Appropriate" are ALLOWED ONLY when k=Yes.
+If k is No or "", NEVER emit those — even if rq is empty, "**", ".", or junk.
 
 STYLE — OBSERVATION (o) AND RECOMMENDATION (r)
 Voice: layman QA supervisor speaking to the telecaller — clear, specific, human. No CRM jargon dumps.
 
-o (18–28 words): Cross-check each Error Type in e against Comments (c) — cite what in the comments aligns or conflicts with that error. Also use Connected (k) naturally ("the call connected" / "the call never connected") — NEVER "Connected=Yes" / "Connected=No". Cover each issued error in plain words (status too warm for unanswered history, preferred location missing, first call not same day, overdue follow-up date, junk requirement, thin requirement detail). Exact error labels optional if meaning is obvious. Do NOT copy, trim, or paraphrase Comments. When e is empty, judge note quality / connectedness only.
+o (18–28 words): Cross-check each Error Type in le ∪ e against Comments (c) — cite what in the comments aligns or conflicts with that error. Also use Connected (k) naturally ("the call connected" / "the call never connected") — NEVER "Connected=Yes" / "Connected=No". Cover each issued error in plain words (status too warm for unanswered history, preferred location missing, overdue follow-up date, junk requirement, thin requirement detail). Exact error labels optional if meaning is obvious. Do NOT copy, trim, or paraphrase Comments. When le and e are both empty, judge note quality / connectedness only.
 Bad o: "Connected=Yes. Comment lacks a real telecaller–customer conversation. Connected call missing usable location."
 Bad o: "The call never connected, and the comments are vague, which does not support a Cold status." (WRONG when comments are all RNR — Cold is valid.)
 Good o: "Comments are only RNR/WA FU with no customer talk, so Warm status conflicts with the unanswered history; preferred location was never captured." / "The call connected, but the thin note and empty locality field leave no evidence for a warm pipeline claim."
 
-r (20–40 words): Coaching from full comment history + Connected + Error Types in e. Must include (1) how to avoid those same errors next time with concrete habits matching the error (same-day first call for daytime leads, write detailed conversation notes with facing/size/purpose/timeline, fill location/budget/requirement, step status down when history is all-RNR, set a dated follow-up) and (2) what to do next on the upcoming call / follow-up. Not a rewrite of the note, not vague ("follow up", "update remarks", "call again"), not robotic label dumps.
+r (20–40 words): Coaching from full comment history + Connected + Error Types in le ∪ e. Must include (1) how to avoid those same errors next time with concrete habits matching the error (write detailed conversation notes with facing/size/purpose/timeline, fill location/budget/requirement, step status down when history is all-RNR, set a dated follow-up) and (2) what to do next on the upcoming call / follow-up. Not a rewrite of the note, not vague ("follow up", "update remarks", "call again"), not robotic label dumps.
 Bad r: "Follow up and update comments."
-Good r: "Next time call daytime registrations the same day and write a full need+locality note; on the next connected call ask facing, size, purpose, and timeline, then set a dated follow-up."
+Good r: "Next time write a full need+locality note; on the next connected call ask facing, size, purpose, and timeline, then set a dated follow-up."
 Never dump the full comment into o or r. Never restate this handbook.
 
 EXAMPLES
 A) c="visited" => q<=2, usually i=0.
-B) k=Yes, rq="." or "" => "Customer Requirement Empty".
+B) k=Yes, rq="." => "Customer Requirement Empty". k=Yes with rq omitted (fully blank locally) => do not emit a requirement label.
 C) k=Yes, rq="RNR" or "Visited" => "Incorrect Customer Requirement".
 D) k=Yes, rq="2BHK Whitefield" => rq OK.
 E) day[] siblings present: score/flag THIS call only; siblings are context.
@@ -291,8 +285,8 @@ G2) k=No, c all RNR-like, s=Cold => e:[] for status, i=0 — Cold is aligned; ne
 H) c history [hot interest, RNR, RNR, WA followup] and s=Prospect => "Lead Status Not Aligned With Comments".
 H2) c history [interested 2BHK, RNR, RNR] and s=Hot or Warm => e:[] for status (step-down / temporary unreachable is aligned).
 H3) c latest="wants Saturday site visit for 2BHK" and s=Cold => "Lead Status Not Aligned With Comments".
-I) reg=12/03/2026 10:00, fu=13/03/2026 => "Fresh Call TAT Missed". reg=12/03/2026 10:00, fu=12/03/2026 16:00 => OK (same day). reg=12/03/2026 18:00 => skip SLA.
-J) n is yesterday's date => "Follow-up Missed". n is today with any time => NOT missed.
+I) le contains "Follow-up Missed" => mention overdue follow-up in o/r; e must NOT include Follow-up Missed.
+J) le contains "Estimate Budget Empty" or "Customer Location Empty" => explain in o/r; never emit those labels in e.
 K) k=Yes, comments lack facing/size/purpose/timeline detail => "Customer Comment Quality Not Appropriate".
 
 EDGE CASES
@@ -308,7 +302,7 @@ EDGE CASES
 - For Comments history arrays, status must weigh the full timeline then the latest tone; q and i still focus on THIS call's latest comment unless a run check says otherwise.
 
 CACHE STABILITY PAD (identical every request — do not vary)
-LeadLens keeps this handbook byte-stable so automatic prompt caching can reuse the prefix across batches in a run and across nearby reruns. Static instructions stay first; configured run checks follow; unique lead payloads stay last. Routing uses a stable prompt_cache_key derived from model + rules. Parallel workers must warm this prefix once before fanning out. Treat the following checklist as fixed operating procedure: verify id echo, apply q hard caps, distinguish rq empty vs wrong, gate rq/b/comment-quality on connected, apply history trajectory + same-day fresh-call TAT + date-only Follow-up Missed, keep outputs compact, never invent sibling calls, never merge two ids, never invent error labels outside the allowed types, never emit Customer Location Empty, never emit TAT Error, never emit severity, never wrap JSON in fences, never discuss pricing or tokens, never mention cache mechanics in o/r. Repeatable discipline improves audit consistency across telecalling QA shifts, projects, and batch sizes while preserving privacy of customer records inside the browser-only LeadLens workflow.
+LeadLens keeps this handbook byte-stable so automatic prompt caching can reuse the prefix across batches in a run and across nearby reruns. Static instructions stay first; configured run checks follow; unique lead payloads stay last. Routing uses a stable prompt_cache_key derived from model + rules. Parallel workers must warm this prefix once before fanning out. Treat the following checklist as fixed operating procedure: verify id echo, apply q hard caps, distinguish rq placeholder-empty vs wrong, gate rq/comment-quality on connected, apply history trajectory, explain le local errors in o/r without copying them into e, keep outputs compact, never invent sibling calls, never merge two ids, never invent error labels outside the allowed types, never emit Follow-up Missed, never emit Estimate Budget Empty, never emit Customer Location Empty, never emit Analysis Parameter Empty, never emit TAT labels, never emit severity, never wrap JSON in fences, never discuss pricing or tokens, never mention cache mechanics in o/r. Repeatable discipline improves audit consistency across telecalling QA shifts, projects, and batch sizes while preserving privacy of customer records inside the browser-only LeadLens workflow.
 
 This handbook is identical across batches for prompt caching.`;
 
@@ -341,18 +335,6 @@ function isBlankish(value){
   const n=norm(s);
   return["na","n/a","n a","nil","none","null","blank","empty","dot","x","xx","xxx","tbd","not available"].includes(n);
 }
-const REQUIREMENT_JUNK=new Set([
-  "rnr","cnp","visited","visit","sv","site visit","site visited","sv done","busy","switched off","switch off",
-  "not connected","connected","follow up","followup","cb","callback","call back","ni","not interested",
-  "interested","ringing","no answer","wrong number","wn","call later","will call","talked","spoke","ok","yes","no"
-]);
-function looksLikeWrongRequirement(value){
-  if(isBlankish(value))return false;
-  const n=norm(value);
-  if(REQUIREMENT_JUNK.has(n))return true;
-  if(/^(rnr|cnp|sv|ni|wn|cb)\b/.test(n)&&n.split(" ").length<=3)return true;
-  return false;
-}
 function clampCommentQuality(score,comments){
   let q=Number(score);
   if(!Number.isFinite(q))q=0;
@@ -379,7 +361,7 @@ export function slugFieldId(label,used=new Set()){
   let base=norm(label).replace(/[^a-z0-9]+/g,"_").replace(/^_|_$/g,"")||"field";
   if(/^\d/.test(base))base=`f_${base}`;
   let id=base,n=2;
-  while(used.has(id)||["leadId","groupId","staticValues","auditContext","deterministicErrors","rowIndex","updateDate","nextDate"].includes(id)){
+  while(used.has(id)||["leadId","groupId","staticValues","auditContext","localErrors","deterministicErrors","rowIndex","updateDate","nextDate","overdue"].includes(id)){
     id=`${base}_${n++}`;
   }
   return id;
@@ -452,14 +434,22 @@ export function normalizeOutputFields(saved,seedFresh=false){
   }
   for(const def of defaults){
     if(used.has(def.id)){
-      if(seedFresh&&def.id==="callDate"){
-        const row=out.find(field=>field.id==="callDate");
+      if(seedFresh&&(def.id==="callDate"||def.id==="overdue")){
+        const row=out.find(field=>field.id===def.id);
         if(row)row.label=def.label;
       }
       continue;
     }
     out.push(clone(def));
     used.add(def.id);
+    if(def.id==="overdue"){
+      const nextIdx=out.findIndex(field=>field.id==="next");
+      const overdueIdx=out.length-1;
+      if(nextIdx>=0&&overdueIdx!==nextIdx+1){
+        const [overdueRow]=out.splice(overdueIdx,1);
+        out.splice(nextIdx+1,0,overdueRow);
+      }
+    }
   }
   // Mobile + Project first so lead identity is obvious in Settings and Excel.
   if(seedFresh){
@@ -512,8 +502,8 @@ function normalizeRuleErrors(rules,maps){
 /** Ensure every default rule field exists; on seed bump, refresh default rule text. Keep custom user rules. */
 function mergeRules(savedRules,seedFresh){
   const saved=Array.isArray(savedRules)?savedRules:[];
-  const renamedFields={"prior follow up timing":"Follow-up Missed","first talk sla":"Fresh Call TAT"};
-  const dropFields=new Set(["tat error","tat"]);
+  const renamedFields={"prior follow up timing":"Follow-up Missed"};
+  const dropFields=new Set(["tat error","tat","fresh call tat","first talk sla","follow up missed","empty fields when connected"]);
   const byField=new Map();
   for(const rule of saved){
     const rawField=clean(rule.field);
@@ -532,7 +522,7 @@ function mergeRules(savedRules,seedFresh){
   });
   for(const leftover of byField.values()){
     const key=norm(leftover.field);
-    if(dropFields.has(key)||key==="first talk sla")continue;
+    if(dropFields.has(key)||key==="first talk sla"||key==="fresh call tat")continue;
     merged.push({field:leftover.field||"Custom",instruction:leftover.instruction||"",errors:leftover.errors||""});
   }
   return merged;
@@ -781,35 +771,18 @@ const dateTimeText=value=>{
   if(!hasClockTime(d))return base;
   return`${base} ${String(d.getHours()).padStart(2,"0")}:${String(d.getMinutes()).padStart(2,"0")}`;
 };
-function isBusinessHoursRegistration(d){
-  if(!(d instanceof Date)||Number.isNaN(d.valueOf())||!hasClockTime(d))return false;
-  const mins=d.getHours()*60+d.getMinutes();
-  return mins>=(9*60)&&mins<=(17*60);
-}
-/** Fresh Call TAT: same calendar day as registration when reg is 09:00–17:00. */
-function missedFreshCallSameDay(registrationAt,firstUpdateAt){
-  if(!registrationAt||!isBusinessHoursRegistration(registrationAt))return false;
-  if(!firstUpdateAt)return true;
-  return registrationAt.getFullYear()!==firstUpdateAt.getFullYear()
-    ||registrationAt.getMonth()!==firstUpdateAt.getMonth()
-    ||registrationAt.getDate()!==firstUpdateAt.getDate();
-}
-/** Calendar date only (local midnight) for Follow-up Missed comparisons. */
 function calendarDateOnly(value){
   if(value instanceof Date&&!Number.isNaN(value.valueOf())){
     return new Date(value.getFullYear(),value.getMonth(),value.getDate());
   }
   return parseDate(value);
 }
-function hasCustomerRequirementDetail(comments){
-  const list=Array.isArray(comments)?comments.map(clean).filter(Boolean):[clean(comments)].filter(Boolean);
-  if(!list.length)return false;
-  const n=norm(list.join(" "));
-  const facing=/\b(east|west|north|south|corner|facing|north\s*east|north\s*west|south\s*east|south\s*west|\bne\b|\bnw\b|\bse\b|\bsw\b)\b/.test(n);
-  const size=/\b(\d\s*bhk|\d\s*rk|bhk|rk|sq\.?\s*ft|sqft|sft|gaj|gunta|acre|cent|dimension|\d+\s*[x×]\s*\d+|plot\s*size|site\s*size|sqm|sq\s*m)\b/.test(n);
-  const purpose=/\b(investment|invest(ing|or|ment)?|self\s*(use|purpose|occupy|occupied)?|own\s*use|end\s*use|for\s*(self|rent|rental)|rental)\b/.test(n);
-  const timeline=/\b(immediate|asap|urgent|ready\s*to\s*(buy|move|visit)|this\s*month|next\s*month|future|later|after\s+\d+|next\s+year|possession|planning|in\s*\d+\s*(month|year)s?|long\s*term|short\s*term)\b/.test(n);
-  return facing||size||purpose||timeline;
+/** Integer overdue days: (today − nextDay) / 86400000. Missing next → "". Today → 0. */
+function overdueDays(next){
+  const nextDay=calendarDateOnly(next);
+  if(!nextDay)return "";
+  const today=new Date();today.setHours(0,0,0,0);
+  return Math.round((today-nextDay)/86400000);
 }
 function isRnrLikeComment(value){
   const n=norm(value);
@@ -833,63 +806,25 @@ function isStrongPositiveComment(value){
     ||(/\b(2bhk|3bhk)\b/.test(n)&&/\b(interested|looking|need|visit|want)\b/.test(n))
     ||(/\bvisit(ed)?\b/.test(n)&&n.split(/\s+/).length>=3);
 }
-function trailingRnrStreak(comments){
-  let streak=0;
-  for(let i=comments.length-1;i>=0;i--){
-    if(isRnrLikeComment(comments[i]))streak++;
-    else break;
-  }
-  return streak;
-}
 function allCommentsRnrLike(comments){
   const list=Array.isArray(comments)?comments.map(clean).filter(Boolean):[clean(comments)].filter(Boolean);
   return list.length>0&&list.every(isRnrLikeComment);
-}
-function historyStatusErrors(status,comments,connected=""){
-  const errors=[];
-  const list=Array.isArray(comments)?comments.map(clean).filter(Boolean):[clean(comments)].filter(Boolean);
-  if(!list.length)return errors;
-  const statusNorm=norm(status);
-  const warmOrHigher=["prospect","hot","warm"];
-  // All RNR-like comments + Connected=No ⇒ status must be lesser than Warm.
-  if(allCommentsRnrLike(list)&&norm(connected)==="no"&&warmOrHigher.includes(statusNorm)){
-    errors.push(STATUS_HISTORY_ERROR);
-  }
-  // Prospect only: >2 continuous trailing RNR-like notes (Hot/Warm after short RNR gaps stays aligned).
-  const streak=trailingRnrStreak(list);
-  if(streak>2&&statusNorm==="prospect"&&!errors.includes(STATUS_HISTORY_ERROR))errors.push(STATUS_HISTORY_ERROR);
-  // Latest comment clearly positive but status still cold-side.
-  const last=list[list.length-1];
-  if(isStrongPositiveComment(last)&&["cold","beyond budget","lost"].includes(statusNorm)){
-    if(!errors.includes(STATUS_HISTORY_ERROR))errors.push(STATUS_HISTORY_ERROR);
-  }
-  return errors;
 }
 export function indianMobile(value){let digits=clean(value).replace(/\.0$/,"").replace(/\D/g,"");if(digits.length===12&&digits.startsWith("91"))digits=digits.slice(2);if(digits.length===11&&digits.startsWith("0"))digits=digits.slice(1);return /^[6-9]\d{9}$/.test(digits)?digits:"";}
 function fieldColumns(headers,fields){const normalized=headers.map(header=>({header,key:norm(header)}));return Object.fromEntries(fields.filter(field=>field.required||field.enabled!==false).map(field=>{const match=normalized.find(item=>list(field.aliases).includes(item.key));return[field.id,match?.header||""];}));}
 function correctedAiLocation(project,location){const exceptions=new Set(["guru punvaanii eureka|bidadi","guru punvaanii ernika|anekal","guru punvaanii eka|anekal","guru punvaanii elegance|bheemenahalli"]);return exceptions.has(`${norm(project)}|${norm(location)}`)?"":location;}
 function connectedFromParameter(parameter,settings){const value=norm(parameter);if(!value)return"";if(list(settings.yesValues).includes(value)||value==="yes")return"Yes";if(list(settings.noValues).includes(value)||value==="no")return"No";return"";}
-function deterministicErrors(call,aiLocation,{commentHistory=[],registrationAt=null,firstUpdateAt=null}={}){
+function localErrors(call,aiLocation){
   const errors=[];
-  const today=new Date();today.setHours(0,0,0,0);
-  // Follow-up Missed: calendar date only (never time-of-day).
-  const nextDay=calendarDateOnly(call.nextDate||call.nextAt||call.next);
-  if(nextDay&&nextDay<today)errors.push(FOLLOWUP_MISSED_ERROR);
+  const overdue=overdueDays(call.nextDate||call.nextAt||call.next);
+  if(typeof overdue==="number"&&overdue>0)errors.push(FOLLOWUP_MISSED_ERROR);
   if(isBlankish(call.parameter))errors.push(EMPTY_PARAMETER);
   if(call.connected==="Yes"){
-    // Exception-blanked location for empty check; Excel still keeps original CRM city.
     if(isBlankish(aiLocation))errors.push(EMPTY_LOCATION);
-    if(isBlankish(call.requirement))errors.push(EMPTY_REQUIREMENT);
-    else if(looksLikeWrongRequirement(call.requirement))errors.push(WRONG_REQUIREMENT);
-    if(isBlankish(call.budget))errors.push(EMPTY_BUDGET);
-    const commentsForQuality=commentHistory.length?commentHistory:[call.comments];
-    if(!hasCustomerRequirementDetail(commentsForQuality))errors.push(COMMENT_QUALITY_ERROR);
+    if(clean(call.requirement)==="")errors.push(EMPTY_REQUIREMENT);
+    if(clean(call.budget)==="")errors.push(EMPTY_BUDGET);
   }
-  if(missedFreshCallSameDay(registrationAt,firstUpdateAt))errors.push(FRESH_CALL_TAT_ERROR);
-  for(const label of historyStatusErrors(call.status,commentHistory.length?commentHistory:[call.comments],call.connected)){
-    if(!errors.includes(label))errors.push(label);
-  }
-  return errors;
+  return{errors,overdue};
 }
 function contextValue(id,record,aiLocation){if(id==="connected")return record.connected;if(id==="next")return dateText(record.nextDate||record.next);if(id==="location")return aiLocation;return record[id]||"";}
 function callSnapshot(record){
@@ -998,17 +933,13 @@ export function parseWorkbook(arrayBuffer,rawSettings=DEFAULT_SETTINGS){
     const registration=firstNonEmpty(records.map(record=>record.registration));
     const telecaller=firstNonEmpty(records.map(record=>record.telecaller));
     const registrationAt=records.map(record=>parseDateTime(record.registration)).find(Boolean)||null;
-    const firstRecord=records.find(record=>record.updateAt||record.updateDate)||records[0];
-    const firstUpdateAt=firstRecord?.updateAt||(firstRecord?.updateDate?new Date(firstRecord.updateDate.getFullYear(),firstRecord.updateDate.getMonth(),firstRecord.updateDate.getDate()):null)||null;
     const commentHistory=records.map(record=>record.comments||"");
     const daySnapshots=dayCalls.map(callSnapshot);
 
     dayCalls.forEach((call,callIndex)=>{
       const aiLocation=correctedAiLocation(call.project,call.location);
       const leadUpdateDate=dateText(call.updateAt||call.updateDate||call.update);
-      const recordIndex=records.findIndex(record=>record.rowIndex===call.rowIndex);
-      const previous=recordIndex>0?records[recordIndex-1]:null;
-      const previousFollowupAt=previous?.nextAt||(previous?.nextDate?new Date(previous.nextDate.getFullYear(),previous.nextDate.getMonth(),previous.nextDate.getDate()):null)||null;
+      const local=localErrors(call,aiLocation);
       const staticValues={
         project:call.project,
         mobile:call.mobile,
@@ -1017,6 +948,7 @@ export function parseWorkbook(arrayBuffer,rawSettings=DEFAULT_SETTINGS){
         status:call.status,
         comments:call.comments,
         next:dateTimeText(call.nextAt)||dateText(call.nextDate||call.next),
+        overdue:local.overdue,
         callDate:dateTimeText(call.updateAt)||leadUpdateDate,
         update:dateTimeText(call.updateAt)||leadUpdateDate,
         totalFollowups:records.length,
@@ -1045,10 +977,10 @@ export function parseWorkbook(arrayBuffer,rawSettings=DEFAULT_SETTINGS){
           ?records.map(record=>contextValue(field.id,record,correctedAiLocation(record.project,record.location)))
           :contextValue(field.id,call,aiLocation);
       }
-      auditContext.reg=dateTimeText(registrationAt)||registration||"";
-      auditContext.fu=dateTimeText(firstUpdateAt)||"";
       auditContext.u=dateTimeText(call.updateAt)||leadUpdateDate||"";
-      auditContext.pn=dateTimeText(previousFollowupAt)||"";
+      auditContext.le=local.errors;
+      if(clean(call.requirement)==="")delete auditContext.rq;
+      if(clean(call.budget)==="")delete auditContext.b;
       // Same-day siblings on the latest day are context only; each latest-day call still gets its own result.
       if(daySnapshots.length>1)auditContext.day=daySnapshots;
       leads.push({
@@ -1056,7 +988,7 @@ export function parseWorkbook(arrayBuffer,rawSettings=DEFAULT_SETTINGS){
         groupId,
         staticValues,
         auditContext,
-        deterministicErrors:deterministicErrors(call,aiLocation,{commentHistory,registrationAt,firstUpdateAt})
+        localErrors:local.errors
       });
     });
   }
@@ -1125,7 +1057,8 @@ function auditImportFields(settings){
     buyingIntent:"buying intent, intent, i",
     observation:"ai observation, observation, o",
     recommendation:"ai recommendation, recommendation, r",
-    telecaller:"telecaller name, tele caller name, agent name"
+    telecaller:"telecaller name, tele caller name, agent name",
+    overdue:"overdue, overdue days"
   };
   for(const field of fields){
     if(extras[field.id])field.aliases=`${field.aliases}, ${extras[field.id]}`;
@@ -1188,6 +1121,12 @@ export function parseAuditedWorkbook(arrayBuffer,rawSettings=DEFAULT_SETTINGS){
       }else if(field.id==="commentQuality"){
         const q=Number(value);
         value=Number.isFinite(q)?Math.max(0,Math.min(10,Math.round(q))):0;
+      }else if(field.id==="overdue"){
+        if(value===""||value==null)value="";
+        else{
+          const n=Number(value);
+          value=Number.isFinite(n)?Math.round(n):"";
+        }
       }else if(field.id==="buyingIntent"){
         const n=norm(value);
         value=(n==="yes"||n==="1"||n==="true")?"Yes":"No";
@@ -1197,18 +1136,13 @@ export function parseAuditedWorkbook(arrayBuffer,rawSettings=DEFAULT_SETTINGS){
       result[field.id]=value;
     }
     if(result.commentQuality===undefined)result.commentQuality=0;
-    if(!result.errorTypes)result.errorTypes="None";
-    if(!result.errorSeverity||!/^(NONE|MEDIUM|HIGH)$/i.test(String(result.errorSeverity))){
-      const labels=String(result.errorTypes||"");
-      const errors=ERROR_TYPES.filter(label=>labels.includes(label));
-      const none=/^none$/i.test(labels)||!errors.length;
-      result.errorSeverity=none?"NONE":errors.some(error=>HIGH_SEVERITY_ERRORS.has(error))?"HIGH":"MEDIUM";
-    }else{
-      result.errorSeverity=String(result.errorSeverity).toUpperCase();
-    }
+    const importedErrors=ERROR_TYPES.filter(label=>String(result.errorTypes||"").includes(label));
+    result.errorTypes=importedErrors.length?importedErrors.join(", "):"None";
+    result.errorSeverity=importedErrors.length?(importedErrors.some(error=>HIGH_SEVERITY_ERRORS.has(error))?"HIGH":"MEDIUM"):"NONE";
     if(!result.buyingIntent)result.buyingIntent="No";
     if(result.observation===undefined)result.observation="";
     if(result.recommendation===undefined)result.recommendation="";
+    if(result.overdue===undefined||result.overdue==="")result.overdue=overdueDays(result.next);
     results.push(result);
   }
   if(!results.length)throw new Error("No audited rows could be read from this Excel.");
@@ -1240,9 +1174,7 @@ export function parseAuditedWorkbook(arrayBuffer,rawSettings=DEFAULT_SETTINGS){
 }
 
 function buildPrompt(settings){
-  const maps=buildErrorMaps(settings);
-  // Location empty is deterministic-only — do not invite the model to emit it.
-  const errorLegend=maps.labels.filter(label=>label!==EMPTY_LOCATION).join(" | ");
+  const errorLegend=[...AI_ALLOWED_ERRORS].join(" | ");
   const rules=settings.rules.filter(rule=>clean(rule.instruction)).map((rule,index)=>{
     const errors=splitErrorList(rule.errors);
     return`${index+1}. ${clean(rule.field)||"check"}: ${clean(rule.instruction)}${errors.length?` errors:${errors.join(" | ")}`:""}`;
@@ -1320,7 +1252,6 @@ function fallbackObservation(row,errors,q){
   if(has(EMPTY_REQUIREMENT))gaps.push("customer requirement");
   const issues=[];
   if(has(STATUS_HISTORY_ERROR))issues.push("the lead status does not match how the conversation went");
-  if(has(FRESH_CALL_TAT_ERROR))issues.push("the first call was not on the same day as daytime lead generation");
   if(has(FOLLOWUP_MISSED_ERROR))issues.push("the promised follow-up date is already past");
   if(has(WRONG_REQUIREMENT))issues.push("the requirement field holds call jargon instead of a real need");
   if(has(COMMENT_QUALITY_ERROR))issues.push("the comments miss requirement detail like facing, size, purpose, or timeline");
@@ -1356,7 +1287,6 @@ function fallbackRecommendation(row,errors,q){
   if(norm(row.connected)==="no")actions.push("when the customer picks up, capture need, locality, and budget before closing");
   else if(Number(q)<=4)actions.push("rewrite remarks with what the customer said: need, locality, budget, objection, and next step");
   if(errors.includes(STATUS_HISTORY_ERROR))actions.push("align lead status on the Prospect→Lost ladder to the full comment timeline");
-  if(errors.includes(FRESH_CALL_TAT_ERROR))actions.push("call daytime registrations the same calendar day and log the first update promptly");
   if(errors.includes(WRONG_REQUIREMENT)||errors.includes(EMPTY_REQUIREMENT))actions.push("on the next connected call capture a real requirement (config or area), not RNR or visit jargon");
   if(errors.includes(COMMENT_QUALITY_ERROR))actions.push("on connected calls note facing, size/dimension, investment vs self use, and immediate vs future plan");
   if(errors.includes(EMPTY_LOCATION))actions.push("ask and save the preferred micro-market or location");
@@ -1398,7 +1328,7 @@ async function requestAudit(apiKey,settings,leads,signal,log,onUsage){
       prompt_cache_key:promptCacheKey(settings),
       messages:[
         {role:"system",content:buildPrompt(settings)},
-        {role:"user",content:`Audit ${leads.length} call(s). Echo each id. c=full history; reg+fu=same-day fresh-call TAT (09:00–17:00 only); n=date-only Follow-up Missed. Cold+all-RNR is aligned. Never emit TAT Error. o (18-28 words): layman supervisor note explaining every e label via comments+Connected — no Connected=Yes dumps, no comment paraphrase. r (20-40 words): concrete next-step coaching from comment history+Connected+e — not vague follow-up / remark rewrites.\n${JSON.stringify({L:modelInput})}`}
+        {role:"user",content:`Audit ${leads.length} call(s). Echo each id. c=full history. le=local errors — explain in o/r, never copy into e. Judge status vs full c; non-blank rq empty-vs-wrong when k=Yes; comment quality + q; buying intent. Cold+all-RNR is aligned. Never emit Follow-up Missed, Budget/Location/Parameter Empty, or any TAT label. o (18-28 words): layman supervisor note explaining every le∪e label via comments+Connected — no Connected=Yes dumps, no comment paraphrase. r (20-40 words): concrete next-step coaching from comment history+Connected+le∪e — not vague follow-up / remark rewrites.\n${JSON.stringify({L:modelInput})}`}
       ],
       response_format:{type:"json_schema",json_schema:{name:"ll_audit",strict:true,schema:responseSchema}}
     });
@@ -1474,28 +1404,31 @@ export async function auditBatch(apiKey,rawSettings,batch,signal,log,onUsage){
   if(missing.length)throw new Error(`OpenAI still omitted ${missing.length} lead(s). Saved batches are safe; resume to retry.`);
   return batch.map(lead=>{
     const ai=byId.get(clean(lead.leadId));
-    const aiErrors=Array.isArray(ai.e)?ai.e.map(token=>maps.resolve(token)).filter(label=>maps.allowed.has(label)):[];
+    const aiErrors=Array.isArray(ai.e)?ai.e.map(token=>maps.resolve(token)).filter(label=>AI_ALLOWED_ERRORS.has(label)):[];
     const connectedYes=lead.staticValues.connected==="Yes";
-    // Location empty is deterministic-only — never keep AI Customer Location Empty.
-    let filteredAi=aiErrors.filter(label=>label!==EMPTY_LOCATION);
-    filteredAi=connectedYes?filteredAi:filteredAi.filter(label=>!CONNECTED_ONLY_ERRORS.has(label));
-    const filteredDet=connectedYes?lead.deterministicErrors:lead.deterministicErrors.filter(label=>!CONNECTED_ONLY_ERRORS.has(label));
-    let merged=unique([...filteredDet,...filteredAi]).filter(label=>ERROR_TYPES.includes(label));
-    // Drop retired "TAT Error" and any non-canonical TAT label except Fresh Call TAT Missed.
-    merged=merged.filter(label=>{
-      const n=norm(label);
-      if(n==="tat error"||n==="tat")return false;
-      return true;
-    });
+    const filteredAi=connectedYes?aiErrors:aiErrors.filter(label=>!CONNECTED_ONLY_ERRORS.has(label));
+    const localRaw=Array.isArray(lead.localErrors)?lead.localErrors:(Array.isArray(lead.deterministicErrors)?lead.deterministicErrors:[]);
+    const local=localRaw.filter(label=>LOCAL_OWNED_ERRORS.has(label));
+    const filteredLocal=connectedYes?local:local.filter(label=>!CONNECTED_ONLY_ERRORS.has(label));
+    let merged=unique([...filteredLocal,...filteredAi]).filter(label=>ERROR_TYPES.includes(label));
     let errors=merged.includes(EMPTY_REQUIREMENT)?merged.filter(label=>label!==WRONG_REQUIREMENT):merged;
-    // MCube source: strip Fresh Call TAT Missed (any label containing TAT).
-    if(norm(lead.staticValues.source)==="mcube"){
-      errors=errors.filter(label=>!String(label).toUpperCase().includes("TAT"));
+    const comments=Array.isArray(lead.auditContext?.c)?lead.auditContext.c:[lead.staticValues.comments];
+    const forceNoIntent=allCommentsRnrLike(comments)||norm(lead.staticValues.connected)==="no";
+    let intent;
+    if(forceNoIntent)intent="No";
+    else if(ai.i===undefined||ai.i===null||ai.i===""){
+      const last=(comments.map(clean).filter(Boolean).at(-1))||lead.staticValues.comments;
+      intent=isStrongPositiveComment(last)?"Yes":"No";
+    }else{
+      intent=Number(ai.i)===1||clean(ai.i)==="1"||norm(ai.i)==="yes"?"Yes":"No";
     }
-    const intent=Number(ai.i)===1||clean(ai.i)==="1"||norm(ai.i)==="yes"?"Yes":"No";
     const q=clampCommentQuality(ai.q,lead.staticValues.comments);
+    const overdue=lead.staticValues.overdue!==undefined&&lead.staticValues.overdue!==null
+      ?lead.staticValues.overdue
+      :overdueDays(lead.staticValues.next);
     return{
       ...lead.staticValues,
+      overdue,
       commentQuality:q,
       errorTypes:errors.length?errors.join(", "):"None",
       errorSeverity:severityFromErrors(errors),
@@ -1527,6 +1460,10 @@ function sortValue(row,fieldId){
   if(DATE_SORT_FIELDS.has(fieldId)){
     const date=parseDateTime(raw)||parseDate(raw);
     return date?date.valueOf():Number.NEGATIVE_INFINITY;
+  }
+  if(fieldId==="overdue"){
+    const n=Number(raw);
+    return Number.isFinite(n)?n:Number.NEGATIVE_INFINITY;
   }
   if(fieldId==="totalFollowups"||fieldId==="commentQuality"||fieldId==="dayCallCount")return Number(raw)||0;
   return String(raw??"").toLocaleLowerCase();
@@ -1736,7 +1673,7 @@ export function buildDeterministicInsights(metrics){
     else if(/requirement/i.test(item.label))coachingFocus.push("Record a real customer requirement — not RNR/visited/status crumbs.");
     else if(/budget/i.test(item.label))coachingFocus.push("Ask and save budget band before ending connected calls.");
     else if(/status|aligned/i.test(item.label))coachingFocus.push("Align Lead Status to the latest comment trajectory on the Prospect→Lost ladder.");
-    else if(/tat|fresh|follow-up missed|follow up missed/i.test(item.label))coachingFocus.push("Tighten same-day first-call TAT and follow-up date discipline.");
+    else if(/follow-up missed|follow up missed/i.test(item.label))coachingFocus.push("Call on or before the promised follow-up date and set a fresh dated next step.");
     else coachingFocus.push(`Drill on “${item.label}” until it drops in the next cycle.`);
   }
   if(!coachingFocus.length)coachingFocus.push("Spot-check High-severity Excel rows and coach from concrete call examples.");

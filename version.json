@@ -1,5 +1,5 @@
 {
-  "version": "5.0.9",
+  "version": "5.1.0",
   "name": "LeadLens",
-  "notes": "Audit rules v5.0.9: same-day Fresh Call TAT (9–5), date-only Follow-up Missed, Comment Quality Not Appropriate, RNR→Cold OK, TAT Error removed, severities refreshed."
+  "notes": "Audit rules v5.1.0: AI owns status/requirement/comment quality/intent; local owns follow-up, overdue, blank budget/location/parameter; Fresh Call TAT removed."
 }
