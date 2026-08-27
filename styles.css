@@ -373,3 +373,38 @@ body .dashboard-filter-reset{width:100%;justify-self:stretch;margin-top:4px}
   .review-precounts{grid-template-columns:1fr}
   .home-topbar{padding:16px 18px;flex-wrap:wrap;gap:12px}
 }
+
+/* DeBug Error Focus Lab */
+.debug-chip-row{max-width:800px;margin:0 auto 8px;display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.debug-chip-label{font-size:13px;color:var(--muted)}
+.debug-chip,.debug-filter-chip{
+  display:inline-flex;align-items:center;gap:6px;padding:6px 11px;border-radius:999px;
+  border:1px solid var(--line);background:var(--panel);font-size:12px;font-weight:600;color:var(--green-2)
+}
+.debug-filter-chip{cursor:pointer;background:#fff}
+.debug-filter-chip.active{background:var(--mint);border-color:#9bb7a8;color:var(--green)}
+.debug-error-checks{display:grid;gap:8px;margin:12px 0}
+.debug-error-check{display:flex;align-items:flex-start;gap:10px}
+.debug-error-check input{width:auto;margin-top:3px}
+.debug-focus-toolbar{display:flex;flex-wrap:wrap;gap:12px;align-items:end;justify-content:space-between;margin:12px 0}
+.debug-focus-select{display:grid;gap:6px;min-width:min(100%,320px)}
+.debug-results-panel,.debug-compare-panel{
+  background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:18px 20px;
+  box-shadow:var(--shadow);display:grid;gap:14px
+}
+.debug-error-counts{display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:10px}
+.debug-error-counts div{display:grid;gap:4px}
+.debug-error-counts span{font-size:12px;color:var(--muted)}
+.debug-error-counts strong{font-size:18px}
+.debug-filter-row{display:flex;flex-wrap:wrap;gap:8px}
+.debug-results-table-wrap{overflow:auto;max-height:420px;border:1px solid var(--line);border-radius:12px}
+.debug-results-table{width:100%;border-collapse:collapse;font-size:13px}
+.debug-results-table th,.debug-results-table td{
+  text-align:left;padding:10px 12px;border-bottom:1px solid var(--line);vertical-align:top
+}
+.debug-results-table th{position:sticky;top:0;background:#f7faf8;font-size:11px;letter-spacing:.04em;text-transform:uppercase;color:var(--muted)}
+.debug-results-table td:last-child{min-width:220px}
+@media(max-width:850px){
+  .debug-focus-toolbar{flex-direction:column;align-items:stretch}
+  .debug-results-table td:last-child{min-width:160px}
+}
