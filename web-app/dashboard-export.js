@@ -95,7 +95,7 @@ function mapSeverity(errorSeverity, errorLabels, highSeverityErrors){
 function splitErrorLabels(errorTypes){
   const raw = clean(errorTypes);
   if(!raw || /^none$/i.test(raw)) return [];
-  return raw.split(/\s*\|\s*|\s*,\s*/).map(s => s.trim()).filter(Boolean).filter(s => !/^none$/i.test(s));
+  return raw.split(/\s*\|\s*|\s*,\s*/).map(s => s.trim()).filter(Boolean).filter(s => !/^none$/i.test(s) && !/tat/i.test(s));
 }
 
 function leadKey(row){
@@ -113,7 +113,10 @@ export function mapResultsToRawDataRows(results, {highSeverityErrors} = {}){
     const next = parseLooseDate(row.next);
     const regDay = reg ? startOfLocalDay(reg) : null;
     let overdue = "";
-    if(next){
+    if(row.overdue !== undefined && row.overdue !== null && row.overdue !== ""){
+      const n = Number(row.overdue);
+      if(Number.isFinite(n)) overdue = Math.round(n);
+    }else if(next){
       overdue = Math.round((today - startOfLocalDay(next)) / 86400000);
     }
     return {
