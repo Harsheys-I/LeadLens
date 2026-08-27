@@ -79,6 +79,8 @@ export const DashboardApi = {
 export const SettingsApi = {
   getAudit: () => api('settings/audit'),
   saveAudit: (settings) => api('settings/audit', {method: 'PUT', body: {settings}}),
+  getDebug: () => api('settings/debug'),
+  saveDebug: (settings) => api('settings/debug', {method: 'PUT', body: {settings}}),
   openaiKeyStatus: () => api('settings/openai-key-status'),
   getOpenaiKey: () => api('settings/openai-key'),
   // POST — Hostinger/shared hosts often block PUT

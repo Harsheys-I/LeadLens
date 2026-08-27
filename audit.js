@@ -1367,7 +1367,7 @@ function promptCacheKey(settings){
   return `leadlens-${APP_VERSION}-${(hash>>>0).toString(16)}`;
 }
 
-const responseSchema={
+export const AUDIT_RESPONSE_SCHEMA={
   type:"object",additionalProperties:false,required:["a"],
   properties:{
     a:{
@@ -1387,6 +1387,7 @@ const responseSchema={
     }
   }
 };
+const responseSchema=AUDIT_RESPONSE_SCHEMA;
 
 function clipWords(text,maxWords){
   const words=clean(text).split(/\s+/).filter(Boolean);
@@ -1603,14 +1604,15 @@ async function requestAudit(apiKey,settings,leads,signal,log,onUsage){
 const unique=values=>[...new Set(values.filter(Boolean))];
 const severityFromErrors=errors=>!errors.length?"NONE":errors.some(error=>HIGH_SEVERITY_ERRORS.has(error))?"HIGH":"MEDIUM";
 
-export async function auditBatch(apiKey,rawSettings,batch,signal,log,onUsage){
+export async function auditBatch(apiKey,rawSettings,batch,signal,log,onUsage,requestFn=requestAudit){
   const settings=normalizeSettings(rawSettings);
   const maps=buildErrorMaps(settings);
+  const request=typeof requestFn==="function"?requestFn:requestAudit;
   async function requestWithRetry(leads,label){
     let result,lastError;
     let attempt=1;
     while(!result){
-      try{result=await requestAudit(apiKey,settings,leads,signal,log,onUsage);break;}
+      try{result=await request(apiKey,settings,leads,signal,log,onUsage);break;}
       catch(error){
         if(error.name==="AbortError")throw error;
         lastError=error;
