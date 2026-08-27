@@ -10,12 +10,12 @@ import {
   buildChatCompletionBody,
   normalizeSettings,
   auditBatch,
-} from "./audit.js?v=5.2.1";
+} from "./audit.js?v=5.2.1d";
 import {
   LAB_ERROR_TYPES,
   SHARED_PREAMBLE,
   DEFAULT_ERROR_PROMPTS,
-} from "./debug-prompts.js?v=5.2.1";
+} from "./debug-prompts.js?v=5.2.1d";
 
 /** App-local labels — never shown in DeBug focus-lab results / Excel. */
 const LOCAL_OWNED_ERRORS = new Set([
@@ -129,9 +129,16 @@ async function requestDebugAudit(apiKey,settings,leads,signal,log,onUsage){
   const system=composeDebugPrompt(settings);
   const schema=buildDebugResponseSchema(settings.activeErrorTypes);
   const csv=leadsToCsv(leads);
+  const sentIds=(leads||[]).map(lead=>String(lead.leadId??""));
+  const maxTokens=Math.max(500,leads.length*140);
+  // #region agent log
+  const csvIdCol=(csv.split(/\r?\n/)[0]||"").split(",")[0];
+  const csvSampleRows=(csv.split(/\r?\n/)||[]).slice(1,4).map(line=>(line.split(",")[0]||"").slice(0,80));
+  fetch('http://127.0.0.1:7843/ingest/f4ac7d78-fa93-4940-929e-852fd1791883',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'ab7011'},body:JSON.stringify({sessionId:'ab7011',runId:'pre-fix',hypothesisId:'A,D',location:'debug-engine.js:requestDebugAudit:pre',message:'DeBug request about to send',data:{sentCount:sentIds.length,sentSample:sentIds.slice(0,3),maxTokens,csvChars:csv.length,systemChars:system.length,csvIdCol,csvSampleRows},timestamp:Date.now()})}).catch(()=>{});
+  // #endregion
   const auditBody=buildChatCompletionBody(settings.model,{
     temperature:0,
-    maxTokens:Math.max(500,leads.length*140),
+    maxTokens,
     messages:[
       {role:"system",content:system},
       {role:"user",content:`Audit ${leads.length} call(s). Echo each id. For each id, o must explain WHY each e label was raised.\n\n${csv}`}
@@ -156,10 +163,27 @@ async function requestDebugAudit(apiKey,settings,leads,signal,log,onUsage){
     throw new Error(`OpenAI ${response.status}: ${detail||response.statusText}`);
   }
   const data=await response.json(),usage=data.usage;
-  const content=data.choices?.[0]?.message?.content;
+  const choice=data.choices?.[0];
+  const content=choice?.message?.content;
+  const finishReason=choice?.finish_reason||choice?.finishReason||"";
   if(!content)throw new Error("OpenAI returned no audit content.");
-  const parsed=JSON.parse(content);
+  let parsed;
+  try{
+    parsed=JSON.parse(content);
+  }catch(parseErr){
+    // #region agent log
+    fetch('http://127.0.0.1:7843/ingest/f4ac7d78-fa93-4940-929e-852fd1791883',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'ab7011'},body:JSON.stringify({sessionId:'ab7011',runId:'pre-fix',hypothesisId:'A',location:'debug-engine.js:requestDebugAudit:parseFail',message:'JSON parse failed',data:{finishReason,contentLen:String(content).length,contentHead:String(content).slice(0,120),contentTail:String(content).slice(-120),maxTokens,outputTok:usage?.completion_tokens??usage?.output_tokens??0},timestamp:Date.now()})}).catch(()=>{});
+    // #endregion
+    throw parseErr;
+  }
   if(!Array.isArray(parsed.a))throw new Error("OpenAI response did not contain results array.");
+  const returnedIds=parsed.a.map(item=>String(item?.id??""));
+  const sentSet=new Set(sentIds);
+  const matched=returnedIds.filter(id=>sentSet.has(id)).length;
+  const unmatchedReturn=returnedIds.filter(id=>!sentSet.has(id)).slice(0,5);
+  // #region agent log
+  fetch('http://127.0.0.1:7843/ingest/f4ac7d78-fa93-4940-929e-852fd1791883',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'ab7011'},body:JSON.stringify({sessionId:'ab7011',runId:'pre-fix',hypothesisId:'A,B,C',location:'debug-engine.js:requestDebugAudit:post',message:'DeBug response parsed',data:{sentCount:sentIds.length,returnedCount:returnedIds.length,matchedExact:matched,finishReason,maxTokens,inputTok:usage?.prompt_tokens??usage?.input_tokens??0,outputTok:usage?.completion_tokens??usage?.output_tokens??0,contentLen:String(content).length,sentSample:sentIds.slice(0,3),returnedSample:returnedIds.slice(0,3),unmatchedReturnSample:unmatchedReturn,emptyA:!returnedIds.length},timestamp:Date.now()})}).catch(()=>{});
+  // #endregion
   const active=new Set(normalizeActiveErrorTypes(settings.activeErrorTypes));
   for(const item of parsed.a){
     if(Array.isArray(item.e)){
