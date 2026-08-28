@@ -916,7 +916,7 @@ function hasBuyingSignalComment(value){
   if(isStrongPositiveComment(value))return true;
   const n=norm(value);
   if(!n||isRnrLikeComment(n))return false;
-  return/\b(budget|2bhk|3bhk|site visit|visit on|under \d+l|whitefield|investment)\b/.test(n);
+  return/\b(budget|2bhk|3bhk|\d+\s*bhk|bedroom|flat|villa|plot|apartment|site visit|visit on|coming saturday|\bsv\b|under \d+l|under \d+\s*cr|\d+l\b|lakh|lac|\bcr\b|loan eligible|whitefield|anekal|electronic city|sarjapur|investment|possession|facing)\b/.test(n);
 }
 function hasCumulativeBuyingSignals(comments){
   const list=commentEntries(comments);
@@ -991,6 +991,13 @@ function statusHardRuleMismatch(status,comments){
   const rank=leadStatusRank(status);
   if(rank>3)return false;
   return hasCumulativeBuyingSignals(comments);
+}
+/** Local ceiling: Cold/Beyond Budget/Lost + dead/NI/RNR trail and no buying signals — strip false-positive status error. */
+function statusHardRuleAligned(status,comments){
+  const rank=leadStatusRank(status);
+  if(rank>3)return false;
+  if(!hasDeadLostAlignedTrajectory(comments))return false;
+  return !hasCumulativeBuyingSignals(comments);
 }
 export function indianMobile(value){let digits=clean(value).replace(/\.0$/,"").replace(/\D/g,"");if(digits.length===12&&digits.startsWith("91"))digits=digits.slice(2);if(digits.length===11&&digits.startsWith("0"))digits=digits.slice(1);return /^[6-9]\d{9}$/.test(digits)?digits:"";}
 function fieldColumns(headers,fields){const normalized=headers.map(header=>({header,key:norm(header)}));return Object.fromEntries(fields.filter(field=>field.required||field.enabled!==false).map(field=>{const match=normalized.find(item=>list(field.aliases).includes(item.key));return[field.id,match?.header||""];}));}
@@ -1394,7 +1401,7 @@ function buildPrompt(settings){
   const extra=clean(settings.additionalInstructions);
   return `${CACHE_HANDBOOK}\n\nALLOWED ERROR TYPES: ${errorLegend}\n\nRUN CHECKS:\n${rules||"none"}${extra?`\n\nEXTRA:\n${extra}`:""}`;
 }
-function promptCacheKey(settings){
+export function promptCacheKey(settings){
   // Keep key stable for the whole run / identical settings so parallel requests route together.
   const material=JSON.stringify({
     v:APP_VERSION,
@@ -1681,6 +1688,10 @@ export async function auditBatch(apiKey,rawSettings,batch,signal,log,onUsage,req
     // Local hard-rule floor: Cold/Beyond Budget/Lost + clear buying signals in c → always emit status error.
     if(statusHardRuleMismatch(lead.staticValues.status,comments)){
       errors=unique([...errors,STATUS_HISTORY_ERROR]);
+    }
+    // Local hard-rule ceiling: Cold/Beyond Budget/Lost + dead/NI/RNR trail, no buying signals → strip false-positive status error.
+    if(statusHardRuleAligned(lead.staticValues.status,comments)){
+      errors=errors.filter(label=>label!==STATUS_HISTORY_ERROR);
     }
     const forceNoIntent=(trailingRnrStreak(comments)>=8&&!hasCumulativeBuyingSignals(comments))
       ||commentEntries(comments).some(hasActiveRejectionComment)
