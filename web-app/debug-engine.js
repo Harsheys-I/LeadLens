@@ -11,6 +11,7 @@ import {
   normalizeSettings,
   auditBatch,
   resolveAuditResultId,
+  promptCacheKey,
 } from "./audit.js?v=5.2.8";
 import {
   LAB_ERROR_TYPES,
@@ -129,15 +130,16 @@ async function requestDebugAudit(apiKey,settings,leads,signal,log,onUsage){
   }
   const system=composeDebugPrompt(settings);
   const schema=buildDebugResponseSchema(settings.activeErrorTypes);
-  const csv=leadsToCsv(leads);
+  const modelInput=leads.map(lead=>({id:lead.leadId,...lead.auditContext}));
   const sentIds=(leads||[]).map(lead=>String(lead.leadId??""));
   const maxTokens=Math.max(500,leads.length*140);
   const auditBody=buildChatCompletionBody(settings.model,{
     temperature:0,
     maxTokens,
+    prompt_cache_key:promptCacheKey(settings),
     messages:[
       {role:"system",content:system},
-      {role:"user",content:`Audit ${leads.length} call(s). Echo each id. For each id, o must explain WHY each e label was raised.\n\n${csv}`}
+      {role:"user",content:`Audit ${leads.length} call(s). Echo each id. c=full history — assess cumulative buying intent; 1–5 RNR/Busy/Unreachable are neutral and do not cancel prior interest; interest cancels only on ACTIVE rejection or 8+ consecutive RNRs. For each id, o must explain WHY each e label was raised.\n${JSON.stringify({L:modelInput})}`}
     ],
     response_format:{type:"json_schema",json_schema:{name:"ll_audit",strict:true,schema}}
   });

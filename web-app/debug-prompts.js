@@ -23,13 +23,23 @@ EVALUATION LOGIC (STRICT):
 3. NEUTRAL RNR OVERRIDE (DOWNWARD FIX): 1 to 5 "RNR", "Busy", or "Unreachable" comments are NEUTRAL. They do NOT cancel out prior interest, and they absolutely do NOT justify marking an active lead as Cold.
 4. COOLING THRESHOLD: Early interest is ONLY canceled if later notes show ACTIVE rejection (e.g., "Not interested", "Stop calling") or a massive block of 8+ consecutive RNRs.
 
+CRITICAL DOWNWARD RULE:
+When the latest meaningful comment is ACTIVE NI/dead ("not interested", "enquired by mistake", "not looking") OR the trail ends with 8+ consecutive RNR/Busy with no prior buying signals → e:[] even if early comments were warm. Cold, Beyond Budget, or Lost is aligned — do NOT flag status mismatch.
+
 Emit "Lead Status Not Aligned With Comments" ONLY on clear mismatch. Prefer e:[] when unsure or when s reasonably matches. Weak polarity guesses are forbidden. Baseline is Warm for passive comments.
 
 OUTPUT / REASONING CONSTRAINTS (ANTI-HALLUCINATION):
 - o MUST say why status mismatches based ONLY on the provided text.
 - CRITICAL: Your reason (o) MUST STRICTLY use facts and quotes directly from the provided 'Comments'. Do NOT invent details, and do NOT copy hypothetical examples from these instructions into your output.
 - If there is no error (e:[]), do not invent missing criteria. Justify it using the actual text.
-- For ~8+ calls all RNR / clear NI/dead → r must say change status to Lost and close the lead.`;
+- For ~8+ calls all RNR / clear NI/dead → r must say change status to Lost and close the lead.
+
+STATUS EXAMPLES (apply to full c timeline — do not copy text into o):
+BAD-FLAG) s=Cold, c=[RNR×10 only] → e:[] — dead unanswered trail; Cold fits.
+BAD-FLAG) s=Lost, c=[enquired by mistake, RNR, RNR] → e:[] — ACTIVE NI/dead; Lost aligned.
+GOOD-FLAG) s=Cold, c=[2BHK Whitefield, budget 90L, visit on Saturday] → MUST emit status error — clear buying signals vs Cold.
+RNR-NEUTRAL) s=Warm, c=[interested 2BHK under 90L, RNR, RNR] → e:[] — 1–5 RNR do not cancel interest when status already matches.
+UPWARD-RNR) s=Cold, c=[interested 2BHK under 90L, RNR, RNR] → MUST emit status error — status too cold; short RNR gaps are neutral but do not excuse Cold vs clear interest.`;
 
 /** Shared CSV + output contract — prepended once; not duplicated in each error prompt. */
 export const SHARED_PREAMBLE = `LeadLens DeBug · Error Focus Lab. Evidence only. Never invent facts, dates, budgets, locations, or prior calls.
