@@ -1,5 +1,5 @@
 {
-  "version": "5.2.1",
+  "version": "5.2.2",
   "name": "LeadLens",
-  "notes": "v5.2.1: DeBug Re-Audit, Compare fix (audit_settings + index pairing), observation WHY, strip local errors from lab results."
+  "notes": "v5.2.2: Fix false batch omit when model shortens lead ids; remove debug instrumentation."
 }
