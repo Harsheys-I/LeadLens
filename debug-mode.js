@@ -12,26 +12,28 @@ import {
   slugFieldId,
   parseWorkbook,
   downloadWorkbook,
+  selectedOutputFields,
+  sortResults,
   validateApiKey,
   SERVER_API_KEY,
-} from "./audit.js?v=5.2.7";
-import {getApiKey,apiKeyIsRemembered,saveApiKey,forgetApiKey,setStorageUserId,storageKey} from "./db.js?v=5.2.7";
-import {requireAuth,logout,getUser,changePassword,updateProfile} from "./auth.js?v=5.2.7";
-import {SettingsApi} from "./api-client.js?v=5.2.7";
-import {mountNotifications} from "./notifications-ui.js?v=5.2.7";
+} from "./audit.js?v=5.2.8";
+import {getApiKey,apiKeyIsRemembered,saveApiKey,forgetApiKey,setStorageUserId,storageKey} from "./db.js?v=5.2.8";
+import {requireAuth,logout,getUser,changePassword,updateProfile} from "./auth.js?v=5.2.8";
+import {SettingsApi} from "./api-client.js?v=5.2.8";
+import {mountNotifications} from "./notifications-ui.js?v=5.2.8";
 import {
   debugAuditBatch,
   telecallerAuditBatch,
   compareDebugVsTelecaller,
   activePromptsReady,
   normalizeActiveErrorTypes,
-} from "./debug-engine.js?v=5.2.7";
+} from "./debug-engine.js?v=5.2.8";
 import {
   LAB_ERROR_TYPES,
   STATUS_HISTORY_PROMPT,
   emptyErrorPrompts,
   ERROR_TO_AUDIT_RULE,
-} from "./debug-prompts.js?v=5.2.7";
+} from "./debug-prompts.js?v=5.2.8";
 
 const $=id=>document.getElementById(id);
 const ids=[
@@ -47,7 +49,7 @@ const ids=[
   "onboard-toggle","onboard-remember","onboard-message","onboard-save","onboard-skip","sidebar-version",
   "sidebar-notes","debug-drop-zone","debug-file-input","debug-drop-hint","debug-file-list","debug-validation",
   "start-debug","debug-run-panel","debug-precounts","debug-active-chips","debug-results-panel","debug-error-counts",
-  "debug-result-filters","debug-results-body","debug-compare-panel","debug-compare-summary","debug-compare-metrics",
+  "debug-result-filters","debug-results-head","debug-results-body","debug-compare-panel","debug-compare-summary","debug-compare-metrics",
   "debug-compare-body","shell-user-label","shell-logout","shell-account"
 ];
 const els=Object.fromEntries(ids.map(id=>[id,$(id)]));
@@ -62,6 +64,21 @@ const SHORT_ERROR_LABEL={
   "Customer Comment Quality Not Appropriate":"Comment quality"
 };
 const STATUS_HISTORY_ERROR=LAB_ERROR_TYPES[0];
+const WIDE_RESULT_COLS=new Set(["observation","recommendation","comments"]);
+
+function formatResultCell(fieldId,value){
+  const text=String(value??"").trim();
+  if(!text)return fieldId==="errorTypes"?"None":"—";
+  return text;
+}
+
+function resultColumns(rawSettings){
+  return selectedOutputFields(normalizeSettings(rawSettings));
+}
+
+function refreshResultsTable(){
+  if(currentJob)renderResultsPanel(currentJob);
+}
 
 function normalizeDebugSettings(saved={}){
   const merged=normalizeSettings(saved);
@@ -460,13 +477,40 @@ function renderResultsPanel(job){
     for(const label of active)makeBtn(label,`${shortLabel(label)} (${counts[label]||0})`);
   }
   const body=els["debug-results-body"];
+  const head=els["debug-results-head"];
+  const live=collectSettings();
+  const columns=resultColumns(live);
+  if(head){
+    head.replaceChildren();
+    if(!columns.length){
+      const th=document.createElement("th");
+      th.textContent="Output columns";
+      head.append(th);
+    }else{
+      for(const field of columns){
+        const th=document.createElement("th");
+        th.textContent=field.label;
+        head.append(th);
+      }
+    }
+  }
   if(body){
     body.replaceChildren();
-    const rows=filteredResults(job);
+    if(!columns.length){
+      const tr=document.createElement("tr");
+      const td=document.createElement("td");
+      td.colSpan=1;
+      td.className="empty-state";
+      td.textContent="Enable at least one column in Settings → Output Excel.";
+      tr.append(td);
+      body.append(tr);
+      return;
+    }
+    const rows=sortResults(filteredResults(job),live);
     if(!rows.length){
       const tr=document.createElement("tr");
       const td=document.createElement("td");
-      td.colSpan=5;
+      td.colSpan=columns.length;
       td.className="empty-state";
       td.textContent="No rows match this filter.";
       tr.append(td);
@@ -474,24 +518,17 @@ function renderResultsPanel(job){
     }else{
       for(const row of rows.slice(0,400)){
         const tr=document.createElement("tr");
-        const observation=String(row.observation||"").trim()||"—";
-        const cells=[
-          row.mobile||"—",
-          row.status||"—",
-          row.connected||"—",
-          row.errorTypes||"None",
-          observation
-        ];
-        cells.forEach((text,idx)=>{
+        for(const field of columns){
+          const text=formatResultCell(field.id,row[field.id]);
           const td=document.createElement("td");
           td.textContent=text;
-          if(idx===3)td.className="debug-errors-cell";
-          if(idx===4){
+          if(field.id==="errorTypes")td.className="debug-errors-cell";
+          if(WIDE_RESULT_COLS.has(field.id)){
             td.className="debug-obs-cell";
-            td.title=observation;
+            td.title=text;
           }
           tr.append(td);
-        });
+        }
         body.append(tr);
       }
     }
@@ -1044,6 +1081,7 @@ function moveInputField(index,delta){
   renderInputFields();
   renderOutputFields();
   renderSortFields();
+  refreshResultsTable();
 }
 
 function renderInputFields(){
@@ -1167,6 +1205,7 @@ function renderSettings(){
   renderActiveChips();
   updateKeyState();
   syncApiKeySettingsUi();
+  refreshResultsTable();
 }
 
 function collectSettings(){
@@ -1612,7 +1651,20 @@ els["add-input-field"]?.addEventListener("click",()=>{
   renderInputFields();
   renderOutputFields();
   renderSortFields();
+  refreshResultsTable();
 });
+
+els["output-field-config"]?.addEventListener("change",event=>{
+  if(!event.target.matches("[data-output-id]"))return;
+  settings=collectSettings();
+  refreshResultsTable();
+});
+for(const id of ["sort-field","sort-direction"]){
+  els[id]?.addEventListener("change",()=>{
+    settings=collectSettings();
+    refreshResultsTable();
+  });
+}
 
 els["save-settings"]?.addEventListener("click",async()=>{
   const rawBatch=Number(els["batch-size"]?.value);
