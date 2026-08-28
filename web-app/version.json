@@ -1,5 +1,5 @@
 {
-  "version": "5.2.7",
+  "version": "5.2.8",
   "name": "LeadLens",
-  "notes": "v5.2.7: DeBug sync toolbar — remove Load starter; Sync from / Sync to Bucket 1 only."
+  "notes": "v5.2.8: DeBug results table follows Output Excel column settings live."
 }
