@@ -1,6 +1,6 @@
 import {buildTelecallerDashboardBlob} from "./dashboard-export.js?v=5.2.1";
 
-export const APP_VERSION = "5.2.1";
+export const APP_VERSION = "5.2.2";
 /** Sentinel: use server OpenAI proxy (no raw key in the browser). */
 export const SERVER_API_KEY = "__server__";
 /** Bump when default AI rules / field defaults must refresh existing localStorage settings. */
@@ -1663,22 +1663,13 @@ export async function auditBatch(apiKey,rawSettings,batch,signal,log,onUsage,req
   let byId=buildAuditResultMap(batch,result);
   let missing=batch.filter(lead=>!byId.has(clean(lead.leadId)));
   if(missing.length){
-    // #region agent log
-    const returnedClean=[...byId.keys()].slice(0,5);
-    const missingSample=missing.slice(0,5).map(lead=>({raw:String(lead.leadId??""),cleaned:clean(lead.leadId)}));
-    const resultIdRaw=(result||[]).slice(0,5).map(item=>({raw:String(item?.id??""),cleaned:clean(item?.id)}));
-    fetch('http://127.0.0.1:7843/ingest/f4ac7d78-fa93-4940-929e-852fd1791883',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'ab7011'},body:JSON.stringify({sessionId:'ab7011',runId:'post-fix',hypothesisId:'B,C',location:'audit.js:auditBatch:omit',message:'Model omitted leads before recovery',data:{batchLen:batch.length,resultLen:(result||[]).length,missingLen:missing.length,missingSample,resultIdRaw,returnedCleanKeys:returnedClean,requestIsDebug:requestFn!==requestAudit},timestamp:Date.now()})}).catch(()=>{});
-    // #endregion
-    log(`Model omitted ${missing.length} lead(s); retrying only those leads. [dbg] got=${(result||[]).length} missSample=${missingSample.map(m=>m.raw).slice(0,2).join(" || ")} gotSample=${resultIdRaw.map(r=>r.raw).slice(0,2).join(" || ")||"(none)"}`,"warn");
+    log(`Model omitted ${missing.length} lead(s); retrying only those leads.`,"warn");
     const recovered=await requestWithRetry(missing,"Recovery");
     const recoveryMap=buildAuditResultMap(missing,recovered);
     for(const [key,item] of recoveryMap)byId.set(key,item);
     missing=batch.filter(lead=>!byId.has(clean(lead.leadId)));
   }
   if(missing.length){
-    // #region agent log
-    fetch('http://127.0.0.1:7843/ingest/f4ac7d78-fa93-4940-929e-852fd1791883',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'ab7011'},body:JSON.stringify({sessionId:'ab7011',runId:'pre-fix',hypothesisId:'B,C,E',location:'audit.js:auditBatch:omitFatal',message:'Still omitted after recovery',data:{batchLen:batch.length,byIdSize:byId.size,missingLen:missing.length,missingSample:missing.slice(0,5).map(lead=>String(lead.leadId??"")),byIdSample:[...byId.keys()].slice(0,5)},timestamp:Date.now()})}).catch(()=>{});
-    // #endregion
     throw new Error(`OpenAI still omitted ${missing.length} lead(s). Saved batches are safe; resume to retry.`);
   }
   return batch.map(lead=>{
