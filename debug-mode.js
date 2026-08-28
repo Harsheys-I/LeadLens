@@ -14,24 +14,24 @@ import {
   downloadWorkbook,
   validateApiKey,
   SERVER_API_KEY,
-} from "./audit.js?v=5.2.5";
-import {getApiKey,apiKeyIsRemembered,saveApiKey,forgetApiKey,setStorageUserId,storageKey} from "./db.js?v=5.2.5";
-import {requireAuth,logout,getUser,changePassword,updateProfile} from "./auth.js?v=5.2.5";
-import {SettingsApi} from "./api-client.js?v=5.2.5";
-import {mountNotifications} from "./notifications-ui.js?v=5.2.5";
+} from "./audit.js?v=5.2.7";
+import {getApiKey,apiKeyIsRemembered,saveApiKey,forgetApiKey,setStorageUserId,storageKey} from "./db.js?v=5.2.7";
+import {requireAuth,logout,getUser,changePassword,updateProfile} from "./auth.js?v=5.2.7";
+import {SettingsApi} from "./api-client.js?v=5.2.7";
+import {mountNotifications} from "./notifications-ui.js?v=5.2.7";
 import {
   debugAuditBatch,
   telecallerAuditBatch,
   compareDebugVsTelecaller,
   activePromptsReady,
   normalizeActiveErrorTypes,
-} from "./debug-engine.js?v=5.2.5";
+} from "./debug-engine.js?v=5.2.7";
 import {
   LAB_ERROR_TYPES,
-  DEFAULT_ERROR_PROMPTS,
   STATUS_HISTORY_PROMPT,
   emptyErrorPrompts,
-} from "./debug-prompts.js?v=5.2.5";
+  ERROR_TO_AUDIT_RULE,
+} from "./debug-prompts.js?v=5.2.7";
 
 const $=id=>document.getElementById(id);
 const ids=[
@@ -40,7 +40,7 @@ const ids=[
   "metric-cached-tokens","metric-output-tokens","metric-duration","metric-cost","live-log","clear-console",
   "api-key","remember-key","toggle-key","save-key","forget-key","key-message","batch-size","concurrency","model",
   "input-field-config","add-input-field","ai-field-config","output-field-config","yes-values","no-values",
-  "error-type-checks","error-run-hint","focus-error-type","error-prompt","load-starter-prompt","sync-status-from-audit","clear-error-prompt",
+  "error-type-checks","error-run-hint","focus-error-type","error-prompt","sync-status-from-audit","push-prompt-to-audit","clear-error-prompt",
   "input-price","cached-price","output-price","save-settings","reset-settings","settings-message",
   "toast","mobile-menu","sort-field","sort-direction","app-version","export-settings","import-settings",
   "import-settings-file","update-banner","update-banner-text","reload-app","key-modal","onboard-key",
@@ -362,6 +362,15 @@ function renderErrorFocusSettings(){
     const isStatus=settings.focusErrorType===STATUS_HISTORY_ERROR;
     syncBtn.hidden=!isStatus;
     syncBtn.disabled=!isStatus;
+  }
+  const pushBtn=els["push-prompt-to-audit"];
+  if(pushBtn){
+    const isSuper=Boolean(getUser()?.is_super);
+    pushBtn.hidden=!isSuper;
+    pushBtn.disabled=!isSuper;
+    pushBtn.title=isSuper
+      ? "Sync this prompt into TeleCaller Bucket 1 audit settings (server audit_settings) for everyone"
+      : "Super User only";
   }
   if(hint){
     const list=settings.activeErrorTypes;
@@ -1485,13 +1494,6 @@ els["error-prompt"]?.addEventListener("input",()=>{
   settings.errorPrompts=settings.errorPrompts||emptyErrorPrompts();
   settings.errorPrompts[focus]=els["error-prompt"].value||"";
 });
-els["load-starter-prompt"]?.addEventListener("click",()=>{
-  settings=collectSettings();
-  const focus=settings.focusErrorType||LAB_ERROR_TYPES[0];
-  settings.errorPrompts[focus]=DEFAULT_ERROR_PROMPTS[focus]||"";
-  if(els["error-prompt"])els["error-prompt"].value=settings.errorPrompts[focus];
-  if(els["settings-message"])els["settings-message"].textContent=`Loaded starter for ${shortLabel(focus)}.`;
-});
 els["sync-status-from-audit"]?.addEventListener("click",()=>{
   settings=collectSettings();
   const focus=settings.focusErrorType||LAB_ERROR_TYPES[0];
@@ -1499,7 +1501,61 @@ els["sync-status-from-audit"]?.addEventListener("click",()=>{
   settings.errorPrompts=settings.errorPrompts||emptyErrorPrompts();
   settings.errorPrompts[focus]=STATUS_HISTORY_PROMPT;
   if(els["error-prompt"])els["error-prompt"].value=STATUS_HISTORY_PROMPT;
-  if(els["settings-message"])els["settings-message"].textContent="Synced Status prompt from Bucket 1 audit rules.";
+  if(els["settings-message"])els["settings-message"].textContent="Loaded production Status rules into this DeBug prompt (from app defaults, not live server).";
+});
+els["push-prompt-to-audit"]?.addEventListener("click",async()=>{
+  if(!getUser()?.is_super){
+    toast("Only Super User can update Bucket 1 audit settings.");
+    return;
+  }
+  settings=collectSettings();
+  const focus=settings.focusErrorType||LAB_ERROR_TYPES[0];
+  const mapping=ERROR_TO_AUDIT_RULE[focus];
+  if(!mapping){
+    toast("No Bucket 1 rule mapping for this error type.");
+    return;
+  }
+  const prompt=String(els["error-prompt"]?.value||settings.errorPrompts?.[focus]||"").trim();
+  if(!prompt){
+    toast("Prompt is empty — write or load a prompt first.");
+    return;
+  }
+  settings.errorPrompts=settings.errorPrompts||emptyErrorPrompts();
+  settings.errorPrompts[focus]=prompt;
+  const pushBtn=els["push-prompt-to-audit"];
+  if(pushBtn)pushBtn.disabled=true;
+  if(els["settings-message"])els["settings-message"].textContent="Syncing to Bucket 1…";
+  try{
+    const payload=await SettingsApi.getAudit().catch(()=>({settings:null}));
+    const merged=normalizeSettings(payload?.settings||{});
+    const rules=Array.isArray(merged.rules)?merged.rules.map(rule=>({...rule})):merged.rules;
+    const idx=rules.findIndex(rule=>String(rule.field||"").trim()===mapping.field);
+    const nextRule={
+      field:mapping.field,
+      instruction:prompt,
+      errors:mapping.errors||(idx>=0?rules[idx].errors:"")
+    };
+    if(idx>=0)rules[idx]={...rules[idx],...nextRule};
+    else rules.push(nextRule);
+    merged.rules=rules;
+    delete merged.errorPrompts;
+    delete merged.activeErrorTypes;
+    delete merged.focusErrorType;
+    delete merged.customPrompt;
+    await SettingsApi.saveAudit(merged);
+    if(els["settings-message"]){
+      const sharedNote=mapping.field==="Customer Requirement"
+        ? " (replaces the whole Customer Requirement rule — tune Empty and Incorrect separately in DeBug, then push each)."
+        : "";
+      els["settings-message"].textContent=`Synced ${shortLabel(focus)} to Bucket 1 · rule “${mapping.field}”.${sharedNote}`;
+    }
+    toast(`Synced to Bucket 1 — ${mapping.field}`);
+  }catch(error){
+    if(els["settings-message"])els["settings-message"].textContent=error.message||"Sync to Bucket 1 failed.";
+    toast(error.message||"Could not sync to Bucket 1.");
+  }finally{
+    renderErrorFocusSettings();
+  }
 });
 els["clear-error-prompt"]?.addEventListener("click",()=>{
   settings=collectSettings();

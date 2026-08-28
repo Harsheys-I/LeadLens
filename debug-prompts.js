@@ -113,3 +113,23 @@ export function emptyErrorPrompts(){
 export function starterErrorPrompts(){
   return Object.fromEntries(LAB_ERROR_TYPES.map(label=>[label,DEFAULT_ERROR_PROMPTS[label]||""]));
 }
+
+/** Maps DeBug error labels → Bucket 1 settings.rules[] row (field + errors column). */
+export const ERROR_TO_AUDIT_RULE={
+  "Lead Status Not Aligned With Comments":{
+    field:"Lead Status + Comments",
+    errors:"Lead Status Not Aligned With Comments"
+  },
+  "Customer Requirement Empty":{
+    field:"Customer Requirement",
+    errors:"Customer Requirement Empty | Incorrect Customer Requirement"
+  },
+  "Incorrect Customer Requirement":{
+    field:"Customer Requirement",
+    errors:"Customer Requirement Empty | Incorrect Customer Requirement"
+  },
+  "Customer Comment Quality Not Appropriate":{
+    field:"Comment quality",
+    errors:"Customer Comment Quality Not Appropriate"
+  }
+};
