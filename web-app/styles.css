@@ -90,7 +90,12 @@ body .review-download-panel{background:var(--panel);border:1px solid var(--line)
 body .packing-toggle{display:flex;flex-wrap:wrap;gap:16px;margin:8px 0 16px}
 body .packing-option{margin:0!important}
 body .review-download-actions{flex-wrap:wrap}
-body .review-dashboard-panel{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:20px 22px;box-shadow:var(--shadow);display:grid;gap:18px}
+body .review-dashboard-panel{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:20px 22px;box-shadow:var(--shadow);display:grid;gap:18px;width:100%;max-width:none}
+/* Dashboard views: fill main between sidebar and filters rail (not the 1220px .view cap) */
+#view-published.view,.view.view-wide{max-width:none;width:100%;margin-left:0;margin-right:0}
+#view-review.view:has(#review-dashboard-panel:not(.hidden)){max-width:none;width:100%;margin-left:0;margin-right:0}
+body .review-run-panel:has(#review-dashboard-panel:not(.hidden)){max-width:none;width:100%;margin-left:0;margin-right:0}
+body .dashboard-root,body .dashboard-body{width:100%;max-width:none}
 body .dashboard-root{display:grid;gap:22px}
 body .dashboard-filters{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px;align-items:end;padding:14px 16px;background:#f7faf8;border:1px solid var(--line);border-radius:12px}
 body .dashboard-filter{display:grid;gap:6px;margin:0;font-size:12px;font-weight:650;color:var(--muted)}

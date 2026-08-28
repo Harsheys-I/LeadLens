@@ -1,5 +1,5 @@
 {
-  "version": "5.2.4",
+  "version": "5.2.5",
   "name": "LeadLens",
-  "notes": "v5.2.4: Remove debug instrumentation; one audit row per lead (latest call on latest day)."
+  "notes": "v5.2.5: Dashboard views use full main width between sidebar and filters rail."
 }
