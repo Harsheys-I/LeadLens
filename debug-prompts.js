@@ -12,8 +12,9 @@ export const LAB_ERROR_TYPES = [
 
 /** Canonical production status-vs-comments rules (Bucket 1 / TeleCaller audit). */
 export const STATUS_HISTORY_PROMPT = `STATUS vs FULL COMMENT HISTORY
-Allowed Lead Status labels (case-insensitive): Prospect, Hot, Warm, Cold, Beyond Budget, Lost.
-Heat ladder highest→lowest: Prospect > Hot > Warm > Cold > Beyond Budget > Lost.
+Allowed Lead Status labels (case-insensitive): Qualified, Hot, Warm, Cold, Beyond Budget, Lost.
+Heat ladder highest→lowest: Qualified > Hot > Warm > Cold > Beyond Budget > Lost.
+Note: CRM exports may label the top tier as "Prospect"; the payload field s uses "Qualified" for that tier.
 
 c is the full chronological timeline — read ALL entries to determine the cumulative intent.
 

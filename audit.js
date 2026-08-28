@@ -1027,6 +1027,23 @@ function callSnapshot(record){
     k:record.connected||""
   };
 }
+/** CRM "Prospect" is sent to the model as "Qualified" — Excel/export keep the original label. */
+export function statusForAi(value){
+  const text=clean(value);
+  if(!text)return text;
+  return norm(text)==="prospect"?"Qualified":text;
+}
+/** Build AI payload from leads; maps status s (and day[].s) through statusForAi. */
+export function buildAiModelInput(leads){
+  return(leads||[]).map(lead=>{
+    const ctx={id:lead.leadId,...lead.auditContext};
+    if(ctx.s!==undefined)ctx.s=statusForAi(ctx.s);
+    if(Array.isArray(ctx.day)){
+      ctx.day=ctx.day.map(snap=>snap&&typeof snap==="object"?{...snap,s:statusForAi(snap.s)}:snap);
+    }
+    return ctx;
+  });
+}
 
 const ONE_HOUR_MS=60*60*1000;
 /** Drop CRM twin rows: same lead content within <1 hour (timestamp glitches / double-writes). */
@@ -1589,7 +1606,7 @@ function finalizeRecommendation(aiText,row,errors,q){
 }
 
 async function requestAudit(apiKey,settings,leads,signal,log,onUsage){
-  const modelInput=leads.map(lead=>({id:lead.leadId,...lead.auditContext}));
+  const modelInput=buildAiModelInput(leads);
   const auditBody=buildChatCompletionBody(settings.model,{
       temperature:0,
       maxTokens:Math.max(500,leads.length*140),

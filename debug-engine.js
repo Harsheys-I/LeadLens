@@ -8,6 +8,7 @@ import {
   AI_ALLOWED_ERRORS,
   HIGH_SEVERITY_ERRORS,
   buildChatCompletionBody,
+  buildAiModelInput,
   normalizeSettings,
   auditBatch,
   resolveAuditResultId,
@@ -130,7 +131,7 @@ async function requestDebugAudit(apiKey,settings,leads,signal,log,onUsage){
   }
   const system=composeDebugPrompt(settings);
   const schema=buildDebugResponseSchema(settings.activeErrorTypes);
-  const modelInput=leads.map(lead=>({id:lead.leadId,...lead.auditContext}));
+  const modelInput=buildAiModelInput(leads);
   const sentIds=(leads||[]).map(lead=>String(lead.leadId??""));
   const maxTokens=Math.max(500,leads.length*140);
   const auditBody=buildChatCompletionBody(settings.model,{
