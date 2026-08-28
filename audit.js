@@ -320,6 +320,34 @@ This handbook is identical across batches for prompt caching.`;
 
 const norm=value=>String(value??"").trim().toLowerCase().replace(/[_-]+/g," ").replace(/\s+/g," ");
 const clean=value=>["","nan","none","nat","undefined","null"].includes(norm(value))?"":String(value).trim();
+/** Map model-returned id (often shortened) back to sent leadId. */
+export function resolveAuditResultId(returnedId,sentLeadIds){
+  const ret=clean(returnedId);
+  if(!ret)return null;
+  const sent=(sentLeadIds||[]).map(id=>String(id||"")).filter(Boolean);
+  for(const id of sent){
+    if(clean(id)===ret)return id;
+  }
+  const tailMatch=sent.filter(id=>clean(id).split("|").pop()?.trim()===ret);
+  if(tailMatch.length===1)return tailMatch[0];
+  const suffixMatch=sent.filter(id=>clean(id).endsWith(ret));
+  if(suffixMatch.length===1)return suffixMatch[0];
+  return null;
+}
+/** Build id→result map; tolerates shortened ids from the model. */
+function buildAuditResultMap(batch,result){
+  const sentIds=batch.map(lead=>String(lead.leadId??""));
+  const byId=new Map();
+  const claimed=new Set();
+  for(const item of result||[]){
+    const pool=sentIds.filter(id=>!claimed.has(clean(id)));
+    const resolved=resolveAuditResultId(item?.id,pool);
+    if(!resolved)continue;
+    claimed.add(clean(resolved));
+    byId.set(clean(resolved),{...item,id:resolved});
+  }
+  return byId;
+}
 const clone=value=>JSON.parse(JSON.stringify(value));
 const list=value=>String(value||"").split(",").map(norm).filter(Boolean);
 const firstNonEmpty=values=>values.map(clean).find(Boolean)||"";
@@ -1632,18 +1660,19 @@ export async function auditBatch(apiKey,rawSettings,batch,signal,log,onUsage,req
     return result;
   }
   const result=await requestWithRetry(batch,"Audit");
-  const byId=new Map(result.map(item=>[clean(item.id),item]));
+  let byId=buildAuditResultMap(batch,result);
   let missing=batch.filter(lead=>!byId.has(clean(lead.leadId)));
   if(missing.length){
     // #region agent log
     const returnedClean=[...byId.keys()].slice(0,5);
     const missingSample=missing.slice(0,5).map(lead=>({raw:String(lead.leadId??""),cleaned:clean(lead.leadId)}));
     const resultIdRaw=(result||[]).slice(0,5).map(item=>({raw:String(item?.id??""),cleaned:clean(item?.id)}));
-    fetch('http://127.0.0.1:7843/ingest/f4ac7d78-fa93-4940-929e-852fd1791883',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'ab7011'},body:JSON.stringify({sessionId:'ab7011',runId:'pre-fix',hypothesisId:'B,C',location:'audit.js:auditBatch:omit',message:'Model omitted leads before recovery',data:{batchLen:batch.length,resultLen:(result||[]).length,missingLen:missing.length,missingSample,resultIdRaw,returnedCleanKeys:returnedClean,requestIsDebug:requestFn!==requestAudit},timestamp:Date.now()})}).catch(()=>{});
+    fetch('http://127.0.0.1:7843/ingest/f4ac7d78-fa93-4940-929e-852fd1791883',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'ab7011'},body:JSON.stringify({sessionId:'ab7011',runId:'post-fix',hypothesisId:'B,C',location:'audit.js:auditBatch:omit',message:'Model omitted leads before recovery',data:{batchLen:batch.length,resultLen:(result||[]).length,missingLen:missing.length,missingSample,resultIdRaw,returnedCleanKeys:returnedClean,requestIsDebug:requestFn!==requestAudit},timestamp:Date.now()})}).catch(()=>{});
     // #endregion
     log(`Model omitted ${missing.length} lead(s); retrying only those leads. [dbg] got=${(result||[]).length} missSample=${missingSample.map(m=>m.raw).slice(0,2).join(" || ")} gotSample=${resultIdRaw.map(r=>r.raw).slice(0,2).join(" || ")||"(none)"}`,"warn");
     const recovered=await requestWithRetry(missing,"Recovery");
-    recovered.forEach(item=>byId.set(clean(item.id),item));
+    const recoveryMap=buildAuditResultMap(missing,recovered);
+    for(const [key,item] of recoveryMap)byId.set(key,item);
     missing=batch.filter(lead=>!byId.has(clean(lead.leadId)));
   }
   if(missing.length){

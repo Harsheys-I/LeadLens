@@ -14,23 +14,23 @@ import {
   downloadWorkbook,
   validateApiKey,
   SERVER_API_KEY,
-} from "./audit.js?v=5.2.1e";
-import {getApiKey,apiKeyIsRemembered,saveApiKey,forgetApiKey,setStorageUserId,storageKey} from "./db.js?v=5.2.1e";
-import {requireAuth,logout,getUser,changePassword,updateProfile} from "./auth.js?v=5.2.1e";
-import {SettingsApi} from "./api-client.js?v=5.2.1e";
-import {mountNotifications} from "./notifications-ui.js?v=5.2.1e";
+} from "./audit.js?v=5.2.1f";
+import {getApiKey,apiKeyIsRemembered,saveApiKey,forgetApiKey,setStorageUserId,storageKey} from "./db.js?v=5.2.1f";
+import {requireAuth,logout,getUser,changePassword,updateProfile} from "./auth.js?v=5.2.1f";
+import {SettingsApi} from "./api-client.js?v=5.2.1f";
+import {mountNotifications} from "./notifications-ui.js?v=5.2.1f";
 import {
   debugAuditBatch,
   telecallerAuditBatch,
   compareDebugVsTelecaller,
   activePromptsReady,
   normalizeActiveErrorTypes,
-} from "./debug-engine.js?v=5.2.1e";
+} from "./debug-engine.js?v=5.2.1f";
 import {
   LAB_ERROR_TYPES,
   DEFAULT_ERROR_PROMPTS,
   emptyErrorPrompts,
-} from "./debug-prompts.js?v=5.2.1e";
+} from "./debug-prompts.js?v=5.2.1f";
 
 const $=id=>document.getElementById(id);
 const ids=[

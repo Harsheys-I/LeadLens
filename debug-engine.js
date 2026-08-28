@@ -10,12 +10,13 @@ import {
   buildChatCompletionBody,
   normalizeSettings,
   auditBatch,
-} from "./audit.js?v=5.2.1e";
+  resolveAuditResultId,
+} from "./audit.js?v=5.2.1f";
 import {
   LAB_ERROR_TYPES,
   SHARED_PREAMBLE,
   DEFAULT_ERROR_PROMPTS,
-} from "./debug-prompts.js?v=5.2.1e";
+} from "./debug-prompts.js?v=5.2.1f";
 
 /** App-local labels — never shown in DeBug focus-lab results / Excel. */
 const LOCAL_OWNED_ERRORS = new Set([
@@ -180,11 +181,22 @@ async function requestDebugAudit(apiKey,settings,leads,signal,log,onUsage){
   if(!Array.isArray(parsed.a))throw new Error("OpenAI response did not contain results array.");
   const returnedIds=parsed.a.map(item=>String(item?.id??""));
   const sentSet=new Set(sentIds);
-  const matched=returnedIds.filter(id=>sentSet.has(id)).length;
-  const unmatchedReturn=returnedIds.filter(id=>!sentSet.has(id)).slice(0,5);
+  const matchedExact=returnedIds.filter(id=>sentSet.has(id)).length;
+  const claimed=new Set();
+  let matchedResolved=0;
+  for(const item of parsed.a){
+    const pool=sentIds.filter(id=>!claimed.has(id));
+    const resolved=resolveAuditResultId(item?.id,pool);
+    if(resolved){
+      claimed.add(resolved);
+      item.id=resolved;
+      matchedResolved++;
+    }
+  }
+  const unmatchedReturn=returnedIds.filter((id,i)=>!resolveAuditResultId(id,sentIds)).slice(0,5);
   // #region agent log
-  fetch('http://127.0.0.1:7843/ingest/f4ac7d78-fa93-4940-929e-852fd1791883',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'ab7011'},body:JSON.stringify({sessionId:'ab7011',runId:'pre-fix',hypothesisId:'A,B,C',location:'debug-engine.js:requestDebugAudit:post',message:'DeBug response parsed',data:{sentCount:sentIds.length,returnedCount:returnedIds.length,matchedExact:matched,finishReason,maxTokens,inputTok:usage?.prompt_tokens??usage?.input_tokens??0,outputTok:usage?.completion_tokens??usage?.output_tokens??0,contentLen:String(content).length,sentSample:sentIds.slice(0,3),returnedSample:returnedIds.slice(0,3),unmatchedReturnSample:unmatchedReturn,emptyA:!returnedIds.length},timestamp:Date.now()})}).catch(()=>{});
-  if(log)log(`[dbg] recv n=${returnedIds.length}/${sentIds.length} match=${matched} finish=${finishReason||"?"} outTok=${usage?.completion_tokens??usage?.output_tokens??0}/${maxTokens} retSample=${returnedIds.slice(0,2).join(" || ")||"(empty)"}`,"info");
+  fetch('http://127.0.0.1:7843/ingest/f4ac7d78-fa93-4940-929e-852fd1791883',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'ab7011'},body:JSON.stringify({sessionId:'ab7011',runId:'post-fix',hypothesisId:'B',location:'debug-engine.js:requestDebugAudit:post',message:'DeBug response parsed',data:{sentCount:sentIds.length,returnedCount:returnedIds.length,matchedExact,matchedResolved,finishReason,maxTokens,inputTok:usage?.prompt_tokens??usage?.input_tokens??0,outputTok:usage?.completion_tokens??usage?.output_tokens??0,contentLen:String(content).length,sentSample:sentIds.slice(0,3),returnedSample:returnedIds.slice(0,3),unmatchedReturnSample:unmatchedReturn,emptyA:!returnedIds.length},timestamp:Date.now()})}).catch(()=>{});
+  if(log)log(`[dbg] recv n=${returnedIds.length}/${sentIds.length} exact=${matchedExact} resolved=${matchedResolved} finish=${finishReason||"?"} outTok=${usage?.completion_tokens??usage?.output_tokens??0}/${maxTokens} retSample=${returnedIds.slice(0,2).join(" || ")||"(empty)"}`,"info");
   // #endregion
   const active=new Set(normalizeActiveErrorTypes(settings.activeErrorTypes));
   for(const item of parsed.a){
