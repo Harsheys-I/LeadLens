@@ -1,5 +1,5 @@
 {
-  "version": "5.2.2",
+  "version": "5.2.3",
   "name": "LeadLens",
-  "notes": "v5.2.2: Fix false batch omit when model shortens lead ids; remove debug instrumentation."
+  "notes": "v5.2.3: One audit row per lead — latest call on latest day only; same-day siblings stay in day[] context."
 }

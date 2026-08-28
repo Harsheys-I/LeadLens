@@ -1,6 +1,6 @@
 import {buildTelecallerDashboardBlob} from "./dashboard-export.js?v=5.2.1";
 
-export const APP_VERSION = "5.2.2";
+export const APP_VERSION = "5.2.3";
 /** Sentinel: use server OpenAI proxy (no raw key in the browser). */
 export const SERVER_API_KEY = "__server__";
 /** Bump when default AI rules / field defaults must refresh existing localStorage settings. */
@@ -1108,7 +1108,11 @@ export function parseWorkbook(arrayBuffer,rawSettings=DEFAULT_SETTINGS){
     const commentHistory=records.map(record=>record.comments||"");
     const daySnapshots=dayCalls.map(callSnapshot);
 
-    dayCalls.forEach((call,callIndex)=>{
+    // One audit row per lead: latest call on the latest calendar day only.
+    // Earlier same-day siblings remain in auditContext.day for AI context.
+    const call=dayCalls.at(-1);
+    const callIndex=dayCalls.length-1;
+    if(call){
       const aiLocation=correctedAiLocation(call.project,call.location);
       const leadUpdateDate=dateText(call.updateAt||call.updateDate||call.update);
       const local=localErrors(call,aiLocation,records);
@@ -1153,7 +1157,6 @@ export function parseWorkbook(arrayBuffer,rawSettings=DEFAULT_SETTINGS){
       auditContext.le=local.errors;
       if(clean(call.requirement)==="")delete auditContext.rq;
       if(clean(call.budget)==="")delete auditContext.b;
-      // Same-day siblings on the latest day are context only; each latest-day call still gets its own result.
       if(daySnapshots.length>1)auditContext.day=daySnapshots;
       leads.push({
         leadId:`${groupId}#${call.rowIndex}`,
@@ -1162,7 +1165,12 @@ export function parseWorkbook(arrayBuffer,rawSettings=DEFAULT_SETTINGS){
         auditContext,
         localErrors:local.errors
       });
-    });
+      // #region agent log
+      if(dayCalls.length>1){
+        fetch('http://127.0.0.1:7843/ingest/f4ac7d78-fa93-4940-929e-852fd1791883',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'ab7011'},body:JSON.stringify({sessionId:'ab7011',runId:'post-fix',hypothesisId:'A',location:'audit.js:parseWorkbook:onePerLead',message:'Latest-day siblings collapsed to one audit row',data:{groupId,dayCallCount:dayCalls.length,keptStatus:call.status,keptUpdate:staticValues.callDate,skippedStatuses:dayCalls.slice(0,-1).map(r=>r.status)},timestamp:Date.now()})}).catch(()=>{});
+      }
+      // #endregion
+    }
   }
   if(!leads.length)throw new Error("No valid Indian mobile numbers were found. Only 10-digit Indian mobiles starting with 6, 7, 8 or 9 are processed.");
   // Compare the chosen sheet's headers against the enabled Settings fields so the UI

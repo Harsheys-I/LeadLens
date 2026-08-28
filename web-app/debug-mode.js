@@ -14,23 +14,23 @@ import {
   downloadWorkbook,
   validateApiKey,
   SERVER_API_KEY,
-} from "./audit.js?v=5.2.2";
-import {getApiKey,apiKeyIsRemembered,saveApiKey,forgetApiKey,setStorageUserId,storageKey} from "./db.js?v=5.2.2";
-import {requireAuth,logout,getUser,changePassword,updateProfile} from "./auth.js?v=5.2.2";
-import {SettingsApi} from "./api-client.js?v=5.2.2";
-import {mountNotifications} from "./notifications-ui.js?v=5.2.2";
+} from "./audit.js?v=5.2.3";
+import {getApiKey,apiKeyIsRemembered,saveApiKey,forgetApiKey,setStorageUserId,storageKey} from "./db.js?v=5.2.3";
+import {requireAuth,logout,getUser,changePassword,updateProfile} from "./auth.js?v=5.2.3";
+import {SettingsApi} from "./api-client.js?v=5.2.3";
+import {mountNotifications} from "./notifications-ui.js?v=5.2.3";
 import {
   debugAuditBatch,
   telecallerAuditBatch,
   compareDebugVsTelecaller,
   activePromptsReady,
   normalizeActiveErrorTypes,
-} from "./debug-engine.js?v=5.2.2";
+} from "./debug-engine.js?v=5.2.3";
 import {
   LAB_ERROR_TYPES,
   DEFAULT_ERROR_PROMPTS,
   emptyErrorPrompts,
-} from "./debug-prompts.js?v=5.2.2";
+} from "./debug-prompts.js?v=5.2.3";
 
 const $=id=>document.getElementById(id);
 const ids=[
@@ -1321,6 +1321,15 @@ async function handleFiles(fileList){
   try{
     const file=files[0];
     const parsed=parseWorkbook(await file.arrayBuffer(),settings);
+    // #region agent log
+    const perGroup=new Map();
+    for(const lead of parsed.leads||[]){
+      const gid=lead.groupId||`${lead.staticValues?.project||""} | ${lead.staticValues?.mobile||""}`;
+      perGroup.set(gid,(perGroup.get(gid)||0)+1);
+    }
+    const multiGroup=[...perGroup.entries()].filter(([,n])=>n>1);
+    fetch('http://127.0.0.1:7843/ingest/f4ac7d78-fa93-4940-929e-852fd1791883',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'ab7011'},body:JSON.stringify({sessionId:'ab7011',runId:'post-fix',hypothesisId:'A',location:'debug-mode.js:handleFiles',message:'Parse complete — rows per lead group',data:{leadRows:parsed.leads?.length||0,leadGroups:parsed.leadCount||0,multiGroupCount:multiGroup.length,multiGroupSample:multiGroup.slice(0,3)},timestamp:Date.now()})}).catch(()=>{});
+    // #endregion
     parsedFile={...parsed,fileName:file.name,fileSize:file.size,sourceFormat:"raw"};
     loadedBundle={
       fileName:parsedFile.fileName,
