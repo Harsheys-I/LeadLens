@@ -51,7 +51,7 @@ const ids=[
   "sidebar-notes","debug-drop-zone","debug-file-input","debug-drop-hint","debug-file-list","debug-validation",
   "start-debug","debug-run-panel","debug-precounts","debug-active-chips","debug-results-panel","debug-error-counts",
   "debug-result-filters","debug-results-head","debug-results-body","debug-compare-panel","debug-compare-summary","debug-compare-metrics",
-  "debug-compare-body","debug-frequency-panel","debug-frequency-summary","debug-frequency-chart",
+  "debug-compare-body",
   "shell-user-label","shell-logout","shell-account"
 ];
 const els=Object.fromEntries(ids.map(id=>[id,$(id)]));
@@ -147,11 +147,20 @@ function parseErrorList(value){
   return text.split(",").map(part=>part.trim()).filter(Boolean);
 }
 
-/** Count each error label (and "None" for clean rows) across all result rows. */
-function aggregateErrorFrequencies(resultSets){
-  const counts=new Map();
+function resultLeadKey(row){
+  const project=String(row?.project??"").trim().toLowerCase();
+  const mobile=String(row?.mobile??"").trim().toLowerCase();
+  return`${project}\u0001${mobile}`;
+}
+
+/** Per lead: count each error label (and "None") across repeated runs — one increment per run per lead. */
+function aggregatePerLeadFrequencies(resultSets){
+  const byLead=new Map();
   for(const results of resultSets||[]){
     for(const row of results||[]){
+      const key=resultLeadKey(row);
+      if(!byLead.has(key))byLead.set(key,new Map());
+      const counts=byLead.get(key);
       const errors=parseErrorList(row?.errorTypes);
       if(!errors.length){
         counts.set("None",(counts.get("None")||0)+1);
@@ -162,49 +171,41 @@ function aggregateErrorFrequencies(resultSets){
       }
     }
   }
-  return[...counts.entries()].sort((a,b)=>b[1]-a[1]||a[0].localeCompare(b[0]));
+  const out=new Map();
+  for(const [key,counts] of byLead){
+    out.set(key,[...counts.entries()].sort((a,b)=>b[1]-a[1]||a[0].localeCompare(b[0])));
+  }
+  return out;
 }
 
-function renderFrequencyChart(entries,{runsCompleted=0,runsFailed=0,rowTotal=0}={}){
-  const panel=els["debug-frequency-panel"];
-  const chart=els["debug-frequency-chart"];
-  const summary=els["debug-frequency-summary"];
-  if(!panel||!chart)return;
+function renderLeadFrequencyMini(container,entries,runCount){
+  if(!container)return;
+  container.replaceChildren();
+  container.className="debug-lead-freq-mini";
   if(!entries?.length){
-    panel.classList.add("hidden");
-    chart.replaceChildren();
+    container.textContent="—";
     return;
   }
-  panel.classList.remove("hidden");
-  if(summary){
-    const parts=[
-      `${runsCompleted} completed run${runsCompleted===1?"":"s"}`,
-      `${rowTotal.toLocaleString()} row observation${rowTotal===1?"":"s"} total`
-    ];
-    if(runsFailed)parts.push(`${runsFailed} run${runsFailed===1?"":"s"} failed`);
-    summary.textContent=parts.join(" · ");
-  }
-  const max=Math.max(...entries.map(([,count])=>count),1);
-  chart.replaceChildren();
+  const max=Math.max(runCount,...entries.map(([,count])=>count),1);
   for(const [label,count] of entries){
     const row=document.createElement("div");
-    row.className="debug-freq-row";
+    row.className="debug-freq-row debug-freq-row-mini";
     const name=document.createElement("div");
     name.className="debug-freq-label";
-    name.textContent=label;
+    name.textContent=shortLabel(label);
     name.title=label;
     const wrap=document.createElement("div");
     wrap.className="debug-freq-bar-wrap";
     const bar=document.createElement("div");
     bar.className="debug-freq-bar";
     bar.style.width=`${Math.max(2,Math.round(count/max*100))}%`;
-    bar.title=`${label}: ${count}`;
+    bar.title=`${label}: ${count}/${runCount}`;
     const value=document.createElement("span");
     value.className="debug-freq-count";
     value.textContent=String(count);
     wrap.append(bar,value);
     row.append(name,wrap);
-    chart.append(row);
+    container.append(row);
   }
 }
 
@@ -553,6 +554,8 @@ function renderResultsPanel(job){
   const head=els["debug-results-head"];
   const live=collectSettings();
   const columns=resultColumns(live);
+  const multiRunStats=job.multiRunStats;
+  const multiRunCount=job.multiRunMeta?.runsCompleted||0;
   if(head){
     head.replaceChildren();
     if(!columns.length){
@@ -563,6 +566,12 @@ function renderResultsPanel(job){
       for(const field of columns){
         const th=document.createElement("th");
         th.textContent=field.label;
+        head.append(th);
+      }
+      if(multiRunStats){
+        const th=document.createElement("th");
+        th.textContent=`${multiRunCount}-run consistency`;
+        th.className="debug-consistency-col";
         head.append(th);
       }
     }
@@ -583,7 +592,7 @@ function renderResultsPanel(job){
     if(!rows.length){
       const tr=document.createElement("tr");
       const td=document.createElement("td");
-      td.colSpan=columns.length;
+      td.colSpan=columns.length+(multiRunStats?1:0);
       td.className="empty-state";
       td.textContent="No rows match this filter.";
       tr.append(td);
@@ -600,6 +609,12 @@ function renderResultsPanel(job){
             td.className="debug-obs-cell";
             td.title=text;
           }
+          tr.append(td);
+        }
+        if(multiRunStats){
+          const td=document.createElement("td");
+          td.className="debug-consistency-cell";
+          renderLeadFrequencyMini(td,multiRunStats.get(resultLeadKey(row)),multiRunCount);
           tr.append(td);
         }
         body.append(tr);
@@ -1153,7 +1168,6 @@ async function runTenTimes(){
   multiRunProgress={current:0,total:MULTI_RUN_COUNT};
   syncRunActionButtons();
   els["debug-run-panel"]?.classList.remove("hidden");
-  els["debug-frequency-panel"]?.classList.add("hidden");
 
   const resultSets=[];
   let runsCompleted=0,runsFailed=0;
@@ -1177,6 +1191,7 @@ async function runTenTimes(){
   addLog(logJob,`Run 10 times: starting ${MULTI_RUN_COUNT} sequential audits on “${bundle.fileName}” (${activeForJob(logJob).map(shortLabel).join(", ")}).`,"info");
   renderProgress(logJob);
 
+  let perLeadStats=null;
   try{
     for(let run=1;run<=MULTI_RUN_COUNT;run++){
       multiRunProgress={current:run,total:MULTI_RUN_COUNT};
@@ -1206,16 +1221,13 @@ async function runTenTimes(){
       renderProgress(logJob);
     }
 
-    const entries=aggregateErrorFrequencies(resultSets);
-    const rowTotal=entries.reduce((sum,[,count])=>sum+count,0);
-    renderFrequencyChart(entries,{runsCompleted,runsFailed,rowTotal});
+    perLeadStats=aggregatePerLeadFrequencies(resultSets);
 
-    if(!entries.length){
+    if(!perLeadStats.size){
       addLog(logJob,`Run 10 times finished with no successful runs.`,"error");
       toast("Run 10 times finished — no successful runs.");
     }else{
-      const top=entries.slice(0,3).map(([label,count])=>`${label} (${count})`).join(", ");
-      addLog(logJob,`Run 10 times complete · ${runsCompleted}/${MULTI_RUN_COUNT} succeeded${runsFailed?`, ${runsFailed} failed`:""}. Top: ${top}.`,"success");
+      addLog(logJob,`Run 10 times complete · ${runsCompleted}/${MULTI_RUN_COUNT} succeeded${runsFailed?`, ${runsFailed} failed`:""}. Per-lead consistency shown in Results.`,"success");
       toast(`Run 10 times complete (${runsCompleted}/${MULTI_RUN_COUNT}).`);
     }
   }finally{
@@ -1223,6 +1235,10 @@ async function runTenTimes(){
     multiRunProgress={current:0,total:MULTI_RUN_COUNT};
     if(lastSuccessfulJob){
       lastSuccessfulJob.logs=logJob.logs;
+      if(typeof perLeadStats!=="undefined"&&perLeadStats?.size){
+        lastSuccessfulJob.multiRunStats=perLeadStats;
+        lastSuccessfulJob.multiRunMeta={runsCompleted,runsFailed};
+      }
       currentJob=lastSuccessfulJob;
       currentJob.status="completed";
     }else{

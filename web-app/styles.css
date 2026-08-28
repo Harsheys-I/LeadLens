@@ -411,12 +411,15 @@ body .dashboard-filter-reset{width:100%;justify-self:stretch;margin-top:4px}
 .debug-results-table td.debug-obs-cell{min-width:220px;max-width:360px}
 .debug-obs-cell{max-width:360px;white-space:normal;line-height:1.35;color:var(--green-2);font-weight:500}
 .debug-errors-cell{font-weight:600;color:var(--green)}
-.debug-frequency-panel{
-  background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:18px 20px;
-  box-shadow:var(--shadow);display:grid;gap:14px
-}
-.debug-frequency-chart{display:grid;gap:10px}
+.debug-consistency-col{min-width:220px}
+.debug-consistency-cell{min-width:220px;max-width:320px;vertical-align:top;padding-top:10px;padding-bottom:10px}
+.debug-lead-freq-mini{display:grid;gap:6px}
 .debug-freq-row{display:grid;grid-template-columns:minmax(140px,34%) 1fr;gap:10px 14px;align-items:center}
+.debug-freq-row-mini{grid-template-columns:minmax(72px,38%) 1fr;gap:6px 8px}
+.debug-freq-row-mini .debug-freq-label{font-size:10px;line-height:1.25}
+.debug-freq-row-mini .debug-freq-bar-wrap{min-height:22px;padding:3px 6px 3px 3px}
+.debug-freq-row-mini .debug-freq-bar{height:16px}
+.debug-freq-row-mini .debug-freq-count{font-size:11px}
 .debug-freq-label{font-size:12px;line-height:1.35;color:var(--green-2);font-weight:600;word-break:break-word}
 .debug-freq-bar-wrap{
   position:relative;display:flex;align-items:center;gap:10px;min-height:28px;
@@ -429,6 +432,7 @@ body .dashboard-filter-reset{width:100%;justify-self:stretch;margin-top:4px}
 .debug-freq-count{font-size:13px;font-weight:700;color:var(--green);white-space:nowrap;margin-left:auto}
 @media(max-width:850px){
   .debug-freq-row{grid-template-columns:1fr}
+  .debug-consistency-cell{min-width:160px;max-width:240px}
   .debug-focus-toolbar{flex-direction:column;align-items:stretch}
   .debug-results-table td.debug-obs-cell{min-width:160px}
   .debug-obs-cell{max-width:220px}
