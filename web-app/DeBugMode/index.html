@@ -7,9 +7,9 @@
   <meta name="description" content="LeadLens DeBug Mode">
   <title>LeadLens · DeBug Mode</title>
   <link rel="manifest" href="../manifest.webmanifest">
-  <link rel="stylesheet" href="../styles.css?v=5.2.4">
+  <link rel="stylesheet" href="../styles.css?v=5.2.5">
   <script defer src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-  <script type="module" src="../debug-mode.js?v=5.2.4"></script>
+  <script type="module" src="../debug-mode.js?v=5.2.5"></script>
 </head>
 <body>
   <div id="update-banner" class="update-banner hidden" role="status">
@@ -23,7 +23,7 @@
         <button class="nav-item active" data-view="run"><span>◎</span>Run</button>
         <button class="nav-item" data-view="settings"><span>⚙</span>Settings</button>
       </nav>
-      <div class="privacy-note"><strong id="sidebar-version">v5.2.4</strong><span id="sidebar-notes">DeBug Mode — Error Focus Lab. Per-error prompts + CSV batches + Structured Outputs.</span></div>
+      <div class="privacy-note"><strong id="sidebar-version">v5.2.5</strong><span id="sidebar-notes">DeBug Mode — Error Focus Lab. Per-error prompts + CSV batches + Structured Outputs.</span></div>
     </aside>
 
     <main>
@@ -164,6 +164,7 @@
                 <label class="debug-focus-select">Editing<select id="focus-error-type"></select></label>
                 <div class="inline-actions">
                   <button id="load-starter-prompt" type="button" class="secondary-button">Load starter template</button>
+                  <button id="sync-status-from-audit" type="button" class="secondary-button" hidden>Sync from Bucket 1</button>
                   <button id="clear-error-prompt" type="button" class="text-button">Clear</button>
                 </div>
               </div>

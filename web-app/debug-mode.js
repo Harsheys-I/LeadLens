@@ -14,23 +14,24 @@ import {
   downloadWorkbook,
   validateApiKey,
   SERVER_API_KEY,
-} from "./audit.js?v=5.2.4";
-import {getApiKey,apiKeyIsRemembered,saveApiKey,forgetApiKey,setStorageUserId,storageKey} from "./db.js?v=5.2.4";
-import {requireAuth,logout,getUser,changePassword,updateProfile} from "./auth.js?v=5.2.4";
-import {SettingsApi} from "./api-client.js?v=5.2.4";
-import {mountNotifications} from "./notifications-ui.js?v=5.2.4";
+} from "./audit.js?v=5.2.5";
+import {getApiKey,apiKeyIsRemembered,saveApiKey,forgetApiKey,setStorageUserId,storageKey} from "./db.js?v=5.2.5";
+import {requireAuth,logout,getUser,changePassword,updateProfile} from "./auth.js?v=5.2.5";
+import {SettingsApi} from "./api-client.js?v=5.2.5";
+import {mountNotifications} from "./notifications-ui.js?v=5.2.5";
 import {
   debugAuditBatch,
   telecallerAuditBatch,
   compareDebugVsTelecaller,
   activePromptsReady,
   normalizeActiveErrorTypes,
-} from "./debug-engine.js?v=5.2.4";
+} from "./debug-engine.js?v=5.2.5";
 import {
   LAB_ERROR_TYPES,
   DEFAULT_ERROR_PROMPTS,
+  STATUS_HISTORY_PROMPT,
   emptyErrorPrompts,
-} from "./debug-prompts.js?v=5.2.4";
+} from "./debug-prompts.js?v=5.2.5";
 
 const $=id=>document.getElementById(id);
 const ids=[
@@ -39,7 +40,7 @@ const ids=[
   "metric-cached-tokens","metric-output-tokens","metric-duration","metric-cost","live-log","clear-console",
   "api-key","remember-key","toggle-key","save-key","forget-key","key-message","batch-size","concurrency","model",
   "input-field-config","add-input-field","ai-field-config","output-field-config","yes-values","no-values",
-  "error-type-checks","error-run-hint","focus-error-type","error-prompt","load-starter-prompt","clear-error-prompt",
+  "error-type-checks","error-run-hint","focus-error-type","error-prompt","load-starter-prompt","sync-status-from-audit","clear-error-prompt",
   "input-price","cached-price","output-price","save-settings","reset-settings","settings-message",
   "toast","mobile-menu","sort-field","sort-direction","app-version","export-settings","import-settings",
   "import-settings-file","update-banner","update-banner-text","reload-app","key-modal","onboard-key",
@@ -60,6 +61,7 @@ const SHORT_ERROR_LABEL={
   "Incorrect Customer Requirement":"Rq wrong",
   "Customer Comment Quality Not Appropriate":"Comment quality"
 };
+const STATUS_HISTORY_ERROR=LAB_ERROR_TYPES[0];
 
 function normalizeDebugSettings(saved={}){
   const merged=normalizeSettings(saved);
@@ -355,6 +357,12 @@ function renderErrorFocusSettings(){
     focusSelect.append(option);
   }
   textarea.value=settings.errorPrompts?.[settings.focusErrorType]||"";
+  const syncBtn=els["sync-status-from-audit"];
+  if(syncBtn){
+    const isStatus=settings.focusErrorType===STATUS_HISTORY_ERROR;
+    syncBtn.hidden=!isStatus;
+    syncBtn.disabled=!isStatus;
+  }
   if(hint){
     const list=settings.activeErrorTypes;
     hint.textContent=`Running with ${list.length} error(s): ${list.map(shortLabel).join(", ")}`;
@@ -1483,6 +1491,15 @@ els["load-starter-prompt"]?.addEventListener("click",()=>{
   settings.errorPrompts[focus]=DEFAULT_ERROR_PROMPTS[focus]||"";
   if(els["error-prompt"])els["error-prompt"].value=settings.errorPrompts[focus];
   if(els["settings-message"])els["settings-message"].textContent=`Loaded starter for ${shortLabel(focus)}.`;
+});
+els["sync-status-from-audit"]?.addEventListener("click",()=>{
+  settings=collectSettings();
+  const focus=settings.focusErrorType||LAB_ERROR_TYPES[0];
+  if(focus!==STATUS_HISTORY_ERROR)return;
+  settings.errorPrompts=settings.errorPrompts||emptyErrorPrompts();
+  settings.errorPrompts[focus]=STATUS_HISTORY_PROMPT;
+  if(els["error-prompt"])els["error-prompt"].value=STATUS_HISTORY_PROMPT;
+  if(els["settings-message"])els["settings-message"].textContent="Synced Status prompt from Bucket 1 audit rules.";
 });
 els["clear-error-prompt"]?.addEventListener("click",()=>{
   settings=collectSettings();
