@@ -1,5 +1,5 @@
 {
   "version": "5.2.5",
   "name": "LeadLens",
-  "notes": "v5.2.5: Dashboard views use full main width between sidebar and filters rail."
+  "notes": "v5.2.5: Status-vs-comments rules (neutral 1–5 RNR, upward fix, 8+ RNR cooling); DeBug sync from Bucket 1."
 }

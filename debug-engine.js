@@ -11,12 +11,12 @@ import {
   normalizeSettings,
   auditBatch,
   resolveAuditResultId,
-} from "./audit.js?v=5.2.2";
+} from "./audit.js?v=5.2.5";
 import {
   LAB_ERROR_TYPES,
   SHARED_PREAMBLE,
   DEFAULT_ERROR_PROMPTS,
-} from "./debug-prompts.js?v=5.2.2";
+} from "./debug-prompts.js?v=5.2.5";
 
 /** App-local labels — never shown in DeBug focus-lab results / Excel. */
 const LOCAL_OWNED_ERRORS = new Set([

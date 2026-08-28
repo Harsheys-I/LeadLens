@@ -1,10 +1,11 @@
-import {buildTelecallerDashboardBlob} from "./dashboard-export.js?v=5.2.1";
+import {buildTelecallerDashboardBlob} from "./dashboard-export.js?v=5.2.5";
+import {STATUS_HISTORY_PROMPT} from "./debug-prompts.js?v=5.2.5";
 
-export const APP_VERSION = "5.2.4";
+export const APP_VERSION = "5.2.5";
 /** Sentinel: use server OpenAI proxy (no raw key in the browser). */
 export const SERVER_API_KEY = "__server__";
 /** Bump when default AI rules / field defaults must refresh existing localStorage settings. */
-export const SETTINGS_SEED = 20;
+export const SETTINGS_SEED = 21;
 
 /** Settings limits — batch size is leads per request; concurrency is parallel requests. */
 export const MAX_BATCH_SIZE = 20;
@@ -131,13 +132,13 @@ export const DEFAULT_OUTPUT_FIELDS = [
   {id:"buyingIntent",label:"Buying Intent",enabled:true},{id:"observation",label:"AI Observation",enabled:true},{id:"recommendation",label:"AI Recommendation",enabled:true}
 ];
 export const DEFAULT_RULES = [
-  {field:"Lead Status + Comments",instruction:`Allowed Lead Status labels only (case-insensitive): Prospect, Hot, Warm, Cold, Beyond Budget, Lost. Heat ladder highest→lowest: ${STATUS_LADDER_TEXT}. c is ALWAYS the FULL chronological comment history (oldest→newest); judge CURRENT s against the FULL timeline then the LATEST tone — early interest does NOT keep Warm/Hot/Prospect when later notes cooled. Emit "${STATUS_HISTORY_ERROR}" ONLY for a clear mismatch — prefer e:[] when status reasonably fits. HARD RULE — all-RNR / not connected: if EVERY non-empty comment in c is RNR-like (RNR, CNP, busy, ringing, WhatsApp follow-up/WA FU, no answer, switched off) AND k=No, then s MUST be lesser than Warm (only Cold, Beyond Budget, or Lost). Warm/Hot/Prospect in that case → emit. Cold/Beyond Budget/Lost with all-RNR + k=No is ALWAYS aligned — never emit and never claim Cold/Lost is unsupported by vague/RNR notes. HARD RULE — dead/NI Lost is aligned: if comments show "not looking for properties", "enquired by mistake", not interested, plan dropped, or wrong enquiry (even when otherwise thin/vague/RNR-heavy), then Cold/Beyond Budget/Lost is CORRECT — never emit and never claim Lost needs rich customer detail to be justified. HARD RULE — cooled trajectory: if latest meaningful (non-RNR) notes show passive NI / callback-only ("if interested they will call back", "will call if interested", plan dropped, not interested) and/or a long trailing RNR streak after that cool-down, then Warm/Hot/Prospect → emit (step to Cold, or Lost when many RNRs / clearly dead). Early investment/Whitefield talk does NOT rescue Warm once later tone cooled. Prospect ban: more than 2 continuous trailing RNR-like notes ⇒ s cannot be Prospect → emit. Warm-up mismatch: latest comment shows clear purchase interest but s is Cold/Beyond Budget/Lost → emit. DO NOT emit when: mixed history still supports Hot/Warm with recent active interest; status already stepped down from Prospect; all-RNR + Cold/Beyond Budget/Lost; dead/NI trail + Lost; thin admin notes without a hard rule hit; uncertain polarity. Do not emit any other status/comment polarity labels.`,errors:STATUS_HISTORY_ERROR},
+  {field:"Lead Status + Comments",instruction:STATUS_HISTORY_PROMPT,errors:STATUS_HISTORY_ERROR},
   {field:"Comment quality",instruction:`Score q strictly. q must reflect how well Comments capture the real telecaller–customer conversation (need, budget, location preference, objection, decision-maker, next step). One-word/CRM crumbs like visited/RNR/CNP/busy/followup = q 0-2 max. Generic connected notes without customer detail = q <=4. Only rich descriptive talk earns 8-10. When c is an array, score THIS call's latest comment (last entry), using earlier entries only as context. Separately, when k=Yes and comments lack requirement detail (facing east/west/north/corner etc, size/dimension, investment vs self purpose, immediate vs future plan) → also emit "${COMMENT_QUALITY_ERROR}".`,errors:COMMENT_QUALITY_ERROR},
   {field:"Customer Requirement",instruction:`Only review Customer Requirement when k=Yes AND rq is present and not a fully empty string (fully blank rq is already in le). On a connected lead, rq should describe what the customer genuinely wants — for example a home configuration (2BHK/3BHK/plot), a budget, a preferred location/locality, facing, or a possession timeline. If rq is only a placeholder such as ".", "-", "**", "NA" or "nil", raise "${EMPTY_REQUIREMENT}". If rq instead holds call notes or jargon rather than a real need — for example RNR, CNP, Visited, Site visit, Busy, Follow-up, Callback, Interested/Not interested — raise "${WRONG_REQUIREMENT}". When k is No or blank, or rq is omitted, never raise either of these two errors.`,errors:`${EMPTY_REQUIREMENT} | ${WRONG_REQUIREMENT}`},
   {field:"Local-only errors",instruction:`Never emit Follow-up Missed, Estimate Budget Empty, Customer Location Empty, Analysis Parameter Empty, Fresh Call TAT Missed, TAT Error, or any TAT label. Those are precomputed in le. Explain labels in le in o/r, but do not copy them into e. Fully blank budget is local-only — even if b is omitted or empty, do not emit Estimate Budget Empty.`,errors:""},
-  {field:"AI Observation",instruction:"Write o as a layman supervisor speaking to a telecaller (18-28 words). Cross-check every Error Type in le ∪ e against Comments (c): say specifically what in the comments supports (or conflicts with) each error. Also use Connected (k) naturally ('the call connected' / 'never connected'), never Connected=Yes/No dumps. Name the gap in plain words (status too warm for unanswered or cooled history, location missing, overdue follow-up date, junk requirement, thin requirement detail). Forbidden: copying or paraphrasing c; stacking raw error labels; template fragments; claiming Cold/Lost is wrong when comments are all RNR or show clear NI/dead signals ('not looking', 'enquired by mistake') — Lost does not need rich detail to be valid; claiming Warm/Hot is supported by early interest when later notes cooled (passive NI / 'if interested call back' / long trailing RNR). When le and e are both empty, judge note quality / connectedness only.",errors:""},
-  {field:"AI Recommendation",instruction:"Write r as layman coaching (20-40 words) grounded in comment history + Connected (k) + Error Types in le ∪ e + whether n (next follow-up date) is already set. Cover both: (1) how to fix those errors next time with concrete habits matching each error (write detailed comments with facing/size/purpose/timeline, fill location/budget/requirement, align status to the latest cooled trajectory); (2) clearly state what to do next on the lead. HARD: if ~8+ calls all RNR / long trailing RNR streak / cooled then many RNRs / clear NI or 'not looking' / 'enquired by mistake' → tell telecaller to change or confirm Lead Status to Lost and **close the lead** — NOT 'capture details if connects' / generic warm follow-up. If trajectory cooled but not fully dead → step status to Cold (or Lost). If n is already set, NEVER say 'set a follow-up date'; for Follow-up Missed explain the date is overdue — call/proceed now. Only coach setting a dated follow-up when n is blank/missing. Not a rewrite of the comment. Not vague ('follow up', 'update remarks', 'call again'). Not Connected=Yes/No or error-label dumps.",errors:""},
-  {field:"Buying intent",instruction:"i=1 only for genuine positive purchase interest in THIS call's latest comment/status; else i=0. Earlier history alone does not set i=1 if the latest comment cooled. All-RNR / k=No / passive NI cooldown ⇒ i=0.",errors:""}
+  {field:"AI Observation",instruction:"Write o as a layman supervisor speaking to a telecaller (18-28 words). Cross-check every Error Type in le ∪ e against Comments (c): say specifically what in the comments supports (or conflicts with) each error. Also use Connected (k) naturally ('the call connected' / 'never connected'), never Connected=Yes/No dumps. Name the gap in plain words (status too low for clear buying signals, status too cold after only 1–5 neutral RNR/Busy gaps, location missing, overdue follow-up date, junk requirement, thin requirement detail). Forbidden: copying or paraphrasing c; stacking raw error labels; template fragments; inventing facts not in c; claiming Cold/Lost is wrong when comments show clear ACTIVE NI/dead ('not interested', 'stop calling', 'not looking', 'enquired by mistake') or 8+ consecutive RNRs; treating 1–5 RNR/Busy as proof the lead cooled. When le and e are both empty, judge note quality / connectedness only.",errors:""},
+  {field:"AI Recommendation",instruction:"Write r as layman coaching (20-40 words) grounded in comment history + Connected (k) + Error Types in le ∪ e + whether n (next follow-up date) is already set. Cover both: (1) how to fix those errors next time with concrete habits matching each error (write detailed comments with facing/size/purpose/timeline, fill location/budget/requirement, align status to cumulative comment intent); (2) clearly state what to do next on the lead. HARD: if ~8+ consecutive RNR / clear ACTIVE NI or dead ('not interested', 'stop calling', 'not looking', 'enquired by mistake') → tell telecaller to change or confirm Lead Status to Lost and **close the lead** — NOT 'capture details if connects' / generic warm follow-up. If s is Cold/Beyond Budget/Lost but comments show clear buying signals → coach stepping status up to match interest. Do NOT coach stepping to Cold on 1–5 neutral RNR/Busy alone. If n is already set, NEVER say 'set a follow-up date'; for Follow-up Missed explain the date is overdue — call/proceed now. Only coach setting a dated follow-up when n is blank/missing. Not a rewrite of the comment. Not vague ('follow up', 'update remarks', 'call again'). Not Connected=Yes/No or error-label dumps.",errors:""},
+  {field:"Buying intent",instruction:"i=1 only for genuine positive purchase interest evidenced in comments (assess cumulative intent from full c; 1–5 RNR/Busy/Unreachable are neutral and do not cancel prior interest). i=0 for clear ACTIVE NI/dead, wrong number, or 8+ consecutive RNR with no prior interest signal.",errors:""}
 ];
 /* gpt-5-nano OpenAI list price (USD/1M): $0.05 input, $0.005 cached, $0.40 output.
    Defaults stored as ₹/1M using ₹87/USD (OpenAI publishes USD only).
@@ -175,7 +176,7 @@ export function buildChatCompletionBody(model,{temperature,maxTokens,messages,..
 
 /* Large stable prefix FIRST so OpenAI prompt caching can activate (>=1024 tokens;
    some models need closer to 2048). Run-specific rules come after; lead data last. */
-const CACHE_HANDBOOK = `LeadLens QA v5.1.1 — stable cacheable auditor handbook. Evidence only. Never invent facts, dates, budgets, locations, or prior calls.
+const CACHE_HANDBOOK = `LeadLens QA v5.2.5 — stable cacheable auditor handbook. Evidence only. Never invent facts, dates, budgets, locations, or prior calls.
 
 PURPOSE
 You audit Indian real-estate telecalling follow-up notes. Judge only the supplied fields for THIS call id. Optional day[] lists sibling calls on the same latest calendar day — context only; still return one result for THIS id.
@@ -183,7 +184,7 @@ You audit Indian real-estate telecalling follow-up notes. Judge only the supplie
 INPUT CONTRACT
 - id: opaque lead/call id. Echo it exactly. Never invent or drop ids.
 - s: Lead Status on THIS call
-- c: Comments — ALWAYS full chronological history array for the lead (oldest→newest). Status weighs FULL timeline then LATEST tone; q/i focus on the last entry
+- c: Comments — ALWAYS full chronological history array for the lead (oldest→newest). Status uses FULL timeline cumulative intent; q/i focus on the last entry
 - n: Next Followup Date for THIS call (DD/MM/YYYY calendar date only — ignore any time if present). Context for o/r only — NEVER emit Follow-up Missed. If n is already set, NEVER recommend "set a follow-up date"
 - u: THIS call's Lead Update DateTime
 - rq: Customer Requirement (omitted when already flagged locally as fully blank)
@@ -231,28 +232,12 @@ Placeholder-only (., -, NA, nil, **) on connected call => "Customer Requirement 
 If le already contains "Customer Requirement Empty", do not also emit "Incorrect Customer Requirement".
 
 BUYING INTENT i
-i=1 only for genuine purchase interest (site visit interest, options request, active shortlist, budget toward buy).
-i=0 for CNP/busy/NI/wrong number/neutral admin/no interest signal. All-RNR history with k=No ⇒ i=0. Passive NI / "if interested they will call back" cooldown ⇒ i=0.
+i=1 only for genuine purchase interest (site visit interest, options request, active shortlist, budget toward buy) evidenced in comments.
+Assess cumulative intent from full c; 1–5 RNR/Busy/Unreachable notes are neutral and do not cancel prior interest.
+i=0 for clear ACTIVE NI/dead ("not interested", "stop calling", "not looking", "enquired by mistake"), wrong number, or 8+ consecutive RNR with no prior interest signal.
 
-STATUS vs FULL COMMENT HISTORY
-Allowed Lead Status labels (case-insensitive): Prospect, Hot, Warm, Cold, Beyond Budget, Lost.
-Heat ladder highest→lowest: Prospect > Hot > Warm > Cold > Beyond Budget > Lost.
-c is the full chronological timeline — read ALL entries, then judge CURRENT s against the FULL timeline THEN the LATEST tone. Early interest (investment, Whitefield, shared details) does NOT keep Warm/Hot/Prospect when later notes show passive NI / callback-only or a long trailing RNR streak after cool-down.
-Emit "Lead Status Not Aligned With Comments" ONLY on clear mismatch. Prefer e:[] for this label when unsure or when s reasonably matches the timeline. Weak polarity guesses are forbidden.
-EMIT when any of these hold:
-1) HARD RULE — all RNR + not connected: every non-empty comment in c is RNR-like (RNR, CNP, busy, ringing, no answer, switched off, WhatsApp follow-up / WA FU) AND k=No AND s is Warm/Hot/Prospect.
-2) HARD RULE — cooled trajectory: latest meaningful (non-RNR) notes are passive NI / callback-only ("if interested they will call back", "will call if interested", plan dropped, not interested) AND/OR long trailing RNR after that cool-down, AND s is Warm/Hot/Prospect. Correct status is Cold, or Lost when many RNRs / clearly dead.
-3) Prospect ban: more than 2 continuous trailing RNR-like notes AND s=Prospect.
-4) Warm-up mismatch: latest comment shows clear purchase interest (site visit / config+budget ask / active shortlist) AND s is Cold/Beyond Budget/Lost.
-DO NOT emit when:
-- All comments are RNR-like AND k=No AND s is Cold, Beyond Budget, or Lost — Cold/Lost is CORRECT. Never say vague/RNR comments fail to support Cold or Lost. All-RNR + never connected SUPPORTS Cold/Lost.
-- Comments show clear dead/NI signals ("not looking for properties", "enquired by mistake", "not interested", plan dropped, wrong enquiry) AND s is Cold, Beyond Budget, or Lost — Lost is CORRECT even if notes are thin/vague/RNR-heavy. Do NOT require rich customer detail to justify Lost.
-- Mixed history has real PRIOR interest but LATEST tone is still active (short RNR/callback/WA gaps without a cool-down note) and s is Hot or Warm.
-- Status heat already matches comment trajectory (e.g. cooled from hot talk into Cold/Lost; or stayed Hot after one/two unreachable attempts without cool-down).
-- Partial/thin notes without hitting a hard rule above.
-- Ambiguous tone — leave e without this label.
+${STATUS_HISTORY_PROMPT}
 Do not emit any other status/comment polarity labels.
-RNR/CNP/busy alone does not justify Warm/Hot/Prospect when the WHOLE history is RNR-like and k=No.
 
 LOCAL ERRORS (le) — DO NOT EMIT
 le is computed by the app: Follow-up Missed (overdue next-followup date), Estimate Budget Empty (fully blank budget on connected calls), Customer Location Empty, Analysis Parameter Empty.
@@ -265,21 +250,22 @@ If k is No or "", NEVER emit those — even if rq is empty, "**", ".", or junk.
 STYLE — OBSERVATION (o) AND RECOMMENDATION (r)
 Voice: layman QA supervisor speaking to the telecaller — clear, specific, human. No CRM jargon dumps.
 
-o (18–28 words): Cross-check each Error Type in le ∪ e against Comments (c) — cite what in the comments aligns or conflicts with that error. Also use Connected (k) naturally ("the call connected" / "the call never connected") — NEVER "Connected=Yes" / "Connected=No". Cover each issued error in plain words (status too warm for unanswered or cooled history, preferred location missing, overdue follow-up date, junk requirement, thin requirement detail). Exact error labels optional if meaning is obvious. Do NOT copy, trim, or paraphrase Comments. When le and e are both empty, judge note quality / connectedness only.
+o (18–28 words): Cross-check each Error Type in le ∪ e against Comments (c) — cite what in the comments aligns or conflicts with that error. Also use Connected (k) naturally ("the call connected" / "the call never connected") — NEVER "Connected=Yes" / "Connected=No". Cover each issued error in plain words (status too low for clear buying signals, status too cold after only neutral RNR/Busy gaps, preferred location missing, overdue follow-up date, junk requirement, thin requirement detail). Quote or paraphrase only facts from c — never invent details. When le and e are both empty, judge note quality / connectedness only.
 Bad o: "Connected=Yes. Comment lacks a real telecaller–customer conversation. Connected call missing usable location."
-Bad o: "The call never connected, and the comments are vague, which does not support a Cold status." (WRONG when comments are all RNR — Cold is valid.)
-Bad o: "The call connected, but comments are vague and lack customer details, which does not support a Lost status." (WRONG when comments show not-looking / mistake enquiry / NI / dead trail — Lost is valid without rich detail.)
-Bad o: "The call connected, and the comments show clear interest in investment, supporting the Warm status despite the overdue follow-up." (WRONG when later notes cooled / trailing RNR after "if interested they will call back".)
-Good o: "Comments are only RNR/WA FU with no customer talk, so Warm status conflicts with the unanswered history; preferred location was never captured." / "Early interest cooled into 'call back if interested' plus more RNR, so Warm is too hot for the latest tone." / "Customer said not looking / enquired by mistake, then RNR — Lost status is appropriate."
+Bad o: "Comments show budget and site-visit interest but status is Cold — status is too low for the buying signals in the notes." (Good upward-fix shape — but o must quote actual comment text, not generic placeholders.)
+Bad o: "Two RNR notes after interest mean the lead cooled, so Cold status fits." (WRONG — 1–5 RNR/Busy are neutral and do not cancel prior interest.)
+Bad o: "The call connected, but comments are vague, which does not support a Lost status." (WRONG when comments show ACTIVE NI/dead or 8+ consecutive RNR — Lost is valid.)
+Good o: "Comments mention 2BHK under 90L and a Saturday visit, but status is Cold — status is too low for that interest." / "Customer said not interested, then 8+ RNR — Lost status fits the dead trail." / "Only passive admin notes — Warm baseline fits; no status mismatch."
 
 r (20–40 words): Coaching from full comment history + Connected + Error Types in le ∪ e + whether n is set. Must include (1) how to avoid those same errors next time and (2) what to do next on the lead.
 HARD r rules:
-- ~8+ calls all RNR, or a long trailing RNR streak, or cooled-then-many-RNRs, or clear NI/dead ("not looking", "enquired by mistake") → tell telecaller to change/confirm Lead Status to Lost and **close the lead**. Do NOT say "capture customer details if connects" / keep chasing as warm pipeline.
-- Cooled trajectory with Warm/Hot/Prospect → step status to Cold (or Lost if clearly dead).
+- ~8+ consecutive RNR, or clear ACTIVE NI/dead ("not interested", "stop calling", "not looking", "enquired by mistake") → tell telecaller to change/confirm Lead Status to Lost and **close the lead**. Do NOT say "capture customer details if connects" / keep chasing as warm pipeline.
+- If s is Cold/Beyond Budget/Lost but comments show clear buying signals → coach stepping status up to match cumulative intent.
+- Do NOT coach stepping to Cold on 1–5 neutral RNR/Busy alone — short unreachable gaps do not cancel prior interest.
 - If n is already set: NEVER say "set a follow-up date". For Follow-up Missed, say the date is overdue — call/proceed now and fix other errors.
 - Only coach setting a dated follow-up when n is blank/missing.
-Bad r: "Follow up and update comments." / "Capture details if the customer connects." (when history is all-RNR dead lead)
-Good r: "Change Lead Status to Lost and close this lead — the history is unanswered RNR with no connect." / "Step status to Cold; the latest notes show passive interest only, then call on the overdue follow-up already on file."
+Bad r: "Follow up and update comments." / "Capture details if the customer connects." (when history is 8+ RNR dead lead)
+Good r: "Change Lead Status to Lost and close this lead — 8+ unanswered RNR with no buying signals." / "Step status up to Warm/Hot to match the budget and visit interest in comments; call on the overdue follow-up already on file."
 Never dump the full comment into o or r. Never restate this handbook.
 
 EXAMPLES
@@ -289,14 +275,13 @@ C) k=Yes, rq="RNR" or "Visited" => "Incorrect Customer Requirement".
 D) k=Yes, rq="2BHK Whitefield" => rq OK.
 E) day[] siblings present: score/flag THIS call only; siblings are context.
 F) s=Hot, c=wants 2BHK under 90L Saturday visit => high q, i=1, e:[].
-G) k=No, c all RNR-like, s=Warm => "Lead Status Not Aligned With Comments", i=0.
-G2) k=No, c all RNR-like, s=Cold or Lost => e:[] for status, i=0 — Cold/Lost is aligned; never criticize Cold/Lost here.
-G3) ~8 calls all RNR => r must say change status to Lost and close — not capture-details-if-connects.
-G4) c has "enquired by mistake" / "not looking for properties" then RNR, s=Lost => e:[] for status; never say vague comments fail to support Lost; r → confirm Lost and close the lead.
-H) c history [hot interest, RNR, RNR, WA followup] and s=Prospect => "Lead Status Not Aligned With Comments".
-H2) c history [interested 2BHK, RNR, RNR] and s=Hot or Warm => e:[] for status ONLY when there is no cool-down note (short unreachable gap).
-H3) c latest="wants Saturday site visit for 2BHK" and s=Cold => "Lead Status Not Aligned With Comments".
-H4) c [shared details Whitefield investment, RNR×N, "if interested they will call back", RNR×N] and s=Warm => "Lead Status Not Aligned With Comments"; o must NOT claim early interest supports Warm; r → Cold or Lost.
+G) c [interested 2BHK under 90L, RNR, RNR] and s=Cold => "Lead Status Not Aligned With Comments" (upward fix — 1–5 RNR neutral), i=1.
+G2) c history [interested 2BHK, RNR, RNR] and s=Hot or Warm => e:[] — short RNR gaps do not cancel interest.
+G3) ~8+ consecutive RNR or clear ACTIVE NI ("not interested", "stop calling") => r must say change status to Lost and close — not capture-details-if-connects.
+G4) c has "enquired by mistake" / "not looking for properties" then RNR, s=Lost => e:[] for status; r → confirm Lost and close the lead.
+H) c latest shows clear purchase interest (site visit / config+budget) and s=Cold/Beyond Budget/Lost => "Lead Status Not Aligned With Comments" (upward fix).
+H2) passive comments only, s=Warm => e:[] — baseline Warm for passive comments.
+H3) c [Whitefield investment talk, RNR×3] and s=Cold => "Lead Status Not Aligned With Comments" — 3 RNR does NOT cancel prior interest (need ACTIVE rejection or 8+ RNR).
 I) le contains "Follow-up Missed" and n is set => mention overdue follow-up in o/r and say call/proceed now; do NOT say set a follow-up date; e must NOT include Follow-up Missed.
 J) le contains "Estimate Budget Empty" or "Customer Location Empty" => explain in o/r; never emit those labels in e.
 K) k=Yes, comments lack facing/size/purpose/timeline detail => "Customer Comment Quality Not Appropriate".
@@ -308,13 +293,13 @@ EDGE CASES
 - Insufficient data => short o + r asking what to capture next.
 - Illegal or harassing calling advice is forbidden in r.
 - Budget ranges stay as written; do not normalize currency.
-- CRM labels Hot/Warm/Cold/NI/CNP/Busy need comment evidence, not the label alone; do not invent status errors from labels without a hard rule hit.
+- CRM labels Hot/Warm/Cold/NI/CNP/Busy need comment evidence, not the label alone; do not invent status errors from labels without a clear mismatch under STATUS rules.
 - "Just enquiry/browsing" with no next step is usually i=0.
 - Callback-after-salary with active locality search can support i=1.
-- For Comments history arrays, status must weigh the full timeline then the latest tone; early positive talk never overrides a later cool-down; q and i still focus on THIS call's latest comment unless a run check says otherwise.
+- For Comments history arrays, status weighs cumulative intent across c; 1–5 RNR/Busy/Unreachable are neutral; interest cancels only on ACTIVE rejection or 8+ consecutive RNRs; q and i use THIS call's latest comment with full-history context.
 
 CACHE STABILITY PAD (identical every request — do not vary)
-LeadLens keeps this handbook byte-stable so automatic prompt caching can reuse the prefix across batches in a run and across nearby reruns. Static instructions stay first; configured run checks follow; unique lead payloads stay last. Routing uses a stable prompt_cache_key derived from model + rules. Parallel workers must warm this prefix once before fanning out. Treat the following checklist as fixed operating procedure: verify id echo, apply q hard caps, distinguish rq placeholder-empty vs wrong, gate rq/comment-quality on connected, apply history trajectory with latest-tone priority, never attack Cold/Lost on all-RNR or clear NI/dead signals, never keep Warm on cooled trajectory, explain le local errors in o/r without copying them into e, never recommend set-follow-up when n is set, keep outputs compact, never invent sibling calls, never merge two ids, never invent error labels outside the allowed types, never emit Follow-up Missed, never emit Estimate Budget Empty, never emit Customer Location Empty, never emit Analysis Parameter Empty, never emit TAT labels, never emit severity, never wrap JSON in fences, never discuss pricing or tokens, never mention cache mechanics in o/r. Repeatable discipline improves audit consistency across telecalling QA shifts, projects, and batch sizes while preserving privacy of customer records inside the browser-only LeadLens workflow.
+LeadLens keeps this handbook byte-stable so automatic prompt caching can reuse the prefix across batches in a run and across nearby reruns. Static instructions stay first; configured run checks follow; unique lead payloads stay last. Routing uses a stable prompt_cache_key derived from model + rules. Parallel workers must warm this prefix once before fanning out. Treat the following checklist as fixed operating procedure: verify id echo, apply q hard caps, distinguish rq placeholder-empty vs wrong, gate rq/comment-quality on connected, apply cumulative status intent with neutral 1–5 RNR override and 8+ RNR / ACTIVE NI cooling, explain le local errors in o/r without copying them into e, never recommend set-follow-up when n is set, keep outputs compact, never invent sibling calls, never merge two ids, never invent error labels outside the allowed types, never emit Follow-up Missed, never emit Estimate Budget Empty, never emit Customer Location Empty, never emit Analysis Parameter Empty, never emit TAT labels, never emit severity, never wrap JSON in fences, never discuss pricing or tokens, never mention cache mechanics in o/r. Repeatable discipline improves audit consistency across telecalling QA shifts, projects, and batch sizes while preserving privacy of customer records inside the browser-only LeadLens workflow.
 
 This handbook is identical across batches for prompt caching.`;
 
@@ -917,6 +902,34 @@ function isPassiveCoolDownComment(value){
   if(/\b(they|he|she|customer) will call (back|us|me)?\b/.test(n)&&/\bif interested\b/.test(n))return true;
   return false;
 }
+/** ACTIVE rejection only — passive callback-only notes do not cancel prior interest. */
+function hasActiveRejectionComment(value){
+  const n=norm(value);
+  if(!n||isRnrLikeComment(n))return false;
+  if(/\b(not interested|stop calling|do not call|don't call|dont call)\b/.test(n))return true;
+  if(/\b(not looking|plan dropped|wrong enquiry|enquired by mistake)\b/.test(n))return true;
+  if(/\bnot looking for (propert|homes?|flats?|plots?|villas?|real estate)/.test(n))return true;
+  if(/\benquir(ed|y|ies).{0,40}(by )?mistake\b/.test(n))return true;
+  return false;
+}
+function hasBuyingSignalComment(value){
+  if(isStrongPositiveComment(value))return true;
+  const n=norm(value);
+  if(!n||isRnrLikeComment(n))return false;
+  return/\b(budget|2bhk|3bhk|site visit|visit on|under \d+l|whitefield|investment)\b/.test(n);
+}
+function hasCumulativeBuyingSignals(comments){
+  const list=commentEntries(comments);
+  if(!list.length)return false;
+  const streak=trailingRnrStreak(comments);
+  if(streak>=8){
+    const before=list.slice(0,list.length-streak);
+    if(!before.some(hasBuyingSignalComment))return false;
+  }
+  const lastMeaningful=latestMeaningfulComment(comments);
+  if(lastMeaningful&&hasActiveRejectionComment(lastMeaningful))return false;
+  return list.some(hasBuyingSignalComment);
+}
 /** Explicit dead / NI / mistake-enquiry signals that justify Lost (or Cold). */
 function isDeadNiComment(value){
   const n=norm(value);
@@ -973,14 +986,11 @@ function shouldCloseAsLost(comments){
 function hasNextFollowupDate(row){
   return Boolean(clean(row?.next)||clean(row?.nextDate)||clean(row?.n));
 }
-/** Local floor: Warm/Hot/Prospect must not survive all-RNR+k=No or cooled trajectory. */
-function statusHardRuleMismatch(status,comments,connected){
+/** Local floor: Cold/Beyond Budget/Lost cannot survive clear buying signals in c (upward fix). */
+function statusHardRuleMismatch(status,comments){
   const rank=leadStatusRank(status);
-  if(rank<4)return false;
-  if(norm(connected)==="no"&&allCommentsRnrLike(comments))return true;
-  if(hasCooledTrajectory(comments))return true;
-  if(rank>=6&&trailingRnrStreak(comments)>2)return true;
-  return false;
+  if(rank>3)return false;
+  return hasCumulativeBuyingSignals(comments);
 }
 export function indianMobile(value){let digits=clean(value).replace(/\.0$/,"").replace(/\D/g,"");if(digits.length===12&&digits.startsWith("91"))digits=digits.slice(2);if(digits.length===11&&digits.startsWith("0"))digits=digits.slice(1);return /^[6-9]\d{9}$/.test(digits)?digits:"";}
 function fieldColumns(headers,fields){const normalized=headers.map(header=>({header,key:norm(header)}));return Object.fromEntries(fields.filter(field=>field.required||field.enabled!==false).map(field=>{const match=normalized.find(item=>list(field.aliases).includes(item.key));return[field.id,match?.header||""];}));}
@@ -1449,8 +1459,6 @@ function fallbackObservation(row,errors,q){
   const connected=norm(row.connected);
   const thin=Number(q)<=3;
   const has=label=>errors.includes(label);
-  const cooled=hasCooledTrajectory(row.comments);
-  const rnrAll=allCommentsRnrLike(row.comments);
   const deadAligned=hasDeadLostAlignedTrajectory(row.comments);
   const closedOk=isClosedLeadStatus(row.status)||norm(row.status)==="cold";
   const gaps=[];
@@ -1459,8 +1467,7 @@ function fallbackObservation(row,errors,q){
   if(has(EMPTY_REQUIREMENT))gaps.push("customer requirement");
   const issues=[];
   if(has(STATUS_HISTORY_ERROR)){
-    if(cooled)issues.push("later comments cooled (passive interest or trailing RNR), so Warm/Hot/Prospect no longer fits");
-    else if(rnrAll)issues.push("the lead status is warmer than the unanswered RNR history supports");
+    if(hasCumulativeBuyingSignals(row.comments)&&leadStatusRank(row.status)<=3)issues.push("comments show buying interest but the status is too cold");
     else issues.push("the lead status does not match how the conversation went");
   }
   if(has(FOLLOWUP_MISSED_ERROR))issues.push("the promised follow-up date is already past");
@@ -1479,19 +1486,15 @@ function fallbackObservation(row,errors,q){
     }else{
       text="The trail is unanswered RNR after the lead went cold, so Lost or Cold status is appropriate.";
     }
-  }else if(cooled&&has(STATUS_HISTORY_ERROR)){
-    text=has(FOLLOWUP_MISSED_ERROR)
-      ?"Early interest cooled into passive notes and trailing RNR, so warm status no longer fits; the follow-up date is also overdue."
-      :"Early interest cooled into passive callback-only notes and trailing RNR, so the current warm status no longer fits.";
+  }else if(has(STATUS_HISTORY_ERROR)&&hasCumulativeBuyingSignals(row.comments)&&leadStatusRank(row.status)<=3){
+    text="Comments show buying interest, but the lead status is Cold, Beyond Budget, or Lost — step status up to match.";
   }else if(connected==="yes"&&thin&&issues.length){
     text=`The call connected, but the note is thin and ${joinNatural(issues)}.`;
   }else if(connected==="yes"&&thin){
     text="The call connected, but the note is thin and does not show a real telecaller–customer conversation.";
   }else if(connected==="yes"&&issues.length){
     text=`The call connected, yet ${joinNatural(issues)}.`;
-  }else if(connected==="no"&&has(STATUS_HISTORY_ERROR)&&issues.length===1){
-    text="The call never connected and every note looks unanswered, yet the lead status is still warmer than the history supports.";
-  }else if(connected==="no"&&issues.length){
+  }else if(connected==="no"&&has(STATUS_HISTORY_ERROR)&&issues.length){
     text=`The call never connected, and ${joinNatural(issues)}.`;
   }else if(connected==="no"&&thin){
     // All-RNR / unanswered thin notes with Cold (or no status error) are fine — do not attack Cold.
@@ -1514,18 +1517,14 @@ function fallbackRecommendation(row,errors,q){
   if(shouldCloseAsLost(row.comments)){
     return clipWords("Change Lead Status to Lost and close this lead — clear NI/dead signal or long unanswered RNR. Do not keep chasing generic follow-ups.",40);
   }
-  if(hasCooledTrajectory(row.comments)&&leadStatusRank(row.status)>=4){
-    const nextSet=hasNextFollowupDate(row);
-    const overdueBit=errors.includes(FOLLOWUP_MISSED_ERROR)&&nextSet
-      ?" Call on the overdue follow-up already on file;"
-      :"";
-    return clipWords(`Step Lead Status down to Cold — later notes show passive interest only.${overdueBit} do not treat this as an active warm pipeline.`,40);
+  if(errors.includes(STATUS_HISTORY_ERROR)&&hasCumulativeBuyingSignals(row.comments)&&leadStatusRank(row.status)<=3){
+    return clipWords("Step Lead Status up to Warm or Hot to match the buying signals in comments, then call on any follow-up date already on file.",40);
   }
   const actions=[];
   const nextSet=hasNextFollowupDate(row);
   if(norm(row.connected)==="no"&&!allCommentsRnrLike(row.comments)&&!hasDeadLostAlignedTrajectory(row.comments))actions.push("when the customer picks up, capture need, locality, and budget before closing");
   else if(Number(q)<=4&&norm(row.connected)==="yes")actions.push("rewrite remarks with what the customer said: need, locality, budget, objection, and next step");
-  if(errors.includes(STATUS_HISTORY_ERROR))actions.push("align lead status on the Prospect→Lost ladder to the latest comment trajectory");
+  if(errors.includes(STATUS_HISTORY_ERROR))actions.push("align lead status on the Prospect→Lost ladder to cumulative comment intent (1–5 RNR/Busy are neutral)");
   if(errors.includes(WRONG_REQUIREMENT)||errors.includes(EMPTY_REQUIREMENT))actions.push("on the next connected call capture a real requirement (config or area), not RNR or visit jargon");
   if(errors.includes(COMMENT_QUALITY_ERROR))actions.push("on connected calls note facing, size/dimension, investment vs self use, and immediate vs future plan");
   if(errors.includes(EMPTY_LOCATION))actions.push("ask and save the preferred micro-market or location");
@@ -1550,29 +1549,22 @@ function finalizeObservation(aiText,row,errors,q){
   const statusNorm=norm(row.status);
   const coldOk=["cold","beyond budget","lost"].includes(statusNorm);
   const rnrLike=allCommentsRnrLike(row.comments);
-  const cooled=hasCooledTrajectory(row.comments);
   const deadAligned=hasDeadLostAlignedTrajectory(row.comments);
-  // Reject wrong Cold/Lost attacks — aligned when all-RNR OR clear NI/dead/cool-down trail.
-  // Do NOT require rich customer detail to "justify" Lost.
+  const buyingSignals=hasCumulativeBuyingSignals(row.comments);
+  // Reject wrong Cold/Lost attacks when NI/dead/RNR trail supports closed status and no buying signals remain.
   const attacksClosed=/does not support (a )?(cold|lost|beyond budget)|(?:cold|lost|beyond budget) (status )?(is )?(not |un)?support|vague.{0,80}(cold|lost)|(cold|lost).{0,80}vague|lack.{0,50}(detail|customer).{0,80}(cold|lost)|rnr.{0,50}(does not|don't|dont).{0,20}(cold|lost)|(cold|lost).{0,40}(wrong|incorrect|mismatch|unsupported)/i.test(clipped);
-  if(coldOk&&attacksClosed&&!errors.includes(STATUS_HISTORY_ERROR)&&(deadAligned||rnrLike||cooled)){
+  if(coldOk&&attacksClosed&&!errors.includes(STATUS_HISTORY_ERROR)&&(deadAligned||rnrLike)&&!buyingSignals){
     return fallbackObservation(row,errors,q);
   }
-  // Reject overweighted early-interest Warm support when trajectory cooled.
-  const supportsWarmEarly=/supporting (the )?warm|supports? (a |the )?warm|warm status despite|clear interest.{0,60}warm|interest in investment.{0,80}warm|warm.{0,40}(supported|justified|aligned).{0,40}interest/i.test(clipped);
-  if(cooled&&supportsWarmEarly){
-    return fallbackObservation(row,errors,q);
-  }
-  if(cooled&&leadStatusRank(row.status)>=4&&/warm status|supporting warm|still warm|active (warm )?pipeline/i.test(clipped)&&!/too warm|no longer|does not (fit|match)|conflict/i.test(clipped)){
+  // Reject claiming short RNR gaps alone cooled an interested lead.
+  const shortRnrCooled=/two rnr|2 rnr|trailing rnr.{0,40}(cold|cooled)|rnr.{0,40}(mean|means).{0,20}(cold|cooled)/i.test(clipped);
+  if(buyingSignals&&leadStatusRank(row.status)<=3&&shortRnrCooled&&!errors.includes(STATUS_HISTORY_ERROR)){
     return fallbackObservation(row,errors,q);
   }
   return clipped;
 }
 function finalizeRecommendation(aiText,row,errors,q){
   if((shouldCloseAsLost(row.comments)||(isClosedLeadStatus(row.status)&&hasDeadLostAlignedTrajectory(row.comments)))&&!/\b(close|lost)\b/i.test(String(aiText||""))){
-    return fallbackRecommendation(row,errors,q);
-  }
-  if(hasCooledTrajectory(row.comments)&&leadStatusRank(row.status)>=4&&!/\b(cold|lost)\b/i.test(String(aiText||""))){
     return fallbackRecommendation(row,errors,q);
   }
   // Prefer model prose: empty, comment-echo, tiny, or single vague phrase → fallback.
@@ -1597,7 +1589,7 @@ async function requestAudit(apiKey,settings,leads,signal,log,onUsage){
       prompt_cache_key:promptCacheKey(settings),
       messages:[
         {role:"system",content:buildPrompt(settings)},
-        {role:"user",content:`Audit ${leads.length} call(s). Echo each id. c=full history — weigh FULL timeline then LATEST tone (early interest does not keep Warm after cool-down / long trailing RNR). le=local errors — explain in o/r, never copy into e. Judge status vs full c; non-blank rq empty-vs-wrong when k=Yes; comment quality + q; buying intent. Cold/Lost+all-RNR is aligned. Lost + not-looking / enquired-by-mistake / NI is aligned (no rich detail required). Cooled trajectory + Warm/Hot/Prospect ⇒ status error. Never emit Follow-up Missed, Budget/Location/Parameter Empty, or any TAT label. o (18-28 words): layman supervisor note — never claim vague notes fail to support Lost/Cold when NI/dead/RNR trail exists; never claim early interest supports Warm after cool-down. r (20-40 words): Lost+close the lead after NI/dead/many RNRs; never "set a follow-up" when n is set; for overdue n say call/proceed now.\n${JSON.stringify({L:modelInput})}`}
+        {role:"user",content:`Audit ${leads.length} call(s). Echo each id. c=full history — assess cumulative buying intent; 1–5 RNR/Busy/Unreachable are neutral and do not cancel prior interest; interest cancels only on ACTIVE rejection or 8+ consecutive RNRs. le=local errors — explain in o/r, never copy into e. Judge status vs full c (upward fix when s is Cold/Beyond Budget/Lost but comments show buying signals); non-blank rq empty-vs-wrong when k=Yes; comment quality + q; buying intent. Lost + ACTIVE NI/dead or 8+ RNR is aligned. Never emit Follow-up Missed, Budget/Location/Parameter Empty, or any TAT label. o (18-28 words): quote facts from c only — never invent details. r (20-40 words): Lost+close the lead after ACTIVE NI/dead/8+ RNR; step status up when comments show interest but s is too cold; never "set a follow-up" when n is set; for overdue n say call/proceed now.\n${JSON.stringify({L:modelInput})}`}
       ],
       response_format:{type:"json_schema",json_schema:{name:"ll_audit",strict:true,schema:responseSchema}}
     });
@@ -1686,11 +1678,13 @@ export async function auditBatch(apiKey,rawSettings,batch,signal,log,onUsage,req
     let merged=unique([...filteredLocal,...filteredAi]).filter(label=>ERROR_TYPES.includes(label));
     let errors=merged.includes(EMPTY_REQUIREMENT)?merged.filter(label=>label!==WRONG_REQUIREMENT):merged;
     const comments=Array.isArray(lead.auditContext?.c)?lead.auditContext.c:[lead.staticValues.comments];
-    // Local hard-rule floor: all-RNR+k=No or cooled trajectory with Warm/Hot/Prospect → always emit status error.
-    if(statusHardRuleMismatch(lead.staticValues.status,comments,lead.staticValues.connected)){
+    // Local hard-rule floor: Cold/Beyond Budget/Lost + clear buying signals in c → always emit status error.
+    if(statusHardRuleMismatch(lead.staticValues.status,comments)){
       errors=unique([...errors,STATUS_HISTORY_ERROR]);
     }
-    const forceNoIntent=allCommentsRnrLike(comments)||norm(lead.staticValues.connected)==="no"||hasCooledTrajectory(comments)||hasDeadLostAlignedTrajectory(comments)||isDeadNiComment(latestMeaningfulComment(comments));
+    const forceNoIntent=(trailingRnrStreak(comments)>=8&&!hasCumulativeBuyingSignals(comments))
+      ||commentEntries(comments).some(hasActiveRejectionComment)
+      ||(allCommentsRnrLike(comments)&&commentEntries(comments).length>=8);
     let intent;
     if(forceNoIntent)intent="No";
     else if(ai.i===undefined||ai.i===null||ai.i===""){

@@ -10,6 +10,27 @@ export const LAB_ERROR_TYPES = [
   "Customer Comment Quality Not Appropriate"
 ];
 
+/** Canonical production status-vs-comments rules (Bucket 1 / TeleCaller audit). */
+export const STATUS_HISTORY_PROMPT = `STATUS vs FULL COMMENT HISTORY
+Allowed Lead Status labels (case-insensitive): Prospect, Hot, Warm, Cold, Beyond Budget, Lost.
+Heat ladder highest→lowest: Prospect > Hot > Warm > Cold > Beyond Budget > Lost.
+
+c is the full chronological timeline — read ALL entries to determine the cumulative intent.
+
+EVALUATION LOGIC (STRICT):
+1. ASSESS INTENT: Identify the highest level of buying intent based strictly on what is written in the comments.
+2. LOW STATUS MISMATCH (UPWARD FIX): If comments show clear buying signals (like budget, specific requirements, promised visits), the status CANNOT be Cold, Beyond Budget, or Lost. If s=Cold but comments show active interest, you MUST emit "Lead Status Not Aligned With Comments".
+3. NEUTRAL RNR OVERRIDE (DOWNWARD FIX): 1 to 5 "RNR", "Busy", or "Unreachable" comments are NEUTRAL. They do NOT cancel out prior interest, and they absolutely do NOT justify marking an active lead as Cold.
+4. COOLING THRESHOLD: Early interest is ONLY canceled if later notes show ACTIVE rejection (e.g., "Not interested", "Stop calling") or a massive block of 8+ consecutive RNRs.
+
+Emit "Lead Status Not Aligned With Comments" ONLY on clear mismatch. Prefer e:[] when unsure or when s reasonably matches. Weak polarity guesses are forbidden. Baseline is Warm for passive comments.
+
+OUTPUT / REASONING CONSTRAINTS (ANTI-HALLUCINATION):
+- o MUST say why status mismatches based ONLY on the provided text.
+- CRITICAL: Your reason (o) MUST STRICTLY use facts and quotes directly from the provided 'Comments'. Do NOT invent details, and do NOT copy hypothetical examples from these instructions into your output.
+- If there is no error (e:[]), do not invent missing criteria. Justify it using the actual text.
+- For ~8+ calls all RNR / clear NI/dead → r must say change status to Lost and close the lead.`;
+
 /** Shared CSV + output contract — prepended once; not duplicated in each error prompt. */
 export const SHARED_PREAMBLE = `LeadLens DeBug · Error Focus Lab. Evidence only. Never invent facts, dates, budgets, locations, or prior calls.
 
@@ -52,28 +73,7 @@ STYLE
 Voice: layman QA supervisor. Never dump full comments into o/r. Never restate this preamble.`;
 
 export const DEFAULT_ERROR_PROMPTS = {
-  "Lead Status Not Aligned With Comments": `STATUS vs FULL COMMENT HISTORY
-Allowed Lead Status labels (case-insensitive): Prospect, Hot, Warm, Cold, Beyond Budget, Lost.
-Heat ladder highest→lowest: Prospect > Hot > Warm > Cold > Beyond Budget > Lost.
-c is the full chronological timeline — read ALL entries, then judge CURRENT s against the FULL timeline THEN the LATEST tone. Early interest does NOT keep Warm/Hot/Prospect when later notes cooled.
-
-Emit "Lead Status Not Aligned With Comments" ONLY on clear mismatch. Prefer e:[] when unsure or when s reasonably matches. Weak polarity guesses are forbidden.
-
-EMIT when any of these hold:
-1) HARD RULE — all RNR + not connected: every non-empty comment in c is RNR-like (RNR, CNP, busy, ringing, no answer, switched off, WhatsApp follow-up / WA FU) AND k=No AND s is Warm/Hot/Prospect.
-2) HARD RULE — cooled trajectory: latest meaningful (non-RNR) notes are passive NI / callback-only ("if interested they will call back", plan dropped, not interested) AND/OR long trailing RNR after that cool-down, AND s is Warm/Hot/Prospect. Correct status is Cold, or Lost when many RNRs / clearly dead.
-3) Prospect ban: more than 2 continuous trailing RNR-like notes AND s=Prospect.
-4) Warm-up mismatch: latest comment shows clear purchase interest (site visit / config+budget ask / active shortlist) AND s is Cold/Beyond Budget/Lost.
-
-DO NOT emit when:
-- All comments are RNR-like AND k=No AND s is Cold, Beyond Budget, or Lost — Cold/Lost is CORRECT.
-- Comments show clear dead/NI ("not looking for properties", "enquired by mistake", "not interested") AND s is Cold, Beyond Budget, or Lost — Lost is CORRECT even if notes are thin.
-- Mixed history has prior interest but LATEST tone is still active (short RNR gaps without cool-down) and s is Hot or Warm.
-- Status already matches trajectory, partial/thin notes without a hard rule, or ambiguous tone.
-
-Buying intent: i=0 for all-RNR + k=No, passive NI / cooldown. i=1 only for genuine purchase interest.
-
-o MUST say why status mismatches (e.g. "s=Warm but latest notes are NI + trailing RNR"). For ~8+ calls all RNR / clear NI/dead → r must say change status to Lost and close the lead — not "capture details if connects".`,
+  "Lead Status Not Aligned With Comments": STATUS_HISTORY_PROMPT,
 
   "Customer Requirement Empty": `CUSTOMER REQUIREMENT EMPTY (placeholder / blankish rq)
 Only review when k=Yes AND rq is present (not omitted) and not a fully empty string. Fully blank rq is already in le — do not emit this label for missing rq.
