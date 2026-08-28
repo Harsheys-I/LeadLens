@@ -1,5 +1,5 @@
 {
-  "version": "5.2.3",
+  "version": "5.2.4",
   "name": "LeadLens",
-  "notes": "v5.2.3: One audit row per lead — latest call on latest day only; same-day siblings stay in day[] context."
+  "notes": "v5.2.4: Remove debug instrumentation; one audit row per lead (latest call on latest day)."
 }

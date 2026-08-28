@@ -1,6 +1,6 @@
 import {buildTelecallerDashboardBlob} from "./dashboard-export.js?v=5.2.1";
 
-export const APP_VERSION = "5.2.3";
+export const APP_VERSION = "5.2.4";
 /** Sentinel: use server OpenAI proxy (no raw key in the browser). */
 export const SERVER_API_KEY = "__server__";
 /** Bump when default AI rules / field defaults must refresh existing localStorage settings. */
@@ -1165,11 +1165,6 @@ export function parseWorkbook(arrayBuffer,rawSettings=DEFAULT_SETTINGS){
         auditContext,
         localErrors:local.errors
       });
-      // #region agent log
-      if(dayCalls.length>1){
-        fetch('http://127.0.0.1:7843/ingest/f4ac7d78-fa93-4940-929e-852fd1791883',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'ab7011'},body:JSON.stringify({sessionId:'ab7011',runId:'post-fix',hypothesisId:'A',location:'audit.js:parseWorkbook:onePerLead',message:'Latest-day siblings collapsed to one audit row',data:{groupId,dayCallCount:dayCalls.length,keptStatus:call.status,keptUpdate:staticValues.callDate,skippedStatuses:dayCalls.slice(0,-1).map(r=>r.status)},timestamp:Date.now()})}).catch(()=>{});
-      }
-      // #endregion
     }
   }
   if(!leads.length)throw new Error("No valid Indian mobile numbers were found. Only 10-digit Indian mobiles starting with 6, 7, 8 or 9 are processed.");
