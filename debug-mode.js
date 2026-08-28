@@ -37,7 +37,8 @@ import {
 
 const $=id=>document.getElementById(id);
 const ids=[
-  "page-title","key-state","pause-run","download-result","compare-telecaller","re-audit","re-audit-panel","progress-label","progress-percent","progress-bar",
+  "page-title","key-state","pause-run","download-result","compare-telecaller","re-audit","re-audit-panel",
+  "run-ten-times","run-ten-times-panel","progress-label","progress-percent","progress-bar",
   "metric-leads","metric-calls","metric-batch","metric-completed","metric-status","metric-input-tokens",
   "metric-cached-tokens","metric-output-tokens","metric-duration","metric-cost","live-log","clear-console",
   "api-key","remember-key","toggle-key","save-key","forget-key","key-message","batch-size","concurrency","model",
@@ -50,11 +51,13 @@ const ids=[
   "sidebar-notes","debug-drop-zone","debug-file-input","debug-drop-hint","debug-file-list","debug-validation",
   "start-debug","debug-run-panel","debug-precounts","debug-active-chips","debug-results-panel","debug-error-counts",
   "debug-result-filters","debug-results-head","debug-results-body","debug-compare-panel","debug-compare-summary","debug-compare-metrics",
-  "debug-compare-body","shell-user-label","shell-logout","shell-account"
+  "debug-compare-body","debug-frequency-panel","debug-frequency-summary","debug-frequency-chart",
+  "shell-user-label","shell-logout","shell-account"
 ];
 const els=Object.fromEntries(ids.map(id=>[id,$(id)]));
 const titles={run:"Run",settings:"Settings"};
 const ENGINE_VERSION="debug-csv-v3";
+const MULTI_RUN_COUNT=10;
 const SYSTEM_OUTPUT_IDS=new Set(DEFAULT_OUTPUT_FIELDS.map(field=>field.id));
 const BLOCK_KEY_REASONS=new Set(["empty","format","unauthorized","forbidden"]);
 const SHORT_ERROR_LABEL={
@@ -112,6 +115,8 @@ const DEFAULT_DEBUG_SETTINGS=normalizeDebugSettings({
 let currentJob=null,displayLogs=true,parsedFile=null,serverKeyConfigured=false;
 /** Kept after Start so Re-Audit can rerun without re-upload (same leads/job input). */
 let loadedBundle=null;
+let multiRunActive=false;
+let multiRunProgress={current:0,total:MULTI_RUN_COUNT};
 let settings=normalizeDebugSettings(DEFAULT_DEBUG_SETTINGS);
 let resultFilter="all";
 const controllers=new Map();
@@ -140,6 +145,67 @@ function parseErrorList(value){
   const text=String(value??"").trim();
   if(!text||/^none$/i.test(text))return[];
   return text.split(",").map(part=>part.trim()).filter(Boolean);
+}
+
+/** Count each error label (and "None" for clean rows) across all result rows. */
+function aggregateErrorFrequencies(resultSets){
+  const counts=new Map();
+  for(const results of resultSets||[]){
+    for(const row of results||[]){
+      const errors=parseErrorList(row?.errorTypes);
+      if(!errors.length){
+        counts.set("None",(counts.get("None")||0)+1);
+      }else{
+        for(const label of errors){
+          counts.set(label,(counts.get(label)||0)+1);
+        }
+      }
+    }
+  }
+  return[...counts.entries()].sort((a,b)=>b[1]-a[1]||a[0].localeCompare(b[0]));
+}
+
+function renderFrequencyChart(entries,{runsCompleted=0,runsFailed=0,rowTotal=0}={}){
+  const panel=els["debug-frequency-panel"];
+  const chart=els["debug-frequency-chart"];
+  const summary=els["debug-frequency-summary"];
+  if(!panel||!chart)return;
+  if(!entries?.length){
+    panel.classList.add("hidden");
+    chart.replaceChildren();
+    return;
+  }
+  panel.classList.remove("hidden");
+  if(summary){
+    const parts=[
+      `${runsCompleted} completed run${runsCompleted===1?"":"s"}`,
+      `${rowTotal.toLocaleString()} row observation${rowTotal===1?"":"s"} total`
+    ];
+    if(runsFailed)parts.push(`${runsFailed} run${runsFailed===1?"":"s"} failed`);
+    summary.textContent=parts.join(" · ");
+  }
+  const max=Math.max(...entries.map(([,count])=>count),1);
+  chart.replaceChildren();
+  for(const [label,count] of entries){
+    const row=document.createElement("div");
+    row.className="debug-freq-row";
+    const name=document.createElement("div");
+    name.className="debug-freq-label";
+    name.textContent=label;
+    name.title=label;
+    const wrap=document.createElement("div");
+    wrap.className="debug-freq-bar-wrap";
+    const bar=document.createElement("div");
+    bar.className="debug-freq-bar";
+    bar.style.width=`${Math.max(2,Math.round(count/max*100))}%`;
+    bar.title=`${label}: ${count}`;
+    const value=document.createElement("span");
+    value.className="debug-freq-count";
+    value.textContent=String(count);
+    wrap.append(bar,value);
+    row.append(name,wrap);
+    chart.append(row);
+  }
 }
 
 function shortLabel(label){return SHORT_ERROR_LABEL[label]||label;}
@@ -424,14 +490,21 @@ function filteredResults(job){
   return rows.filter(row=>parseErrorList(row.errorTypes).includes(resultFilter));
 }
 
-function syncReAuditButton(job=currentJob){
+function syncRunActionButtons(job=currentJob){
   const hasLeads=Boolean((loadedBundle?.leads||[]).length||(job?.leads||[]).length);
-  const busy=job?.status==="running"||job?.compareStatus==="running";
+  const busy=multiRunActive||job?.status==="running"||job?.compareStatus==="running";
   for(const id of ["re-audit","re-audit-panel"]){
     const btn=els[id]||document.getElementById(id);
     if(!btn)continue;
     btn.disabled=!hasLeads||busy;
   }
+  for(const id of ["run-ten-times","run-ten-times-panel"]){
+    const btn=els[id]||document.getElementById(id);
+    if(!btn)continue;
+    btn.disabled=!hasLeads||busy;
+    btn.textContent=multiRunActive?`Running ${multiRunProgress.current}/${multiRunProgress.total}…`:"Run 10 times";
+  }
+  if(els["start-debug"])els["start-debug"].disabled=!(parsedFile?.leads||[]).length||multiRunActive;
 }
 
 function renderResultsPanel(job){
@@ -612,7 +685,9 @@ function renderProgress(job){
   const concurrency=job.settings?.concurrency||1;
   const billable=Math.max(0,number(usage.input)-number(usage.cached));
   const pendingLeft=Object.keys(job.pendingBatches||{}).length;
-  if(els["progress-label"])els["progress-label"].textContent=job.status==="completed"
+  if(els["progress-label"])els["progress-label"].textContent=multiRunActive
+    ?`Multi-run ${multiRunProgress.current}/${multiRunProgress.total} · ${job.status==="running"?`${pct}% of current run`:"between runs"}`
+    :job.status==="completed"
     ?"DeBug complete"
     :job.status==="running"
     ?`Keeping ${concurrency} batch request${concurrency>1?"s":""} in flight${pendingLeft?` · ${pendingLeft} batch(es) waiting to checkpoint`:""}…`
@@ -630,15 +705,15 @@ function renderProgress(job){
   if(els["metric-duration"])els["metric-duration"].textContent=durationText(elapsed(job));
   if(els["metric-cost"])els["metric-cost"].textContent=estimatedCost(job).toFixed(4);
   if(els["pause-run"]){
-    els["pause-run"].disabled=!(["running","paused","failed"].includes(job.status));
+    els["pause-run"].disabled=multiRunActive||!(["running","paused","failed"].includes(job.status));
     els["pause-run"].textContent=job.status==="running"?"Pause":"Resume";
   }
-  if(els["download-result"])els["download-result"].disabled=job.status!=="completed";
+  if(els["download-result"])els["download-result"].disabled=multiRunActive||job.status!=="completed";
   if(els["compare-telecaller"]){
-    els["compare-telecaller"].disabled=job.status!=="completed"||job.compareStatus==="running"||job.status==="running";
+    els["compare-telecaller"].disabled=multiRunActive||job.status!=="completed"||job.compareStatus==="running"||job.status==="running";
     els["compare-telecaller"].textContent=job.compareStatus==="running"?"Comparing…":"Compare to TeleCaller Audit";
   }
-  syncReAuditButton(job);
+  syncRunActionButtons(job);
   renderActiveChips(activeForJob(job));
   renderResultsPanel(job);
   renderComparePanel(job);
@@ -792,7 +867,7 @@ async function runJob(job){
     const billable=Math.max(0,number(job.tokenUsage.input)-number(job.tokenUsage.cached));
     addLog(job,`DeBug complete in ${durationText(job.elapsedMs)}. Cost est. ${estimatedCost(job).toFixed(4)}. Cached ${number(job.tokenUsage.cached).toLocaleString()} · billable input ${billable.toLocaleString()} · output ${number(job.tokenUsage.output).toLocaleString()}.`,"success");
     renderProgress(job);
-    toast(`${job.fileName}: DeBug complete.`);
+    if(!multiRunActive)toast(`${job.fileName}: DeBug complete.`);
   }catch(error){
     flushPendingBatches(job);
     stopClock(job);
@@ -1014,17 +1089,7 @@ async function startDebug(){
 }
 
 async function reAudit(){
-  const bundle=loadedBundle?.leads?.length
-    ?loadedBundle
-    :(currentJob?.leads?.length?{
-      fileName:currentJob.fileName,
-      sheetName:currentJob.sheetName||"",
-      leads:currentJob.leads,
-      leadCount:currentJob.leadCount||0,
-      callCount:currentJob.callCount||currentJob.leads.length,
-      latestDayCalls:currentJob.latestDayCalls||currentJob.leads.length,
-      rowCount:currentJob.rowCount||0
-    }:null);
+  const bundle=getLoadedBundle();
   if(!bundle?.leads?.length){
     toast("Upload an Excel file first.");
     return;
@@ -1047,6 +1112,126 @@ async function reAudit(){
   renderProgress(job);
   toast("Re-Audit started.");
   await runJob(job);
+}
+
+function getLoadedBundle(){
+  return loadedBundle?.leads?.length
+    ?loadedBundle
+    :(currentJob?.leads?.length?{
+      fileName:currentJob.fileName,
+      sheetName:currentJob.sheetName||"",
+      leads:currentJob.leads,
+      leadCount:currentJob.leadCount||0,
+      callCount:currentJob.callCount||currentJob.leads.length,
+      latestDayCalls:currentJob.latestDayCalls||currentJob.leads.length,
+      rowCount:currentJob.rowCount||0
+    }:null);
+}
+
+async function runTenTimes(){
+  if(multiRunActive){
+    toast("A 10-run batch is already in progress.");
+    return;
+  }
+  const bundle=getLoadedBundle();
+  if(!bundle?.leads?.length){
+    toast("Upload an Excel file first.");
+    return;
+  }
+  loadedBundle=bundle;
+  const key=effectiveApiKey();
+  if(!key){showView("settings");toast("Add an OpenAI API key first.");return;}
+  const live=collectSettings();
+  const ready=activePromptsReady(live);
+  if(!ready.ok){showView("settings");toast(`Fill prompts for: ${ready.missing.map(shortLabel).join(", ")}`);return;}
+  settings=live;
+  saveDebugSettingsLocal(settings);
+
+  if(currentJob)await abortInFlight(currentJob);
+
+  multiRunActive=true;
+  multiRunProgress={current:0,total:MULTI_RUN_COUNT};
+  syncRunActionButtons();
+  els["debug-run-panel"]?.classList.remove("hidden");
+  els["debug-frequency-panel"]?.classList.add("hidden");
+
+  const resultSets=[];
+  let runsCompleted=0,runsFailed=0;
+  let lastSuccessfulJob=null;
+  const logJob={
+    id:"multi-run",
+    logs:[],
+    status:"running",
+    settings:deepCopy(settings),
+    leads:bundle.leads,
+    fileName:bundle.fileName,
+    totalLeads:bundle.leads.length,
+    results:[],
+    pendingBatches:{},
+    nextBatch:0,
+    tokenUsage:{input:0,cached:0,output:0},
+    elapsedMs:0
+  };
+  currentJob=logJob;
+  displayLogs=true;
+  addLog(logJob,`Run 10 times: starting ${MULTI_RUN_COUNT} sequential audits on “${bundle.fileName}” (${activeForJob(logJob).map(shortLabel).join(", ")}).`,"info");
+  renderProgress(logJob);
+
+  try{
+    for(let run=1;run<=MULTI_RUN_COUNT;run++){
+      multiRunProgress={current:run,total:MULTI_RUN_COUNT};
+      syncRunActionButtons(logJob);
+      addLog(logJob,`Run ${run}/${MULTI_RUN_COUNT}…`,"info");
+      renderProgress(logJob);
+
+      const job=buildJobFromBundle(bundle,settings);
+      currentJob=job;
+      job.logs=logJob.logs;
+      await runJob(job);
+
+      if(job.status==="completed"&&(job.results||[]).length){
+        resultSets.push(job.results);
+        runsCompleted++;
+        lastSuccessfulJob=job;
+        addLog(logJob,`Run ${run}/${MULTI_RUN_COUNT} complete · ${job.results.length} rows.`,"success");
+      }else{
+        runsFailed++;
+        const reason=job.status==="paused"
+          ?"paused"
+          :(job.error||job.status||"unknown error");
+        addLog(logJob,`Run ${run}/${MULTI_RUN_COUNT} failed (${reason}). Continuing with remaining runs.`,"warn");
+        if(job.status==="paused")break;
+      }
+      currentJob=logJob;
+      renderProgress(logJob);
+    }
+
+    const entries=aggregateErrorFrequencies(resultSets);
+    const rowTotal=entries.reduce((sum,[,count])=>sum+count,0);
+    renderFrequencyChart(entries,{runsCompleted,runsFailed,rowTotal});
+
+    if(!entries.length){
+      addLog(logJob,`Run 10 times finished with no successful runs.`,"error");
+      toast("Run 10 times finished — no successful runs.");
+    }else{
+      const top=entries.slice(0,3).map(([label,count])=>`${label} (${count})`).join(", ");
+      addLog(logJob,`Run 10 times complete · ${runsCompleted}/${MULTI_RUN_COUNT} succeeded${runsFailed?`, ${runsFailed} failed`:""}. Top: ${top}.`,"success");
+      toast(`Run 10 times complete (${runsCompleted}/${MULTI_RUN_COUNT}).`);
+    }
+  }finally{
+    multiRunActive=false;
+    multiRunProgress={current:0,total:MULTI_RUN_COUNT};
+    if(lastSuccessfulJob){
+      lastSuccessfulJob.logs=logJob.logs;
+      currentJob=lastSuccessfulJob;
+      currentJob.status="completed";
+    }else{
+      logJob.status=runsFailed?"failed":"completed";
+      currentJob=logJob;
+    }
+    syncRunActionButtons(currentJob);
+    renderProgress(currentJob);
+  }
 }
 
 function download(job){
@@ -1322,7 +1507,7 @@ function updateValidation(){
   const pre=els["debug-precounts"];
   const start=els["start-debug"];
   if(!box||!start)return;
-  syncReAuditButton();
+  syncRunActionButtons();
   if(!parsedFile){
     if(loadedBundle?.leads?.length){
       box.classList.remove("hidden");
@@ -1364,7 +1549,7 @@ function updateValidation(){
     pre.textContent=`Sheet “${parsedFile.sheetName||"—"}” · ${Number(parsedFile.rowCount||0).toLocaleString()} Excel rows · ${Number(parsedFile.callCount||parsedFile.leads.length).toLocaleString()} calls · latest-day ${parsedFile.leads.length}`;
   }
   start.disabled=!(parsedFile.leads||[]).length;
-  syncReAuditButton();
+  syncRunActionButtons();
 }
 
 async function handleFiles(fileList){
@@ -1393,7 +1578,7 @@ async function handleFiles(fileList){
     box.className="validation error";
     box.textContent=error.message||"Could not read workbook.";
     els["start-debug"].disabled=true;
-    syncReAuditButton();
+    syncRunActionButtons();
     renderFileList();
     return;
   }
@@ -1517,6 +1702,8 @@ els["download-result"]?.addEventListener("click",()=>currentJob&&download(curren
 els["compare-telecaller"]?.addEventListener("click",()=>currentJob&&runTelecallerCompare(currentJob));
 els["re-audit"]?.addEventListener("click",()=>reAudit());
 els["re-audit-panel"]?.addEventListener("click",()=>reAudit());
+els["run-ten-times"]?.addEventListener("click",()=>runTenTimes());
+els["run-ten-times-panel"]?.addEventListener("click",()=>runTenTimes());
 els["clear-console"]?.addEventListener("click",()=>{displayLogs=false;renderLogs(currentJob);});
 
 els["focus-error-type"]?.addEventListener("change",()=>{
@@ -1612,7 +1799,7 @@ if(els["debug-drop-zone"]){
 }
 if(els["debug-file-input"])els["debug-file-input"].onchange=event=>handleFiles(event.target.files);
 if(els["start-debug"])els["start-debug"].onclick=startDebug;
-syncReAuditButton();
+syncRunActionButtons();
 
 els["toggle-key"]?.addEventListener("click",()=>{const hidden=els["api-key"].type==="password";els["api-key"].type=hidden?"text":"password";els["toggle-key"].textContent=hidden?"Hide":"Show";});
 els["save-key"]?.addEventListener("click",async()=>{
