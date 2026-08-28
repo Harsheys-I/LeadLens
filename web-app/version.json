@@ -1,5 +1,5 @@
 {
-  "version": "5.2.5",
+  "version": "5.2.7",
   "name": "LeadLens",
-  "notes": "v5.2.5: Status-vs-comments rules (neutral 1–5 RNR, upward fix, 8+ RNR cooling); DeBug sync from Bucket 1."
+  "notes": "v5.2.7: DeBug sync toolbar — remove Load starter; Sync from / Sync to Bucket 1 only."
 }
