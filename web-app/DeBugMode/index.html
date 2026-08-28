@@ -54,6 +54,7 @@
         <div class="action-row">
           <button id="start-debug" class="primary-button" disabled>Start DeBug <span>→</span></button>
           <button id="re-audit" type="button" class="secondary-button" disabled>Re-Audit</button>
+          <button id="run-ten-times" type="button" class="secondary-button" disabled>Run 10 times</button>
         </div>
 
         <div id="debug-run-panel" class="review-run-panel hidden">
@@ -62,6 +63,7 @@
             <div class="inline-actions">
               <button id="pause-run" type="button" class="secondary-button" disabled>Pause</button>
               <button id="re-audit-panel" type="button" class="secondary-button" disabled>Re-Audit</button>
+              <button id="run-ten-times-panel" type="button" class="secondary-button" disabled>Run 10 times</button>
               <button id="download-result" type="button" class="primary-button" disabled>Save Audit Excel</button>
               <button id="compare-telecaller" type="button" class="secondary-button" disabled>Compare to TeleCaller Audit</button>
             </div>
@@ -85,6 +87,12 @@
                 <tbody id="debug-results-body"></tbody>
               </table>
             </div>
+          </div>
+          <div id="debug-frequency-panel" class="debug-frequency-panel hidden">
+            <div class="section-head">
+              <div><h2>Error frequency (10 runs)</h2><p id="debug-frequency-summary">Aggregate error-type counts across repeated audits on the same leads and settings.</p></div>
+            </div>
+            <div id="debug-frequency-chart" class="debug-frequency-chart" role="img" aria-label="Error type frequency bar chart"></div>
           </div>
           <div id="debug-compare-panel" class="debug-compare-panel hidden">
             <div class="section-head">

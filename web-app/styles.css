@@ -411,7 +411,24 @@ body .dashboard-filter-reset{width:100%;justify-self:stretch;margin-top:4px}
 .debug-results-table td.debug-obs-cell{min-width:220px;max-width:360px}
 .debug-obs-cell{max-width:360px;white-space:normal;line-height:1.35;color:var(--green-2);font-weight:500}
 .debug-errors-cell{font-weight:600;color:var(--green)}
+.debug-frequency-panel{
+  background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:18px 20px;
+  box-shadow:var(--shadow);display:grid;gap:14px
+}
+.debug-frequency-chart{display:grid;gap:10px}
+.debug-freq-row{display:grid;grid-template-columns:minmax(140px,34%) 1fr;gap:10px 14px;align-items:center}
+.debug-freq-label{font-size:12px;line-height:1.35;color:var(--green-2);font-weight:600;word-break:break-word}
+.debug-freq-bar-wrap{
+  position:relative;display:flex;align-items:center;gap:10px;min-height:28px;
+  background:#eef3ef;border-radius:8px;overflow:hidden;padding:4px 8px 4px 4px
+}
+.debug-freq-bar{
+  height:20px;border-radius:6px;background:linear-gradient(90deg,var(--green),var(--green-2));
+  min-width:4px;transition:width .25s ease
+}
+.debug-freq-count{font-size:13px;font-weight:700;color:var(--green);white-space:nowrap;margin-left:auto}
 @media(max-width:850px){
+  .debug-freq-row{grid-template-columns:1fr}
   .debug-focus-toolbar{flex-direction:column;align-items:stretch}
   .debug-results-table td.debug-obs-cell{min-width:160px}
   .debug-obs-cell{max-width:220px}
