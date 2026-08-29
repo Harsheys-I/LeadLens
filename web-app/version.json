@@ -1,5 +1,5 @@
 {
-  "version": "5.2.16",
+  "version": "5.2.17",
   "name": "LeadLens",
-  "notes": "v5.2.16: Deterministic Rules 1–5 set Lead Status Not Aligned With Comments in Error Types."
+  "notes": "v5.2.17: Bucket 1 keeps AI status errors + clear-mismatch safety net; restored baseline-Warm status prompt; unified DeBug/Bucket cache-bust."
 }
