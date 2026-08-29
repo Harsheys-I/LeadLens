@@ -1,5 +1,5 @@
 {
-  "version": "5.2.17",
+  "version": "5.2.18",
   "name": "LeadLens",
-  "notes": "v5.2.17: Bucket 1 keeps AI status errors + clear-mismatch safety net; restored baseline-Warm status prompt; unified DeBug/Bucket cache-bust."
+  "notes": "v5.2.18: Hide dashboard Search on Summary/Graphs; persistent left-nav hide (☰); filters rail collapse remembered."
 }

@@ -16,24 +16,24 @@ import {
   sortResults,
   validateApiKey,
   SERVER_API_KEY,
-} from "./audit.js?v=5.2.17";
-import {getApiKey,apiKeyIsRemembered,saveApiKey,forgetApiKey,setStorageUserId,storageKey} from "./db.js?v=5.2.17";
-import {requireAuth,logout,getUser,changePassword,updateProfile} from "./auth.js?v=5.2.17";
-import {SettingsApi} from "./api-client.js?v=5.2.17";
-import {mountNotifications} from "./notifications-ui.js?v=5.2.17";
+} from "./audit.js?v=5.2.18";
+import {getApiKey,apiKeyIsRemembered,saveApiKey,forgetApiKey,setStorageUserId,storageKey} from "./db.js?v=5.2.18";
+import {requireAuth,logout,getUser,changePassword,updateProfile} from "./auth.js?v=5.2.18";
+import {SettingsApi} from "./api-client.js?v=5.2.18";
+import {mountNotifications} from "./notifications-ui.js?v=5.2.18";
 import {
   debugAuditBatch,
   telecallerAuditBatch,
   compareDebugVsTelecaller,
   activePromptsReady,
   normalizeActiveErrorTypes,
-} from "./debug-engine.js?v=5.2.17";
+} from "./debug-engine.js?v=5.2.18";
 import {
   LAB_ERROR_TYPES,
   STATUS_HISTORY_PROMPT,
   emptyErrorPrompts,
   ERROR_TO_AUDIT_RULE,
-} from "./debug-prompts.js?v=5.2.17";
+} from "./debug-prompts.js?v=5.2.18";
 
 const $=id=>document.getElementById(id);
 const ids=[
@@ -1953,9 +1953,40 @@ async function checkForUpdate(){
 }
 
 // —— wire events ——
+function readSidebarCollapsedPref(){
+  try{return localStorage.getItem(storageKey("sidebarCollapsed"))==="1";}
+  catch{return false;}
+}
+function writeSidebarCollapsedPref(collapsed){
+  try{localStorage.setItem(storageKey("sidebarCollapsed"),collapsed?"1":"0");}
+  catch{/* ignore */}
+}
+function applySidebarCollapsed(collapsed,{persist=true}={}){
+  const shell=document.querySelector(".shell");
+  if(!shell)return;
+  shell.classList.toggle("sidebar-collapsed",Boolean(collapsed));
+  const btn=els["mobile-menu"];
+  if(btn){
+    btn.setAttribute("aria-expanded",collapsed?"false":"true");
+    btn.setAttribute("aria-label",collapsed?"Show left panel":"Hide left panel");
+    btn.title=collapsed?"Show left panel":"Hide left panel";
+  }
+  if(persist)writeSidebarCollapsedPref(Boolean(collapsed));
+  requestAnimationFrame(()=>window.dispatchEvent(new Event("resize")));
+}
+
 document.querySelectorAll(".nav-item").forEach(button=>button.addEventListener("click",()=>showView(button.dataset.view)));
 document.getElementById("settings-form")?.addEventListener("submit",event=>event.preventDefault());
-els["mobile-menu"]?.addEventListener("click",()=>document.querySelector(".shell")?.classList.toggle("menu-open"));
+els["mobile-menu"]?.addEventListener("click",()=>{
+  const shell=document.querySelector(".shell");
+  if(!shell)return;
+  const narrow=window.matchMedia("(max-width:850px)").matches;
+  if(narrow){
+    shell.classList.toggle("menu-open");
+    return;
+  }
+  applySidebarCollapsed(!shell.classList.contains("sidebar-collapsed"));
+});
 els["shell-logout"]?.addEventListener("click",async()=>{
   await logout();
   setStorageUserId(null);
@@ -2200,6 +2231,7 @@ async function bootDeBugMode(){
     return;
   }
   setStorageUserId(user.id);
+  applySidebarCollapsed(readSidebarCollapsedPref(),{persist:false});
   settings=normalizeDebugSettings(loadDebugSettingsLocal(DEFAULT_DEBUG_SETTINGS));
   await loadServerSettingsAndKey();
   renderSettings();
