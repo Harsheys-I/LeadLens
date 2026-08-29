@@ -2,8 +2,8 @@
  * In-app TeleCaller Review dashboard (KPIs, scorecard, Chart.js charts, error table).
  */
 
-import {buildDashboardModel, OVERDUE_BUCKETS} from "./dashboard-metrics.js?v=5.2.18";
-import {storageKey} from "./db.js?v=5.2.18";
+import {buildDashboardModel, OVERDUE_BUCKETS} from "./dashboard-metrics.js?v=5.2.19";
+import {storageKey} from "./db.js?v=5.2.19";
 
 /** Panel switcher labels (presentation) → internal section titles stay as-built. */
 const DASHBOARD_PANELS = [

@@ -1,5 +1,5 @@
 {
-  "version": "5.2.18",
+  "version": "5.2.19",
   "name": "LeadLens",
-  "notes": "v5.2.18: Upload Dashboard replaces prior TeleCaller board (no orphans); hide Search on Summary/Graphs; persistent left-nav hide."
+  "notes": "v5.2.19: Remove Settings AI audit rules / dynamic prompting; pin Bucket 1 prompts to code defaults; remove DeBug Sync to Bucket 1."
 }
