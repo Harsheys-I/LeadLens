@@ -1,11 +1,11 @@
 import {buildTelecallerDashboardBlob} from "./dashboard-export.js?v=5.2.5";
-import {STATUS_HISTORY_PROMPT} from "./debug-prompts.js?v=5.2.13";
+import {STATUS_HISTORY_PROMPT} from "./debug-prompts.js?v=5.2.15";
 
-export const APP_VERSION = "5.2.14";
+export const APP_VERSION = "5.2.15";
 /** Sentinel: use server OpenAI proxy (no raw key in the browser). */
 export const SERVER_API_KEY = "__server__";
 /** Bump when default AI rules / field defaults must refresh existing localStorage settings. */
-export const SETTINGS_SEED = 22;
+export const SETTINGS_SEED = 23;
 
 /** Settings limits — batch size is leads per request; concurrency is parallel requests. */
 export const MAX_BATCH_SIZE = 20;
@@ -176,7 +176,7 @@ export function buildChatCompletionBody(model,{temperature,maxTokens,messages,..
 
 /* Large stable prefix FIRST so OpenAI prompt caching can activate (>=1024 tokens;
    some models need closer to 2048). Run-specific rules come after; lead data last. */
-const CACHE_HANDBOOK = `LeadLens QA v5.2.14 — stable cacheable auditor handbook. Evidence only. Never invent facts, dates, budgets, locations, or prior calls.
+const CACHE_HANDBOOK = `LeadLens QA v5.2.15 — stable cacheable auditor handbook. Evidence only. Never invent facts, dates, budgets, locations, or prior calls.
 
 PURPOSE
 You audit Indian real-estate telecalling follow-up notes. Judge only the supplied fields for THIS call id. Optional day[] lists sibling calls on the same latest calendar day — context only; still return one result for THIS id.
@@ -1617,42 +1617,23 @@ function finalizeObservation(aiText,row,errors,q){
 }
 function finalizeRecommendation(aiText,row,errors,q){
   if((shouldCloseAsLost(row.comments)||(isClosedLeadStatus(row.status)&&hasDeadLostAlignedTrajectory(row.comments)))&&!/\b(close|lost)\b/i.test(String(aiText||""))){
-    // #region agent log
-    fetch('http://127.0.0.1:7843/ingest/f4ac7d78-fa93-4940-929e-852fd1791883',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'6866e6'},body:JSON.stringify({sessionId:'6866e6',runId:'pre-fix',hypothesisId:'E',location:'audit.js:finalizeRecommendation',message:'forced fallback close/lost',data:{status:String(row?.status||''),hasStatusErr:errors.includes(STATUS_HISTORY_ERROR),path:'shouldCloseOrClosed'},timestamp:Date.now()})}).catch(()=>{});
-    // #endregion
     return fallbackRecommendation(row,errors,q);
   }
   // Prefer model prose: empty, comment-echo, tiny, or single vague phrase → fallback.
   const clipped=clipWords(aiText,40);
   const words=clipped.split(/\s+/).filter(Boolean);
   const vague=/^(follow\s*up|call\s*again|update\s*(comments?|remarks?)|try\s*later|connect\s*again)\.?$/i.test(clipped);
-  if(!clipped||isCommentEcho(clipped,row.comments)||words.length<10||vague){
-    // #region agent log
-    fetch('http://127.0.0.1:7843/ingest/f4ac7d78-fa93-4940-929e-852fd1791883',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'6866e6'},body:JSON.stringify({sessionId:'6866e6',runId:'pre-fix',hypothesisId:'E',location:'audit.js:finalizeRecommendation',message:'fallback recommendation path',data:{status:String(row?.status||''),hasStatusErr:errors.includes(STATUS_HISTORY_ERROR),reason:!clipped?'empty':isCommentEcho(clipped,row.comments)?'echo':words.length<10?'short':'vague'},timestamp:Date.now()})}).catch(()=>{});
-    // #endregion
-    return fallbackRecommendation(row,errors,q);
-  }
+  if(!clipped||isCommentEcho(clipped,row.comments)||words.length<10||vague)return fallbackRecommendation(row,errors,q);
   const nextSet=hasNextFollowupDate(row);
   const asksSetFollowup=/\bset (a |an |the )?(dated )?(next )?follow[-\s]?up|\bschedule (a )?follow[-\s]?up|\bput (a |an )?follow[-\s]?up date|\block a dated (next )?follow/i.test(clipped);
   if(nextSet&&asksSetFollowup)return fallbackRecommendation(row,errors,q);
   if((shouldCloseAsLost(row.comments)||hasDeadLostAlignedTrajectory(row.comments))&&/capture (customer )?details if|if (the customer |they )?connects?|gather (more )?details/i.test(clipped)){
     return fallbackRecommendation(row,errors,q);
   }
-  // Drop status-change / status-label coaching unless e has the status error.
-  // Allow Lost+close prose only when shouldCloseAsLost and text is about Lost/close (not Cold/Warm steps).
+  // Drop status-change coaching unless e has the status error (or genuine Lost+close on dead lead).
   const statusTalk=/\b(status|cold|lost|warm|hot|align|mismatch|prospect|qualified)\b/i.test(clipped);
   const lostCloseOk=shouldCloseAsLost(row.comments)&&/\blost\b/i.test(clipped)&&/\bclose\b/i.test(clipped)&&!/\b(warm|hot|prospect|qualified)\b/i.test(clipped);
-  if(statusTalk&&!errors.includes(STATUS_HISTORY_ERROR)&&!lostCloseOk){
-    // #region agent log
-    fetch('http://127.0.0.1:7843/ingest/f4ac7d78-fa93-4940-929e-852fd1791883',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'6866e6'},body:JSON.stringify({sessionId:'6866e6',runId:'post-fix',hypothesisId:'C',location:'audit.js:finalizeRecommendation',message:'scrubbed status talk without status error',data:{status:String(row?.status||''),snippet:clipped.slice(0,140)},timestamp:Date.now()})}).catch(()=>{});
-    // #endregion
-    return fallbackRecommendation(row,errors,q);
-  }
-  // #region agent log
-  if(statusTalk){
-    fetch('http://127.0.0.1:7843/ingest/f4ac7d78-fa93-4940-929e-852fd1791883',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'6866e6'},body:JSON.stringify({sessionId:'6866e6',runId:'post-fix',hypothesisId:'C',location:'audit.js:finalizeRecommendation',message:'kept AI recommendation with status talk',data:{status:String(row?.status||''),hasStatusErr:errors.includes(STATUS_HISTORY_ERROR),lostCloseOk,snippet:clipped.slice(0,140)},timestamp:Date.now()})}).catch(()=>{});
-  }
-  // #endregion
+  if(statusTalk&&!errors.includes(STATUS_HISTORY_ERROR)&&!lostCloseOk)return fallbackRecommendation(row,errors,q);
   return clipped;
 }
 
@@ -1702,28 +1683,6 @@ async function requestAudit(apiKey,settings,leads,signal,log,onUsage){
 const unique=values=>[...new Set(values.filter(Boolean))];
 const severityFromErrors=errors=>!errors.length?"NONE":errors.some(error=>HIGH_SEVERITY_ERRORS.has(error))?"HIGH":"MEDIUM";
 
-// #region agent log
-function agentDebugLog(payload,logFn){
-  const entry={sessionId:"6866e6",timestamp:Date.now(),...payload};
-  try{
-    const key="ll-debug-6866e6";
-    const prev=JSON.parse(sessionStorage.getItem(key)||"[]");
-    prev.push(entry);
-    while(prev.length>300)prev.shift();
-    sessionStorage.setItem(key,JSON.stringify(prev));
-    if(typeof window!=="undefined")window.__LL_DEBUG_6866E6__=prev;
-  }catch{/* ignore */}
-  fetch("http://127.0.0.1:7843/ingest/f4ac7d78-fa93-4940-929e-852fd1791883",{method:"POST",headers:{"Content-Type":"application/json","X-Debug-Session-Id":"6866e6"},body:JSON.stringify(entry)}).catch(()=>{});
-  try{
-    const d=payload?.data||{};
-    const interesting=d.aiRHasStatusTalk&&!d.finalHasStatus||(Array.isArray(d.rawAiE)&&d.rawAiE.some(t=>/status|aligned/i.test(String(t))))||d.mismatch||d.aligned&&d.beforeHard?.includes?.(STATUS_HISTORY_ERROR);
-    if(interesting&&typeof logFn==="function"){
-      logFn(`[DBG-status] m=…${d.mobile||"?"} s=${d.status||"?"} rank=${d.statusRank} rawE=${JSON.stringify(d.rawAiE||[])} resolved=${JSON.stringify(d.aiErrors||[])} mismatch=${d.mismatch} aligned=${d.aligned} buy=${d.buyingSignals} finalHasStatus=${d.finalHasStatus} rTalk=${d.aiRHasStatusTalk} r="${String(d.aiRSnippet||"").slice(0,80)}"`, "warn");
-    }
-  }catch{/* ignore */}
-}
-// #endregion
-
 export async function auditBatch(apiKey,rawSettings,batch,signal,log,onUsage,requestFn=requestAudit){
   const settings=normalizeSettings(rawSettings);
   const maps=buildErrorMaps(settings);
@@ -1764,13 +1723,8 @@ export async function auditBatch(apiKey,rawSettings,batch,signal,log,onUsage,req
   if(missing.length){
     throw new Error(`OpenAI still omitted ${missing.length} lead(s). Saved batches are safe; resume to retry.`);
   }
-  const rows=batch.map(lead=>{
+  return batch.map(lead=>{
     const ai=byId.get(clean(lead.leadId));
-    const rawAiE=Array.isArray(ai?.e)?ai.e.map(t=>String(t??"")):[];
-    const resolvedPairs=(Array.isArray(ai?.e)?ai.e:[]).map(token=>{
-      const resolved=maps.resolve(token);
-      return{raw:String(token??""),resolved,allowed:Boolean(resolved&&AI_ALLOWED_ERRORS.has(resolved))};
-    });
     const aiErrors=Array.isArray(ai.e)?ai.e.map(token=>maps.resolve(token)).filter(label=>AI_ALLOWED_ERRORS.has(label)):[];
     const connectedYes=lead.staticValues.connected==="Yes";
     const filteredAi=connectedYes?aiErrors:aiErrors.filter(label=>!CONNECTED_ONLY_ERRORS.has(label));
@@ -1780,22 +1734,13 @@ export async function auditBatch(apiKey,rawSettings,batch,signal,log,onUsage,req
     let merged=unique([...filteredLocal,...filteredAi]).filter(label=>ERROR_TYPES.includes(label));
     let errors=merged.includes(EMPTY_REQUIREMENT)?merged.filter(label=>label!==WRONG_REQUIREMENT):merged;
     const comments=Array.isArray(lead.auditContext?.c)?lead.auditContext.c:[lead.staticValues.comments];
-    const mismatch=statusHardRuleMismatch(lead.staticValues.status,comments);
-    const aligned=statusHardRuleAligned(lead.staticValues.status,comments);
-    const beforeHard=[...errors];
-    // Local hard-rule floor: Cold/Beyond Budget/Lost + clear buying signals in c → always emit status error.
-    if(mismatch){
+    // Local hard-rule floor / ceiling aligned with STATUS Rules 1–5.
+    if(statusHardRuleMismatch(lead.staticValues.status,comments)){
       errors=unique([...errors,STATUS_HISTORY_ERROR]);
     }
-    // Local hard-rule ceiling: Cold/Beyond Budget/Lost + dead/NI/RNR trail, no buying signals → strip false-positive status error.
-    if(aligned){
+    if(statusHardRuleAligned(lead.staticValues.status,comments)){
       errors=errors.filter(label=>label!==STATUS_HISTORY_ERROR);
     }
-    // #region agent log
-    const rText=String(ai?.r??"");
-    const statusTalk=/\b(status|cold|lost|warm|hot|prospect|qualified|align|mismatch)\b/i.test(rText);
-    agentDebugLog({runId:"pre-fix",hypothesisId:"A-E",location:"audit.js:auditBatch-merge",message:"status error merge path",data:{mobile:String(lead.staticValues?.mobile||"").slice(-4),status:String(lead.staticValues?.status||""),statusRank:leadStatusRank(lead.staticValues?.status),connectedYes,rawAiE,resolvedPairs,aiErrors,beforeHard,mismatch,aligned,buyingSignals:hasCumulativeBuyingSignals(comments),deadAligned:hasDeadLostAlignedTrajectory(comments),finalErrors:errors,finalHasStatus:errors.includes(STATUS_HISTORY_ERROR),aiRHasStatusTalk:statusTalk,aiRSnippet:rText.slice(0,120)}},log);
-    // #endregion
     const forceNoIntent=(trailingRnrStreak(comments)>=8&&!hasCumulativeBuyingSignals(comments))
       ||commentEntries(comments).some(hasActiveRejectionComment)
       ||(allCommentsRnrLike(comments)&&commentEntries(comments).length>=8);
@@ -1828,19 +1773,6 @@ export async function auditBatch(apiKey,rawSettings,batch,signal,log,onUsage,req
       recommendation:finalizeRecommendation(ai.r,rowForText,errors,q)
     };
   });
-  // #region agent log
-  try{
-    const buf=typeof sessionStorage!=="undefined"?JSON.parse(sessionStorage.getItem("ll-debug-6866e6")||"[]"):[];
-    const recent=buf.filter(x=>x?.location==="audit.js:auditBatch-merge").slice(-batch.length);
-    const rTalkNoErr=recent.filter(x=>x?.data?.aiRHasStatusTalk&&!x?.data?.finalHasStatus).length;
-    const aiEmitted=recent.filter(x=>Array.isArray(x?.data?.rawAiE)&&x.data.rawAiE.some(t=>/status|aligned/i.test(String(t)))).length;
-    const resolvedOk=recent.filter(x=>Array.isArray(x?.data?.aiErrors)&&x.data.aiErrors.includes(STATUS_HISTORY_ERROR)).length;
-    const stripped=recent.filter(x=>x?.data?.aligned&&Array.isArray(x?.data?.beforeHard)&&x.data.beforeHard.includes(STATUS_HISTORY_ERROR)).length;
-    agentDebugLog({runId:"pre-fix",hypothesisId:"A-E",location:"audit.js:auditBatch-flush",message:"batch status debug summary",data:{batchSize:batch.length,recent:recent.length,rTalkNoErr,aiEmitted,resolvedOk,stripped}},log);
-    if(typeof log==="function")log(`[DBG-status] batch summary: rows=${batch.length} aiEmittedStatus=${aiEmitted} resolvedOk=${resolvedOk} strippedByAligned=${stripped} rTalkWithoutError=${rTalkNoErr}`,"warn");
-  }catch{/* ignore */}
-  // #endregion
-  return rows;
 }
 
 export function selectedOutputFields(rawSettings){

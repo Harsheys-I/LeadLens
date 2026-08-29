@@ -1,5 +1,5 @@
 {
-  "version": "5.2.14",
+  "version": "5.2.15",
   "name": "LeadLens",
-  "notes": "v5.2.14: Local Prospect Rules 4–5 + stricter scrub of status talk without status error in e."
+  "notes": "v5.2.15: Bucket 1 Lead Status prompt = DeBug Rules 1–5 with JSON e mapping."
 }
