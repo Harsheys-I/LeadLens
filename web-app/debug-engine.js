@@ -13,7 +13,7 @@ import {
   auditBatch,
   resolveAuditResultId,
   promptCacheKey,
-} from "./audit.js?v=5.2.12";
+} from "./audit.js?v=5.2.8";
 import {
   LAB_ERROR_TYPES,
   SHARED_PREAMBLE,
@@ -131,7 +131,7 @@ async function requestDebugAudit(apiKey,settings,leads,signal,log,onUsage){
   }
   const system=composeDebugPrompt(settings);
   const schema=buildDebugResponseSchema(settings.activeErrorTypes);
-  const modelInput=buildAiModelInput(leads,settings);
+  const modelInput=buildAiModelInput(leads);
   const sentIds=(leads||[]).map(lead=>String(lead.leadId??""));
   const maxTokens=Math.max(500,leads.length*140);
   const auditBody=buildChatCompletionBody(settings.model,{

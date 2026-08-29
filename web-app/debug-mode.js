@@ -16,7 +16,7 @@ import {
   sortResults,
   validateApiKey,
   SERVER_API_KEY,
-} from "./audit.js?v=5.2.12";
+} from "./audit.js?v=5.2.10";
 import {getApiKey,apiKeyIsRemembered,saveApiKey,forgetApiKey,setStorageUserId,storageKey} from "./db.js?v=5.2.8";
 import {requireAuth,logout,getUser,changePassword,updateProfile} from "./auth.js?v=5.2.8";
 import {SettingsApi} from "./api-client.js?v=5.2.8";
@@ -27,13 +27,13 @@ import {
   compareDebugVsTelecaller,
   activePromptsReady,
   normalizeActiveErrorTypes,
-} from "./debug-engine.js?v=5.2.12";
+} from "./debug-engine.js?v=5.2.8";
 import {
   LAB_ERROR_TYPES,
-  DEFAULT_ERROR_PROMPTS,
+  STATUS_HISTORY_PROMPT,
   emptyErrorPrompts,
   ERROR_TO_AUDIT_RULE,
-} from "./debug-prompts.js?v=5.2.11";
+} from "./debug-prompts.js?v=5.2.8";
 
 const $=id=>document.getElementById(id);
 const ids=[
@@ -42,7 +42,7 @@ const ids=[
   "metric-leads","metric-calls","metric-batch","metric-completed","metric-status","metric-input-tokens",
   "metric-cached-tokens","metric-output-tokens","metric-duration","metric-cost","live-log","clear-console",
   "api-key","remember-key","toggle-key","save-key","forget-key","key-message","batch-size","concurrency","model",
-  "input-field-config","add-input-field","ai-field-config","output-field-config","eligible-followups","yes-values","no-values",
+  "input-field-config","add-input-field","ai-field-config","output-field-config","yes-values","no-values",
   "error-type-checks","error-run-hint","focus-error-type","error-prompt","sync-status-from-audit","push-prompt-to-audit","clear-error-prompt",
   "input-price","cached-price","output-price","save-settings","reset-settings","settings-message",
   "toast","mobile-menu","sort-field","sort-direction","app-version","export-settings","import-settings",
@@ -66,6 +66,7 @@ const SHORT_ERROR_LABEL={
   "Incorrect Customer Requirement":"Rq wrong",
   "Customer Comment Quality Not Appropriate":"Comment quality"
 };
+const STATUS_HISTORY_ERROR=LAB_ERROR_TYPES[0];
 const WIDE_RESULT_COLS=new Set(["observation","recommendation","comments"]);
 
 function formatResultCell(fieldId,value){
@@ -487,13 +488,9 @@ function renderErrorFocusSettings(){
   textarea.value=settings.errorPrompts?.[settings.focusErrorType]||"";
   const syncBtn=els["sync-status-from-audit"];
   if(syncBtn){
-    const focus=settings.focusErrorType||LAB_ERROR_TYPES[0];
-    const hasDefault=Boolean(String(DEFAULT_ERROR_PROMPTS[focus]||"").trim());
-    syncBtn.hidden=false;
-    syncBtn.disabled=!hasDefault;
-    syncBtn.title=hasDefault
-      ? "Load the built-in production default prompt for this error into DeBug"
-      : "No default prompt for this error type";
+    const isStatus=settings.focusErrorType===STATUS_HISTORY_ERROR;
+    syncBtn.hidden=!isStatus;
+    syncBtn.disabled=!isStatus;
   }
   const pushBtn=els["push-prompt-to-audit"];
   if(pushBtn){
@@ -1685,7 +1682,6 @@ function renderSettings(){
   if(els["batch-size"])els["batch-size"].value=settings.batchSize;
   if(els.concurrency)els.concurrency.value=settings.concurrency;
   if(els.model)els.model.value=settings.model;
-  if(els["eligible-followups"])els["eligible-followups"].value=settings.eligibleFollowups;
   if(els["yes-values"])els["yes-values"].value=settings.yesValues;
   if(els["no-values"])els["no-values"].value=settings.noValues;
   if(els["input-price"])els["input-price"].value=settings.pricing.input;
@@ -1710,7 +1706,6 @@ function collectSettings(){
   next.batchSize=Number(els["batch-size"]?.value);
   next.concurrency=Number(els.concurrency?.value);
   next.model=(els.model?.value||"").trim();
-  next.eligibleFollowups=Number(els["eligible-followups"]?.value);
   next.yesValues=(els["yes-values"]?.value||"").trim();
   next.noValues=(els["no-values"]?.value||"").trim();
   next.pricing={input:number(els["input-price"]?.value),cached:number(els["cached-price"]?.value),output:number(els["output-price"]?.value)};
@@ -2036,18 +2031,11 @@ els["error-prompt"]?.addEventListener("input",()=>{
 els["sync-status-from-audit"]?.addEventListener("click",()=>{
   settings=collectSettings();
   const focus=settings.focusErrorType||LAB_ERROR_TYPES[0];
-  const defaultPrompt=String(DEFAULT_ERROR_PROMPTS[focus]||"").trim();
-  if(!defaultPrompt){
-    toast("No default prompt for this error type.");
-    return;
-  }
+  if(focus!==STATUS_HISTORY_ERROR)return;
   settings.errorPrompts=settings.errorPrompts||emptyErrorPrompts();
-  settings.errorPrompts[focus]=defaultPrompt;
-  if(els["error-prompt"])els["error-prompt"].value=defaultPrompt;
-  if(els["settings-message"]){
-    els["settings-message"].textContent=`Loaded production default for ${shortLabel(focus)} into this DeBug prompt (app defaults, not live server).`;
-  }
-  toast(`Loaded default prompt — ${shortLabel(focus)}`);
+  settings.errorPrompts[focus]=STATUS_HISTORY_PROMPT;
+  if(els["error-prompt"])els["error-prompt"].value=STATUS_HISTORY_PROMPT;
+  if(els["settings-message"])els["settings-message"].textContent="Loaded production Status rules into this DeBug prompt (from app defaults, not live server).";
 });
 els["push-prompt-to-audit"]?.addEventListener("click",async()=>{
   if(!getUser()?.is_super){
@@ -2182,11 +2170,6 @@ els["save-settings"]?.addEventListener("click",async()=>{
   }
   if(!Number.isInteger(rawConc)||rawConc<1||rawConc>MAX_CONCURRENCY){
     if(els["settings-message"])els["settings-message"].textContent=`Parallel batches must be 1–${MAX_CONCURRENCY}.`;
-    return;
-  }
-  const rawEligible=Number(els["eligible-followups"]?.value);
-  if(!Number.isInteger(rawEligible)||(rawEligible!==-1&&rawEligible<1)){
-    if(els["settings-message"])els["settings-message"].textContent="Eligible Followups must be -1 (all) or an integer ≥ 1.";
     return;
   }
   const next=collectSettings();

@@ -1,4 +1,4 @@
-import {APP_VERSION,DEFAULT_SETTINGS,DEFAULT_OUTPUT_FIELDS,SETTINGS_SEED,MAX_BATCH_SIZE,MAX_CONCURRENCY,normalizeSettings,normalizeInputFields,slugFieldId,parseWorkbook,parseAuditedWorkbook,auditBatch,downloadWorkbook,downloadReviewPack,splitLeadsByTelecaller,splitResultsByTelecaller,validateApiKey,HIGH_SEVERITY_ERRORS,SERVER_API_KEY} from "./audit.js?v=5.2.12";
+import {APP_VERSION,DEFAULT_SETTINGS,DEFAULT_OUTPUT_FIELDS,SETTINGS_SEED,MAX_BATCH_SIZE,MAX_CONCURRENCY,normalizeSettings,normalizeInputFields,slugFieldId,parseWorkbook,parseAuditedWorkbook,auditBatch,downloadWorkbook,downloadReviewPack,splitLeadsByTelecaller,splitResultsByTelecaller,validateApiKey,HIGH_SEVERITY_ERRORS,SERVER_API_KEY} from "./audit.js?v=5.2.5";
 import {getJob,getJobs,loadSettings,saveSettings,getApiKey,apiKeyIsRemembered,saveApiKey,forgetApiKey,setStorageUserId,storageKey} from "./db.js?v=5.2.1";
 import {renderReviewDashboard,destroyReviewDashboard} from "./dashboard-view.js?v=5.2.10";
 import {requireAuth,logout,hasPermission,getUser,changePassword,updateProfile} from "./auth.js?v=5.2.1";
@@ -7,7 +7,7 @@ import {mountNotifications} from "./notifications-ui.js?v=5.2.1";
 import {persistJob,removeJobSynced,clearJobsSynced,pullJobsFromServer} from "./jobs-sync.js?v=5.2.1";
 
 const $=id=>document.getElementById(id);
-const ids=["page-title","key-state","run-name","pause-run","download-result","progress-label","progress-percent","progress-bar","metric-leads","metric-excel-rows","metric-calls","metric-batch","metric-completed","metric-status","metric-input-tokens","metric-cached-tokens","metric-output-tokens","metric-duration","metric-cost","live-log","clear-console","history-list","clear-history","api-key","remember-key","toggle-key","save-key","forget-key","key-message","batch-size","concurrency","model","input-field-config","add-input-field","ai-field-config","rule-config","add-rule","output-field-config","eligible-followups","yes-values","no-values","additional-instructions","input-price","cached-price","output-price","save-settings","reset-settings","settings-message","toast","mobile-menu","active-job-switch","sort-field","sort-direction","app-version","export-settings","import-settings","import-settings-file","update-banner","update-banner-text","reload-app","key-modal","onboard-key","onboard-toggle","onboard-remember","onboard-message","onboard-save","onboard-skip","sidebar-version","sidebar-notes","review-drop-zone","review-file-input","review-drop-hint","review-file-list","review-validation","start-review","review-run-panel","review-aggregate","review-cards","review-dashboard-panel","review-dashboard-mount","download-review-excel","review-open-console","review-precounts","review-live-progress","review-progress-label","review-progress-percent","review-progress-bar","review-post-actions","create-review-dashboard","upload-dashboard-btn","upload-dashboard-modal","upload-telecaller-list","upload-dash-message","upload-dash-confirm","upload-dash-cancel","published-list","refresh-published","published-dashboard-panel","published-dash-title","published-dash-meta","published-dash-actions","published-dashboard-mount","shell-user-label","shell-logout","shell-account"];
+const ids=["page-title","key-state","run-name","pause-run","download-result","progress-label","progress-percent","progress-bar","metric-leads","metric-excel-rows","metric-calls","metric-batch","metric-completed","metric-status","metric-input-tokens","metric-cached-tokens","metric-output-tokens","metric-duration","metric-cost","live-log","clear-console","history-list","clear-history","api-key","remember-key","toggle-key","save-key","forget-key","key-message","batch-size","concurrency","model","input-field-config","add-input-field","ai-field-config","rule-config","add-rule","output-field-config","yes-values","no-values","additional-instructions","input-price","cached-price","output-price","save-settings","reset-settings","settings-message","toast","mobile-menu","active-job-switch","sort-field","sort-direction","app-version","export-settings","import-settings","import-settings-file","update-banner","update-banner-text","reload-app","key-modal","onboard-key","onboard-toggle","onboard-remember","onboard-message","onboard-save","onboard-skip","sidebar-version","sidebar-notes","review-drop-zone","review-file-input","review-drop-hint","review-file-list","review-validation","start-review","review-run-panel","review-aggregate","review-cards","review-dashboard-panel","review-dashboard-mount","download-review-excel","review-open-console","review-precounts","review-live-progress","review-progress-label","review-progress-percent","review-progress-bar","review-post-actions","create-review-dashboard","upload-dashboard-btn","upload-dashboard-modal","upload-telecaller-list","upload-dash-message","upload-dash-confirm","upload-dash-cancel","published-list","refresh-published","published-dashboard-panel","published-dash-title","published-dash-meta","published-dash-actions","published-dashboard-mount","shell-user-label","shell-logout","shell-account"];
 const els=Object.fromEntries(ids.map(id=>[id,$(id)]));
 const titles={review:"Bucket 1 lead audit",console:"Run console",published:"Dashboard",history:"History",settings:"Settings"};
 /** When false, completed audits do not auto-render charts until Create Dashboard. */
@@ -1678,7 +1678,6 @@ function renderSettings(){
   els["batch-size"].value=settings.batchSize;
   els.concurrency.value=settings.concurrency;
   els.model.value=settings.model;
-  if(els["eligible-followups"])els["eligible-followups"].value=settings.eligibleFollowups;
   els["yes-values"].value=settings.yesValues;
   els["no-values"].value=settings.noValues;
   els["additional-instructions"].value=settings.additionalInstructions;
@@ -1701,7 +1700,6 @@ function collectSettings(){
   next.batchSize=Number(els["batch-size"].value);
   next.concurrency=Number(els.concurrency.value);
   next.model=els.model.value.trim();
-  if(els["eligible-followups"])next.eligibleFollowups=Number(els["eligible-followups"].value);
   next.yesValues=els["yes-values"].value.trim();
   next.noValues=els["no-values"].value.trim();
   next.additionalInstructions=els["additional-instructions"].value.trim();
@@ -1993,11 +1991,6 @@ els["save-settings"].onclick=async()=>{
   const rawConcurrency=Number(els.concurrency.value);
   if(!Number.isInteger(rawBatch)||rawBatch<1||rawBatch>MAX_BATCH_SIZE){els["settings-message"].textContent=`Batch size must be 1–${MAX_BATCH_SIZE}.`;return;}
   if(!Number.isInteger(rawConcurrency)||rawConcurrency<1||rawConcurrency>MAX_CONCURRENCY){els["settings-message"].textContent=`Parallel batches must be 1–${MAX_CONCURRENCY}.`;return;}
-  const rawEligible=Number(els["eligible-followups"]?.value);
-  if(!Number.isInteger(rawEligible)||(rawEligible!==-1&&rawEligible<1)){
-    els["settings-message"].textContent="Eligible Followups must be -1 (all) or an integer ≥ 1.";
-    return;
-  }
   const next=collectSettings();
   if(!next.model){els["settings-message"].textContent="Enter a model name.";return;}
   if(!next.outputFields.some(field=>field.enabled)){els["settings-message"].textContent="Select at least one output Excel field.";return;}

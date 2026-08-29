@@ -7,9 +7,9 @@
   <meta name="description" content="LeadLens DeBug Mode">
   <title>LeadLens · DeBug Mode</title>
   <link rel="manifest" href="../manifest.webmanifest">
-  <link rel="stylesheet" href="../styles.css?v=5.2.12">
+  <link rel="stylesheet" href="../styles.css?v=5.2.10">
   <script defer src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-  <script type="module" src="../debug-mode.js?v=5.2.12"></script>
+  <script type="module" src="../debug-mode.js?v=5.2.10"></script>
 </head>
 <body>
   <div id="update-banner" class="update-banner hidden" role="status">
@@ -23,7 +23,7 @@
         <button class="nav-item active" data-view="run"><span>◎</span>Run</button>
         <button class="nav-item" data-view="settings"><span>⚙</span>Settings</button>
       </nav>
-      <div class="privacy-note"><strong id="sidebar-version">v5.2.12</strong><span id="sidebar-notes">DeBug Mode — Error Focus Lab. Per-error prompts + CSV batches + Structured Outputs.</span></div>
+      <div class="privacy-note"><strong id="sidebar-version">v5.2.10</strong><span id="sidebar-notes">DeBug Mode — Error Focus Lab. Per-error prompts + CSV batches + Structured Outputs.</span></div>
     </aside>
 
     <main>
@@ -150,23 +150,22 @@
             </section>
 
             <section class="settings-card">
-              <div class="card-title"><h2>4 · Fields sent to AI</h2><p><strong>Eligible Followups</strong> limits how many latest comments go to the AI (−1 = all). Values go into the CSV/JSON batch.</p></div>
+              <div class="card-title"><h2>4 · Fields sent to AI</h2><p>Comments always send full chronological history. Values go into the CSV batch.</p></div>
               <div id="ai-field-config" class="config-list"></div>
               <div class="field-grid settings-subgrid">
-                <label>Eligible Followups<input id="eligible-followups" type="number" step="1" value="-1" title="-1 sends all comments; 3 sends only the latest 3"></label>
                 <label>Connected = Yes values<input id="yes-values" type="text"></label>
                 <label>Connected = No values<input id="no-values" type="text"></label>
               </div>
             </section>
 
             <section class="settings-card">
-              <div class="card-title"><h2>5 · Error Focus prompts</h2><p>Select AI Error Types to run. Edit the focused prompt below. <strong>Sync to Bucket 1</strong> writes it into TeleCaller production <code>audit_settings</code> (Super User). <strong>Sync from Bucket 1</strong> loads the app’s built-in production default prompt for the focused error into DeBug.</p></div>
+              <div class="card-title"><h2>5 · Error Focus prompts</h2><p>Select AI Error Types to run. Edit the focused prompt below. <strong>Sync to Bucket 1</strong> writes it into TeleCaller production <code>audit_settings</code> (Super User). <strong>Sync from Bucket 1</strong> (Status only) loads the app’s built-in production Status rules into DeBug.</p></div>
               <div id="error-type-checks" class="debug-error-checks" role="group" aria-label="Active error types"></div>
               <p id="error-run-hint" class="form-message muted">Running with 0 error(s): —</p>
               <div class="debug-focus-toolbar">
                 <label class="debug-focus-select">Editing<select id="focus-error-type"></select></label>
                 <div class="inline-actions">
-                  <button id="sync-status-from-audit" type="button" class="secondary-button" title="Load the built-in production default prompt for this error into DeBug">Sync from Bucket 1</button>
+                  <button id="sync-status-from-audit" type="button" class="secondary-button" hidden title="Copy production Status rules into this DeBug prompt">Sync from Bucket 1</button>
                   <button id="push-prompt-to-audit" type="button" class="primary-button" title="Save this prompt into TeleCaller Bucket 1 audit settings for everyone">Sync to Bucket 1</button>
                   <button id="clear-error-prompt" type="button" class="text-button">Clear</button>
                 </div>
