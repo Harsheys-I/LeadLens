@@ -12,35 +12,39 @@ export const LAB_ERROR_TYPES = [
 
 /** Canonical production status-vs-comments rules (Bucket 1 / TeleCaller audit). */
 export const STATUS_HISTORY_PROMPT = `STATUS vs FULL COMMENT HISTORY
-Allowed Lead Status labels (case-insensitive): Qualified, Hot, Warm, Cold, Beyond Budget, Lost.
-Heat ladder highest→lowest: Qualified > Hot > Warm > Cold > Beyond Budget > Lost.
-Note: CRM exports may label the top tier as "Prospect"; the payload field s uses "Qualified" for that tier.
+Allowed Lead Status labels (case-insensitive): Prospect (Qualified), Hot, Warm, Cold, Beyond Budget, Lost.
+Heat ladder highest→lowest: Prospect > Hot > Warm > Cold > Beyond Budget > Lost.
+Note: CRM may show "Prospect"; payload field s may arrive as "Qualified" for that same top tier — treat them as the same rank.
 
-c is the full chronological timeline — read ALL entries to determine the cumulative intent.
+CRITICAL ALIGNMENT RULES (RECENCY-BASED):
+Read the timeline chronologically. The MOST RECENT comments at the end of the chain dictate the exact status, overriding early interest.
 
-EVALUATION LOGIC (STRICT):
-1. ASSESS INTENT: Identify the highest level of buying intent based strictly on what is written in the comments.
-2. LOW STATUS MISMATCH (UPWARD FIX): If comments show clear buying signals (like budget, specific requirements, promised visits), the status CANNOT be Cold, Beyond Budget, or Lost. If s=Cold but comments show active interest, you MUST emit "Lead Status Not Aligned With Comments".
-3. NEUTRAL RNR OVERRIDE (DOWNWARD FIX): 1 to 5 "RNR", "Busy", or "Unreachable" comments are NEUTRAL. They do NOT cancel out prior interest, and they absolutely do NOT justify marking an active lead as Cold.
-4. COOLING THRESHOLD: Early interest is ONLY canceled if later notes show ACTIVE rejection (e.g., "Not interested", "Stop calling") or a massive block of 8+ consecutive RNRs.
+RULE 1 (DEAD AIR / PURE RNR):
+IF 100% of the timeline is outbound attempts (RNR, Voicemail, Busy, Message Shared) with ZERO buyer response, REGARDLESS of count (1 or 500).
+→ Target Status: Cold or Lost. If current status is Cold or Lost → ALIGNED. Do NOT put "Lead Status Not Aligned With Comments" in e.
 
-CRITICAL DOWNWARD RULE:
-When the latest meaningful comment is ACTIVE NI/dead ("not interested", "enquired by mistake", "not looking") OR the trail ends with 8+ consecutive RNR/Busy with no prior buying signals → e:[] even if early comments were warm. Cold, Beyond Budget, or Lost is aligned — do NOT flag status mismatch.
+RULE 2 (THE 5-RNR DROP):
+IF there WAS early interest, BUT the LAST 5 (or more) consecutive comments are RNR-like.
+→ Target Status: Cold. Early interest has decayed. If current status is Cold → ALIGNED. Do NOT put the status error in e.
 
-Emit "Lead Status Not Aligned With Comments" ONLY on clear mismatch. Prefer e:[] when unsure or when s reasonably matches. Weak polarity guesses are forbidden. Baseline is Warm for passive comments.
+RULE 3 (THE COOLDOWN):
+IF the LAST 1 to 4 comments are RNR-like, BUT there is a positive/engaged comment immediately before them.
+→ Target Status: Warm. If currently Prospect, Hot, or Cold → MISMATCH — you MUST include "Lead Status Not Aligned With Comments" in e.
 
-OUTPUT / REASONING CONSTRAINTS (ANTI-HALLUCINATION):
-- o MUST say why status mismatches based ONLY on the provided text.
-- CRITICAL: Your reason (o) MUST STRICTLY use facts and quotes directly from the provided 'Comments'. Do NOT invent details, and do NOT copy hypothetical examples from these instructions into your output.
-- If there is no error (e:[]), do not invent missing criteria. Justify it using the actual text.
-- For ~8+ calls all RNR / clear NI/dead → r must say change status to Lost and close the lead.
+RULE 4 (THE HOT / NO-VISIT RULE):
+IF the VERY LAST comment is positive (asking for details, sharing budget), BUT there is no confirmed site visit happening.
+→ Target Status: Hot. If currently Prospect/Qualified → MISMATCH — you MUST include "Lead Status Not Aligned With Comments" in e.
 
-STATUS EXAMPLES (apply to full c timeline — do not copy text into o):
-BAD-FLAG) s=Cold, c=[RNR×10 only] → e:[] — dead unanswered trail; Cold fits.
-BAD-FLAG) s=Lost, c=[enquired by mistake, RNR, RNR] → e:[] — ACTIVE NI/dead; Lost aligned.
-GOOD-FLAG) s=Cold, c=[2BHK Whitefield, budget 90L, visit on Saturday] → MUST emit status error — clear buying signals vs Cold.
-RNR-NEUTRAL) s=Warm, c=[interested 2BHK under 90L, RNR, RNR] → e:[] — 1–5 RNR do not cancel interest when status already matches.
-UPWARD-RNR) s=Cold, c=[interested 2BHK under 90L, RNR, RNR] → MUST emit status error — status too cold; short RNR gaps are neutral but do not excuse Cold vs clear interest.`;
+RULE 5 (PROSPECT / QUALIFIED VALIDATION):
+Prospect/Qualified is ONLY valid if the VERY LAST comment is positive AND confirms a site visit.
+Otherwise MISMATCH — include "Lead Status Not Aligned With Comments" in e.
+
+STRUCTURED OUTPUT (JSON schema — mandatory):
+- On MISMATCH: e MUST contain exactly "Lead Status Not Aligned With Comments" (full label).
+- On ALIGNED: e must NOT contain that label for this check.
+- Explain the rule and evidence in o (18–28 words). Put coaching in r.
+- Do NOT write freeform "Error :" / "Reason :" lines or <thinking> blocks — those are ignored by the app. Only e / o / r count.
+- NEVER invent details. NEVER suggest changing an already-Cold lead to Lost solely because of many RNRs when Rule 1 or 2 says Cold is aligned.`;
 
 /** Shared CSV + output contract — prepended once; not duplicated in each error prompt. */
 export const SHARED_PREAMBLE = `LeadLens DeBug · Error Focus Lab. Evidence only. Never invent facts, dates, budgets, locations, or prior calls.

@@ -1,5 +1,5 @@
 {
-  "version": "5.2.10",
+  "version": "5.2.13",
   "name": "LeadLens",
-  "notes": "v5.2.10: DeBug Results per-row Re-Audit 10× updates that lead’s consistency bars."
+  "notes": "v5.2.13: Align Bucket 1 status rules with DeBug recency Rules 1–5; put mismatches in e."
 }
