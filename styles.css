@@ -106,6 +106,7 @@ body .dashboard-section.is-panel-hidden,body .dashboard-section[hidden]{display:
 body .dashboard-section h2{margin:0;font-size:17px}
 body .dashboard-section-note{margin:0;font-size:12px;color:var(--muted)}
 body .dashboard-panel-switcher{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:12px;padding:12px 14px;background:#f7faf8;border:1px solid var(--line);border-radius:12px}
+body .dashboard-export-pdf{margin-left:auto;flex-shrink:0}
 body .dashboard-panel-switcher-label{display:flex;align-items:center;gap:10px;margin:0;font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.06em}
 body .dashboard-panel-select{min-width:200px;border:1px solid #cfd8d2;border-radius:9px;background:#fff;padding:9px 11px;color:var(--ink);font-weight:600;text-transform:none;letter-spacing:0}
 body .dashboard-panel-segments{display:none;flex-wrap:wrap;gap:6px;padding:4px;background:var(--panel);border:1px solid var(--line);border-radius:10px}
@@ -243,6 +244,16 @@ body.auth-body.home-mode{display:block;padding:0;place-items:unset}
 .home-tile.is-soon{opacity:.72}
 
 /* —— Module shell extras —— */
+.nav-group{display:grid;gap:4px}
+.nav-group.is-collapsed .nav-children{display:none}
+.nav-parent-row{display:flex;align-items:stretch;gap:2px;min-width:0}
+.nav-toggle{flex:0 0 28px;border:0;background:transparent;color:rgba(255,255,255,.65);border-radius:9px;cursor:pointer;padding:0;position:relative}
+.nav-toggle:hover{background:rgba(255,255,255,.12);color:#fff}
+.nav-toggle::before{content:"";position:absolute;inset:50% auto auto 50%;width:0;height:0;border-style:solid;border-width:5px 0 5px 7px;border-color:transparent transparent transparent currentColor;transform:translate(-40%,-50%);transition:transform .15s ease}
+.nav-group:not(.is-collapsed) .nav-toggle::before{transform:translate(-50%,-40%) rotate(90deg)}
+.nav-parent-row .nav-item{flex:1;min-width:0}
+.nav-children{display:grid;gap:4px;margin:2px 0 0 10px;padding-left:10px;border-left:1px solid rgba(255,255,255,.18)}
+.nav-item-child{padding:10px 12px;font-size:13px}
 .sidebar-user{display:grid;gap:6px;padding:0 10px;font-size:12px;color:rgba(255,255,255,.75)}
 .sidebar-link{color:#dff4e8!important;text-align:left;padding:0}
 .review-precounts{max-width:none;width:100%;margin:14px 0 0;display:grid;grid-template-columns:repeat(3,1fr);gap:12px;padding:14px 16px;background:var(--panel);border:1px solid var(--line);border-radius:12px}

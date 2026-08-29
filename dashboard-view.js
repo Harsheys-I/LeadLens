@@ -895,7 +895,7 @@ function section(title, noteText, child, panelId){
   return node;
 }
 
-function buildPanelSwitcher(activeId, onChange){
+function buildPanelSwitcher(activeId, onChange, {onExportPdf} = {}){
   const bar = el("div", "dashboard-panel-switcher");
   const label = el("label", "dashboard-panel-switcher-label");
   label.append(el("span", null, "Panel"));
@@ -930,6 +930,13 @@ function buildPanelSwitcher(activeId, onChange){
     segs.append(btn);
   }
   bar.append(segs);
+
+  if(typeof onExportPdf === "function"){
+    const exportBtn = el("button", "secondary-button dashboard-export-pdf", "Export PDF");
+    exportBtn.type = "button";
+    exportBtn.addEventListener("click", () => onExportPdf());
+    bar.append(exportBtn);
+  }
 
   select.addEventListener("change", () => onChange(select.value));
   return {bar, select, segs};
@@ -1031,7 +1038,7 @@ export function renderReviewDashboard(container, jobs, options = {}){
 
     const {bar} = buildPanelSwitcher(activePanel, (id) => {
       activePanel = applyActivePanel(body, id);
-    });
+    }, {onExportPdf: typeof options.onExportPdf === "function" ? options.onExportPdf : null});
     body.append(searchBar, bar);
     body.append(section("Executive KPIs", null, renderKpis(model.kpis, {showComparativeKpis}), "summary"));
     body.append(section("TeleCaller Performance", null, renderScorecard(model.scorecard), "performance"));

@@ -97,7 +97,7 @@ export function moduleTilesForUser(user = currentUser){
   const tiles = [
     {
       id: 'telecaller',
-      title: 'TeleCaller Audit',
+      title: 'TeleCaller',
       href: '/TeleCallerAudit/',
       perm: 'module.telecaller_audit',
       soon: false,

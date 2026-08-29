@@ -1,15 +1,15 @@
-import {APP_VERSION,DEFAULT_SETTINGS,DEFAULT_OUTPUT_FIELDS,SETTINGS_SEED,MAX_BATCH_SIZE,MAX_CONCURRENCY,normalizeSettings,normalizeInputFields,slugFieldId,parseWorkbook,parseAuditedWorkbook,auditBatch,downloadWorkbook,downloadReviewPack,splitLeadsByTelecaller,splitResultsByTelecaller,validateApiKey,HIGH_SEVERITY_ERRORS,SERVER_API_KEY} from "./audit.js?v=5.2.23";
+import {APP_VERSION,DEFAULT_SETTINGS,DEFAULT_OUTPUT_FIELDS,SETTINGS_SEED,MAX_BATCH_SIZE,MAX_CONCURRENCY,normalizeSettings,normalizeInputFields,slugFieldId,parseWorkbook,parseAuditedWorkbook,auditBatch,downloadWorkbook,downloadReviewPack,downloadReviewPdf,splitLeadsByTelecaller,splitResultsByTelecaller,validateApiKey,HIGH_SEVERITY_ERRORS,SERVER_API_KEY} from "./audit.js?v=5.2.24";
 import {getJob,getJobs,loadSettings,saveSettings,getApiKey,apiKeyIsRemembered,saveApiKey,forgetApiKey,setStorageUserId,storageKey} from "./db.js?v=5.2.19";
-import {renderReviewDashboard,destroyReviewDashboard} from "./dashboard-view.js?v=5.2.20";
+import {renderReviewDashboard,destroyReviewDashboard} from "./dashboard-view.js?v=5.2.24";
 import {requireAuth,logout,hasPermission,getUser,changePassword,updateProfile} from "./auth.js?v=5.2.19";
 import {DashboardApi,SettingsApi} from "./api-client.js?v=5.2.19";
 import {mountNotifications} from "./notifications-ui.js?v=5.2.19";
 import {persistJob,removeJobSynced,clearJobsSynced,pullJobsFromServer} from "./jobs-sync.js?v=5.2.19";
 
 const $=id=>document.getElementById(id);
-const ids=["page-title","key-state","run-name","pause-run","download-result","progress-label","progress-percent","progress-bar","metric-leads","metric-excel-rows","metric-calls","metric-batch","metric-completed","metric-status","metric-input-tokens","metric-cached-tokens","metric-output-tokens","metric-duration","metric-cost","live-log","clear-console","history-list","clear-history","api-key","remember-key","toggle-key","save-key","forget-key","key-message","batch-size","concurrency","model","input-field-config","add-input-field","ai-field-config","output-field-config","yes-values","no-values","input-price","cached-price","output-price","save-settings","reset-settings","settings-message","toast","mobile-menu","active-job-switch","sort-field","sort-direction","app-version","export-settings","import-settings","import-settings-file","update-banner","update-banner-text","reload-app","key-modal","onboard-key","onboard-toggle","onboard-remember","onboard-message","onboard-save","onboard-skip","sidebar-version","sidebar-notes","review-drop-zone","review-file-input","review-drop-hint","review-file-list","review-validation","start-review","review-run-panel","review-aggregate","review-cards","review-dashboard-panel","review-dashboard-mount","download-review-excel","review-open-console","review-precounts","review-live-progress","review-progress-label","review-progress-percent","review-progress-bar","review-post-actions","create-review-dashboard","upload-dashboard-btn","upload-dashboard-modal","upload-telecaller-list","upload-dash-message","upload-dash-confirm","upload-dash-cancel","published-list","refresh-published","published-dashboard-panel","published-dash-title","published-dash-meta","published-dash-actions","published-dashboard-mount","shell-user-label","shell-logout","shell-account"];
+const ids=["page-title","key-state","run-name","pause-run","download-result","progress-label","progress-percent","progress-bar","metric-leads","metric-excel-rows","metric-calls","metric-batch","metric-completed","metric-status","metric-input-tokens","metric-cached-tokens","metric-output-tokens","metric-duration","metric-cost","live-log","clear-console","history-list","clear-history","api-key","remember-key","toggle-key","save-key","forget-key","key-message","batch-size","concurrency","model","input-field-config","add-input-field","ai-field-config","output-field-config","yes-values","no-values","input-price","cached-price","output-price","save-settings","reset-settings","settings-message","toast","mobile-menu","active-job-switch","sort-field","sort-direction","app-version","export-settings","import-settings","import-settings-file","update-banner","update-banner-text","reload-app","key-modal","onboard-key","onboard-toggle","onboard-remember","onboard-message","onboard-save","onboard-skip","sidebar-version","sidebar-notes","review-drop-zone","review-file-input","review-drop-hint","review-file-list","review-validation","start-review","review-run-panel","review-aggregate","review-cards","review-dashboard-panel","review-dashboard-mount","download-review-excel","review-open-console","review-precounts","review-live-progress","review-progress-label","review-progress-percent","review-progress-bar","review-post-actions","create-review-dashboard","export-dashboard-pdf","upload-dashboard-btn","upload-dashboard-modal","upload-telecaller-list","upload-dash-message","upload-dash-confirm","upload-dash-cancel","published-list","refresh-published","published-dashboard-panel","published-dash-title","published-dash-meta","published-dash-actions","published-dashboard-mount","shell-user-label","shell-logout","shell-account"];
 const els=Object.fromEntries(ids.map(id=>[id,$(id)]));
-const titles={review:"Bucket 1 lead audit",console:"Run console",published:"Dashboard",history:"History",settings:"Settings"};
+const titles={review:"Bucket 1 Lead Audit",console:"Run console",published:"Dashboard",history:"History",settings:"Settings","perf-dashboard":"Dashboard","perf-settings":"Settings"};
 /** When false, completed audits do not auto-render charts until Create Dashboard. */
 let reviewDashboardRequested=false;
 let lastReadyReviewJobs=[];
@@ -54,8 +54,32 @@ function effectiveApiKey(){
   return "";
 }
 
-function dashboardRenderOptions(){
-  return{highSeverityErrors:HIGH_SEVERITY_ERRORS,showComparativeKpis:canSeeComparativeKpis()};
+function dashboardRenderOptions(jobsForPdf){
+  return{
+    highSeverityErrors:HIGH_SEVERITY_ERRORS,
+    showComparativeKpis:canSeeComparativeKpis(),
+    onExportPdf:()=>exportDashboardPdf(jobsForPdf)
+  };
+}
+
+async function exportDashboardPdf(jobs){
+  try{
+    let list=(jobs||[]).filter(job=>job&&job.results?.length);
+    if(!list.length){
+      toast("No dashboard data to export");
+      return;
+    }
+    if(list.length===1){
+      const split=splitResultsByTelecaller(list[0].results);
+      if(split.length>1)list=split;
+    }
+    toast("Building PDF…");
+    const stamp=new Date().toISOString().slice(0,10);
+    await downloadReviewPdf(list,`TeleCaller_Dashboard_${stamp}.pdf`);
+    toast(list.length===1?"PDF downloaded":`PDF downloaded (${list.length} TeleCallers)`);
+  }catch(err){
+    toast(err.message||"PDF export failed");
+  }
 }
 
 const deepCopy=value=>JSON.parse(JSON.stringify(value));
@@ -132,6 +156,25 @@ function clearInMemoryJobs(){
   reviewParsedFiles=[];
 }
 
+function setNavGroupExpanded(group,expanded){
+  if(!group)return;
+  group.classList.toggle("is-collapsed",!expanded);
+  group.querySelectorAll(".nav-toggle").forEach(btn=>{
+    btn.setAttribute("aria-expanded",expanded?"true":"false");
+    const label=btn.getAttribute("aria-label")||"";
+    btn.setAttribute("aria-label",expanded
+      ?label.replace(/^Expand\b/,"Collapse")
+      :label.replace(/^Collapse\b/,"Expand"));
+  });
+}
+
+function expandNavGroupForView(name){
+  const btn=document.querySelector(`.nav-item[data-view="${name}"]`);
+  if(!btn?.classList.contains("nav-item-child"))return;
+  const group=btn?.closest(".nav-group");
+  if(group)setNavGroupExpanded(group,true);
+}
+
 function showView(name){
   const btn=document.querySelector(`.nav-item[data-view="${name}"]`);
   if(btn?.dataset.perm&&!hasPermission(btn.dataset.perm)){
@@ -141,6 +184,7 @@ function showView(name){
   document.querySelectorAll(".view").forEach(view=>view.classList.toggle("active",view.id===`view-${name}`));
   document.querySelectorAll(".nav-item").forEach(button=>button.classList.toggle("active",button.dataset.view===name));
   if(els["page-title"])els["page-title"].textContent=titles[name]||titles.review;
+  expandNavGroupForView(name);
   document.querySelector(".shell")?.classList.remove("menu-open");
   const activeRail=document.querySelector(".view.active .dashboard-filters-rail:not(.is-collapsed)");
   document.body.classList.toggle("dashboard-filters-open",Boolean(activeRail));
@@ -1065,6 +1109,7 @@ async function startReview(){
   els["review-dashboard-panel"]?.classList.add("hidden");
   els["review-post-actions"]?.classList.add("hidden");
   if(els["create-review-dashboard"])els["create-review-dashboard"].disabled=true;
+  if(els["export-dashboard-pdf"])els["export-dashboard-pdf"].disabled=true;
   if(els["upload-dashboard-btn"])els["upload-dashboard-btn"].disabled=true;
 
   if(reviewFormat==="audit"){
@@ -1363,11 +1408,12 @@ async function renderReviewProgress(){
       if(els["upload-dashboard-btn"]){
         els["upload-dashboard-btn"].disabled=!hasPermission("telecaller.upload_dashboard");
       }
+      if(els["export-dashboard-pdf"])els["export-dashboard-pdf"].disabled=false;
       const key=ready.map(job=>`${job.id}:${job.results?.length||0}:${job.status}`).join("|");
       if(key!==lastReviewDashboardKey){
         lastReviewDashboardKey=key;
         try{
-          renderReviewDashboard(els["review-dashboard-mount"],ready,dashboardRenderOptions());
+          renderReviewDashboard(els["review-dashboard-mount"],ready,dashboardRenderOptions(ready));
         }catch(error){
           toast(error.message||"Could not render dashboard.");
         }
@@ -1377,12 +1423,14 @@ async function renderReviewProgress(){
       destroyReviewDashboard();
       if(els["review-dashboard-mount"])els["review-dashboard-mount"].replaceChildren();
       dashboardPanel.classList.add("hidden");
+      if(els["export-dashboard-pdf"])els["export-dashboard-pdf"].disabled=true;
       if(els["upload-dashboard-btn"])els["upload-dashboard-btn"].disabled=true;
     }else{
       lastReviewDashboardKey="";
       destroyReviewDashboard();
       if(els["review-dashboard-mount"])els["review-dashboard-mount"].replaceChildren();
       dashboardPanel.classList.add("hidden");
+      if(els["export-dashboard-pdf"])els["export-dashboard-pdf"].disabled=true;
       if(els["upload-dashboard-btn"])els["upload-dashboard-btn"].disabled=true;
     }
   }
@@ -1823,7 +1871,19 @@ function applySidebarCollapsed(collapsed,{persist=true}={}){
   requestAnimationFrame(()=>window.dispatchEvent(new Event("resize")));
 }
 
-document.querySelectorAll(".nav-item").forEach(button=>button.addEventListener("click",()=>showView(button.dataset.view)));
+document.querySelectorAll(".nav-toggle").forEach(button=>button.addEventListener("click",()=>{
+  const group=button.closest(".nav-group");
+  if(!group)return;
+  setNavGroupExpanded(group,group.classList.contains("is-collapsed"));
+}));
+document.querySelectorAll(".nav-item").forEach(button=>button.addEventListener("click",()=>{
+  if(button.hasAttribute("data-nav-toggle-group")){
+    const group=button.closest(".nav-group");
+    if(group)setNavGroupExpanded(group,group.classList.contains("is-collapsed"));
+    return;
+  }
+  if(button.dataset.view)showView(button.dataset.view);
+}));
 document.querySelector(".brand")?.addEventListener("click",event=>{
   // Brand goes to home hub (href="/"); only prevent default if we want in-module nav
 });
@@ -1911,6 +1971,7 @@ if(els["create-review-dashboard"])els["create-review-dashboard"].onclick=()=>{
   toast("Dashboard created below.");
 };
 if(els["upload-dashboard-btn"])els["upload-dashboard-btn"].onclick=openUploadDashboardModal;
+if(els["export-dashboard-pdf"])els["export-dashboard-pdf"].onclick=()=>exportDashboardPdf(lastReadyReviewJobs);
 if(els["upload-dash-cancel"])els["upload-dash-cancel"].onclick=closeUploadDashboardModal;
 if(els["upload-dash-confirm"])els["upload-dash-confirm"].onclick=confirmUploadDashboard;
 if(els["refresh-published"])els["refresh-published"].onclick=()=>refreshPublishedDashboards();
@@ -2050,11 +2111,16 @@ async function bootTeleCallerAudit(){
     const perm=btn.dataset.perm;
     if(perm&&!hasPermission(perm))btn.classList.add("hidden");
   });
+  document.querySelectorAll(".nav-group").forEach(group=>{
+    const items=[...group.querySelectorAll(".nav-item")];
+    const anyVisible=items.some(btn=>!btn.classList.contains("hidden"));
+    group.classList.toggle("hidden",!anyVisible);
+  });
   if(els["review-open-console"]&&!hasPermission("telecaller.run_console")){
     els["review-open-console"].classList.add("hidden");
   }
 
-  const firstVisible=[...document.querySelectorAll(".nav-item:not(.hidden)")][0];
+  const firstVisible=[...document.querySelectorAll(".nav-item[data-view]:not(.hidden)")][0];
   showView(firstVisible?.dataset.view||"review");
   await restoreFromStorage();
   checkForUpdate();
@@ -2221,9 +2287,16 @@ async function refreshPublishedDashboards(){
         ?`Combined · ${count} TeleCaller${count===1?"":"s"} · ${results.length} rows${when?" · updated "+when:""}`
         :`Your board · ${results.length} rows${when?" · updated "+when:""}`;
     }
+    const fakeJob={id:"published-combined",results,status:"completed",telecallerName:data.title||"Dashboard",updatedAt:data.updated_at};
     const actions=els["published-dash-actions"];
     if(actions){
       actions.replaceChildren();
+      const pdfBtn=document.createElement("button");
+      pdfBtn.type="button";
+      pdfBtn.className="secondary-button";
+      pdfBtn.textContent="Export PDF";
+      pdfBtn.onclick=()=>exportDashboardPdf([fakeJob]);
+      actions.append(pdfBtn);
       if(canManagePublishedDashboards()&&items.length){
         const all=document.createElement("button");
         all.type="button";
@@ -2234,8 +2307,7 @@ async function refreshPublishedDashboards(){
       }
     }
     panel?.classList.remove("hidden");
-    const fakeJob={id:"published-combined",results,status:"completed"};
-    renderReviewDashboard(els["published-dashboard-mount"],[fakeJob],dashboardRenderOptions());
+    renderReviewDashboard(els["published-dashboard-mount"],[fakeJob],dashboardRenderOptions([fakeJob]));
   }catch(err){
     mount.classList.remove("hidden");
     mount.innerHTML=`<div class="empty-card">${err.message||"Could not load dashboards."}</div>`;

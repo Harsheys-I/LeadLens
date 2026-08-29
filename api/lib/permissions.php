@@ -6,19 +6,19 @@ declare(strict_types=1);
 function ll_permission_catalog(): array
 {
   return [
-    ['id' => 'module.telecaller_audit', 'label' => 'Module · TeleCaller Audit', 'group' => 'Modules'],
+    ['id' => 'module.telecaller_audit', 'label' => 'Module · TeleCaller', 'group' => 'Modules'],
     ['id' => 'module.admin', 'label' => 'Module · Admin', 'group' => 'Modules'],
     ['id' => 'module.crm', 'label' => 'Module · CRM (coming soon)', 'group' => 'Modules'],
     ['id' => 'module.hr', 'label' => 'Module · HR (coming soon)', 'group' => 'Modules'],
     ['id' => 'admin.users', 'label' => 'Admin · Users', 'group' => 'Admin'],
     ['id' => 'admin.roles', 'label' => 'Admin · Roles', 'group' => 'Admin'],
     ['id' => 'admin.access_requests', 'label' => 'Admin · Access requests', 'group' => 'Admin'],
-    ['id' => 'telecaller.bucket1', 'label' => 'TeleCaller · Bucket 1 lead audit', 'group' => 'TeleCaller Audit'],
-    ['id' => 'telecaller.run_console', 'label' => 'TeleCaller · Run console', 'group' => 'TeleCaller Audit'],
-    ['id' => 'telecaller.dashboard', 'label' => 'TeleCaller · Dashboard', 'group' => 'TeleCaller Audit'],
-    ['id' => 'telecaller.upload_dashboard', 'label' => 'TeleCaller · Upload Dashboard', 'group' => 'TeleCaller Audit'],
-    ['id' => 'telecaller.history', 'label' => 'TeleCaller · History', 'group' => 'TeleCaller Audit'],
-    ['id' => 'telecaller.settings', 'label' => 'TeleCaller · Settings', 'group' => 'TeleCaller Audit'],
+    ['id' => 'telecaller.bucket1', 'label' => 'TeleCaller · Bucket 1 Lead Audit', 'group' => 'TeleCaller'],
+    ['id' => 'telecaller.run_console', 'label' => 'TeleCaller · Run console', 'group' => 'TeleCaller'],
+    ['id' => 'telecaller.dashboard', 'label' => 'TeleCaller · Dashboard', 'group' => 'TeleCaller'],
+    ['id' => 'telecaller.upload_dashboard', 'label' => 'TeleCaller · Upload Dashboard', 'group' => 'TeleCaller'],
+    ['id' => 'telecaller.history', 'label' => 'TeleCaller · History', 'group' => 'TeleCaller'],
+    ['id' => 'telecaller.settings', 'label' => 'TeleCaller · Settings', 'group' => 'TeleCaller'],
     ['id' => 'dashboards.view_all', 'label' => 'Dashboards · View all TeleCallers', 'group' => 'Dashboards'],
   ];
 }
