@@ -3,12 +3,12 @@
  * Reuses mapResultsToRawDataRows for severity / overdue / error labels.
  */
 
-import {mapResultsToRawDataRows} from "./dashboard-export.js?v=5.2.1";
+import {mapResultsToRawDataRows} from "./dashboard-export.js?v=5.2.20";
 
 const MONTHS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
 
-/** Inclusive bands for overdue pie + filter. Negatives / blank / Lost|Beyond Budget / >100 excluded. */
-export const OVERDUE_BUCKETS = ["0-5", ">5-50", ">50-100"];
+/** Inclusive upper bands for overdue pie + filter. Negatives / blank / Lost|Beyond Budget excluded. */
+export const OVERDUE_BUCKETS = ["0-5", "5-20", "20-50", "50-100", "100+"];
 
 function formatDashDate(date){
   if(!(date instanceof Date) || Number.isNaN(date.valueOf())) return "";
@@ -40,14 +40,15 @@ function accuracyRating(accuracy){
   return `${"★".repeat(filled)}${"☆".repeat(5 - filled)}`;
 }
 
-/** Map numeric overdue days → pie bucket, or null when N/A / out of range. */
+/** Map numeric overdue days → pie bucket, or null when N/A. */
 export function overdueBucket(days){
   const n = Number(days);
   if(!Number.isFinite(n) || n < 0) return null;
   if(n <= 5) return "0-5";
-  if(n <= 50) return ">5-50";
-  if(n <= 100) return ">50-100";
-  return null;
+  if(n <= 20) return "5-20";
+  if(n <= 50) return "20-50";
+  if(n <= 100) return "50-100";
+  return "100+";
 }
 
 function uniqueSorted(values){
@@ -292,6 +293,22 @@ export function buildDashboardModel(results, filters = {}, options = {}){
       sourceName: row.sourceName,
       auditStatus: row.auditStatus
     }));
+
+  // #region agent log
+  {
+    const STATUS_LABEL = "Lead Status Not Aligned With Comments";
+    const rawWithStatus = (results || []).filter(r => String(r?.errorTypes || "").includes(STATUS_LABEL));
+    const mappedWithStatus = allRows.filter(r => (r.errorLabels || []).includes(STATUS_LABEL) || String(r.errorType || "").includes(STATUS_LABEL));
+    const detailsWithStatus = errorDetails.filter(r => String(r.errorType || "").includes(STATUS_LABEL));
+    const strippedOnlyStatus = allRows.filter((r, i) => {
+      const src = (results || [])[i];
+      const rawHas = String(src?.errorTypes || "").includes(STATUS_LABEL);
+      const mappedHas = (r.errorLabels || []).includes(STATUS_LABEL);
+      return rawHas && !mappedHas;
+    });
+    fetch('http://127.0.0.1:7843/ingest/f4ac7d78-fa93-4940-929e-852fd1791883',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'d7b064'},body:JSON.stringify({sessionId:'d7b064',runId:'post-fix',hypothesisId:'B',location:'dashboard-metrics.js:buildDashboardModel',message:'status error pipeline counts',data:{rawWithStatus:rawWithStatus.length,mappedWithStatus:mappedWithStatus.length,detailsWithStatus:detailsWithStatus.length,strippedOnlyStatus:strippedOnlyStatus.length,sampleRaw:rawWithStatus.slice(0,3).map(r=>({errorTypes:r.errorTypes,mobile:r.mobile})),sampleMapped:allRows.filter((_,i)=>String((results||[])[i]?.errorTypes||'').includes(STATUS_LABEL)).slice(0,3).map(r=>({errorLabels:r.errorLabels,errorType:r.errorType,errorFlag:r.errorFlag})),errorTypeChartHasStatus:(charts.errorTypeDistribution?.labels||[]).includes(STATUS_LABEL)},timestamp:Date.now()})}).catch(()=>{});
+  }
+  // #endregion
 
   return {
     filterOptions,

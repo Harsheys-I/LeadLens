@@ -1,4 +1,4 @@
-import {buildTelecallerDashboardBlob} from "./dashboard-export.js?v=5.2.5";
+import {buildTelecallerDashboardBlob} from "./dashboard-export.js?v=5.2.20";
 import {STATUS_HISTORY_PROMPT} from "./debug-prompts.js?v=5.2.19";
 
 export const APP_VERSION = "5.2.19";
