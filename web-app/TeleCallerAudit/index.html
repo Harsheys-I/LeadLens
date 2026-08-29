@@ -4,14 +4,15 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="theme-color" content="#12372a">
-  <meta name="description" content="LeadLens TeleCaller Audit">
-  <title>LeadLens · TeleCaller Audit</title>
+  <meta name="description" content="LeadLens TeleCaller">
+  <title>LeadLens · TeleCaller</title>
   <link rel="manifest" href="../manifest.webmanifest">
-  <link rel="stylesheet" href="../styles.css?v=5.2.19">
+  <link rel="stylesheet" href="../styles.css?v=5.2.22">
   <script defer src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
-  <script type="module" src="../app.js?v=5.2.23"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js"></script>
+  <script type="module" src="../app.js?v=5.2.25"></script>
 </head>
 <body>
   <div id="update-banner" class="update-banner hidden" role="status">
@@ -21,12 +22,29 @@
   <div class="shell">
     <aside class="sidebar">
       <a class="brand" href="/"><span class="brand-mark">L</span><span>LeadLens</span></a>
-      <nav aria-label="TeleCaller Audit navigation">
-        <button class="nav-item active" data-view="review" data-perm="telecaller.bucket1"><span>◎</span>Bucket 1 lead audit</button>
-        <button class="nav-item" data-view="console" data-perm="telecaller.run_console"><span>⌁</span>Run console</button>
-        <button class="nav-item" data-view="published" data-perm="telecaller.dashboard"><span>▦</span>Dashboard</button>
-        <button class="nav-item" data-view="history" data-perm="telecaller.history"><span>◷</span>History</button>
-        <button class="nav-item" data-view="settings" data-perm="telecaller.settings"><span>⚙</span>Settings</button>
+      <nav aria-label="TeleCaller navigation">
+        <div class="nav-group is-collapsed" data-nav-group="bucket1">
+          <div class="nav-parent-row">
+            <button type="button" class="nav-toggle" aria-expanded="false" aria-label="Expand Bucket 1 Lead Audit"></button>
+            <button class="nav-item nav-item-parent active" data-view="review" data-perm="telecaller.bucket1"><span>◎</span>Bucket 1 Lead Audit</button>
+          </div>
+          <div class="nav-children">
+            <button class="nav-item nav-item-child" data-view="console" data-perm="telecaller.run_console"><span>⌁</span>Run console</button>
+            <button class="nav-item nav-item-child" data-view="published" data-perm="telecaller.dashboard"><span>▦</span>Dashboard</button>
+            <button class="nav-item nav-item-child" data-view="history" data-perm="telecaller.history"><span>◷</span>History</button>
+            <button class="nav-item nav-item-child" data-view="settings" data-perm="telecaller.settings"><span>⚙</span>Settings</button>
+          </div>
+        </div>
+        <div class="nav-group is-collapsed" data-nav-group="performance">
+          <div class="nav-parent-row">
+            <button type="button" class="nav-toggle" aria-expanded="false" aria-label="Expand TeleCaller Performance Report"></button>
+            <button type="button" class="nav-item nav-item-parent" data-nav-toggle-group data-perm="module.telecaller_audit"><span>▣</span>TeleCaller Performance Report</button>
+          </div>
+          <div class="nav-children">
+            <button class="nav-item nav-item-child" data-view="perf-dashboard" data-perm="module.telecaller_audit"><span>▦</span>Dashboard</button>
+            <button class="nav-item nav-item-child" data-view="perf-settings" data-perm="module.telecaller_audit"><span>⚙</span>Settings</button>
+          </div>
+        </div>
       </nav>
       <div class="privacy-note"><strong id="sidebar-version">v5.1.1</strong><span id="sidebar-notes">v5.1.1: rating bands; overdue pie/filter; Lost/Beyond Budget overdue '-'; fulfilled follow-up → overdue 0; Cold/RNR + cooled + Lost/NI floors; close-lead after dead signals; no set-follow-up when n exists.</span></div>
     </aside>
@@ -34,7 +52,7 @@
     <main>
       <header class="topbar">
         <button id="mobile-menu" class="icon-button" aria-label="Hide left panel" title="Hide left panel" aria-expanded="true">☰</button>
-        <div><p class="eyebrow">TELECALLER AUDIT</p><h1 id="page-title">Bucket 1 lead audit</h1></div>
+        <div><p class="eyebrow">TELECALLER</p><h1 id="page-title">Bucket 1 Lead Audit</h1></div>
         <div class="topbar-actions">
           <div id="key-state" class="key-state">API key not set</div>
           <span id="shell-user-label" class="topbar-user-label"></span>
@@ -47,7 +65,7 @@
       </header>
 
       <section id="view-review" class="view active">
-        <div class="intro"><h2>Bucket 1 lead audit</h2><p><strong>Excel RAW</strong> detects TeleCallers, audits the whole file, then lets you save Excel or create a dashboard. <strong>Excel Audit</strong> skips AI — upload an already-audited workbook and review.</p></div>
+        <div class="intro"><h2>Bucket 1 Lead Audit</h2><p><strong>Excel RAW</strong> detects TeleCallers, audits the whole file, then lets you save Excel or create a dashboard. <strong>Excel Audit</strong> skips AI — upload an already-audited workbook and review.</p></div>
         <div class="format-toggle" role="group" aria-label="Upload format">
           <button type="button" class="format-option active" data-review-format="raw">Excel RAW</button>
           <button type="button" class="format-option" data-review-format="audit">Excel Audit</button>
@@ -80,6 +98,7 @@
             <div class="card-title"><h2>Dashboard</h2><p>KPIs, TeleCaller scorecard, charts, and error details. Use the Filters tab on the right.</p></div>
             <div id="review-dashboard-mount"></div>
             <div class="inline-actions review-download-actions dashboard-footer-actions">
+              <button id="export-dashboard-pdf" type="button" class="secondary-button" disabled>Export PDF</button>
               <button id="upload-dashboard-btn" type="button" class="primary-button" disabled>Upload Dashboard</button>
             </div>
           </div>
@@ -116,6 +135,16 @@
       <section id="view-history" class="view">
         <div class="section-head"><div><h2>Audit history</h2><p>Shared team history — anyone with History access can view, download, or resume these runs.</p></div><button id="clear-history" class="danger-button">Clear history</button></div>
         <div id="history-list" class="history-list"><div class="empty-card">No audits yet.</div></div>
+      </section>
+
+      <section id="view-perf-dashboard" class="view">
+        <div class="intro"><h2>Dashboard</h2><p>TeleCaller Performance Report dashboard — placeholder for upcoming analytics.</p></div>
+        <div class="empty-card">This page is a stub. Performance dashboards are not available yet.</div>
+      </section>
+
+      <section id="view-perf-settings" class="view">
+        <div class="intro"><h2>Settings</h2><p>TeleCaller Performance Report settings — placeholder for upcoming options.</p></div>
+        <div class="empty-card">This page is a stub. Performance settings are not available yet.</div>
       </section>
 
       <section id="view-settings" class="view">

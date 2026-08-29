@@ -789,7 +789,7 @@ function renderProgress(job){
   if(els["download-result"])els["download-result"].disabled=multiRunActive||job.status!=="completed";
   if(els["compare-telecaller"]){
     els["compare-telecaller"].disabled=multiRunActive||job.status!=="completed"||job.compareStatus==="running"||job.status==="running";
-    els["compare-telecaller"].textContent=job.compareStatus==="running"?"Comparing…":"Compare to TeleCaller Audit";
+    els["compare-telecaller"].textContent=job.compareStatus==="running"?"Comparing…":"Compare to TeleCaller";
   }
   syncRunActionButtons(job);
   renderActiveChips(activeForJob(job));
