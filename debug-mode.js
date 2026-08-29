@@ -16,24 +16,24 @@ import {
   sortResults,
   validateApiKey,
   SERVER_API_KEY,
-} from "./audit.js?v=5.2.10";
-import {getApiKey,apiKeyIsRemembered,saveApiKey,forgetApiKey,setStorageUserId,storageKey} from "./db.js?v=5.2.8";
-import {requireAuth,logout,getUser,changePassword,updateProfile} from "./auth.js?v=5.2.8";
-import {SettingsApi} from "./api-client.js?v=5.2.8";
-import {mountNotifications} from "./notifications-ui.js?v=5.2.8";
+} from "./audit.js?v=5.2.17";
+import {getApiKey,apiKeyIsRemembered,saveApiKey,forgetApiKey,setStorageUserId,storageKey} from "./db.js?v=5.2.17";
+import {requireAuth,logout,getUser,changePassword,updateProfile} from "./auth.js?v=5.2.17";
+import {SettingsApi} from "./api-client.js?v=5.2.17";
+import {mountNotifications} from "./notifications-ui.js?v=5.2.17";
 import {
   debugAuditBatch,
   telecallerAuditBatch,
   compareDebugVsTelecaller,
   activePromptsReady,
   normalizeActiveErrorTypes,
-} from "./debug-engine.js?v=5.2.8";
+} from "./debug-engine.js?v=5.2.17";
 import {
   LAB_ERROR_TYPES,
   STATUS_HISTORY_PROMPT,
   emptyErrorPrompts,
   ERROR_TO_AUDIT_RULE,
-} from "./debug-prompts.js?v=5.2.8";
+} from "./debug-prompts.js?v=5.2.17";
 
 const $=id=>document.getElementById(id);
 const ids=[
