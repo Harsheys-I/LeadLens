@@ -98,11 +98,11 @@ function readMulti(form, name){
   return [...form.querySelectorAll(`select[name="${name}"] option:checked`)].map(o => o.value).filter(Boolean);
 }
 
-function readFilters(form){
+function readFilters(form, searchInput){
   if(!form) return {};
   const data = new FormData(form);
   return {
-    search: String(data.get("search") || "").trim(),
+    search: String(searchInput?.value ?? "").trim(),
     telecallers: readMulti(form, "telecallers"),
     projects: readMulti(form, "projects"),
     dateFrom: String(data.get("dateFrom") || ""),
@@ -153,11 +153,33 @@ function syncFiltersBodyPadding(aside){
   });
 }
 
-function buildFilters(filterOptions, filters){
+function buildMainSearch(filters){
+  const wrap = el("div", "dashboard-main-search");
+  const head = el("div", "dashboard-main-search-head");
+  head.append(el("span", "dashboard-filter-label", "Search"));
+  const clearSearch = el("button", "dashboard-filter-action", "Clear");
+  clearSearch.type = "button";
+  clearSearch.setAttribute("aria-label", "Clear search");
+  head.append(clearSearch);
+  const searchInput = document.createElement("input");
+  searchInput.type = "search";
+  searchInput.name = "search";
+  searchInput.className = "dashboard-filter-search-input dashboard-main-search-input";
+  searchInput.placeholder = "Search anything…";
+  searchInput.autocomplete = "off";
+  searchInput.spellcheck = false;
+  searchInput.value = filters.search || "";
+  searchInput.setAttribute("aria-label", "Search anything across all fields");
+  wrap.append(head, searchInput);
+  return {wrap, searchInput, clearSearch};
+}
+
+function buildFilters(filterOptions, filters, {collapsed = true, onCollapseChange} = {}){
   const aside = el("aside", "dashboard-filters-rail");
   const toggle = el("button", "filters-tab-toggle", "Filters");
   toggle.type = "button";
-  toggle.setAttribute("aria-expanded", "true");
+  toggle.setAttribute("aria-expanded", collapsed ? "false" : "true");
+  if(collapsed) aside.classList.add("is-collapsed");
 
   const panel = el("div", "dashboard-filters-panel");
   const form = el("form", "dashboard-filters");
@@ -166,25 +188,6 @@ function buildFilters(filterOptions, filters){
   const hint = el("p", "filters-panel-hint", "Hold Ctrl/Cmd to multi-select");
   head.append(hint);
   form.append(head);
-
-  const searchWrap = el("div", "dashboard-filter dashboard-filter-search");
-  const searchHead = el("div", "dashboard-filter-head");
-  searchHead.append(el("span", "dashboard-filter-label", "Search"));
-  const clearSearch = el("button", "dashboard-filter-action", "Clear");
-  clearSearch.type = "button";
-  clearSearch.setAttribute("aria-label", "Clear search");
-  searchHead.append(clearSearch);
-  const searchInput = document.createElement("input");
-  searchInput.type = "search";
-  searchInput.name = "search";
-  searchInput.className = "dashboard-filter-search-input";
-  searchInput.placeholder = "Search anything…";
-  searchInput.autocomplete = "off";
-  searchInput.spellcheck = false;
-  searchInput.value = filters.search || "";
-  searchInput.setAttribute("aria-label", "Search anything across all fields");
-  searchWrap.append(searchHead, searchInput);
-  form.append(searchWrap);
 
   const fields = [
     ["telecallers", "TeleCaller", filterOptions.telecallers, filters.telecallers],
@@ -229,15 +232,16 @@ function buildFilters(filterOptions, filters){
   aside.append(toggle, panel);
 
   toggle.addEventListener("click", () => {
-    const open = !aside.classList.contains("is-collapsed");
-    aside.classList.toggle("is-collapsed", open);
-    toggle.setAttribute("aria-expanded", open ? "false" : "true");
+    const willCollapse = !aside.classList.contains("is-collapsed");
+    aside.classList.toggle("is-collapsed", willCollapse);
+    toggle.setAttribute("aria-expanded", willCollapse ? "false" : "true");
+    onCollapseChange?.(willCollapse);
     syncFiltersBodyPadding(aside);
   });
 
   queueMicrotask(() => syncFiltersBodyPadding(aside));
 
-  return {aside, form, reset, searchInput, clearSearch};
+  return {aside, form, reset};
 }
 
 function renderKpis(kpis, {showComparativeKpis = true} = {}){
@@ -785,6 +789,7 @@ export function renderReviewDashboard(container, jobs, options = {}){
     overdueBuckets: []
   };
   let activePanel = "summary";
+  let filtersCollapsed = true;
 
   const paint = () => {
     const prevSearch = container.querySelector('input[name="search"]');
@@ -799,13 +804,17 @@ export function renderReviewDashboard(container, jobs, options = {}){
     container.classList.add("dashboard-root", "dashboard-with-filters");
 
     const model = buildDashboardModel(results, filters, {highSeverityErrors});
-    const {aside, form, reset, searchInput, clearSearch} = buildFilters(model.filterOptions, filters);
+    const {aside, form, reset} = buildFilters(model.filterOptions, filters, {
+      collapsed: filtersCollapsed,
+      onCollapseChange: (collapsed) => {filtersCollapsed = collapsed;}
+    });
+    const {wrap: searchBar, searchInput, clearSearch} = buildMainSearch(filters);
     const body = el("div", "dashboard-body");
 
     const {bar} = buildPanelSwitcher(activePanel, (id) => {
       activePanel = applyActivePanel(body, id);
     });
-    body.append(bar);
+    body.append(searchBar, bar);
     body.append(section("Executive KPIs", null, renderKpis(model.kpis, {showComparativeKpis}), "summary"));
     body.append(section("TeleCaller Performance", null, renderScorecard(model.scorecard), "performance"));
     body.append(section("Charts", null, renderCharts(model.charts, {
@@ -822,7 +831,7 @@ export function renderReviewDashboard(container, jobs, options = {}){
     activePanel = applyActivePanel(body, activePanel);
 
     const apply = () => {
-      filters = readFilters(form);
+      filters = readFilters(form, searchInput);
       paint();
     };
     form.addEventListener("submit", (e) => e.preventDefault());
@@ -831,7 +840,7 @@ export function renderReviewDashboard(container, jobs, options = {}){
     clearSearch.addEventListener("click", () => {
       if(!searchInput.value && !filters.search) return;
       searchInput.value = "";
-      filters = {...readFilters(form), search: ""};
+      filters = {...readFilters(form, searchInput), search: ""};
       paint();
     });
     reset.addEventListener("click", () => {
