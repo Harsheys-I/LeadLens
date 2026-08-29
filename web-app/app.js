@@ -1,13 +1,13 @@
-import {APP_VERSION,DEFAULT_SETTINGS,DEFAULT_OUTPUT_FIELDS,SETTINGS_SEED,MAX_BATCH_SIZE,MAX_CONCURRENCY,normalizeSettings,normalizeInputFields,slugFieldId,parseWorkbook,parseAuditedWorkbook,auditBatch,downloadWorkbook,downloadReviewPack,splitLeadsByTelecaller,splitResultsByTelecaller,validateApiKey,HIGH_SEVERITY_ERRORS,SERVER_API_KEY} from "./audit.js?v=5.2.18";
-import {getJob,getJobs,loadSettings,saveSettings,getApiKey,apiKeyIsRemembered,saveApiKey,forgetApiKey,setStorageUserId,storageKey} from "./db.js?v=5.2.18";
-import {renderReviewDashboard,destroyReviewDashboard} from "./dashboard-view.js?v=5.2.18";
-import {requireAuth,logout,hasPermission,getUser,changePassword,updateProfile} from "./auth.js?v=5.2.18";
-import {DashboardApi,SettingsApi} from "./api-client.js?v=5.2.18";
-import {mountNotifications} from "./notifications-ui.js?v=5.2.18";
-import {persistJob,removeJobSynced,clearJobsSynced,pullJobsFromServer} from "./jobs-sync.js?v=5.2.18";
+import {APP_VERSION,DEFAULT_SETTINGS,DEFAULT_OUTPUT_FIELDS,SETTINGS_SEED,MAX_BATCH_SIZE,MAX_CONCURRENCY,normalizeSettings,normalizeInputFields,slugFieldId,parseWorkbook,parseAuditedWorkbook,auditBatch,downloadWorkbook,downloadReviewPack,splitLeadsByTelecaller,splitResultsByTelecaller,validateApiKey,HIGH_SEVERITY_ERRORS,SERVER_API_KEY} from "./audit.js?v=5.2.19";
+import {getJob,getJobs,loadSettings,saveSettings,getApiKey,apiKeyIsRemembered,saveApiKey,forgetApiKey,setStorageUserId,storageKey} from "./db.js?v=5.2.19";
+import {renderReviewDashboard,destroyReviewDashboard} from "./dashboard-view.js?v=5.2.19";
+import {requireAuth,logout,hasPermission,getUser,changePassword,updateProfile} from "./auth.js?v=5.2.19";
+import {DashboardApi,SettingsApi} from "./api-client.js?v=5.2.19";
+import {mountNotifications} from "./notifications-ui.js?v=5.2.19";
+import {persistJob,removeJobSynced,clearJobsSynced,pullJobsFromServer} from "./jobs-sync.js?v=5.2.19";
 
 const $=id=>document.getElementById(id);
-const ids=["page-title","key-state","run-name","pause-run","download-result","progress-label","progress-percent","progress-bar","metric-leads","metric-excel-rows","metric-calls","metric-batch","metric-completed","metric-status","metric-input-tokens","metric-cached-tokens","metric-output-tokens","metric-duration","metric-cost","live-log","clear-console","history-list","clear-history","api-key","remember-key","toggle-key","save-key","forget-key","key-message","batch-size","concurrency","model","input-field-config","add-input-field","ai-field-config","rule-config","add-rule","output-field-config","yes-values","no-values","additional-instructions","input-price","cached-price","output-price","save-settings","reset-settings","settings-message","toast","mobile-menu","active-job-switch","sort-field","sort-direction","app-version","export-settings","import-settings","import-settings-file","update-banner","update-banner-text","reload-app","key-modal","onboard-key","onboard-toggle","onboard-remember","onboard-message","onboard-save","onboard-skip","sidebar-version","sidebar-notes","review-drop-zone","review-file-input","review-drop-hint","review-file-list","review-validation","start-review","review-run-panel","review-aggregate","review-cards","review-dashboard-panel","review-dashboard-mount","download-review-excel","review-open-console","review-precounts","review-live-progress","review-progress-label","review-progress-percent","review-progress-bar","review-post-actions","create-review-dashboard","upload-dashboard-btn","upload-dashboard-modal","upload-telecaller-list","upload-dash-message","upload-dash-confirm","upload-dash-cancel","published-list","refresh-published","published-dashboard-panel","published-dash-title","published-dash-meta","published-dash-actions","published-dashboard-mount","shell-user-label","shell-logout","shell-account"];
+const ids=["page-title","key-state","run-name","pause-run","download-result","progress-label","progress-percent","progress-bar","metric-leads","metric-excel-rows","metric-calls","metric-batch","metric-completed","metric-status","metric-input-tokens","metric-cached-tokens","metric-output-tokens","metric-duration","metric-cost","live-log","clear-console","history-list","clear-history","api-key","remember-key","toggle-key","save-key","forget-key","key-message","batch-size","concurrency","model","input-field-config","add-input-field","ai-field-config","output-field-config","yes-values","no-values","input-price","cached-price","output-price","save-settings","reset-settings","settings-message","toast","mobile-menu","active-job-switch","sort-field","sort-direction","app-version","export-settings","import-settings","import-settings-file","update-banner","update-banner-text","reload-app","key-modal","onboard-key","onboard-toggle","onboard-remember","onboard-message","onboard-save","onboard-skip","sidebar-version","sidebar-notes","review-drop-zone","review-file-input","review-drop-hint","review-file-list","review-validation","start-review","review-run-panel","review-aggregate","review-cards","review-dashboard-panel","review-dashboard-mount","download-review-excel","review-open-console","review-precounts","review-live-progress","review-progress-label","review-progress-percent","review-progress-bar","review-post-actions","create-review-dashboard","upload-dashboard-btn","upload-dashboard-modal","upload-telecaller-list","upload-dash-message","upload-dash-confirm","upload-dash-cancel","published-list","refresh-published","published-dashboard-panel","published-dash-title","published-dash-meta","published-dash-actions","published-dashboard-mount","shell-user-label","shell-logout","shell-account"];
 const els=Object.fromEntries(ids.map(id=>[id,$(id)]));
 const titles={review:"Bucket 1 lead audit",console:"Run console",published:"Dashboard",history:"History",settings:"Settings"};
 /** When false, completed audits do not auto-render charts until Create Dashboard. */
@@ -1610,44 +1610,6 @@ function renderAiFields(){
     els["ai-field-config"].append(row);
   }
 }
-function ruleOptions(current){
-  const options=[
-    "Lead Status + Comments",
-    ...settings.aiFields.map(field=>field.label),
-    "Comment quality",
-    "Buying intent",
-    "AI Observation",
-    "AI Recommendation"
-  ];
-  if(current&&!options.includes(current))options.push(current);
-  return [...new Set(options)];
-}
-function renderRules(){
-  els["rule-config"].replaceChildren();
-  for(let index=0;index<settings.rules.length;index++){
-    const rule=settings.rules[index],row=configRow("rule-row"),field=document.createElement("select"),instruction=document.createElement("textarea"),errors=input("text",rule.errors,"Possible error types"),remove=document.createElement("button");
-    field.dataset.ruleField=index;
-    instruction.dataset.ruleInstruction=index;
-    errors.dataset.ruleErrors=index;
-    for(const label of ruleOptions(rule.field)){
-      const option=document.createElement("option");
-      option.value=label;
-      option.textContent=label;
-      option.selected=label===rule.field;
-      field.append(option);
-    }
-    instruction.value=rule.instruction||"";
-    instruction.rows=3;
-    instruction.placeholder="What should the AI validate?";
-    errors.placeholder="Error types separated by |";
-    remove.type="button";
-    remove.className="text-button";
-    remove.textContent="Remove";
-    remove.onclick=()=>{settings=collectSettings();settings.rules.splice(index,1);renderRules();};
-    row.append(field,instruction,errors,remove);
-    els["rule-config"].append(row);
-  }
-}
 function renderOutputFields(){
   els["output-field-config"].replaceChildren();
   for(const field of settings.outputFields){
@@ -1680,7 +1642,6 @@ function renderSettings(){
   els.model.value=settings.model;
   els["yes-values"].value=settings.yesValues;
   els["no-values"].value=settings.noValues;
-  els["additional-instructions"].value=settings.additionalInstructions;
   els["input-price"].value=settings.pricing.input;
   els["cached-price"].value=settings.pricing.cached;
   els["output-price"].value=settings.pricing.output;
@@ -1689,7 +1650,6 @@ function renderSettings(){
   if(els["app-version"])els["app-version"].textContent=APP_VERSION;
   renderInputFields();
   renderAiFields();
-  renderRules();
   renderOutputFields();
   renderSortFields();
   updateKeyState();
@@ -1702,7 +1662,6 @@ function collectSettings(){
   next.model=els.model.value.trim();
   next.yesValues=els["yes-values"].value.trim();
   next.noValues=els["no-values"].value.trim();
-  next.additionalInstructions=els["additional-instructions"].value.trim();
   next.pricing={input:number(els["input-price"].value),cached:number(els["cached-price"].value),output:number(els["output-price"].value)};
   next.sort={field:els["sort-field"]?.value||"callDate",direction:els["sort-direction"]?.value==="desc"?"desc":"asc"};
   next.inputFields=normalizeInputFields([...document.querySelectorAll("[data-input-row]")].map(row=>{
@@ -1723,10 +1682,7 @@ function collectSettings(){
     const output=next.outputFields.find(item=>item.id===field.id);
     if(output)output.label=field.label;
     else next.outputFields.push({id:field.id,label:field.label,enabled:true});
-  }  next.rules=[...document.querySelectorAll("[data-rule-field]")].map(field=>{
-    const index=field.dataset.ruleField;
-    return{field:field.value,instruction:document.querySelector(`[data-rule-instruction="${index}"]`)?.value.trim()||"",errors:document.querySelector(`[data-rule-errors="${index}"]`)?.value.trim()||""};
-  });
+  }
   return normalizeSettings(next);
 }
 
@@ -2005,7 +1961,6 @@ els["onboard-save"]?.addEventListener("click",async()=>{
 });
 els["onboard-key"]?.addEventListener("keydown",event=>{if(event.key==="Enter"){event.preventDefault();els["onboard-save"].click();}});
 els["onboard-skip"]?.addEventListener("click",()=>{closeKeyModal();toast(getUser()?.is_super?"You can save the server key any time in Settings.":"Ask a Super User to configure the server API key.");});
-els["add-rule"].onclick=()=>{settings=collectSettings();settings.rules.push({field:"Comments",instruction:"",errors:""});renderRules();};
 els["add-input-field"].onclick=()=>{
   settings=collectSettings();
   const used=new Set(settings.inputFields.map(field=>field.id));

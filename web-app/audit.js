@@ -1,11 +1,11 @@
 import {buildTelecallerDashboardBlob} from "./dashboard-export.js?v=5.2.5";
-import {STATUS_HISTORY_PROMPT} from "./debug-prompts.js?v=5.2.18";
+import {STATUS_HISTORY_PROMPT} from "./debug-prompts.js?v=5.2.19";
 
-export const APP_VERSION = "5.2.18";
+export const APP_VERSION = "5.2.19";
 /** Sentinel: use server OpenAI proxy (no raw key in the browser). */
 export const SERVER_API_KEY = "__server__";
 /** Bump when default AI rules / field defaults must refresh existing localStorage settings. */
-export const SETTINGS_SEED = 25;
+export const SETTINGS_SEED = 26;
 
 /** Settings limits — batch size is leads per request; concurrency is parallel requests. */
 export const MAX_BATCH_SIZE = 20;
@@ -176,7 +176,7 @@ export function buildChatCompletionBody(model,{temperature,maxTokens,messages,..
 
 /* Large stable prefix FIRST so OpenAI prompt caching can activate (>=1024 tokens;
    some models need closer to 2048). Run-specific rules come after; lead data last. */
-const CACHE_HANDBOOK = `LeadLens QA v5.2.18 — stable cacheable auditor handbook. Evidence only. Never invent facts, dates, budgets, locations, or prior calls.
+const CACHE_HANDBOOK = `LeadLens QA v5.2.19 — stable cacheable auditor handbook. Evidence only. Never invent facts, dates, budgets, locations, or prior calls.
 
 PURPOSE
 You audit Indian real-estate telecalling follow-up notes. Judge only the supplied fields for THIS call id. Optional day[] lists sibling calls on the same latest calendar day — context only; still return one result for THIS id.
@@ -560,15 +560,10 @@ export function normalizeSettings(saved={}){
   merged.inputFields=normalizeInputFields(saved.inputFields,seedFresh);
   merged.aiFields=defaultsById(saved.aiFields,DEFAULT_AI_FIELDS);
   merged.outputFields=normalizeOutputFields(saved.outputFields,seedFresh);
-  merged.rules=mergeRules(saved.rules,seedFresh||!Array.isArray(saved.rules)||!saved.rules.length);
-  // Always pin Lead Status + Comments to shipped baseline-Warm prompt (freeform Error: lines break Bucket 1 e[]).
-  merged.rules=(merged.rules||[]).map(rule=>{
-    if(norm(rule.field)!==norm("Lead Status + Comments"))return rule;
-    return{...rule,field:"Lead Status + Comments",instruction:STATUS_HISTORY_PROMPT,errors:STATUS_HISTORY_ERROR};
-  });
-  if(!(merged.rules||[]).some(rule=>norm(rule.field)===norm("Lead Status + Comments"))){
-    merged.rules=[{field:"Lead Status + Comments",instruction:STATUS_HISTORY_PROMPT,errors:STATUS_HISTORY_ERROR},...(merged.rules||[])];
-  }
+  // Always pin audit rules to shipped defaults — Settings no longer exposes editable prompts;
+  // localStorage / server audit_settings cannot override instruction text.
+  merged.rules=clone(DEFAULT_RULES);
+  merged.additionalInstructions=DEFAULT_SETTINGS.additionalInstructions;
   if(seedFresh){
     const comments=merged.aiFields.find(field=>field.id==="comments");
     if(comments)comments.history=true;

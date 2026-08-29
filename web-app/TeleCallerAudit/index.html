@@ -7,11 +7,11 @@
   <meta name="description" content="LeadLens TeleCaller Audit">
   <title>LeadLens · TeleCaller Audit</title>
   <link rel="manifest" href="../manifest.webmanifest">
-  <link rel="stylesheet" href="../styles.css?v=5.2.18">
+  <link rel="stylesheet" href="../styles.css?v=5.2.19">
   <script defer src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
-  <script type="module" src="../app.js?v=5.2.18"></script>
+  <script type="module" src="../app.js?v=5.2.19"></script>
 </head>
 <body>
   <div id="update-banner" class="update-banner hidden" role="status">
@@ -171,14 +171,7 @@
             </section>
 
             <section class="settings-card">
-              <div class="card-title"><h2>5 · AI audit rules</h2><p>List allowed error types as full text, separated by <code>|</code>.</p></div>
-              <div id="rule-config" class="rule-list"></div>
-              <button id="add-rule" type="button" class="secondary-button">Add AI rule</button>
-              <label>Additional instructions<textarea id="additional-instructions" rows="4" placeholder="Optional extra instructions for the auditor"></textarea></label>
-            </section>
-
-            <section class="settings-card">
-              <div class="card-title"><h2>6 · Output Excel &amp; sort</h2><p>Choose columns to include. Sort By / Order are read live on every download.</p></div>
+              <div class="card-title"><h2>5 · Output Excel &amp; sort</h2><p>Choose columns to include. Sort By / Order are read live on every download.</p></div>
               <div id="output-field-config" class="config-list output-list"></div>
               <div class="field-grid sort-grid">
                 <label>Sort by<select id="sort-field"></select></label>
@@ -187,7 +180,7 @@
             </section>
 
             <section class="settings-card">
-              <div class="card-title"><h2>7 · Backup &amp; version</h2><p>Export settings as JSON. API keys are never included.</p></div>
+              <div class="card-title"><h2>6 · Backup &amp; version</h2><p>Export settings as JSON. API keys are never included.</p></div>
               <div class="version-row"><span>App version</span><strong id="app-version">…</strong></div>
               <div class="inline-actions settings-actions">
                 <button id="export-settings" type="button" class="secondary-button">Export settings JSON</button>
