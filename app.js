@@ -1,6 +1,7 @@
 import {APP_VERSION,DEFAULT_SETTINGS,DEFAULT_OUTPUT_FIELDS,SETTINGS_SEED,MAX_BATCH_SIZE,MAX_CONCURRENCY,normalizeSettings,normalizeInputFields,slugFieldId,parseWorkbook,parseAuditedWorkbook,auditBatch,downloadWorkbook,downloadReviewPack,downloadReviewPdf,splitLeadsByTelecaller,splitResultsByTelecaller,validateApiKey,HIGH_SEVERITY_ERRORS,SERVER_API_KEY} from "./audit.js?v=5.2.24";
 import {getJob,getJobs,loadSettings,saveSettings,getApiKey,apiKeyIsRemembered,saveApiKey,forgetApiKey,setStorageUserId,storageKey} from "./db.js?v=5.2.19";
 import {renderReviewDashboard,destroyReviewDashboard} from "./dashboard-view.js?v=5.2.24";
+import {mountPerfDashboard} from "./perf-dashboard.js?v=5.2.27";
 import {requireAuth,logout,hasPermission,getUser,changePassword,updateProfile} from "./auth.js?v=5.2.19";
 import {DashboardApi,SettingsApi} from "./api-client.js?v=5.2.19";
 import {mountNotifications} from "./notifications-ui.js?v=5.2.19";
@@ -1877,10 +1878,15 @@ document.querySelectorAll(".nav-toggle").forEach(button=>button.addEventListener
   setNavGroupExpanded(group,group.classList.contains("is-collapsed"));
 }));
 document.querySelectorAll(".nav-item").forEach(button=>button.addEventListener("click",()=>{
-  if(button.hasAttribute("data-nav-toggle-group")){
+  const isParent=button.classList.contains("nav-item-parent")||button.hasAttribute("data-nav-toggle-group");
+  if(isParent){
     const group=button.closest(".nav-group");
-    if(group)setNavGroupExpanded(group,group.classList.contains("is-collapsed"));
-    return;
+    if(group){
+      // Navigable parents expand (stay open on re-click); pure toggle parents flip open/closed.
+      if(button.dataset.view)setNavGroupExpanded(group,true);
+      else setNavGroupExpanded(group,group.classList.contains("is-collapsed"));
+    }
+    if(!button.dataset.view)return;
   }
   if(button.dataset.view)showView(button.dataset.view);
 }));
@@ -1962,6 +1968,7 @@ if(els["review-drop-zone"]){
   els["review-drop-zone"].addEventListener("drop",event=>handleReviewFiles(event.dataTransfer.files));
 }
 if(els["review-file-input"])els["review-file-input"].onchange=event=>handleReviewFiles(event.target.files);
+mountPerfDashboard({toast});
 if(els["start-review"])els["start-review"].onclick=startReview;
 if(els["download-review-excel"])els["download-review-excel"].onclick=()=>downloadReviewArtifact("excel");
 if(els["create-review-dashboard"])els["create-review-dashboard"].onclick=()=>{
