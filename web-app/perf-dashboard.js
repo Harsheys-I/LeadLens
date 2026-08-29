@@ -1,7 +1,9 @@
 /**
  * TeleCaller Performance Report — Master + History Excel → Summary + Graph.
- * No AI; parses with SheetJS; charts with Chart.js.
+ * Upload workspace + published dashboard viewer. Parse with SheetJS; charts with Chart.js.
  */
+
+import {PerfDashboardApi} from "./api-client.js?v=5.2.30";
 
 const norm = value => String(value ?? "").trim().toLowerCase().replace(/[_-]+/g, " ").replace(/\s+/g, " ");
 const clean = value => ["", "nan", "none", "nat", "undefined", "null"].includes(norm(value)) ? "" : String(value).trim();
@@ -34,9 +36,22 @@ const STATUS_CHART = [
   {key: "siteVisitCancelled", label: "Site Visit Cancelled", color: "#a33a32"}
 ];
 
-let statusChart = null;
-let metricsChart = null;
-let telecallerChart = null;
+const SUMMARY_LABELS = [
+  {key: "totalActiveLeads", label: "Total Active Leads"},
+  {key: "totalFreshLeadAssigned", label: "Total Fresh Lead Assigned"},
+  {key: "notInterested", label: "Not Interested"},
+  {key: "siteVisitScheduled", label: "Site Visit Scheduled"},
+  {key: "siteVisitPending", label: "Site Visit Pending"},
+  {key: "siteVisited", label: "Site Visited"},
+  {key: "siteVisitCancelled", label: "Site Visit Cancelled"},
+  {key: "overdueCalls", label: "Overdue"},
+  {key: "freshLeadsNotCalledYet", label: "Fresh Leads Not Called Yet"}
+];
+
+let pubStatusChart = null;
+let pubMetricsChart = null;
+let pubTelecallerChart = null;
+let refreshPerfPublishedImpl = null;
 
 function parseDate(value){
   if(value instanceof Date && !Number.isNaN(value.valueOf())){
@@ -69,9 +84,38 @@ function parseDate(value){
   return null;
 }
 
+/** Format ISO YYYY-MM-DD strings or Date objects for display. */
 function formatDate(d){
   if(!d) return "—";
-  return d.toLocaleDateString("en-IN", {day: "2-digit", month: "short", year: "numeric"});
+  if(d instanceof Date){
+    if(Number.isNaN(d.valueOf())) return "—";
+    return d.toLocaleDateString("en-IN", {day: "2-digit", month: "short", year: "numeric"});
+  }
+  const s = String(d).trim();
+  if(!s) return "—";
+  const iso = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if(iso){
+    const date = new Date(Number(iso[1]), Number(iso[2]) - 1, Number(iso[3]));
+    if(!Number.isNaN(date.valueOf())){
+      return date.toLocaleDateString("en-IN", {day: "2-digit", month: "short", year: "numeric"});
+    }
+  }
+  const parsed = parseDate(s);
+  if(parsed) return parsed.toLocaleDateString("en-IN", {day: "2-digit", month: "short", year: "numeric"});
+  return s;
+}
+
+function toIsoDate(d){
+  if(!d) return null;
+  if(typeof d === "string"){
+    const m = d.match(/^(\d{4}-\d{2}-\d{2})/);
+    return m ? m[1] : null;
+  }
+  if(!(d instanceof Date) || Number.isNaN(d.valueOf())) return null;
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
 }
 
 function sameCalendarDay(a, b){
@@ -422,14 +466,14 @@ function setHidden(el, hidden){
   el.classList.toggle("hidden", Boolean(hidden));
 }
 
-function destroyCharts(){
-  for(const chart of [statusChart, metricsChart, telecallerChart]){
+function destroyPubCharts(){
+  for(const chart of [pubStatusChart, pubMetricsChart, pubTelecallerChart]){
     if(!chart) continue;
     try{ chart.destroy(); }catch{/* ignore */}
   }
-  statusChart = null;
-  metricsChart = null;
-  telecallerChart = null;
+  pubStatusChart = null;
+  pubMetricsChart = null;
+  pubTelecallerChart = null;
 }
 
 function renderFileMeta(el, fileName, detail){
@@ -484,68 +528,92 @@ function wireDropZone(dropZone, fileInput, onFile){
 
 function fillSummary(el, model){
   if(!el) return;
-  const items = [
-    {label: "Total Active Leads", value: model.totalActiveLeads},
-    {label: "Total Fresh Lead Assigned", value: model.totalFreshLeadAssigned},
-    {label: "Not Interested", value: model.notInterested},
-    {label: "Site Visit Scheduled", value: model.siteVisitScheduled},
-    {label: "Site Visit Pending", value: model.siteVisitPending},
-    {label: "Site Visited", value: model.siteVisited},
-    {label: "Site Visit Cancelled", value: model.siteVisitCancelled},
-    {label: "Overdue", value: model.overdueCalls},
-    {label: "Fresh Leads Not Called Yet", value: model.freshLeadsNotCalledYet}
-  ];
   el.innerHTML = "";
   const dl = document.createElement("dl");
   dl.className = "perf-summary-list";
-  for(const item of items){
+  for(const item of SUMMARY_LABELS){
     const row = document.createElement("div");
     row.className = "perf-summary-row";
     const dt = document.createElement("dt");
     dt.textContent = item.label;
     const dd = document.createElement("dd");
-    dd.textContent = Number(item.value).toLocaleString();
+    dd.textContent = Number(model[item.key] || 0).toLocaleString();
     row.append(dt, dd);
     dl.append(row);
   }
   el.append(dl);
 }
 
-function fillTelecallerFilter(select, telecallers, selected){
+function fillTelecallerFilter(select, telecallers, selected, {allLabel = "All TeleCallers", locked = false} = {}){
   if(!select) return;
   const current = selected ?? select.value ?? "";
   select.innerHTML = "";
-  const all = document.createElement("option");
-  all.value = "";
-  all.textContent = "All TeleCallers";
-  select.append(all);
+  if(!locked){
+    const all = document.createElement("option");
+    all.value = "";
+    all.textContent = allLabel;
+    select.append(all);
+  }
   for(const name of telecallers){
     const opt = document.createElement("option");
     opt.value = name;
     opt.textContent = name;
     select.append(opt);
   }
-  select.value = telecallers.includes(current) ? current : "";
+  if(locked && telecallers.length){
+    select.value = telecallers.includes(current) ? current : telecallers[0];
+    select.disabled = true;
+  }else{
+    select.disabled = false;
+    select.value = telecallers.includes(current) ? current : "";
+  }
 }
 
-function renderGraphs(model){
-  destroyCharts();
+function summaryFromBucket(bucket){
+  const out = emptyStatusBucket();
+  if(!bucket) return out;
+  for(const key of Object.keys(out)){
+    out[key] = Number(bucket[key] || 0);
+  }
+  return out;
+}
+
+function setDateRangeEl(el, dateMin, dateMax){
+  if(!el) return;
+  const strong = el.querySelector("strong") || el;
+  if(dateMin && dateMax){
+    if(el.querySelector("strong")){
+      el.querySelector("strong").textContent = `${formatDate(dateMin)} – ${formatDate(dateMax)}`;
+    }else{
+      el.innerHTML = `<span>Lead Update Date</span><strong>${formatDate(dateMin)} – ${formatDate(dateMax)}</strong>`;
+    }
+  }else if(el.querySelector("strong")){
+    el.querySelector("strong").textContent = "No valid dates found";
+  }else{
+    el.innerHTML = `<span>Lead Update Date</span><strong>No valid dates found</strong>`;
+  }
+  void strong;
+}
+
+function renderPublishedGraphs(model){
+  destroyPubCharts();
   if(typeof Chart !== "function") throw new Error("Chart.js failed to load. Check your network connection and reload.");
 
-  const statusCanvas = document.getElementById("perf-status-chart");
-  const metricsCanvas = document.getElementById("perf-metrics-chart");
-  const tcCanvas = document.getElementById("perf-tc-chart");
-  const tcBlock = document.getElementById("perf-tc-chart-block");
+  const statusCanvas = document.getElementById("perf-pub-status-chart");
+  const metricsCanvas = document.getElementById("perf-pub-metrics-chart");
+  const tcCanvas = document.getElementById("perf-pub-tc-chart");
+  const tcBlock = document.getElementById("perf-pub-tc-chart-block");
 
   if(statusCanvas){
-    const labels = STATUS_CHART.map(s => s.label);
-    const data = STATUS_CHART.map(s => model[s.key] || 0);
-    const colors = STATUS_CHART.map(s => s.color);
-    statusChart = new Chart(statusCanvas.getContext("2d"), {
+    pubStatusChart = new Chart(statusCanvas.getContext("2d"), {
       type: "doughnut",
       data: {
-        labels,
-        datasets: [{data, backgroundColor: colors, borderWidth: 0}]
+        labels: STATUS_CHART.map(s => s.label),
+        datasets: [{
+          data: STATUS_CHART.map(s => model[s.key] || 0),
+          backgroundColor: STATUS_CHART.map(s => s.color),
+          borderWidth: 0
+        }]
       },
       options: {
         responsive: true,
@@ -564,7 +632,7 @@ function renderGraphs(model){
       {label: "Overdue", value: model.overdueCalls, color: "#a33a32"},
       {label: "Not Called Yet", value: model.freshLeadsNotCalledYet, color: "#c47a1a"}
     ];
-    metricsChart = new Chart(metricsCanvas.getContext("2d"), {
+    pubMetricsChart = new Chart(metricsCanvas.getContext("2d"), {
       type: "bar",
       data: {
         labels: metricItems.map(m => m.label),
@@ -593,9 +661,9 @@ function renderGraphs(model){
   setHidden(tcBlock, !showPerTc);
   if(showPerTc && tcCanvas){
     const names = model.telecallers;
-    const wrap = document.getElementById("perf-tc-chart-wrap");
+    const wrap = document.getElementById("perf-pub-tc-chart-wrap");
     if(wrap) wrap.style.height = `${Math.max(280, names.length * 28)}px`;
-    telecallerChart = new Chart(tcCanvas.getContext("2d"), {
+    pubTelecallerChart = new Chart(tcCanvas.getContext("2d"), {
       type: "bar",
       data: {
         labels: names,
@@ -624,12 +692,58 @@ function renderGraphs(model){
   }
 }
 
+function exportPerfPdf(model, {title = "TeleCaller Performance"} = {}){
+  const JsPDF = window.jspdf?.jsPDF;
+  if(typeof JsPDF !== "function"){
+    throw new Error("jsPDF failed to load. Check your network connection and reload.");
+  }
+  const doc = new JsPDF({orientation: "portrait", unit: "mm", format: "a4"});
+  let y = 18;
+  doc.setFontSize(14);
+  doc.text(title, 14, y);
+  y += 8;
+  doc.setFontSize(11);
+  const range = (model.dateMin && model.dateMax)
+    ? `Lead Update Date: ${formatDate(model.dateMin)} – ${formatDate(model.dateMax)}`
+    : "Lead Update Date: —";
+  doc.text(range, 14, y);
+  y += 10;
+  if(model.telecallerFilter){
+    doc.text(`TeleCaller: ${model.telecallerFilter}`, 14, y);
+    y += 8;
+  }
+  doc.setFontSize(11);
+  for(const item of SUMMARY_LABELS){
+    const line = `${item.label}: ${Number(model[item.key] || 0).toLocaleString()}`;
+    if(y > 280){
+      doc.addPage();
+      y = 18;
+    }
+    doc.text(line, 14, y);
+    y += 7;
+  }
+  const stamp = toIsoDate(new Date()) || "export";
+  doc.save(`TeleCaller_Performance_${stamp}.pdf`);
+}
+
 /**
- * Wire dual upload + Summary/Graph UI inside #view-perf-dashboard.
- * @param {{toast?: (msg: string) => void}} opts
+ * Call the mounted published-dashboard refresh (set by mountPerfPublishedDashboard).
  */
-export function mountPerfDashboard(opts = {}){
+export function refreshPerfPublished(){
+  if(typeof refreshPerfPublishedImpl === "function") return refreshPerfPublishedImpl();
+  return Promise.resolve();
+}
+
+/**
+ * Wire dual Excel upload + preview + publish on #view-perf-report.
+ * @param {{toast?: Function, hasPermission?: Function, getUser?: Function}} opts
+ */
+export function mountPerfReportUpload(opts = {}){
   const toast = typeof opts.toast === "function" ? opts.toast : () => {};
+  const hasPermission = typeof opts.hasPermission === "function" ? opts.hasPermission : () => false;
+
+  const gate = document.getElementById("perf-upload-gate");
+  const workspace = document.getElementById("perf-upload-workspace");
   const masterDrop = document.getElementById("perf-master-drop");
   const historyDrop = document.getElementById("perf-history-drop");
   const masterInput = document.getElementById("perf-master-input");
@@ -638,19 +752,33 @@ export function mountPerfDashboard(opts = {}){
   const historyMeta = document.getElementById("perf-history-meta");
   const validation = document.getElementById("perf-validation");
   const buildBtn = document.getElementById("perf-build");
-  const results = document.getElementById("perf-results");
-  const dateRangeEl = document.getElementById("perf-date-range");
-  const summaryPanel = document.getElementById("perf-summary-panel");
-  const graphPanel = document.getElementById("perf-graph-panel");
-  const summaryEl = document.getElementById("perf-summary");
-  const viewToggle = document.getElementById("perf-view-toggle");
-  const telecallerSelect = document.getElementById("perf-telecaller-filter");
+  const uploadBtn = document.getElementById("perf-upload-dashboard");
+  const results = document.getElementById("perf-preview-results");
+  const dateRangeEl = document.getElementById("perf-preview-date-range");
+  const summaryEl = document.getElementById("perf-preview-summary");
+  const telecallerSelect = document.getElementById("perf-preview-telecaller-filter");
+  const modal = document.getElementById("perf-upload-dashboard-modal");
+  const tcList = document.getElementById("perf-upload-telecaller-list");
+  const dashMessage = document.getElementById("perf-upload-dash-message");
+  const confirmBtn = document.getElementById("perf-upload-dash-confirm");
+  const cancelBtn = document.getElementById("perf-upload-dash-cancel");
 
-  if(!masterDrop || !historyDrop || !buildBtn) return {destroy: destroyCharts};
+  const canUpload = () => Boolean(hasPermission("telecaller.upload_dashboard"));
+
+  function applyUploadGate(){
+    const ok = canUpload();
+    setHidden(gate, ok);
+    setHidden(workspace, !ok);
+  }
+  applyUploadGate();
+
+  if(!workspace || !masterDrop || !historyDrop || !buildBtn){
+    return {destroy(){}};
+  }
 
   let masterParsed = null;
   let historyParsed = null;
-  let activeView = "summary";
+  let lastFullModel = null;
   let lastModel = null;
 
   function showValidation(message, isError){
@@ -664,51 +792,31 @@ export function mountPerfDashboard(opts = {}){
     buildBtn.disabled = !(masterParsed && historyParsed);
   }
 
-  function setView(view){
-    activeView = view === "graph" ? "graph" : "summary";
-    if(viewToggle){
-      for(const btn of viewToggle.querySelectorAll("[data-perf-view]")){
-        btn.classList.toggle("active", btn.getAttribute("data-perf-view") === activeView);
-      }
-    }
-    setHidden(summaryPanel, activeView !== "summary");
-    setHidden(graphPanel, activeView !== "graph");
-    if(activeView === "graph" && lastModel){
-      try{ renderGraphs(lastModel); }
-      catch(err){ showValidation(err?.message || "Could not render graphs.", true); }
-    }
+  function updateUploadEnabled(){
+    if(uploadBtn) uploadBtn.disabled = !(lastFullModel && canUpload());
   }
 
-  function applyModel(model){
+  function applyPreviewModel(model){
     lastModel = model;
-    if(dateRangeEl){
-      if(model.dateMin && model.dateMax){
-        dateRangeEl.innerHTML = `<span>Lead Update Date</span><strong>${formatDate(model.dateMin)} – ${formatDate(model.dateMax)}</strong>`;
-      }else{
-        dateRangeEl.innerHTML = `<span>Lead Update Date</span><strong>No valid dates found</strong>`;
-      }
-    }
+    setDateRangeEl(dateRangeEl, model.dateMin, model.dateMax);
     fillSummary(summaryEl, model);
-    if(activeView === "graph") renderGraphs(model);
-    else destroyCharts();
+    setHidden(results, false);
   }
 
-  function rebuildFromFilter(){
+  function rebuildPreview(){
     if(!masterParsed || !historyParsed) return;
     try{
       const telecaller = telecallerSelect?.value || "";
       const model = reconcilePerf(masterParsed, historyParsed, {telecaller});
-      applyModel(model);
+      applyPreviewModel(model);
       const filterNote = telecaller ? ` · ${telecaller}` : "";
       showValidation(
-        `Summary ready${filterNote} · ${model.totalActiveLeads.toLocaleString()} active leads · ${model.historyRowCount.toLocaleString()} History call rows.`,
+        `Preview ready${filterNote} · ${model.totalActiveLeads.toLocaleString()} active leads · ${model.historyRowCount.toLocaleString()} History call rows.`,
         false
       );
-      setHidden(results, false);
     }catch(err){
       setHidden(results, true);
-      destroyCharts();
-      showValidation(err?.message || "Could not build dashboard.", true);
+      showValidation(err?.message || "Could not build preview.", true);
       toast(err?.message || "Build failed.");
     }
   }
@@ -716,8 +824,9 @@ export function mountPerfDashboard(opts = {}){
   async function loadWorkbook(file, kind){
     showValidation(`Reading ${kind === "history" ? "History" : "Master"} workbook…`, false);
     setHidden(results, true);
-    destroyCharts();
     lastModel = null;
+    lastFullModel = null;
+    updateUploadEnabled();
     try{
       const buffer = await file.arrayBuffer();
       const parsed = parsePerfWorkbook(buffer, file.name, kind);
@@ -732,7 +841,7 @@ export function mountPerfDashboard(opts = {}){
       const ready = masterParsed && historyParsed;
       showValidation(
         ready
-          ? "Both files loaded. Click Build dashboard."
+          ? "Both files loaded. Click Build preview."
           : `${kind === "history" ? "History" : "Master"} loaded (${parsed.rowCount.toLocaleString()} rows). Upload the other file to continue.`,
         false
       );
@@ -751,46 +860,347 @@ export function mountPerfDashboard(opts = {}){
     }
   }
 
-  function buildDashboard(){
+  function buildPreview(){
+    if(!canUpload()){
+      toast("Upload not permitted for your role.");
+      return;
+    }
     if(!masterParsed || !historyParsed){
       showValidation("Upload both Master and History Excel files first.", true);
       return;
     }
     try{
-      const telecallers = collectTelecallers(masterParsed, historyParsed);
-      fillTelecallerFilter(telecallerSelect, telecallers, telecallerSelect?.value || "");
-      rebuildFromFilter();
-      setView(activeView);
-      toast("Performance summary ready.");
+      lastFullModel = reconcilePerf(masterParsed, historyParsed, {});
+      fillTelecallerFilter(telecallerSelect, lastFullModel.telecallers, telecallerSelect?.value || "");
+      rebuildPreview();
+      updateUploadEnabled();
+      toast("Performance preview ready.");
     }catch(err){
+      lastFullModel = null;
+      updateUploadEnabled();
       setHidden(results, true);
-      destroyCharts();
-      showValidation(err?.message || "Could not build dashboard.", true);
+      showValidation(err?.message || "Could not build preview.", true);
       toast(err?.message || "Build failed.");
+    }
+  }
+
+  function openUploadModal(){
+    if(!canUpload()){
+      toast("Upload not permitted for your role.");
+      return;
+    }
+    if(!lastFullModel){
+      toast("Build a preview first.");
+      return;
+    }
+    if(!tcList || !modal) return;
+    tcList.innerHTML = "";
+    for(const name of lastFullModel.telecallers){
+      const label = document.createElement("label");
+      label.className = "upload-telecaller-item";
+      const input = document.createElement("input");
+      input.type = "checkbox";
+      input.value = name;
+      input.checked = true;
+      const span = document.createElement("span");
+      span.textContent = name;
+      label.append(input, span);
+      tcList.append(label);
+    }
+    if(dashMessage) dashMessage.textContent = "";
+    modal.classList.remove("hidden");
+  }
+
+  function closeUploadModal(){
+    modal?.classList.add("hidden");
+  }
+
+  async function confirmUpload(){
+    if(!lastFullModel || !tcList) return;
+    const selected = [...tcList.querySelectorAll("input[type=checkbox]:checked")].map(i => i.value);
+    if(!selected.length){
+      if(dashMessage) dashMessage.textContent = "Select at least one TeleCaller.";
+      return;
+    }
+    const dateMin = toIsoDate(lastFullModel.dateMin);
+    const dateMax = toIsoDate(lastFullModel.dateMax);
+    const sourceMaster = lastFullModel.masterFileName || "";
+    const sourceHistory = lastFullModel.historyFileName || "";
+    const dashboards = selected.map(tc => {
+      const bucket = summaryFromBucket(lastFullModel.byTelecaller?.[tc]);
+      return {
+        telecaller_name: tc,
+        title: `${tc} · Performance`,
+        summary: bucket,
+        date_min: dateMin,
+        date_max: dateMax,
+        source_master: sourceMaster,
+        source_history: sourceHistory
+      };
+    });
+    if(dashMessage) dashMessage.textContent = "Uploading…";
+    if(confirmBtn) confirmBtn.disabled = true;
+    try{
+      const data = await PerfDashboardApi.publish(dashboards);
+      const published = data.published || [];
+      const n = published.length;
+      const cleared = Number(data.cleared ?? 0) || 0;
+      const msg = cleared
+        ? `Cleared ${cleared} old board(s); published ${n} TeleCaller dashboard(s).`
+        : `Published ${n} TeleCaller dashboard(s).`;
+      if(dashMessage) dashMessage.textContent = msg;
+      toast(cleared
+        ? (n === 1 ? "Old boards cleared; new board uploaded" : `Old boards cleared; uploaded ${n} boards`)
+        : (n === 1 ? "Dashboard uploaded" : `Uploaded ${n} TeleCaller dashboards`));
+      setTimeout(closeUploadModal, 800);
+      if(hasPermission("telecaller.dashboard")){
+        try{ await refreshPerfPublished(); }catch{/* ignore */}
+        const dashNav = document.querySelector('.nav-item[data-view="perf-dashboard"]');
+        if(dashNav) dashNav.click();
+      }
+    }catch(err){
+      if(dashMessage) dashMessage.textContent = err?.message || "Upload failed";
+      toast(err?.message || "Upload failed.");
+    }finally{
+      if(confirmBtn) confirmBtn.disabled = false;
     }
   }
 
   wireDropZone(masterDrop, masterInput, file => loadWorkbook(file, "master"));
   wireDropZone(historyDrop, historyInput, file => loadWorkbook(file, "history"));
-  buildBtn.onclick = buildDashboard;
+  buildBtn.onclick = buildPreview;
+  if(uploadBtn) uploadBtn.onclick = openUploadModal;
+  if(cancelBtn) cancelBtn.onclick = closeUploadModal;
+  if(confirmBtn) confirmBtn.onclick = confirmUpload;
 
   if(telecallerSelect){
     telecallerSelect.addEventListener("change", () => {
-      if(!masterParsed || !historyParsed || !lastModel) return;
-      rebuildFromFilter();
+      if(!masterParsed || !historyParsed || !lastFullModel) return;
+      rebuildPreview();
       toast(telecallerSelect.value ? `Filtered to ${telecallerSelect.value}` : "Showing all TeleCallers");
     });
   }
 
-  if(viewToggle){
-    viewToggle.addEventListener("click", event => {
-      const btn = event.target.closest("[data-perf-view]");
-      if(!btn) return;
-      setView(btn.getAttribute("data-perf-view"));
-    });
+  updateBuildEnabled();
+  updateUploadEnabled();
+
+  return {
+    destroy(){},
+    applyUploadGate
+  };
+}
+
+/**
+ * Wire published Performance dashboard viewer on #view-perf-dashboard.
+ * @param {{toast?: Function, hasPermission?: Function, canManage?: Function|boolean}} opts
+ */
+export function mountPerfPublishedDashboard(opts = {}){
+  const toast = typeof opts.toast === "function" ? opts.toast : () => {};
+  const hasPermission = typeof opts.hasPermission === "function" ? opts.hasPermission : () => false;
+  const canManageFn = typeof opts.canManage === "function"
+    ? opts.canManage
+    : () => Boolean(opts.canManage);
+
+  const emptyEl = document.getElementById("perf-published-empty");
+  const panel = document.getElementById("perf-published-panel");
+  const titleEl = document.getElementById("perf-published-title");
+  const metaEl = document.getElementById("perf-published-meta");
+  const actionsEl = document.getElementById("perf-published-actions");
+  const dateRangeEl = document.getElementById("perf-published-date-range");
+  const summaryPanel = document.getElementById("perf-published-summary-panel");
+  const graphPanel = document.getElementById("perf-published-graph-panel");
+  const summaryEl = document.getElementById("perf-published-summary");
+  const tcFilter = document.getElementById("perf-published-telecaller-filter");
+  const viewFilter = document.getElementById("perf-published-view-filter");
+  const refreshBtn = document.getElementById("perf-refresh-published");
+  const resetBtn = document.getElementById("perf-filter-reset");
+
+  let combinedData = null;
+  let activeModel = null;
+
+  function canManage(){
+    return Boolean(canManageFn());
   }
 
-  setView("summary");
+  function setViewMode(mode){
+    const view = mode === "graph" ? "graph" : "summary";
+    if(viewFilter) viewFilter.value = view;
+    setHidden(summaryPanel, view !== "summary");
+    setHidden(graphPanel, view !== "graph");
+    if(view === "graph" && activeModel){
+      try{ renderPublishedGraphs(activeModel); }
+      catch(err){ toast(err?.message || "Could not render graphs."); }
+    }else{
+      destroyPubCharts();
+    }
+  }
 
-  return {destroy: destroyCharts};
+  function buildViewModel(data, telecallerName){
+    const boards = data.boards || [];
+    const byTelecaller = Object.create(null);
+    const telecallers = boards.map(b => b.telecaller_name).filter(Boolean);
+    for(const board of boards){
+      byTelecaller[board.telecaller_name] = summaryFromBucket(board.summary);
+    }
+
+    if(telecallerName){
+      const board = boards.find(b => b.telecaller_name === telecallerName);
+      const summary = summaryFromBucket(board?.summary || emptyStatusBucket());
+      return {
+        ...summary,
+        telecallerFilter: telecallerName,
+        telecallers,
+        byTelecaller,
+        dateMin: board?.date_min ?? data.date_min,
+        dateMax: board?.date_max ?? data.date_max,
+        title: board?.title || telecallerName
+      };
+    }
+
+    const summary = summaryFromBucket(data.summary || emptyStatusBucket());
+    return {
+      ...summary,
+      telecallerFilter: null,
+      telecallers,
+      byTelecaller,
+      dateMin: data.date_min,
+      dateMax: data.date_max,
+      title: data.title || "All TeleCallers"
+    };
+  }
+
+  function applyFilter(){
+    if(!combinedData) return;
+    const viewAll = Boolean(combinedData.view_all);
+    const selected = viewAll ? (tcFilter?.value || "") : (combinedData.boards?.[0]?.telecaller_name || "");
+    activeModel = buildViewModel(combinedData, selected || null);
+    if(titleEl) titleEl.textContent = activeModel.title || "Dashboard";
+    setDateRangeEl(dateRangeEl, activeModel.dateMin, activeModel.dateMax);
+    fillSummary(summaryEl, activeModel);
+    setViewMode(viewFilter?.value || "summary");
+  }
+
+  function renderActions(){
+    if(!actionsEl) return;
+    actionsEl.replaceChildren();
+    const pdfBtn = document.createElement("button");
+    pdfBtn.type = "button";
+    pdfBtn.className = "secondary-button";
+    pdfBtn.textContent = "Export PDF";
+    pdfBtn.onclick = () => {
+      if(!activeModel){
+        toast("Nothing to export yet.");
+        return;
+      }
+      try{
+        exportPerfPdf(activeModel, {title: activeModel.title || "TeleCaller Performance"});
+        toast("PDF downloaded.");
+      }catch(err){
+        toast(err?.message || "Could not export PDF.");
+      }
+    };
+    actionsEl.append(pdfBtn);
+
+    if(canManage() && (combinedData?.boards?.length || combinedData?.dashboards?.length)){
+      const all = document.createElement("button");
+      all.type = "button";
+      all.className = "danger-button";
+      all.textContent = "Delete All";
+      all.onclick = async () => {
+        if(!confirm("Delete all published Performance dashboards? This cannot be undone.")) return;
+        try{
+          await PerfDashboardApi.removeAll();
+          toast("All published Performance dashboards deleted");
+          await refresh();
+        }catch(err){
+          toast(err?.message || "Could not delete dashboards");
+        }
+      };
+      actionsEl.append(all);
+    }
+  }
+
+  function showEmpty(message){
+    if(emptyEl){
+      emptyEl.textContent = message || "No published Performance dashboards yet.";
+      setHidden(emptyEl, false);
+    }
+    setHidden(panel, true);
+    destroyPubCharts();
+    activeModel = null;
+    if(actionsEl) actionsEl.replaceChildren();
+  }
+
+  async function refresh(){
+    if(!hasPermission("telecaller.dashboard")){
+      showEmpty("Dashboard access is not enabled for your role.");
+      return;
+    }
+    try{
+      const data = await PerfDashboardApi.combined();
+      combinedData = data;
+      const boards = data.boards || [];
+      if(!boards.length){
+        showEmpty("No published Performance dashboards yet.");
+        return;
+      }
+
+      setHidden(emptyEl, true);
+      setHidden(panel, false);
+
+      const viewAll = Boolean(data.view_all);
+      const names = boards.map(b => b.telecaller_name).filter(Boolean);
+      if(viewAll){
+        fillTelecallerFilter(tcFilter, names, tcFilter?.value || "", {locked: false});
+      }else{
+        const lockedName = names[0] || "";
+        fillTelecallerFilter(tcFilter, lockedName ? [lockedName] : [], lockedName, {locked: true});
+      }
+
+      if(metaEl){
+        const when = data.updated_at
+          ? new Date(String(data.updated_at).endsWith("Z") ? data.updated_at : `${data.updated_at}Z`).toLocaleString()
+          : "";
+        const count = boards.length;
+        metaEl.textContent = viewAll
+          ? `Combined · ${count} TeleCaller${count === 1 ? "" : "s"}${when ? ` · updated ${when}` : ""}`
+          : `Your board${when ? ` · updated ${when}` : ""}`;
+      }
+
+      renderActions();
+      applyFilter();
+    }catch(err){
+      showEmpty(err?.message || "Could not load Performance dashboards.");
+      toast(err?.message || "Could not load dashboards.");
+    }
+  }
+
+  function resetFilters(){
+    if(combinedData?.view_all && tcFilter) tcFilter.value = "";
+    if(viewFilter) viewFilter.value = "summary";
+    applyFilter();
+    toast("Filters reset.");
+  }
+
+  if(tcFilter){
+    tcFilter.addEventListener("change", () => {
+      applyFilter();
+      toast(tcFilter.value ? `Filtered to ${tcFilter.value}` : "Showing all TeleCallers");
+    });
+  }
+  if(viewFilter){
+    viewFilter.addEventListener("change", () => setViewMode(viewFilter.value));
+  }
+  if(refreshBtn) refreshBtn.onclick = () => refresh();
+  if(resetBtn) resetBtn.onclick = resetFilters;
+
+  refreshPerfPublishedImpl = refresh;
+
+  return {
+    refresh,
+    destroy: () => {
+      destroyPubCharts();
+      if(refreshPerfPublishedImpl === refresh) refreshPerfPublishedImpl = null;
+    }
+  };
 }

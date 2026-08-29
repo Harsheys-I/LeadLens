@@ -122,6 +122,20 @@ function ll_install_run(): void
     CONSTRAINT fk_pub_user FOREIGN KEY (uploaded_by) REFERENCES users(id) ON DELETE SET NULL
   ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
 
+  $pdo->exec("CREATE TABLE IF NOT EXISTS perf_published_dashboards (
+    id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    telecaller_name VARCHAR(120) NOT NULL,
+    title VARCHAR(200) NOT NULL DEFAULT '',
+    payload LONGTEXT NOT NULL,
+    meta JSON NULL,
+    uploaded_by INT UNSIGNED NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    KEY idx_perf_pub_telecaller (telecaller_name),
+    KEY idx_perf_pub_uploaded (uploaded_by),
+    CONSTRAINT fk_perf_pub_user FOREIGN KEY (uploaded_by) REFERENCES users(id) ON DELETE SET NULL
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+
   $pdo->exec("CREATE TABLE IF NOT EXISTS app_settings (
     setting_key VARCHAR(80) NOT NULL PRIMARY KEY,
     setting_value LONGTEXT NULL,

@@ -1,18 +1,19 @@
 import {APP_VERSION,DEFAULT_SETTINGS,DEFAULT_OUTPUT_FIELDS,SETTINGS_SEED,MAX_BATCH_SIZE,MAX_CONCURRENCY,normalizeSettings,normalizeInputFields,slugFieldId,parseWorkbook,parseAuditedWorkbook,auditBatch,downloadWorkbook,downloadReviewPack,downloadReviewPdf,splitLeadsByTelecaller,splitResultsByTelecaller,validateApiKey,HIGH_SEVERITY_ERRORS,SERVER_API_KEY} from "./audit.js?v=5.2.24";
 import {getJob,getJobs,loadSettings,saveSettings,getApiKey,apiKeyIsRemembered,saveApiKey,forgetApiKey,setStorageUserId,storageKey} from "./db.js?v=5.2.19";
 import {renderReviewDashboard,destroyReviewDashboard} from "./dashboard-view.js?v=5.2.24";
-import {mountPerfDashboard} from "./perf-dashboard.js?v=5.2.29";
+import {mountPerfReportUpload,mountPerfPublishedDashboard} from "./perf-dashboard.js?v=5.2.30";
 import {requireAuth,logout,hasPermission,getUser,changePassword,updateProfile} from "./auth.js?v=5.2.19";
-import {DashboardApi,SettingsApi} from "./api-client.js?v=5.2.19";
+import {DashboardApi,SettingsApi} from "./api-client.js?v=5.2.30";
 import {mountNotifications} from "./notifications-ui.js?v=5.2.19";
 import {persistJob,removeJobSynced,clearJobsSynced,pullJobsFromServer} from "./jobs-sync.js?v=5.2.19";
 
 const $=id=>document.getElementById(id);
 const ids=["page-title","key-state","run-name","pause-run","download-result","progress-label","progress-percent","progress-bar","metric-leads","metric-excel-rows","metric-calls","metric-batch","metric-completed","metric-status","metric-input-tokens","metric-cached-tokens","metric-output-tokens","metric-duration","metric-cost","live-log","clear-console","history-list","clear-history","api-key","remember-key","toggle-key","save-key","forget-key","key-message","batch-size","concurrency","model","input-field-config","add-input-field","ai-field-config","output-field-config","yes-values","no-values","input-price","cached-price","output-price","save-settings","reset-settings","settings-message","toast","mobile-menu","active-job-switch","sort-field","sort-direction","app-version","export-settings","import-settings","import-settings-file","update-banner","update-banner-text","reload-app","key-modal","onboard-key","onboard-toggle","onboard-remember","onboard-message","onboard-save","onboard-skip","sidebar-version","sidebar-notes","review-drop-zone","review-file-input","review-drop-hint","review-file-list","review-validation","start-review","review-run-panel","review-aggregate","review-cards","review-dashboard-panel","review-dashboard-mount","download-review-excel","review-open-console","review-precounts","review-live-progress","review-progress-label","review-progress-percent","review-progress-bar","review-post-actions","create-review-dashboard","export-dashboard-pdf","upload-dashboard-btn","upload-dashboard-modal","upload-telecaller-list","upload-dash-message","upload-dash-confirm","upload-dash-cancel","published-list","refresh-published","published-dashboard-panel","published-dash-title","published-dash-meta","published-dash-actions","published-dashboard-mount","shell-user-label","shell-logout","shell-account"];
 const els=Object.fromEntries(ids.map(id=>[id,$(id)]));
-const titles={review:"Bucket 1 Lead Audit",console:"Run console",published:"Dashboard",history:"History",settings:"Settings","perf-dashboard":"Dashboard","perf-settings":"Settings"};
+const titles={review:"Bucket 1 Lead Audit",console:"Run console",published:"Dashboard",history:"History",settings:"Settings","perf-report":"Performance Report","perf-dashboard":"Dashboard","perf-settings":"Settings"};
 /** When false, completed audits do not auto-render charts until Create Dashboard. */
 let reviewDashboardRequested=false;
+let perfPublishedControls=null;
 let lastReadyReviewJobs=[];
 const ENGINE_VERSION="latest-day-v7";
 /** Max TeleCaller review jobs running at once (outer pool). Inner batch pool stays settings.concurrency per job. */
@@ -194,6 +195,7 @@ function showView(name){
   if(name==="console")refreshJobSwitcher();
   if(name==="review")renderReviewProgress();
   if(name==="published")refreshPublishedDashboards();
+  if(name==="perf-dashboard")perfPublishedControls?.refresh?.();
 }
 function toast(message){els.toast.textContent=message;els.toast.classList.add("show");clearTimeout(toast.timer);toast.timer=setTimeout(()=>els.toast.classList.remove("show"),3200);}
 function updateKeyState(){
@@ -1968,7 +1970,8 @@ if(els["review-drop-zone"]){
   els["review-drop-zone"].addEventListener("drop",event=>handleReviewFiles(event.dataTransfer.files));
 }
 if(els["review-file-input"])els["review-file-input"].onchange=event=>handleReviewFiles(event.target.files);
-mountPerfDashboard({toast});
+mountPerfReportUpload({toast,hasPermission,getUser});
+perfPublishedControls=mountPerfPublishedDashboard({toast,hasPermission,canManage:canManagePublishedDashboards});
 if(els["start-review"])els["start-review"].onclick=startReview;
 if(els["download-review-excel"])els["download-review-excel"].onclick=()=>downloadReviewArtifact("excel");
 if(els["create-review-dashboard"])els["create-review-dashboard"].onclick=()=>{
