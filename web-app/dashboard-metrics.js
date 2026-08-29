@@ -68,6 +68,30 @@ function normalizeFilterList(value){
   return [s];
 }
 
+/** Flatten any row field value into searchable text (case folded by caller). */
+function valueToSearchText(value){
+  if(value == null || value === "") return "";
+  if(value instanceof Date){
+    if(Number.isNaN(value.valueOf())) return "";
+    const dash = formatDashDate(value);
+    const iso = value.toISOString?.() || "";
+    return `${dash} ${iso}`.trim();
+  }
+  if(Array.isArray(value)) return value.map(valueToSearchText).filter(Boolean).join(" ");
+  if(typeof value === "object") return "";
+  return String(value);
+}
+
+/** Case-insensitive match across all searchable row fields; multi-word = AND. */
+function rowMatchesSearch(row, query){
+  const q = String(query || "").trim().toLowerCase();
+  if(!q) return true;
+  const tokens = q.split(/\s+/).filter(Boolean);
+  if(!tokens.length) return true;
+  const haystack = Object.values(row || {}).map(valueToSearchText).join("\n").toLowerCase();
+  return tokens.every(token => haystack.includes(token));
+}
+
 function applyFilters(rows, filters = {}){
   const telecallers = normalizeFilterList(filters.telecallers ?? filters.telecaller);
   const projects = normalizeFilterList(filters.projects ?? filters.project);
@@ -76,6 +100,7 @@ function applyFilters(rows, filters = {}){
   const overdueBuckets = normalizeFilterList(filters.overdueBuckets ?? filters.overdueBucket);
   const dateFrom = parseFilterDate(filters.dateFrom);
   const dateTo = parseFilterDate(filters.dateTo);
+  const search = String(filters.search ?? filters.q ?? "").trim();
 
   return rows.filter(row => {
     if(telecallers.length && !telecallers.includes(row.telecaller)) return false;
@@ -96,6 +121,7 @@ function applyFilters(rows, filters = {}){
       if(dateFrom && day < dateFrom) return false;
       if(dateTo && day > dateTo) return false;
     }
+    if(search && !rowMatchesSearch(row, search)) return false;
     return true;
   });
 }
@@ -121,7 +147,7 @@ function commentQualityBucket(score){
 
 /**
  * @param {object[]} results LeadLens audit result rows
- * @param {{telecaller?:string|string[],telecallers?:string[],project?:string|string[],projects?:string[],dateFrom?:string|Date,dateTo?:string|Date,severity?:string|string[],severities?:string[],errorType?:string|string[],errorTypes?:string[],overdueBucket?:string|string[],overdueBuckets?:string[]}} [filters]
+ * @param {{telecaller?:string|string[],telecallers?:string[],project?:string|string[],projects?:string[],dateFrom?:string|Date,dateTo?:string|Date,severity?:string|string[],severities?:string[],errorType?:string|string[],errorTypes?:string[],overdueBucket?:string|string[],overdueBuckets?:string[],search?:string,q?:string}} [filters]
  * @param {{highSeverityErrors?: Set<string>|string[]}} [options]
  */
 export function buildDashboardModel(results, filters = {}, options = {}){

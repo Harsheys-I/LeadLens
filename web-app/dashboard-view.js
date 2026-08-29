@@ -2,7 +2,7 @@
  * In-app TeleCaller Review dashboard (KPIs, scorecard, Chart.js charts, error table).
  */
 
-import {buildDashboardModel, OVERDUE_BUCKETS} from "./dashboard-metrics.js?v=5.2.1";
+import {buildDashboardModel, OVERDUE_BUCKETS} from "./dashboard-metrics.js?v=5.2.9";
 
 /** Panel switcher labels (presentation) → internal section titles stay as-built. */
 const DASHBOARD_PANELS = [
@@ -102,6 +102,7 @@ function readFilters(form){
   if(!form) return {};
   const data = new FormData(form);
   return {
+    search: String(data.get("search") || "").trim(),
     telecallers: readMulti(form, "telecallers"),
     projects: readMulti(form, "projects"),
     dateFrom: String(data.get("dateFrom") || ""),
@@ -166,6 +167,25 @@ function buildFilters(filterOptions, filters){
   head.append(hint);
   form.append(head);
 
+  const searchWrap = el("div", "dashboard-filter dashboard-filter-search");
+  const searchHead = el("div", "dashboard-filter-head");
+  searchHead.append(el("span", "dashboard-filter-label", "Search"));
+  const clearSearch = el("button", "dashboard-filter-action", "Clear");
+  clearSearch.type = "button";
+  clearSearch.setAttribute("aria-label", "Clear search");
+  searchHead.append(clearSearch);
+  const searchInput = document.createElement("input");
+  searchInput.type = "search";
+  searchInput.name = "search";
+  searchInput.className = "dashboard-filter-search-input";
+  searchInput.placeholder = "Search anything…";
+  searchInput.autocomplete = "off";
+  searchInput.spellcheck = false;
+  searchInput.value = filters.search || "";
+  searchInput.setAttribute("aria-label", "Search anything across all fields");
+  searchWrap.append(searchHead, searchInput);
+  form.append(searchWrap);
+
   const fields = [
     ["telecallers", "TeleCaller", filterOptions.telecallers, filters.telecallers],
     ["projects", "Project", filterOptions.projects, filters.projects],
@@ -217,7 +237,7 @@ function buildFilters(filterOptions, filters){
 
   queueMicrotask(() => syncFiltersBodyPadding(aside));
 
-  return {aside, form, reset};
+  return {aside, form, reset, searchInput, clearSearch};
 }
 
 function renderKpis(kpis, {showComparativeKpis = true} = {}){
@@ -755,6 +775,7 @@ export function renderReviewDashboard(container, jobs, options = {}){
   }
 
   let filters = {
+    search: "",
     telecallers: [],
     projects: [],
     dateFrom: "",
@@ -766,6 +787,11 @@ export function renderReviewDashboard(container, jobs, options = {}){
   let activePanel = "summary";
 
   const paint = () => {
+    const prevSearch = container.querySelector('input[name="search"]');
+    const restoreSearch = prevSearch && document.activeElement === prevSearch
+      ? {caret: prevSearch.selectionStart}
+      : null;
+
     destroyCharts();
     hideClipPopover();
     closeLeadDetailModal();
@@ -773,7 +799,7 @@ export function renderReviewDashboard(container, jobs, options = {}){
     container.classList.add("dashboard-root", "dashboard-with-filters");
 
     const model = buildDashboardModel(results, filters, {highSeverityErrors});
-    const {aside, form, reset} = buildFilters(model.filterOptions, filters);
+    const {aside, form, reset, searchInput, clearSearch} = buildFilters(model.filterOptions, filters);
     const body = el("div", "dashboard-body");
 
     const {bar} = buildPanelSwitcher(activePanel, (id) => {
@@ -799,9 +825,18 @@ export function renderReviewDashboard(container, jobs, options = {}){
       filters = readFilters(form);
       paint();
     };
+    form.addEventListener("submit", (e) => e.preventDefault());
     form.addEventListener("change", apply);
+    searchInput.addEventListener("input", apply);
+    clearSearch.addEventListener("click", () => {
+      if(!searchInput.value && !filters.search) return;
+      searchInput.value = "";
+      filters = {...readFilters(form), search: ""};
+      paint();
+    });
     reset.addEventListener("click", () => {
       filters = {
+        search: "",
         telecallers: [],
         projects: [],
         dateFrom: "",
@@ -812,6 +847,13 @@ export function renderReviewDashboard(container, jobs, options = {}){
       };
       paint();
     });
+
+    if(restoreSearch){
+      searchInput.focus();
+      if(typeof restoreSearch.caret === "number"){
+        try{searchInput.setSelectionRange(restoreSearch.caret, restoreSearch.caret);}catch{/* ignore */}
+      }
+    }
   };
 
   paint();

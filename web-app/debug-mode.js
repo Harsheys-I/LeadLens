@@ -16,7 +16,7 @@ import {
   sortResults,
   validateApiKey,
   SERVER_API_KEY,
-} from "./audit.js?v=5.2.8";
+} from "./audit.js?v=5.2.9";
 import {getApiKey,apiKeyIsRemembered,saveApiKey,forgetApiKey,setStorageUserId,storageKey} from "./db.js?v=5.2.8";
 import {requireAuth,logout,getUser,changePassword,updateProfile} from "./auth.js?v=5.2.8";
 import {SettingsApi} from "./api-client.js?v=5.2.8";
@@ -117,6 +117,9 @@ let currentJob=null,displayLogs=true,parsedFile=null,serverKeyConfigured=false;
 let loadedBundle=null;
 let multiRunActive=false;
 let multiRunProgress={current:0,total:MULTI_RUN_COUNT};
+/** project\u0001mobile keys currently re-auditing from the Results table. */
+const rowReAuditKeys=new Set();
+const rowReAuditControllers=new Map();
 let settings=normalizeDebugSettings(DEFAULT_DEBUG_SETTINGS);
 let resultFilter="all";
 const controllers=new Map();
@@ -151,6 +154,46 @@ function resultLeadKey(row){
   const project=String(row?.project??"").trim().toLowerCase();
   const mobile=String(row?.mobile??"").trim().toLowerCase();
   return`${project}\u0001${mobile}`;
+}
+
+function leadsForResultRow(job,row){
+  const key=resultLeadKey(row);
+  if(!key||key==="\u0001")return[];
+  const match=lead=>{
+    const sv=lead?.staticValues||{};
+    if(resultLeadKey(sv)===key)return true;
+    const groupKey=String(lead?.groupId||"").trim().toLowerCase();
+    const expected=`${String(row?.project??"").trim().toLowerCase()} | ${String(row?.mobile??"").trim().toLowerCase()}`;
+    return Boolean(groupKey)&&groupKey===expected;
+  };
+  const fromJob=(job?.leads||[]).filter(match);
+  if(fromJob.length)return fromJob;
+  return(loadedBundle?.leads||[]).filter(match);
+}
+
+/** Clone a lead and keep auditContext.c as the full chronological comment array. */
+function withFullCommentHistory(lead){
+  const next={
+    ...lead,
+    staticValues:{...(lead.staticValues||{})},
+    auditContext:{...(lead.auditContext||{})},
+    localErrors:Array.isArray(lead.localErrors)?[...lead.localErrors]:lead.localErrors
+  };
+  const c=next.auditContext.c;
+  if(Array.isArray(c)&&c.length){
+    next.auditContext.c=c.map(entry=>String(entry??""));
+  }else if(typeof c==="string"&&c.trim()){
+    next.auditContext.c=[c];
+  }else if(next.staticValues.comments){
+    next.auditContext.c=[String(next.staticValues.comments)];
+  }else{
+    next.auditContext.c=[];
+  }
+  return next;
+}
+
+function resultsTableColSpan(columns,multiRunStats){
+  return(columns?.length||1)+(multiRunStats?1:0)+1;
 }
 
 /** Per lead: count each error label (and "None") across repeated runs — one increment per run per lead. */
@@ -574,6 +617,10 @@ function renderResultsPanel(job){
         th.className="debug-consistency-col";
         head.append(th);
       }
+      const actionTh=document.createElement("th");
+      actionTh.textContent="Actions";
+      actionTh.className="debug-actions-col";
+      head.append(actionTh);
     }
   }
   if(body){
@@ -589,10 +636,12 @@ function renderResultsPanel(job){
       return;
     }
     const rows=sortResults(filteredResults(job),live);
+    const colSpan=resultsTableColSpan(columns,multiRunStats);
+    const rowBusyBlocked=multiRunActive||job.status==="running"||job.compareStatus==="running";
     if(!rows.length){
       const tr=document.createElement("tr");
       const td=document.createElement("td");
-      td.colSpan=columns.length+(multiRunStats?1:0);
+      td.colSpan=colSpan;
       td.className="empty-state";
       td.textContent="No rows match this filter.";
       tr.append(td);
@@ -617,6 +666,19 @@ function renderResultsPanel(job){
           renderLeadFrequencyMini(td,multiRunStats.get(resultLeadKey(row)),multiRunCount);
           tr.append(td);
         }
+        const actionTd=document.createElement("td");
+        actionTd.className="debug-actions-cell";
+        const btn=document.createElement("button");
+        btn.type="button";
+        btn.className="secondary-button debug-row-reaudit";
+        const rowKey=resultLeadKey(row);
+        const auditing=rowReAuditKeys.has(rowKey);
+        btn.textContent=auditing?"Re-Auditing…":"Re-Audit";
+        btn.disabled=rowBusyBlocked||auditing||!rowKey||rowKey==="\u0001";
+        btn.title="Re-audit this lead with full comment history using current settings";
+        btn.onclick=()=>reAuditResultRow(job,row);
+        actionTd.append(btn);
+        tr.append(actionTd);
         body.append(tr);
       }
     }
@@ -1062,11 +1124,101 @@ async function abortInFlight(job){
   if(!job)return;
   compareControllers.get(job.id)?.abort();
   compareControllers.delete(job.id);
+  for(const ctrl of rowReAuditControllers.values())ctrl.abort();
+  rowReAuditControllers.clear();
+  rowReAuditKeys.clear();
   const ctrl=controllers.get(job.id);
   if(ctrl){
     ctrl.abort();
     // Wait briefly for runJob finally to clear the controller map.
     for(let i=0;i<40&&controllers.has(job.id);i++)await new Promise(r=>setTimeout(r,50));
+  }
+}
+
+async function reAuditResultRow(job,row){
+  if(!job||!row)return;
+  const key=resultLeadKey(row);
+  if(!key||key==="\u0001"){
+    toast("This row is missing mobile/project — cannot re-audit.");
+    return;
+  }
+  if(rowReAuditKeys.has(key)){
+    toast("That lead is already re-auditing.");
+    return;
+  }
+  if(multiRunActive||job.status==="running"||job.compareStatus==="running"){
+    toast("Wait for the current run to finish before re-auditing a row.");
+    return;
+  }
+  const keyApi=effectiveApiKey();
+  if(!keyApi){showView("settings");toast("Add an OpenAI API key first.");return;}
+  const live=collectSettings();
+  const ready=activePromptsReady(live);
+  if(!ready.ok){showView("settings");toast(`Fill prompts for: ${ready.missing.map(shortLabel).join(", ")}`);return;}
+  settings=live;
+  saveDebugSettingsLocal(settings);
+
+  const sourceLeads=leadsForResultRow(job,row);
+  if(!sourceLeads.length){
+    toast("Lead not found in memory — re-upload the file or run a full Re-Audit.");
+    return;
+  }
+  const leadGroup=groupCallRowsByLead(sourceLeads)[0]||sourceLeads;
+  const batch=leadGroup.map(withFullCommentHistory);
+  const historyLen=Array.isArray(batch[0]?.auditContext?.c)?batch[0].auditContext.c.length:0;
+  const label=`${row.mobile||"?"} · ${row.project||"?"}`;
+
+  rowReAuditKeys.add(key);
+  const controller=new AbortController();
+  rowReAuditControllers.set(key,controller);
+  renderResultsPanel(job);
+  addLog(job,`Row Re-Audit: ${label} · full comment history (${historyLen}) · current settings (${activeForJob({settings:live}).map(shortLabel).join(", ")}).`);
+
+  try{
+    const rows=await debugAuditBatch(
+      keyApi,
+      live,
+      batch,
+      controller.signal,
+      (message,level)=>addLog(job,message,level),
+      usage=>{
+        job.tokenUsage=job.tokenUsage||{input:0,cached:0,output:0};
+        job.tokenUsage.input+=usage.input;
+        job.tokenUsage.cached+=usage.cached;
+        job.tokenUsage.output+=usage.output;
+      }
+    );
+    if(!rows?.length)throw new Error("Re-audit returned no rows.");
+    const next=rows[0];
+    let replaced=false;
+    job.results=(job.results||[]).map(existing=>{
+      if(resultLeadKey(existing)!==key)return existing;
+      if(replaced)return existing;
+      replaced=true;
+      return next;
+    });
+    if(!replaced)job.results.push(next);
+    job.compare=null;
+    job.telecallerResults=null;
+    job.compareStatus="";
+    job.updatedAt=timestamp();
+    job.settings=deepCopy(live);
+    addLog(job,`Row Re-Audit complete: ${label}.`,"success");
+    toast(`Re-audited ${row.mobile||"lead"}.`);
+    renderProgress(job);
+  }catch(error){
+    if(error.name==="AbortError"){
+      addLog(job,`Row Re-Audit aborted: ${label}.`,"warn");
+    }else{
+      addLog(job,`Row Re-Audit FAILED (${label}): ${error.message||error}`,"error");
+      toast(error.message||"Row re-audit failed.");
+    }
+    renderResultsPanel(job);
+    renderProgress(job);
+  }finally{
+    rowReAuditKeys.delete(key);
+    rowReAuditControllers.delete(key);
+    if(currentJob?.id===job.id)renderResultsPanel(job);
   }
 }
 
