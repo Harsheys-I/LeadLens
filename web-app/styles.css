@@ -421,7 +421,7 @@ body .dashboard-filter-reset{width:100%;justify-self:stretch;margin-top:4px}
 .debug-consistency-col{min-width:220px}
 .debug-consistency-cell{min-width:220px;max-width:320px;vertical-align:top;padding-top:10px;padding-bottom:10px}
 .debug-actions-col{width:1%;white-space:nowrap}
-.debug-actions-cell{white-space:nowrap;vertical-align:middle}
+.debug-actions-cell{display:flex;flex-wrap:wrap;gap:6px;align-items:center;white-space:nowrap;vertical-align:middle}
 .debug-row-reaudit{padding:6px 10px;font-size:12px;font-weight:650}
 .debug-lead-freq-mini{display:grid;gap:6px}
 .debug-freq-row{display:grid;grid-template-columns:minmax(140px,34%) 1fr;gap:10px 14px;align-items:center}

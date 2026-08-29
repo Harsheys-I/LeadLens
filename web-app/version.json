@@ -1,5 +1,5 @@
 {
-  "version": "5.2.8",
+  "version": "5.2.10",
   "name": "LeadLens",
-  "notes": "v5.2.8: DeBug results table follows Output Excel column settings live."
+  "notes": "v5.2.10: DeBug Results per-row Re-Audit 10× updates that lead’s consistency bars."
 }

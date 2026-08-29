@@ -16,7 +16,7 @@ import {
   sortResults,
   validateApiKey,
   SERVER_API_KEY,
-} from "./audit.js?v=5.2.9";
+} from "./audit.js?v=5.2.10";
 import {getApiKey,apiKeyIsRemembered,saveApiKey,forgetApiKey,setStorageUserId,storageKey} from "./db.js?v=5.2.8";
 import {requireAuth,logout,getUser,changePassword,updateProfile} from "./auth.js?v=5.2.8";
 import {SettingsApi} from "./api-client.js?v=5.2.8";
@@ -120,6 +120,8 @@ let multiRunProgress={current:0,total:MULTI_RUN_COUNT};
 /** project\u0001mobile keys currently re-auditing from the Results table. */
 const rowReAuditKeys=new Set();
 const rowReAuditControllers=new Map();
+/** Progress for per-row 10× re-audit: key → {current,total}. */
+const rowTenReAuditProgress=new Map();
 let settings=normalizeDebugSettings(DEFAULT_DEBUG_SETTINGS);
 let resultFilter="all";
 const controllers=new Map();
@@ -668,16 +670,25 @@ function renderResultsPanel(job){
         }
         const actionTd=document.createElement("td");
         actionTd.className="debug-actions-cell";
+        const rowKey=resultLeadKey(row);
+        const auditing=rowReAuditKeys.has(rowKey);
+        const tenProgress=rowTenReAuditProgress.get(rowKey);
+        const rowInvalid=!rowKey||rowKey==="\u0001";
         const btn=document.createElement("button");
         btn.type="button";
         btn.className="secondary-button debug-row-reaudit";
-        const rowKey=resultLeadKey(row);
-        const auditing=rowReAuditKeys.has(rowKey);
-        btn.textContent=auditing?"Re-Auditing…":"Re-Audit";
-        btn.disabled=rowBusyBlocked||auditing||!rowKey||rowKey==="\u0001";
+        btn.textContent=auditing&&!tenProgress?"Re-Auditing…":"Re-Audit";
+        btn.disabled=rowBusyBlocked||auditing||rowInvalid;
         btn.title="Re-audit this lead with full comment history using current settings";
         btn.onclick=()=>reAuditResultRow(job,row);
-        actionTd.append(btn);
+        const btnTen=document.createElement("button");
+        btnTen.type="button";
+        btnTen.className="secondary-button debug-row-reaudit";
+        btnTen.textContent=tenProgress?`Running ${tenProgress.current}/${tenProgress.total}…`:"Re-Audit 10×";
+        btnTen.disabled=rowBusyBlocked||auditing||rowInvalid;
+        btnTen.title="Re-audit this lead 10 times with full comment history; updates consistency bars";
+        btnTen.onclick=()=>reAuditResultRowTenTimes(job,row);
+        actionTd.append(btn,btnTen);
         tr.append(actionTd);
         body.append(tr);
       }
@@ -1127,6 +1138,7 @@ async function abortInFlight(job){
   for(const ctrl of rowReAuditControllers.values())ctrl.abort();
   rowReAuditControllers.clear();
   rowReAuditKeys.clear();
+  rowTenReAuditProgress.clear();
   const ctrl=controllers.get(job.id);
   if(ctrl){
     ctrl.abort();
@@ -1217,6 +1229,134 @@ async function reAuditResultRow(job,row){
     renderProgress(job);
   }finally{
     rowReAuditKeys.delete(key);
+    rowReAuditControllers.delete(key);
+    if(currentJob?.id===job.id)renderResultsPanel(job);
+  }
+}
+
+async function reAuditResultRowTenTimes(job,row){
+  if(!job||!row)return;
+  const key=resultLeadKey(row);
+  if(!key||key==="\u0001"){
+    toast("This row is missing mobile/project — cannot re-audit.");
+    return;
+  }
+  if(rowReAuditKeys.has(key)){
+    toast("That lead is already re-auditing.");
+    return;
+  }
+  if(multiRunActive||job.status==="running"||job.compareStatus==="running"){
+    toast("Wait for the current run to finish before re-auditing a row.");
+    return;
+  }
+  const keyApi=effectiveApiKey();
+  if(!keyApi){showView("settings");toast("Add an OpenAI API key first.");return;}
+  const live=collectSettings();
+  const ready=activePromptsReady(live);
+  if(!ready.ok){showView("settings");toast(`Fill prompts for: ${ready.missing.map(shortLabel).join(", ")}`);return;}
+  settings=live;
+  saveDebugSettingsLocal(settings);
+
+  const sourceLeads=leadsForResultRow(job,row);
+  if(!sourceLeads.length){
+    toast("Lead not found in memory — re-upload the file or run a full Re-Audit.");
+    return;
+  }
+  const leadGroup=groupCallRowsByLead(sourceLeads)[0]||sourceLeads;
+  const batch=leadGroup.map(withFullCommentHistory);
+  const historyLen=Array.isArray(batch[0]?.auditContext?.c)?batch[0].auditContext.c.length:0;
+  const label=`${row.mobile||"?"} · ${row.project||"?"}`;
+
+  rowReAuditKeys.add(key);
+  rowTenReAuditProgress.set(key,{current:0,total:MULTI_RUN_COUNT});
+  const controller=new AbortController();
+  rowReAuditControllers.set(key,controller);
+  renderResultsPanel(job);
+  addLog(job,`Row Re-Audit 10×: ${label} · full comment history (${historyLen}) · current settings (${activeForJob({settings:live}).map(shortLabel).join(", ")}).`);
+
+  const resultSets=[];
+  let runsCompleted=0,runsFailed=0,lastRow=null;
+  try{
+    for(let run=1;run<=MULTI_RUN_COUNT;run++){
+      if(controller.signal.aborted){
+        const err=new Error("Aborted");
+        err.name="AbortError";
+        throw err;
+      }
+      rowTenReAuditProgress.set(key,{current:run,total:MULTI_RUN_COUNT});
+      renderResultsPanel(job);
+      addLog(job,`Row Re-Audit 10× ${run}/${MULTI_RUN_COUNT}: ${label}…`,"info");
+      try{
+        const rows=await debugAuditBatch(
+          keyApi,
+          live,
+          batch,
+          controller.signal,
+          (message,level)=>addLog(job,message,level),
+          usage=>{
+            job.tokenUsage=job.tokenUsage||{input:0,cached:0,output:0};
+            job.tokenUsage.input+=usage.input;
+            job.tokenUsage.cached+=usage.cached;
+            job.tokenUsage.output+=usage.output;
+          }
+        );
+        if(!rows?.length)throw new Error("Re-audit returned no rows.");
+        const next=rows[0];
+        resultSets.push([next]);
+        lastRow=next;
+        runsCompleted++;
+        addLog(job,`Row Re-Audit 10× ${run}/${MULTI_RUN_COUNT} complete: ${label}.`,"success");
+      }catch(error){
+        if(error.name==="AbortError")throw error;
+        runsFailed++;
+        addLog(job,`Row Re-Audit 10× ${run}/${MULTI_RUN_COUNT} failed (${label}): ${error.message||error}. Continuing.`,"warn");
+      }
+    }
+
+    if(!runsCompleted||!lastRow){
+      addLog(job,`Row Re-Audit 10× finished with no successful runs: ${label}.`,"error");
+      toast(`Re-Audit 10× failed for ${row.mobile||"lead"} — no successful runs.`);
+      return;
+    }
+
+    let replaced=false;
+    job.results=(job.results||[]).map(existing=>{
+      if(resultLeadKey(existing)!==key)return existing;
+      if(replaced)return existing;
+      replaced=true;
+      return lastRow;
+    });
+    if(!replaced)job.results.push(lastRow);
+
+    const perLead=aggregatePerLeadFrequencies(resultSets);
+    if(!(job.multiRunStats instanceof Map))job.multiRunStats=new Map();
+    const leadEntries=perLead.get(key)||perLead.get(resultLeadKey(lastRow));
+    if(leadEntries)job.multiRunStats.set(key,leadEntries);
+    const prevCompleted=job.multiRunMeta?.runsCompleted||0;
+    job.multiRunMeta={
+      runsCompleted:Math.max(prevCompleted,runsCompleted),
+      runsFailed:(job.multiRunMeta?.runsFailed||0)+runsFailed
+    };
+    job.compare=null;
+    job.telecallerResults=null;
+    job.compareStatus="";
+    job.updatedAt=timestamp();
+    job.settings=deepCopy(live);
+    addLog(job,`Row Re-Audit 10× complete: ${label} · ${runsCompleted}/${MULTI_RUN_COUNT} succeeded${runsFailed?`, ${runsFailed} failed`:""}. Consistency bars updated.`,"success");
+    toast(`Re-Audit 10× complete for ${row.mobile||"lead"} (${runsCompleted}/${MULTI_RUN_COUNT}).`);
+    renderProgress(job);
+  }catch(error){
+    if(error.name==="AbortError"){
+      addLog(job,`Row Re-Audit 10× aborted: ${label}.`,"warn");
+    }else{
+      addLog(job,`Row Re-Audit 10× FAILED (${label}): ${error.message||error}`,"error");
+      toast(error.message||"Row Re-Audit 10× failed.");
+    }
+    renderResultsPanel(job);
+    renderProgress(job);
+  }finally{
+    rowReAuditKeys.delete(key);
+    rowTenReAuditProgress.delete(key);
     rowReAuditControllers.delete(key);
     if(currentJob?.id===job.id)renderResultsPanel(job);
   }
