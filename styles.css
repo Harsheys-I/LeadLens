@@ -448,6 +448,18 @@ body .dashboard-filter-reset{width:100%;justify-self:stretch;margin-top:4px}
 .perf-summary-row:last-child{border-bottom:0}
 .perf-summary-row dt{margin:0;font-size:14px;color:var(--ink);font-weight:600}
 .perf-summary-row dd{margin:0;font-size:18px;font-variant-numeric:tabular-nums;color:var(--green);font-weight:700}
+.perf-filters-rail{align-self:start}
+.perf-filters-rail .dashboard-filter-field{display:grid;gap:6px;margin:0 0 12px}
+.perf-filters-rail .dashboard-filter-field span{font-size:11px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:var(--muted)}
+.perf-filters-rail select{
+  width:100%;border:1px solid #cfd8d2;border-radius:9px;background:#fff;padding:9px 11px;color:var(--ink);font-weight:600
+}
+#view-perf-dashboard .dashboard-layout{display:grid;grid-template-columns:240px minmax(0,1fr);gap:18px;align-items:start}
+#view-perf-dashboard .dashboard-main-col{display:grid;gap:16px;min-width:0}
+#view-perf-dashboard .review-dashboard-panel{max-width:none;width:100%}
+@media(max-width:980px){
+  #view-perf-dashboard .dashboard-layout{grid-template-columns:1fr}
+}
 @media(max-width:850px){
   .perf-upload-grid,.perf-file-metas{grid-template-columns:1fr}
   .perf-date-range strong{font-size:17px}
