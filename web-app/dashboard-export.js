@@ -95,17 +95,8 @@ function mapSeverity(errorSeverity, errorLabels, highSeverityErrors){
 function splitErrorLabels(errorTypes){
   const raw = clean(errorTypes);
   if(!raw || /^none$/i.test(raw)) return [];
-  const parts = raw.split(/\s*\|\s*|\s*,\s*/).map(s => s.trim()).filter(Boolean);
   // Drop retired TAT labels only (word-boundary). /tat/i falsely matches "Status".
-  const kept = parts.filter(s => !/^none$/i.test(s) && !/\bTAT\b/i.test(s));
-  // #region agent log
-  const dropped = parts.filter(s => !kept.includes(s));
-  const statusRelated = parts.filter(s => /status|aligned/i.test(s));
-  if(statusRelated.length || dropped.some(s => /status|aligned|tat/i.test(s))){
-    fetch('http://127.0.0.1:7843/ingest/f4ac7d78-fa93-4940-929e-852fd1791883',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'d7b064'},body:JSON.stringify({sessionId:'d7b064',runId:'post-fix',hypothesisId:'A',location:'dashboard-export.js:splitErrorLabels',message:'splitErrorLabels tat filter',data:{raw:String(errorTypes||'').slice(0,200),parts,kept,dropped,statusRelated,tatHits:parts.map(s=>({s,substringTat:/tat/i.test(s),wordTat:/\bTAT\b/i.test(s)}))},timestamp:Date.now()})}).catch(()=>{});
-  }
-  // #endregion
-  return kept;
+  return raw.split(/\s*\|\s*|\s*,\s*/).map(s => s.trim()).filter(Boolean).filter(s => !/^none$/i.test(s) && !/\bTAT\b/i.test(s));
 }
 
 function leadKey(row){

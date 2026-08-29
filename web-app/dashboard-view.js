@@ -362,7 +362,7 @@ function barScaleOptions(){
   };
 }
 
-function renderCharts(charts, {onOverdueBucketClick} = {}){
+function renderCharts(charts){
   destroyCharts();
   const mount = el("div", "dashboard-charts");
   const Chart = requireChart();
@@ -383,10 +383,12 @@ function renderCharts(charts, {onOverdueBucketClick} = {}){
     ["projects", "Project-wise Errors", "bar", charts.projectErrors, {
       scales: barScaleOptions()
     }, CHART_COLORS.red],
-    ["severity", "Severity Distribution", "doughnut", charts.severityDistribution, {
+    ["severity", "Severity Distribution", "bar", charts.severityDistribution, {
+      scales: barScaleOptions(),
       plugins: {legend: {display: true, position: "bottom", labels: {color: CHART_COLORS.ink, boxWidth: 12, padding: 10}}}
     }],
-    ["commentQuality", "Comment Quality Score", "pie", charts.commentQualityDistribution, {
+    ["commentQuality", "Comment Quality Score", "bar", charts.commentQualityDistribution, {
+      scales: barScaleOptions(),
       plugins: {legend: {display: true, position: "bottom", labels: {color: CHART_COLORS.ink, boxWidth: 12, padding: 10}}}
     }],
     ["overdue", "Overdue Days", "pie", charts.overdueDistribution, {
@@ -398,7 +400,7 @@ function renderCharts(charts, {onOverdueBucketClick} = {}){
     const card = el("div", "dashboard-chart-card");
     card.append(el("h3", null, title));
     if(id === "overdue"){
-      card.append(el("p", "dashboard-section-note", "Click a slice to filter · 0–5, >5–50, >50–100 · Lost/Beyond Budget excluded"));
+      card.append(el("p", "dashboard-section-note", "1–5, 5–20, 20–50, 50–100, 100+ · Lost/Beyond Budget excluded"));
     }
     const canvasWrap = el("div", "dashboard-chart-canvas");
     const canvas = document.createElement("canvas");
@@ -408,37 +410,44 @@ function renderCharts(charts, {onOverdueBucketClick} = {}){
     mount.append(card);
 
     const labels = series?.labels || [];
+    const grouped = Array.isArray(series?.datasets) && series.datasets.length > 0;
     const values = series?.values || [];
     const isSegmented = type === "doughnut" || type === "pie";
-    const backgroundColor = isSegmented
-      ? (id === "severity"
-        ? [CHART_COLORS.red, CHART_COLORS.amber]
-        : labels.map((_, i) => CHART_COLORS.palette[i % CHART_COLORS.palette.length]))
-      : solidColor;
+    const severitySeriesColors = {Critical: CHART_COLORS.red, Medium: CHART_COLORS.amber};
+
+    let datasets;
+    if(grouped){
+      datasets = series.datasets.map((ds, i) => {
+        const color = id === "severity"
+          ? (severitySeriesColors[ds.label] || CHART_COLORS.palette[i % CHART_COLORS.palette.length])
+          : CHART_COLORS.palette[i % CHART_COLORS.palette.length];
+        return {
+          label: ds.label,
+          data: ds.values || [],
+          backgroundColor: color,
+          borderWidth: 0,
+          borderRadius: 4,
+          maxBarThickness: 28
+        };
+      });
+    }else{
+      const backgroundColor = isSegmented
+        ? labels.map((_, i) => CHART_COLORS.palette[i % CHART_COLORS.palette.length])
+        : solidColor;
+      datasets = [{
+        data: values,
+        backgroundColor,
+        borderWidth: 0,
+        borderRadius: isSegmented ? 0 : 4,
+        maxBarThickness: 42
+      }];
+    }
 
     const chartOptions = baseChartOptions(options);
-    if(id === "overdue" && typeof onOverdueBucketClick === "function"){
-      chartOptions.onClick = (_evt, elements) => {
-        if(!elements?.length) return;
-        const idx = elements[0].index;
-        const label = labels[idx];
-        if(label) onOverdueBucketClick(label);
-      };
-      canvas.style.cursor = "pointer";
-    }
 
     const chart = new Chart(canvas.getContext("2d"), {
       type,
-      data: {
-        labels,
-        datasets: [{
-          data: values,
-          backgroundColor,
-          borderWidth: 0,
-          borderRadius: isSegmented ? 0 : 4,
-          maxBarThickness: 42
-        }]
-      },
+      data: {labels, datasets},
       options: chartOptions
     });
     chartRegistry.set(id, chart);
@@ -852,15 +861,7 @@ export function renderReviewDashboard(container, jobs, options = {}){
     body.append(searchBar, bar);
     body.append(section("Executive KPIs", null, renderKpis(model.kpis, {showComparativeKpis}), "summary"));
     body.append(section("TeleCaller Performance", null, renderScorecard(model.scorecard), "performance"));
-    body.append(section("Charts", null, renderCharts(model.charts, {
-      onOverdueBucketClick: (label) => {
-        const set = new Set(filters.overdueBuckets || []);
-        if(set.has(label)) set.delete(label);
-        else set.add(label);
-        filters = {...filters, overdueBuckets: [...set]};
-        paint();
-      }
-    }), "graphs"));
+    body.append(section("Charts", null, renderCharts(model.charts), "graphs"));
     body.append(section("Detailed Error Report", `${num(model.errorDetails.length)} error row(s)`, renderErrorDetails(model.errorDetails), "errors"));
     container.append(body, aside);
     activePanel = applyActivePanel(body, activePanel);

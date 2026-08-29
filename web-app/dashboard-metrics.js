@@ -7,8 +7,8 @@ import {mapResultsToRawDataRows} from "./dashboard-export.js?v=5.2.20";
 
 const MONTHS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
 
-/** Inclusive upper bands for overdue pie + filter. Negatives / blank / Lost|Beyond Budget excluded. */
-export const OVERDUE_BUCKETS = ["0-5", "5-20", "20-50", "50-100", "100+"];
+/** Inclusive upper bands for overdue pie + filter. Shared edges go to the lower band. <1 / blank / Lost|Beyond Budget excluded. */
+export const OVERDUE_BUCKETS = ["1-5", "5-20", "20-50", "50-100", "100+"];
 
 function formatDashDate(date){
   if(!(date instanceof Date) || Number.isNaN(date.valueOf())) return "";
@@ -40,11 +40,11 @@ function accuracyRating(accuracy){
   return `${"★".repeat(filled)}${"☆".repeat(5 - filled)}`;
 }
 
-/** Map numeric overdue days → pie bucket, or null when N/A. */
+/** Map numeric overdue days → pie bucket, or null when N/A (<1 / non-finite). Shared edges → lower band. */
 export function overdueBucket(days){
   const n = Number(days);
-  if(!Number.isFinite(n) || n < 0) return null;
-  if(n <= 5) return "0-5";
+  if(!Number.isFinite(n) || n < 1) return null;
+  if(n <= 5) return "1-5";
   if(n <= 20) return "5-20";
   if(n <= 50) return "20-50";
   if(n <= 100) return "50-100";
@@ -224,15 +224,20 @@ export function buildDashboardModel(results, filters = {}, options = {}){
 
   const errorTypeCounts = new Map();
   const projectErrorCounts = new Map();
-  const severityCounts = new Map([["Critical", 0], ["Medium", 0]]);
-  const commentQualityCounts = new Map(CQ_BUCKETS.map(label => [label, 0]));
   const overdueCounts = new Map(OVERDUE_BUCKETS.map(label => [label, 0]));
+  /** @type {Map<string, Map<string, number>>} telecaller → CQ bucket → count */
+  const cqByTele = new Map();
   for(const row of rows){
-    if(row.severity === "Critical" || row.severity === "Medium"){
-      countMapInc(severityCounts, row.severity);
-    }
+    const tele = row.telecaller || "Unknown";
     const cqBucket = commentQualityBucket(row.commentQuality);
-    if(cqBucket) countMapInc(commentQualityCounts, cqBucket);
+    if(cqBucket){
+      let bucketMap = cqByTele.get(tele);
+      if(!bucketMap){
+        bucketMap = new Map(CQ_BUCKETS.map(label => [label, 0]));
+        cqByTele.set(tele, bucketMap);
+      }
+      countMapInc(bucketMap, cqBucket);
+    }
     const odBucket = row.overdueBucket || overdueBucket(row.overdueDays);
     if(odBucket) countMapInc(overdueCounts, odBucket);
     if(row.errorFlag){
@@ -242,24 +247,34 @@ export function buildDashboardModel(results, filters = {}, options = {}){
     }
   }
 
+  const teleLabels = scorecard.map(s => s.name);
+
   const charts = {
     telecallerAccuracy: {
-      labels: scorecard.map(s => s.name),
+      labels: teleLabels,
       values: scorecard.map(s => Math.round(s.accuracyPct * 10) / 10)
     },
     errorsByTelecaller: {
-      labels: scorecard.map(s => s.name),
+      labels: teleLabels,
       values: scorecard.map(s => s.errors)
     },
     errorTypeDistribution: seriesFromMap(errorTypeCounts, {sortBy: "value"}),
     projectErrors: seriesFromMap(projectErrorCounts, {sortBy: "value"}),
+    /** Grouped bar: x = TeleCaller, series = Critical / Medium. */
     severityDistribution: {
-      labels: ["Critical", "Medium"],
-      values: [severityCounts.get("Critical") || 0, severityCounts.get("Medium") || 0]
+      labels: teleLabels,
+      datasets: [
+        {label: "Critical", values: scorecard.map(s => s.critical)},
+        {label: "Medium", values: scorecard.map(s => s.medium)}
+      ]
     },
+    /** Grouped bar: x = TeleCaller, series = CQ score bands. */
     commentQualityDistribution: {
-      labels: CQ_BUCKETS.slice(),
-      values: CQ_BUCKETS.map(label => commentQualityCounts.get(label) || 0)
+      labels: teleLabels,
+      datasets: CQ_BUCKETS.map(bucket => ({
+        label: bucket,
+        values: teleLabels.map(name => cqByTele.get(name)?.get(bucket) || 0)
+      }))
     },
     overdueDistribution: {
       labels: OVERDUE_BUCKETS.slice(),
@@ -293,22 +308,6 @@ export function buildDashboardModel(results, filters = {}, options = {}){
       sourceName: row.sourceName,
       auditStatus: row.auditStatus
     }));
-
-  // #region agent log
-  {
-    const STATUS_LABEL = "Lead Status Not Aligned With Comments";
-    const rawWithStatus = (results || []).filter(r => String(r?.errorTypes || "").includes(STATUS_LABEL));
-    const mappedWithStatus = allRows.filter(r => (r.errorLabels || []).includes(STATUS_LABEL) || String(r.errorType || "").includes(STATUS_LABEL));
-    const detailsWithStatus = errorDetails.filter(r => String(r.errorType || "").includes(STATUS_LABEL));
-    const strippedOnlyStatus = allRows.filter((r, i) => {
-      const src = (results || [])[i];
-      const rawHas = String(src?.errorTypes || "").includes(STATUS_LABEL);
-      const mappedHas = (r.errorLabels || []).includes(STATUS_LABEL);
-      return rawHas && !mappedHas;
-    });
-    fetch('http://127.0.0.1:7843/ingest/f4ac7d78-fa93-4940-929e-852fd1791883',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'d7b064'},body:JSON.stringify({sessionId:'d7b064',runId:'post-fix',hypothesisId:'B',location:'dashboard-metrics.js:buildDashboardModel',message:'status error pipeline counts',data:{rawWithStatus:rawWithStatus.length,mappedWithStatus:mappedWithStatus.length,detailsWithStatus:detailsWithStatus.length,strippedOnlyStatus:strippedOnlyStatus.length,sampleRaw:rawWithStatus.slice(0,3).map(r=>({errorTypes:r.errorTypes,mobile:r.mobile})),sampleMapped:allRows.filter((_,i)=>String((results||[])[i]?.errorTypes||'').includes(STATUS_LABEL)).slice(0,3).map(r=>({errorLabels:r.errorLabels,errorType:r.errorType,errorFlag:r.errorFlag})),errorTypeChartHasStatus:(charts.errorTypeDistribution?.labels||[]).includes(STATUS_LABEL)},timestamp:Date.now()})}).catch(()=>{});
-  }
-  // #endregion
 
   return {
     filterOptions,
