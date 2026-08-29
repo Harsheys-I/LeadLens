@@ -288,10 +288,12 @@ body .dashboard-filter-action{
   color:var(--green-2);text-decoration:underline;text-underline-offset:2px;text-decoration-color:#9bb7a8
 }
 body .dashboard-filter-action:hover{color:var(--green);text-decoration-color:var(--green)}
-body .dashboard-filter-select,body .dashboard-filter-date{
+body .dashboard-filter-select,body .dashboard-filter-date,body .dashboard-filter-search-input{
   width:100%;border:1px solid #c5d3cb;border-radius:10px;background:#fff;padding:8px 10px;
   color:var(--ink);font-weight:500;box-shadow:inset 0 1px 2px rgba(18,55,42,.04)
 }
+body .dashboard-filter-search-input{min-height:38px}
+body .dashboard-filter-search-input::-webkit-search-cancel-button{-webkit-appearance:none;appearance:none}
 body .dashboard-filter-select{min-height:84px;line-height:1.35}
 body .dashboard-filter-select option{padding:4px 6px;border-radius:4px}
 body .dashboard-filter-select option:checked{background:var(--mint);color:var(--green)}
@@ -413,6 +415,9 @@ body .dashboard-filter-reset{width:100%;justify-self:stretch;margin-top:4px}
 .debug-errors-cell{font-weight:600;color:var(--green)}
 .debug-consistency-col{min-width:220px}
 .debug-consistency-cell{min-width:220px;max-width:320px;vertical-align:top;padding-top:10px;padding-bottom:10px}
+.debug-actions-col{width:1%;white-space:nowrap}
+.debug-actions-cell{white-space:nowrap;vertical-align:middle}
+.debug-row-reaudit{padding:6px 10px;font-size:12px;font-weight:650}
 .debug-lead-freq-mini{display:grid;gap:6px}
 .debug-freq-row{display:grid;grid-template-columns:minmax(140px,34%) 1fr;gap:10px 14px;align-items:center}
 .debug-freq-row-mini{grid-template-columns:minmax(72px,38%) 1fr;gap:6px 8px}
