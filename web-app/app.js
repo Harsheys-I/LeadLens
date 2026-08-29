@@ -1,10 +1,10 @@
-import {APP_VERSION,DEFAULT_SETTINGS,DEFAULT_OUTPUT_FIELDS,SETTINGS_SEED,MAX_BATCH_SIZE,MAX_CONCURRENCY,normalizeSettings,normalizeInputFields,slugFieldId,parseWorkbook,parseAuditedWorkbook,auditBatch,downloadWorkbook,downloadReviewPack,splitLeadsByTelecaller,splitResultsByTelecaller,validateApiKey,HIGH_SEVERITY_ERRORS,SERVER_API_KEY} from "./audit.js?v=5.2.17";
-import {getJob,getJobs,loadSettings,saveSettings,getApiKey,apiKeyIsRemembered,saveApiKey,forgetApiKey,setStorageUserId,storageKey} from "./db.js?v=5.2.17";
-import {renderReviewDashboard,destroyReviewDashboard} from "./dashboard-view.js?v=5.2.17";
-import {requireAuth,logout,hasPermission,getUser,changePassword,updateProfile} from "./auth.js?v=5.2.17";
-import {DashboardApi,SettingsApi} from "./api-client.js?v=5.2.17";
-import {mountNotifications} from "./notifications-ui.js?v=5.2.17";
-import {persistJob,removeJobSynced,clearJobsSynced,pullJobsFromServer} from "./jobs-sync.js?v=5.2.17";
+import {APP_VERSION,DEFAULT_SETTINGS,DEFAULT_OUTPUT_FIELDS,SETTINGS_SEED,MAX_BATCH_SIZE,MAX_CONCURRENCY,normalizeSettings,normalizeInputFields,slugFieldId,parseWorkbook,parseAuditedWorkbook,auditBatch,downloadWorkbook,downloadReviewPack,splitLeadsByTelecaller,splitResultsByTelecaller,validateApiKey,HIGH_SEVERITY_ERRORS,SERVER_API_KEY} from "./audit.js?v=5.2.18";
+import {getJob,getJobs,loadSettings,saveSettings,getApiKey,apiKeyIsRemembered,saveApiKey,forgetApiKey,setStorageUserId,storageKey} from "./db.js?v=5.2.18";
+import {renderReviewDashboard,destroyReviewDashboard} from "./dashboard-view.js?v=5.2.18";
+import {requireAuth,logout,hasPermission,getUser,changePassword,updateProfile} from "./auth.js?v=5.2.18";
+import {DashboardApi,SettingsApi} from "./api-client.js?v=5.2.18";
+import {mountNotifications} from "./notifications-ui.js?v=5.2.18";
+import {persistJob,removeJobSynced,clearJobsSynced,pullJobsFromServer} from "./jobs-sync.js?v=5.2.18";
 
 const $=id=>document.getElementById(id);
 const ids=["page-title","key-state","run-name","pause-run","download-result","progress-label","progress-percent","progress-bar","metric-leads","metric-excel-rows","metric-calls","metric-batch","metric-completed","metric-status","metric-input-tokens","metric-cached-tokens","metric-output-tokens","metric-duration","metric-cost","live-log","clear-console","history-list","clear-history","api-key","remember-key","toggle-key","save-key","forget-key","key-message","batch-size","concurrency","model","input-field-config","add-input-field","ai-field-config","rule-config","add-rule","output-field-config","yes-values","no-values","additional-instructions","input-price","cached-price","output-price","save-settings","reset-settings","settings-message","toast","mobile-menu","active-job-switch","sort-field","sort-direction","app-version","export-settings","import-settings","import-settings-file","update-banner","update-banner-text","reload-app","key-modal","onboard-key","onboard-toggle","onboard-remember","onboard-message","onboard-save","onboard-skip","sidebar-version","sidebar-notes","review-drop-zone","review-file-input","review-drop-hint","review-file-list","review-validation","start-review","review-run-panel","review-aggregate","review-cards","review-dashboard-panel","review-dashboard-mount","download-review-excel","review-open-console","review-precounts","review-live-progress","review-progress-label","review-progress-percent","review-progress-bar","review-post-actions","create-review-dashboard","upload-dashboard-btn","upload-dashboard-modal","upload-telecaller-list","upload-dash-message","upload-dash-confirm","upload-dash-cancel","published-list","refresh-published","published-dashboard-panel","published-dash-title","published-dash-meta","published-dash-actions","published-dashboard-mount","shell-user-label","shell-logout","shell-account"];
@@ -1843,12 +1843,45 @@ async function checkForUpdate(){
   }catch{/* offline or first local open */}
 }
 
+function readSidebarCollapsedPref(){
+  try{return localStorage.getItem(storageKey("sidebarCollapsed"))==="1";}
+  catch{return false;}
+}
+
+function writeSidebarCollapsedPref(collapsed){
+  try{localStorage.setItem(storageKey("sidebarCollapsed"),collapsed?"1":"0");}
+  catch{/* ignore */}
+}
+
+function applySidebarCollapsed(collapsed,{persist=true}={}){
+  const shell=document.querySelector(".shell");
+  if(!shell)return;
+  shell.classList.toggle("sidebar-collapsed",Boolean(collapsed));
+  const btn=els["mobile-menu"];
+  if(btn){
+    btn.setAttribute("aria-expanded",collapsed?"false":"true");
+    btn.setAttribute("aria-label",collapsed?"Show left panel":"Hide left panel");
+    btn.title=collapsed?"Show left panel":"Hide left panel";
+  }
+  if(persist)writeSidebarCollapsedPref(Boolean(collapsed));
+  requestAnimationFrame(()=>window.dispatchEvent(new Event("resize")));
+}
+
 document.querySelectorAll(".nav-item").forEach(button=>button.addEventListener("click",()=>showView(button.dataset.view)));
 document.querySelector(".brand")?.addEventListener("click",event=>{
   // Brand goes to home hub (href="/"); only prevent default if we want in-module nav
 });
 document.getElementById("settings-form")?.addEventListener("submit",event=>event.preventDefault());
-els["mobile-menu"]?.addEventListener("click",()=>document.querySelector(".shell")?.classList.toggle("menu-open"));
+els["mobile-menu"]?.addEventListener("click",()=>{
+  const shell=document.querySelector(".shell");
+  if(!shell)return;
+  const narrow=window.matchMedia("(max-width:850px)").matches;
+  if(narrow){
+    shell.classList.toggle("menu-open");
+    return;
+  }
+  applySidebarCollapsed(!shell.classList.contains("sidebar-collapsed"));
+});
 els["shell-logout"]?.addEventListener("click",async()=>{
   await logout();
   clearInMemoryJobs();
@@ -2050,6 +2083,7 @@ async function bootTeleCallerAudit(){
   setStorageUserId(user.id);
   clearInMemoryJobs();
   reloadUserSettings();
+  applySidebarCollapsed(readSidebarCollapsedPref(),{persist:false});
   await loadServerSettingsAndKey();
   loadReviewSessionIds();
   renderSettings();
@@ -2156,10 +2190,22 @@ async function confirmUploadDashboard(){
   els["upload-dash-message"].textContent="Uploading…";
   try{
     const data=await DashboardApi.publish(dashboards);
-    const n=data.published?.length||0;
-    els["upload-dash-message"].textContent=`Replaced ${n} TeleCaller board(s) with this upload.`;
-    toast(n===1?"Dashboard replaced for TeleCaller":`Replaced ${n} TeleCaller dashboards`);
+    const published=data.published||[];
+    const n=published.length;
+    const replacedCount=published.filter(p=>Number(p.prior_deleted||0)>0||p.replaced).length;
+    const msg=replacedCount
+      ?`Replaced ${replacedCount} existing board(s); saved ${n} TeleCaller dashboard(s).`
+      :`Published ${n} TeleCaller dashboard(s).`;
+    els["upload-dash-message"].textContent=msg;
+    toast(replacedCount
+      ?(n===1?"Old dashboard replaced with this upload":`Replaced ${replacedCount} old dashboard(s)`)
+      :(n===1?"Dashboard uploaded":`Uploaded ${n} TeleCaller dashboards`));
     setTimeout(closeUploadDashboardModal,800);
+    if(hasPermission("telecaller.dashboard")){
+      location.hash="#published";
+      showView("published");
+      await refreshPublishedDashboards();
+    }
   }catch(err){
     els["upload-dash-message"].textContent=err.message||"Upload failed";
   }

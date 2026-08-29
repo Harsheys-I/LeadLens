@@ -2,7 +2,8 @@
  * In-app TeleCaller Review dashboard (KPIs, scorecard, Chart.js charts, error table).
  */
 
-import {buildDashboardModel, OVERDUE_BUCKETS} from "./dashboard-metrics.js?v=5.2.9";
+import {buildDashboardModel, OVERDUE_BUCKETS} from "./dashboard-metrics.js?v=5.2.18";
+import {storageKey} from "./db.js?v=5.2.18";
 
 /** Panel switcher labels (presentation) → internal section titles stay as-built. */
 const DASHBOARD_PANELS = [
@@ -11,6 +12,27 @@ const DASHBOARD_PANELS = [
   {id: "graphs", label: "Graphs"},
   {id: "errors", label: "Detailed Error Report"}
 ];
+
+/** Search is useful for table/list panels; hide on KPI Summary and Graphs. */
+const SEARCH_VISIBLE_PANELS = new Set(["performance", "errors"]);
+
+const FILTERS_COLLAPSED_PREF = "dashboardFiltersCollapsed";
+
+function readFiltersCollapsedPref(){
+  try{
+    const raw = localStorage.getItem(storageKey(FILTERS_COLLAPSED_PREF));
+    if(raw == null) return true;
+    return raw === "1";
+  }catch{
+    return true;
+  }
+}
+
+function writeFiltersCollapsedPref(collapsed){
+  try{
+    localStorage.setItem(storageKey(FILTERS_COLLAPSED_PREF), collapsed ? "1" : "0");
+  }catch{/* ignore */}
+}
 
 const CHART_COLORS = {
   green2: "#1f5d45",
@@ -733,6 +755,14 @@ function buildPanelSwitcher(activeId, onChange){
   return {bar, select, segs};
 }
 
+function syncSearchVisibility(body, activeId){
+  const searchBar = body?.querySelector(".dashboard-main-search");
+  if(!searchBar) return;
+  const show = SEARCH_VISIBLE_PANELS.has(activeId);
+  searchBar.hidden = !show;
+  searchBar.classList.toggle("is-panel-hidden", !show);
+}
+
 function applyActivePanel(body, activeId){
   const id = DASHBOARD_PANELS.some(p => p.id === activeId) ? activeId : "summary";
   for(const sectionNode of body.querySelectorAll(".dashboard-section[data-panel]")){
@@ -747,6 +777,7 @@ function applyActivePanel(body, activeId){
     btn.classList.toggle("is-active", on);
     btn.setAttribute("aria-selected", on ? "true" : "false");
   }
+  syncSearchVisibility(body, id);
   if(id === "graphs"){
     requestAnimationFrame(() => {
       resizeCharts();
@@ -789,11 +820,12 @@ export function renderReviewDashboard(container, jobs, options = {}){
     overdueBuckets: []
   };
   let activePanel = "summary";
-  let filtersCollapsed = true;
+  let filtersCollapsed = readFiltersCollapsedPref();
 
   const paint = () => {
     const prevSearch = container.querySelector('input[name="search"]');
-    const restoreSearch = prevSearch && document.activeElement === prevSearch
+    const searchShown = SEARCH_VISIBLE_PANELS.has(activePanel);
+    const restoreSearch = searchShown && prevSearch && document.activeElement === prevSearch
       ? {caret: prevSearch.selectionStart}
       : null;
 
@@ -806,7 +838,10 @@ export function renderReviewDashboard(container, jobs, options = {}){
     const model = buildDashboardModel(results, filters, {highSeverityErrors});
     const {aside, form, reset} = buildFilters(model.filterOptions, filters, {
       collapsed: filtersCollapsed,
-      onCollapseChange: (collapsed) => {filtersCollapsed = collapsed;}
+      onCollapseChange: (collapsed) => {
+        filtersCollapsed = collapsed;
+        writeFiltersCollapsedPref(collapsed);
+      }
     });
     const {wrap: searchBar, searchInput, clearSearch} = buildMainSearch(filters);
     const body = el("div", "dashboard-body");
