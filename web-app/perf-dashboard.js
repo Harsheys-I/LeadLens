@@ -1,6 +1,6 @@
 /**
- * TeleCaller Performance Report — Master + History Excel → Summary KPIs.
- * No AI; parses with SheetJS. Graph view is a stub for now.
+ * TeleCaller Performance Report — Master + History Excel → Summary + Graph.
+ * No AI; parses with SheetJS; charts with Chart.js.
  */
 
 const norm = value => String(value ?? "").trim().toLowerCase().replace(/[_-]+/g, " ").replace(/\s+/g, " ");
@@ -25,6 +25,18 @@ const STATUS_SV_SCHEDULED = "site visit scheduled";
 const STATUS_SV_PENDING = "site visit pending";
 const STATUS_SEND_TO_ENQUIRY = "send to enquiry";
 const STATUS_SV_CANCELLED = "site visit cancelled";
+
+const STATUS_CHART = [
+  {key: "notInterested", label: "Not Interested", color: "#6c7771"},
+  {key: "siteVisitScheduled", label: "Site Visit Scheduled", color: "#2f6fed"},
+  {key: "siteVisitPending", label: "Site Visit Pending", color: "#c47a1a"},
+  {key: "siteVisited", label: "Site Visited", color: "#1f6b4a"},
+  {key: "siteVisitCancelled", label: "Site Visit Cancelled", color: "#a33a32"}
+];
+
+let statusChart = null;
+let metricsChart = null;
+let telecallerChart = null;
 
 function parseDate(value){
   if(value instanceof Date && !Number.isNaN(value.valueOf())){
@@ -235,15 +247,40 @@ function countOverdueCalls(rows){
   return overdue;
 }
 
+function collectTelecallers(masterParsed, historyParsed){
+  const set = new Set();
+  for(const rec of masterParsed.records){
+    if(rec.telecaller) set.add(rec.telecaller);
+  }
+  for(const rec of historyParsed.records){
+    if(rec.telecaller) set.add(rec.telecaller);
+  }
+  return [...set].sort((a, b) => a.localeCompare(b, undefined, {sensitivity: "base"}));
+}
+
+function emptyStatusBucket(){
+  return {
+    totalActiveLeads: 0,
+    totalFreshLeadAssigned: 0,
+    notInterested: 0,
+    siteVisitScheduled: 0,
+    siteVisitPending: 0,
+    siteVisited: 0,
+    siteVisitCancelled: 0,
+    overdueCalls: 0,
+    freshLeadsNotCalledYet: 0
+  };
+}
+
 /**
  * Reconcile Master + History into Summary KPIs.
+ * Date range always from full History Lead Update Date min–max.
+ * Optional telecaller filter scopes Master/History rows to that agent.
+ * @param {{telecaller?: string|null}} [options]
  */
-export function reconcilePerf(masterParsed, historyParsed){
-  const historyByKey = new Map();
-  for(const rec of historyParsed.records){
-    if(!historyByKey.has(rec.key)) historyByKey.set(rec.key, []);
-    historyByKey.get(rec.key).push(rec);
-  }
+export function reconcilePerf(masterParsed, historyParsed, options = {}){
+  const telecallerFilter = clean(options.telecaller || "") || null;
+  const telecallers = collectTelecallers(masterParsed, historyParsed);
 
   let dateMin = historyParsed.minUpdate || null;
   let dateMax = historyParsed.maxUpdate || null;
@@ -253,6 +290,23 @@ export function reconcilePerf(masterParsed, historyParsed){
       if(!dateMin || rec.update < dateMin) dateMin = rec.update;
       if(!dateMax || rec.update > dateMax) dateMax = rec.update;
     }
+  }
+
+  const masterRecords = telecallerFilter
+    ? masterParsed.records.filter(rec => rec.telecaller === telecallerFilter)
+    : masterParsed.records;
+  const historyRecords = telecallerFilter
+    ? historyParsed.records.filter(rec => rec.telecaller === telecallerFilter)
+    : historyParsed.records;
+
+  // Full History key set (unfiltered) for Draft / Fresh-not-called: a lead is "in History"
+  // if any History row exists for that Mobile+Project, even from another TeleCaller.
+  const allHistoryKeys = new Set(historyParsed.records.map(rec => rec.key));
+
+  const historyByKey = new Map();
+  for(const rec of historyRecords){
+    if(!historyByKey.has(rec.key)) historyByKey.set(rec.key, []);
+    historyByKey.get(rec.key).push(rec);
   }
 
   let notInterested = 0;
@@ -273,7 +327,6 @@ export function reconcilePerf(masterParsed, historyParsed){
     else if(statusKey === STATUS_SEND_TO_ENQUIRY) siteVisited += 1;
     else if(statusKey === STATUS_SV_CANCELLED) siteVisitCancelled += 1;
 
-    // Distinct History lead: use any row's registration (prefer latest)
     const reg = latest?.registration || rows.find(r => r.registration)?.registration || null;
     if(inDateRange(reg, dateMin, dateMax)) historyFreshInRange += 1;
   }
@@ -281,19 +334,64 @@ export function reconcilePerf(masterParsed, historyParsed){
   let draftInRange = 0;
   let freshLeadsNotCalledYet = 0;
 
-  for(const rec of masterParsed.records){
-    if(historyByKey.has(rec.key)) continue;
+  for(const rec of masterRecords){
+    if(allHistoryKeys.has(rec.key)) continue;
     const regEqualsNext = sameCalendarDay(rec.registration, rec.next);
     if(regEqualsNext){
       freshLeadsNotCalledYet += 1;
-    }else{
-      // Draft: not in History and Reg ≠ Next
-      if(inDateRange(rec.registration, dateMin, dateMax)) draftInRange += 1;
+    }else if(inDateRange(rec.registration, dateMin, dateMax)){
+      draftInRange += 1;
     }
   }
 
-  const totalActiveLeads = masterParsed.rowCount;
+  const totalActiveLeads = masterRecords.length;
   const totalFreshLeadAssigned = historyFreshInRange + draftInRange;
+
+  // Per-TeleCaller breakdown (always from full files) for Graph when viewing All
+  const byTelecaller = Object.create(null);
+  for(const name of telecallers){
+    byTelecaller[name] = emptyStatusBucket();
+  }
+
+  const historyByKeyAll = new Map();
+  for(const rec of historyParsed.records){
+    if(!historyByKeyAll.has(rec.key)) historyByKeyAll.set(rec.key, []);
+    historyByKeyAll.get(rec.key).push(rec);
+  }
+
+  // Status / overdue / fresh-from-history attributed to latest call's telecaller
+  for(const rows of historyByKeyAll.values()){
+    const byTc = Object.create(null);
+    for(const row of rows){
+      if(!byTc[row.telecaller]) byTc[row.telecaller] = [];
+      byTc[row.telecaller].push(row);
+    }
+    for(const [tc, tcRows] of Object.entries(byTc)){
+      const bucket = byTelecaller[tc] || (byTelecaller[tc] = emptyStatusBucket());
+      bucket.overdueCalls += countOverdueCalls(tcRows);
+      const latest = latestHistoryRow(tcRows);
+      const statusKey = norm(latest?.status);
+      if(statusKey === STATUS_NOT_INTERESTED) bucket.notInterested += 1;
+      else if(statusKey === STATUS_SV_SCHEDULED) bucket.siteVisitScheduled += 1;
+      else if(statusKey === STATUS_SV_PENDING) bucket.siteVisitPending += 1;
+      else if(statusKey === STATUS_SEND_TO_ENQUIRY) bucket.siteVisited += 1;
+      else if(statusKey === STATUS_SV_CANCELLED) bucket.siteVisitCancelled += 1;
+      const reg = latest?.registration || tcRows.find(r => r.registration)?.registration || null;
+      if(inDateRange(reg, dateMin, dateMax)) bucket.totalFreshLeadAssigned += 1;
+    }
+  }
+
+  for(const rec of masterParsed.records){
+    const bucket = byTelecaller[rec.telecaller] || (byTelecaller[rec.telecaller] = emptyStatusBucket());
+    bucket.totalActiveLeads += 1;
+    if(allHistoryKeys.has(rec.key)) continue;
+    const regEqualsNext = sameCalendarDay(rec.registration, rec.next);
+    if(regEqualsNext){
+      bucket.freshLeadsNotCalledYet += 1;
+    }else if(inDateRange(rec.registration, dateMin, dateMax)){
+      bucket.totalFreshLeadAssigned += 1;
+    }
+  }
 
   return {
     masterFileName: masterParsed.fileName,
@@ -302,6 +400,8 @@ export function reconcilePerf(masterParsed, historyParsed){
     historySheet: historyParsed.sheetName,
     masterRowCount: masterParsed.rowCount,
     historyRowCount: historyParsed.rowCount,
+    telecallerFilter,
+    telecallers,
     dateMin,
     dateMax,
     totalActiveLeads,
@@ -312,13 +412,24 @@ export function reconcilePerf(masterParsed, historyParsed){
     siteVisited,
     siteVisitCancelled,
     overdueCalls,
-    freshLeadsNotCalledYet
+    freshLeadsNotCalledYet,
+    byTelecaller
   };
 }
 
 function setHidden(el, hidden){
   if(!el) return;
   el.classList.toggle("hidden", Boolean(hidden));
+}
+
+function destroyCharts(){
+  for(const chart of [statusChart, metricsChart, telecallerChart]){
+    if(!chart) continue;
+    try{ chart.destroy(); }catch{/* ignore */}
+  }
+  statusChart = null;
+  metricsChart = null;
+  telecallerChart = null;
 }
 
 function renderFileMeta(el, fileName, detail){
@@ -400,8 +511,121 @@ function fillSummary(el, model){
   el.append(dl);
 }
 
+function fillTelecallerFilter(select, telecallers, selected){
+  if(!select) return;
+  const current = selected ?? select.value ?? "";
+  select.innerHTML = "";
+  const all = document.createElement("option");
+  all.value = "";
+  all.textContent = "All TeleCallers";
+  select.append(all);
+  for(const name of telecallers){
+    const opt = document.createElement("option");
+    opt.value = name;
+    opt.textContent = name;
+    select.append(opt);
+  }
+  select.value = telecallers.includes(current) ? current : "";
+}
+
+function renderGraphs(model){
+  destroyCharts();
+  if(typeof Chart !== "function") throw new Error("Chart.js failed to load. Check your network connection and reload.");
+
+  const statusCanvas = document.getElementById("perf-status-chart");
+  const metricsCanvas = document.getElementById("perf-metrics-chart");
+  const tcCanvas = document.getElementById("perf-tc-chart");
+  const tcBlock = document.getElementById("perf-tc-chart-block");
+
+  if(statusCanvas){
+    const labels = STATUS_CHART.map(s => s.label);
+    const data = STATUS_CHART.map(s => model[s.key] || 0);
+    const colors = STATUS_CHART.map(s => s.color);
+    statusChart = new Chart(statusCanvas.getContext("2d"), {
+      type: "doughnut",
+      data: {
+        labels,
+        datasets: [{data, backgroundColor: colors, borderWidth: 0}]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: {position: "bottom", labels: {boxWidth: 12, color: "#24312b"}}
+        }
+      }
+    });
+  }
+
+  if(metricsCanvas){
+    const metricItems = [
+      {label: "Active", value: model.totalActiveLeads, color: "#12372a"},
+      {label: "Fresh Assigned", value: model.totalFreshLeadAssigned, color: "#1f6b4a"},
+      {label: "Overdue", value: model.overdueCalls, color: "#a33a32"},
+      {label: "Not Called Yet", value: model.freshLeadsNotCalledYet, color: "#c47a1a"}
+    ];
+    metricsChart = new Chart(metricsCanvas.getContext("2d"), {
+      type: "bar",
+      data: {
+        labels: metricItems.map(m => m.label),
+        datasets: [{
+          label: "Count",
+          data: metricItems.map(m => m.value),
+          backgroundColor: metricItems.map(m => m.color),
+          borderWidth: 0,
+          borderRadius: 4,
+          maxBarThickness: 48
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {legend: {display: false}},
+        scales: {
+          x: {ticks: {color: "#6c7771"}, grid: {display: false}},
+          y: {beginAtZero: true, ticks: {color: "#6c7771", precision: 0}, grid: {color: "rgba(223,229,225,.7)"}}
+        }
+      }
+    });
+  }
+
+  const showPerTc = !model.telecallerFilter && model.telecallers?.length;
+  setHidden(tcBlock, !showPerTc);
+  if(showPerTc && tcCanvas){
+    const names = model.telecallers;
+    const wrap = document.getElementById("perf-tc-chart-wrap");
+    if(wrap) wrap.style.height = `${Math.max(280, names.length * 28)}px`;
+    telecallerChart = new Chart(tcCanvas.getContext("2d"), {
+      type: "bar",
+      data: {
+        labels: names,
+        datasets: STATUS_CHART.map(status => ({
+          label: status.label,
+          data: names.map(tc => model.byTelecaller?.[tc]?.[status.key] || 0),
+          backgroundColor: status.color,
+          borderWidth: 0,
+          borderRadius: 2,
+          maxBarThickness: 18
+        }))
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        indexAxis: "y",
+        plugins: {
+          legend: {position: "bottom", labels: {boxWidth: 12, color: "#24312b"}}
+        },
+        scales: {
+          x: {stacked: true, beginAtZero: true, ticks: {color: "#6c7771", precision: 0}, grid: {color: "rgba(223,229,225,.7)"}},
+          y: {stacked: true, ticks: {color: "#6c7771"}, grid: {display: false}}
+        }
+      }
+    });
+  }
+}
+
 /**
- * Wire dual upload + Summary UI inside #view-perf-dashboard.
+ * Wire dual upload + Summary/Graph UI inside #view-perf-dashboard.
  * @param {{toast?: (msg: string) => void}} opts
  */
 export function mountPerfDashboard(opts = {}){
@@ -420,12 +644,14 @@ export function mountPerfDashboard(opts = {}){
   const graphPanel = document.getElementById("perf-graph-panel");
   const summaryEl = document.getElementById("perf-summary");
   const viewToggle = document.getElementById("perf-view-toggle");
+  const telecallerSelect = document.getElementById("perf-telecaller-filter");
 
-  if(!masterDrop || !historyDrop || !buildBtn) return {destroy(){}};
+  if(!masterDrop || !historyDrop || !buildBtn) return {destroy: destroyCharts};
 
   let masterParsed = null;
   let historyParsed = null;
   let activeView = "summary";
+  let lastModel = null;
 
   function showValidation(message, isError){
     if(!validation) return;
@@ -447,11 +673,51 @@ export function mountPerfDashboard(opts = {}){
     }
     setHidden(summaryPanel, activeView !== "summary");
     setHidden(graphPanel, activeView !== "graph");
+    if(activeView === "graph" && lastModel){
+      try{ renderGraphs(lastModel); }
+      catch(err){ showValidation(err?.message || "Could not render graphs.", true); }
+    }
+  }
+
+  function applyModel(model){
+    lastModel = model;
+    if(dateRangeEl){
+      if(model.dateMin && model.dateMax){
+        dateRangeEl.innerHTML = `<span>Lead Update Date</span><strong>${formatDate(model.dateMin)} – ${formatDate(model.dateMax)}</strong>`;
+      }else{
+        dateRangeEl.innerHTML = `<span>Lead Update Date</span><strong>No valid dates found</strong>`;
+      }
+    }
+    fillSummary(summaryEl, model);
+    if(activeView === "graph") renderGraphs(model);
+    else destroyCharts();
+  }
+
+  function rebuildFromFilter(){
+    if(!masterParsed || !historyParsed) return;
+    try{
+      const telecaller = telecallerSelect?.value || "";
+      const model = reconcilePerf(masterParsed, historyParsed, {telecaller});
+      applyModel(model);
+      const filterNote = telecaller ? ` · ${telecaller}` : "";
+      showValidation(
+        `Summary ready${filterNote} · ${model.totalActiveLeads.toLocaleString()} active leads · ${model.historyRowCount.toLocaleString()} History call rows.`,
+        false
+      );
+      setHidden(results, false);
+    }catch(err){
+      setHidden(results, true);
+      destroyCharts();
+      showValidation(err?.message || "Could not build dashboard.", true);
+      toast(err?.message || "Build failed.");
+    }
   }
 
   async function loadWorkbook(file, kind){
     showValidation(`Reading ${kind === "history" ? "History" : "Master"} workbook…`, false);
     setHidden(results, true);
+    destroyCharts();
+    lastModel = null;
     try{
       const buffer = await file.arrayBuffer();
       const parsed = parsePerfWorkbook(buffer, file.name, kind);
@@ -491,27 +757,14 @@ export function mountPerfDashboard(opts = {}){
       return;
     }
     try{
-      const model = reconcilePerf(masterParsed, historyParsed);
-
-      if(dateRangeEl){
-        if(model.dateMin && model.dateMax){
-          dateRangeEl.innerHTML = `<span>Lead Update Date</span><strong>${formatDate(model.dateMin)} – ${formatDate(model.dateMax)}</strong>`;
-        }else{
-          dateRangeEl.innerHTML = `<span>Lead Update Date</span><strong>No valid dates found</strong>`;
-        }
-      }
-
-      fillSummary(summaryEl, model);
+      const telecallers = collectTelecallers(masterParsed, historyParsed);
+      fillTelecallerFilter(telecallerSelect, telecallers, telecallerSelect?.value || "");
+      rebuildFromFilter();
       setView(activeView);
-
-      showValidation(
-        `Summary ready · ${model.totalActiveLeads.toLocaleString()} active leads · ${model.historyRowCount.toLocaleString()} History call rows.`,
-        false
-      );
-      setHidden(results, false);
       toast("Performance summary ready.");
     }catch(err){
       setHidden(results, true);
+      destroyCharts();
       showValidation(err?.message || "Could not build dashboard.", true);
       toast(err?.message || "Build failed.");
     }
@@ -520,6 +773,14 @@ export function mountPerfDashboard(opts = {}){
   wireDropZone(masterDrop, masterInput, file => loadWorkbook(file, "master"));
   wireDropZone(historyDrop, historyInput, file => loadWorkbook(file, "history"));
   buildBtn.onclick = buildDashboard;
+
+  if(telecallerSelect){
+    telecallerSelect.addEventListener("change", () => {
+      if(!masterParsed || !historyParsed || !lastModel) return;
+      rebuildFromFilter();
+      toast(telecallerSelect.value ? `Filtered to ${telecallerSelect.value}` : "Showing all TeleCallers");
+    });
+  }
 
   if(viewToggle){
     viewToggle.addEventListener("click", event => {
@@ -531,5 +792,5 @@ export function mountPerfDashboard(opts = {}){
 
   setView("summary");
 
-  return {destroy(){}};
+  return {destroy: destroyCharts};
 }
