@@ -1,7 +1,7 @@
 import {APP_VERSION,DEFAULT_SETTINGS,DEFAULT_OUTPUT_FIELDS,SETTINGS_SEED,MAX_BATCH_SIZE,MAX_CONCURRENCY,normalizeSettings,normalizeInputFields,slugFieldId,parseWorkbook,parseAuditedWorkbook,auditBatch,downloadWorkbook,downloadReviewPack,downloadReviewPdf,splitLeadsByTelecaller,splitResultsByTelecaller,validateApiKey,HIGH_SEVERITY_ERRORS,SERVER_API_KEY} from "./audit.js?v=5.2.24";
 import {getJob,getJobs,loadSettings,saveSettings,getApiKey,apiKeyIsRemembered,saveApiKey,forgetApiKey,setStorageUserId,storageKey} from "./db.js?v=5.2.19";
 import {renderReviewDashboard,destroyReviewDashboard} from "./dashboard-view.js?v=5.2.24";
-import {mountPerfReportUpload,mountPerfPublishedDashboard} from "./perf-dashboard.js?v=5.2.30";
+import {mountPerfReportUpload,mountPerfPublishedDashboard} from "./perf-dashboard.js?v=5.2.31";
 import {requireAuth,logout,hasPermission,getUser,changePassword,updateProfile} from "./auth.js?v=5.2.19";
 import {DashboardApi,SettingsApi} from "./api-client.js?v=5.2.30";
 import {mountNotifications} from "./notifications-ui.js?v=5.2.19";
@@ -14,6 +14,7 @@ const titles={review:"Bucket 1 Lead Audit",console:"Run console",published:"Dash
 /** When false, completed audits do not auto-render charts until Create Dashboard. */
 let reviewDashboardRequested=false;
 let perfPublishedControls=null;
+let perfUploadControls=null;
 let lastReadyReviewJobs=[];
 const ENGINE_VERSION="latest-day-v7";
 /** Max TeleCaller review jobs running at once (outer pool). Inner batch pool stays settings.concurrency per job. */
@@ -196,6 +197,7 @@ function showView(name){
   if(name==="review")renderReviewProgress();
   if(name==="published")refreshPublishedDashboards();
   if(name==="perf-dashboard")perfPublishedControls?.refresh?.();
+  if(name==="perf-report")perfUploadControls?.applyUploadGate?.();
 }
 function toast(message){els.toast.textContent=message;els.toast.classList.add("show");clearTimeout(toast.timer);toast.timer=setTimeout(()=>els.toast.classList.remove("show"),3200);}
 function updateKeyState(){
@@ -1970,7 +1972,7 @@ if(els["review-drop-zone"]){
   els["review-drop-zone"].addEventListener("drop",event=>handleReviewFiles(event.dataTransfer.files));
 }
 if(els["review-file-input"])els["review-file-input"].onchange=event=>handleReviewFiles(event.target.files);
-mountPerfReportUpload({toast,hasPermission,getUser});
+perfUploadControls=mountPerfReportUpload({toast,hasPermission,getUser});
 perfPublishedControls=mountPerfPublishedDashboard({toast,hasPermission,canManage:canManagePublishedDashboards});
 if(els["start-review"])els["start-review"].onclick=startReview;
 if(els["download-review-excel"])els["download-review-excel"].onclick=()=>downloadReviewArtifact("excel");
@@ -2116,6 +2118,9 @@ async function bootTeleCallerAudit(){
   await renderHistory();
 
   if(els["shell-user-label"])els["shell-user-label"].textContent=user.display_name||user.username;
+
+  // Gate was evaluated before session load; re-apply now that permissions exist.
+  perfUploadControls?.applyUploadGate?.();
 
   document.querySelectorAll(".nav-item[data-perm]").forEach(btn=>{
     const perm=btn.dataset.perm;
