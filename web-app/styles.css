@@ -144,6 +144,8 @@ body .dashboard-eye-btn:hover{background:var(--mint);border-color:#c5d6cc;color:
 body .dashboard-eye-btn:focus-visible{outline:2px solid #9bb7a8;outline-offset:2px}
 body .dashboard-lead-modal{position:fixed;inset:0;z-index:70;display:flex;align-items:center;justify-content:center;padding:22px}
 body .dashboard-lead-modal.hidden{display:none!important}
+body #dashboard-lead-modal{z-index:75}
+body .dashboard-chart-report-modal{z-index:70}
 body .dashboard-lead-modal-backdrop{position:absolute;inset:0;background:rgba(17,33,29,.55);backdrop-filter:blur(4px)}
 body .dashboard-lead-modal-card{position:relative;z-index:1;width:100%;max-width:640px;max-height:min(88vh,760px);display:flex;flex-direction:column;background:var(--panel);border:1px solid var(--line);border-radius:16px;box-shadow:0 24px 60px rgba(23,33,29,.28);overflow:hidden}
 body .dashboard-lead-modal-head{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:16px 18px;background:linear-gradient(180deg,#12372a 0%,#1a4a38 100%);color:#fff;flex-shrink:0}
@@ -152,6 +154,12 @@ body .dashboard-lead-modal-close{border:0;background:rgba(255,255,255,.1);color:
 body .dashboard-lead-modal-close:hover{background:rgba(255,255,255,.2)}
 body .dashboard-lead-modal-close:focus-visible{outline:2px solid #9bb7a8;outline-offset:2px}
 body .dashboard-lead-modal-body{overflow:auto;padding:18px;background:#f7faf8}
+body .dashboard-chart-report-card{max-width:min(1100px,96vw);max-height:min(90vh,860px)}
+body .dashboard-chart-report-title-wrap{min-width:0;flex:1}
+body .dashboard-chart-report-subtitle{margin:4px 0 0;font-size:12px;font-weight:500;color:rgba(255,255,255,.82);line-height:1.35}
+body .dashboard-chart-report-body{padding:14px 16px}
+body .dashboard-chart-report-body .dashboard-errors-wrap{max-height:min(62vh,560px)}
+body .dashboard-chart-canvas canvas.dashboard-chart-clickable{cursor:pointer}
 body .dashboard-lead-detail-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
 body .dashboard-lead-detail-item{display:grid;gap:4px;padding:10px 12px;background:var(--panel);border:1px solid var(--line);border-radius:10px;min-width:0}
 body .dashboard-lead-detail-wide{grid-column:1/-1}
