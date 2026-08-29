@@ -44,10 +44,6 @@ function ll_route_dashboards(string $action, ?int $id): void
       ll_error('dashboards array is required');
     }
     $pdo = ll_pdo();
-    // Case/whitespace-insensitive so re-uploads never leave orphan boards for the same TeleCaller.
-    $del = $pdo->prepare(
-      'DELETE FROM published_dashboards WHERE LOWER(TRIM(telecaller_name)) = LOWER(?)'
-    );
     $ins = $pdo->prepare(
       'INSERT INTO published_dashboards (telecaller_name, title, payload, meta, uploaded_by)
        VALUES (?, ?, ?, ?, ?)'
@@ -105,19 +101,20 @@ function ll_route_dashboards(string $action, ?int $id): void
       ll_error('No valid dashboards to publish');
     }
 
+    $cleared = 0;
     $pdo->beginTransaction();
     try {
+      // Always replace the full published set — no keep-old / skip / merge across uploads.
+      $cleared = (int) $pdo->query('SELECT COUNT(*) FROM published_dashboards')->fetchColumn();
+      $pdo->exec('DELETE FROM published_dashboards');
       foreach ($pending as $row) {
-        // Replace (not merge): drop every prior board for this TeleCaller, then insert fresh.
-        $del->execute([$row['telecaller']]);
-        $priorDeleted = $del->rowCount();
         $ins->execute([$row['telecaller'], $row['title'], $row['payload'], $row['metaJson'], (int) $user['id']]);
         $created[] = [
           'id' => (int) $pdo->lastInsertId(),
           'telecaller_name' => $row['telecaller'],
           'title' => $row['title'],
-          'replaced' => $priorDeleted > 0,
-          'prior_deleted' => $priorDeleted,
+          'replaced' => $cleared > 0,
+          'prior_deleted' => $cleared,
           'merged' => false,
           'lead_count' => $row['lead_count'],
         ];
@@ -135,7 +132,7 @@ function ll_route_dashboards(string $action, ?int $id): void
     } catch (Throwable $e) {
       // Boards are saved; notification failure must not fail the publish response.
     }
-    ll_ok(['published' => $created], 201);
+    ll_ok(['published' => $created, 'cleared' => $cleared], 201);
   }
 
   if ($method === 'GET' && ($action === 'list' || $action === '')) {
@@ -229,7 +226,7 @@ function ll_route_dashboards(string $action, ?int $id): void
       $rows = $stmt->fetchAll();
     }
 
-    // One board per TeleCaller (latest only — publish replaces, never merges history).
+    // One board per TeleCaller (latest only — publish clears all boards then inserts fresh).
     $byName = [];
     foreach ($rows as $row) {
       $tc = trim((string) $row['telecaller_name']);

@@ -2147,13 +2147,13 @@ async function confirmUploadDashboard(){
     const data=await DashboardApi.publish(dashboards);
     const published=data.published||[];
     const n=published.length;
-    const replacedCount=published.filter(p=>Number(p.prior_deleted||0)>0||p.replaced).length;
-    const msg=replacedCount
-      ?`Replaced ${replacedCount} existing board(s); saved ${n} TeleCaller dashboard(s).`
+    const cleared=Number(data.cleared??0)||published.filter(p=>Number(p.prior_deleted||0)>0||p.replaced).length;
+    const msg=cleared
+      ?`Cleared ${cleared} old board(s); published ${n} TeleCaller dashboard(s).`
       :`Published ${n} TeleCaller dashboard(s).`;
     els["upload-dash-message"].textContent=msg;
-    toast(replacedCount
-      ?(n===1?"Old dashboard replaced with this upload":`Replaced ${replacedCount} old dashboard(s)`)
+    toast(cleared
+      ?(n===1?"Old dashboards cleared; new board uploaded":`Old dashboards cleared; uploaded ${n} boards`)
       :(n===1?"Dashboard uploaded":`Uploaded ${n} TeleCaller dashboards`));
     setTimeout(closeUploadDashboardModal,800);
     if(hasPermission("telecaller.dashboard")){

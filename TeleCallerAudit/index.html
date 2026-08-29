@@ -11,7 +11,7 @@
   <script defer src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
-  <script type="module" src="../app.js?v=5.2.20"></script>
+  <script type="module" src="../app.js?v=5.2.21"></script>
 </head>
 <body>
   <div id="update-banner" class="update-banner hidden" role="status">
@@ -99,7 +99,7 @@
 
       <section id="view-published" class="view view-wide">
         <div class="section-head">
-          <div><h2>Dashboard</h2><p>Published audit results for your TeleCaller (or all TeleCallers, if permitted). New uploads replace the previous board for each TeleCaller.</p></div>
+          <div><h2>Dashboard</h2><p>Published audit results for your TeleCaller (or all TeleCallers, if permitted). Each Upload Dashboard clears every previous published board, then saves the new selection.</p></div>
           <button id="refresh-published" type="button" class="secondary-button">Refresh</button>
         </div>
         <div id="published-list" class="published-list hidden" aria-live="polite"></div>
@@ -215,7 +215,7 @@
     <div class="key-modal-card upload-dash-card">
       <p class="eyebrow">PUBLISH</p>
       <h2 id="upload-dash-title">Upload Dashboard</h2>
-      <p class="key-modal-copy">Select TeleCallers from this run. Each selected TeleCaller gets one published board on the server — a new upload replaces any previous board for that TeleCaller (visible only to that TeleCaller unless Admin/Super).</p>
+      <p class="key-modal-copy">Select TeleCallers from this run. Upload always deletes all currently published boards first, then publishes only these selections (each TeleCaller sees only their board unless Admin/Super).</p>
       <div id="upload-telecaller-list" class="upload-telecaller-list"></div>
       <div id="upload-dash-message" class="form-message" role="status"></div>
       <div class="inline-actions">
