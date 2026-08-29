@@ -14,37 +14,42 @@ export const LAB_ERROR_TYPES = [
 export const STATUS_HISTORY_PROMPT = `STATUS vs FULL COMMENT HISTORY
 Allowed Lead Status labels (case-insensitive): Prospect (Qualified), Hot, Warm, Cold, Beyond Budget, Lost.
 Heat ladder highest→lowest: Prospect > Hot > Warm > Cold > Beyond Budget > Lost.
-Note: CRM may show "Prospect"; payload field s may arrive as "Qualified" for that same top tier — treat them as the same rank.
 
 CRITICAL ALIGNMENT RULES (RECENCY-BASED):
-Read the timeline chronologically. The MOST RECENT comments at the end of the chain dictate the exact status, overriding early interest.
+Read the timeline chronologically. The MOST RECENT comments at the very end of the chain dictate the exact status, overriding early interest.
 
 RULE 1 (DEAD AIR / PURE RNR):
-IF 100% of the timeline is outbound attempts (RNR, Voicemail, Busy, Message Shared) with ZERO buyer response, REGARDLESS of count (1 or 500).
-→ Target Status: Cold or Lost. If current status is Cold or Lost → ALIGNED. Do NOT put "Lead Status Not Aligned With Comments" in e.
+IF 100% of the timeline is outbound attempts (RNR, Voicemail, Busy, Message Shared) with ZERO buyer response, REGARDLESS of how many there are (1 or 500).
+-> Target Status: Cold or Lost. (If current status is Cold -> ALIGNED, you MUST output Error: None).
 
 RULE 2 (THE 5-RNR DROP):
 IF there WAS early interest, BUT the LAST 5 (or more) consecutive comments are RNR-like.
-→ Target Status: Cold. Early interest has decayed. If current status is Cold → ALIGNED. Do NOT put the status error in e.
+-> Target Status: Cold. Early interest has decayed. (If current status is Cold -> ALIGNED, you MUST output Error: None).
 
 RULE 3 (THE COOLDOWN):
 IF the LAST 1 to 4 comments are RNR-like, BUT there is a positive/engaged comment immediately before them.
-→ Target Status: Warm. If currently Prospect, Hot, or Cold → MISMATCH — you MUST include "Lead Status Not Aligned With Comments" in e.
+-> Target Status: Warm. (If currently Prospect, Hot, or Cold -> MISMATCH).
 
 RULE 4 (THE HOT / NO-VISIT RULE):
 IF the VERY LAST comment is positive (asking for details, sharing budget), BUT there is no confirmed site visit happening.
-→ Target Status: Hot. If currently Prospect/Qualified → MISMATCH — you MUST include "Lead Status Not Aligned With Comments" in e.
+-> Target Status: Hot. (If currently Prospect -> MISMATCH).
 
 RULE 5 (PROSPECT / QUALIFIED VALIDATION):
 Prospect/Qualified is ONLY valid if the VERY LAST comment is positive AND confirms a site visit.
-Otherwise MISMATCH — include "Lead Status Not Aligned With Comments" in e.
 
-STRUCTURED OUTPUT (JSON schema — mandatory):
-- On MISMATCH: e MUST contain exactly "Lead Status Not Aligned With Comments" (full label).
-- On ALIGNED: e must NOT contain that label for this check.
-- Explain the rule and evidence in o (18–28 words). Put coaching in r.
-- Do NOT write freeform "Error :" / "Reason :" lines or <thinking> blocks — those are ignored by the app. Only e / o / r count.
-- NEVER invent details. NEVER suggest changing an already-Cold lead to Lost solely because of many RNRs when Rule 1 or 2 says Cold is aligned.`;
+EVALUATION CHECKLIST (do this mentally before filling JSON):
+1. Count of consecutive RNR-like comments at the very end of the timeline
+2. Last positive/engaged comment before the RNRs
+3. Target Status based on Rules 1-5
+4. Current Lead Status
+5. Result: Aligned or Mismatch
+
+HOW TO WRITE THE JSON RESULT (required — freeform "Error :" lines are ignored by the app):
+- If Result is MISMATCH: e MUST include exactly "Lead Status Not Aligned With Comments".
+- If Result is ALIGNED / Error None: e must NOT include that label.
+- Put the Reason (rule violated or brief aligned justification) in o. Put next-step coaching in r.
+- NEVER suggest changing an already Cold lead to Lost solely because of many RNRs when Rule 1 or 2 says Cold is aligned. Do not invent details.
+- CRM may show "Prospect" while payload s is "Qualified" — treat them as the same top tier.`;
 
 /** Shared CSV + output contract — prepended once; not duplicated in each error prompt. */
 export const SHARED_PREAMBLE = `LeadLens DeBug · Error Focus Lab. Evidence only. Never invent facts, dates, budgets, locations, or prior calls.
