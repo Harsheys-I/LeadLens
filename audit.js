@@ -1613,6 +1613,12 @@ function finalizeObservation(aiText,row,errors,q){
   if(buyingSignals&&leadStatusRank(row.status)<=3&&shortRnrCooled&&!errors.includes(STATUS_HISTORY_ERROR)){
     return fallbackObservation(row,errors,q);
   }
+  // #region agent log
+  const oStatusTalk=/\b(status|cold|lost|warm|hot|align|mismatch|prospect|qualified)\b/i.test(clipped);
+  if(oStatusTalk&&!errors.includes(STATUS_HISTORY_ERROR)){
+    fetch('http://127.0.0.1:7843/ingest/f4ac7d78-fa93-4940-929e-852fd1791883',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'6866e6'},body:JSON.stringify({sessionId:'6866e6',runId:'pre-fix',hypothesisId:'E',location:'audit.js:finalizeObservation',message:'observation status talk without status error',data:{status:String(row?.status||''),rank:leadStatusRank(row?.status),coldOk,hasStatusErr:false,snippet:clipped.slice(0,140)},timestamp:Date.now()})}).catch(()=>{});
+  }
+  // #endregion
   return clipped;
 }
 function finalizeRecommendation(aiText,row,errors,q){
@@ -1683,6 +1689,28 @@ async function requestAudit(apiKey,settings,leads,signal,log,onUsage){
 const unique=values=>[...new Set(values.filter(Boolean))];
 const severityFromErrors=errors=>!errors.length?"NONE":errors.some(error=>HIGH_SEVERITY_ERRORS.has(error))?"HIGH":"MEDIUM";
 
+// #region agent log
+function agentDbg(payload,logFn){
+  const entry={sessionId:"6866e6",timestamp:Date.now(),...payload};
+  try{
+    const key="ll-debug-6866e6";
+    const prev=JSON.parse(sessionStorage.getItem(key)||"[]");
+    prev.push(entry);
+    while(prev.length>250)prev.shift();
+    sessionStorage.setItem(key,JSON.stringify(prev));
+    if(typeof window!=="undefined")window.__LL_DEBUG_6866E6__=prev;
+  }catch{/* ignore */}
+  fetch("http://127.0.0.1:7843/ingest/f4ac7d78-fa93-4940-929e-852fd1791883",{method:"POST",headers:{"Content-Type":"application/json","X-Debug-Session-Id":"6866e6"},body:JSON.stringify(entry)}).catch(()=>{});
+  try{
+    const d=payload?.data||{};
+    const interesting=d.oHasStatusTalk&&!d.finalHasStatus||d.aiEmittedStatus||d.mismatch||d.aligned;
+    if(interesting&&typeof logFn==="function"){
+      logFn(`[DBG-o] …${d.mobile||"?"} status=${d.status||"?"} rank=${d.statusRank} rawE=${JSON.stringify(d.rawAiE||[])} finalHasStatus=${d.finalHasStatus} mismatch=${d.mismatch} aligned=${d.aligned} pureRnr=${d.pureRnr} streak=${d.streak} o="${String(d.oSnippet||"").slice(0,90)}"`, "warn");
+    }
+  }catch{/* ignore */}
+}
+// #endregion
+
 export async function auditBatch(apiKey,rawSettings,batch,signal,log,onUsage,requestFn=requestAudit){
   const settings=normalizeSettings(rawSettings);
   const maps=buildErrorMaps(settings);
@@ -1725,6 +1753,7 @@ export async function auditBatch(apiKey,rawSettings,batch,signal,log,onUsage,req
   }
   return batch.map(lead=>{
     const ai=byId.get(clean(lead.leadId));
+    const rawAiE=Array.isArray(ai?.e)?ai.e.map(t=>String(t??"")):[];
     const aiErrors=Array.isArray(ai.e)?ai.e.map(token=>maps.resolve(token)).filter(label=>AI_ALLOWED_ERRORS.has(label)):[];
     const connectedYes=lead.staticValues.connected==="Yes";
     const filteredAi=connectedYes?aiErrors:aiErrors.filter(label=>!CONNECTED_ONLY_ERRORS.has(label));
@@ -1734,13 +1763,20 @@ export async function auditBatch(apiKey,rawSettings,batch,signal,log,onUsage,req
     let merged=unique([...filteredLocal,...filteredAi]).filter(label=>ERROR_TYPES.includes(label));
     let errors=merged.includes(EMPTY_REQUIREMENT)?merged.filter(label=>label!==WRONG_REQUIREMENT):merged;
     const comments=Array.isArray(lead.auditContext?.c)?lead.auditContext.c:[lead.staticValues.comments];
+    const mismatch=statusHardRuleMismatch(lead.staticValues.status,comments);
+    const aligned=statusHardRuleAligned(lead.staticValues.status,comments);
     // Local hard-rule floor / ceiling aligned with STATUS Rules 1–5.
-    if(statusHardRuleMismatch(lead.staticValues.status,comments)){
+    if(mismatch){
       errors=unique([...errors,STATUS_HISTORY_ERROR]);
     }
-    if(statusHardRuleAligned(lead.staticValues.status,comments)){
+    if(aligned){
       errors=errors.filter(label=>label!==STATUS_HISTORY_ERROR);
     }
+    // #region agent log
+    const oText=String(ai?.o??"");
+    const oHasStatusTalk=/\b(status|cold|lost|warm|hot|align|mismatch|prospect|qualified|rnr)\b/i.test(oText);
+    agentDbg({runId:"pre-fix",hypothesisId:"A-E",location:"audit.js:auditBatch-merge",message:"status vs observation",data:{mobile:String(lead.staticValues?.mobile||"").slice(-4),status:String(lead.staticValues?.status||""),statusRank:leadStatusRank(lead.staticValues?.status),rawAiE,aiErrors,aiEmittedStatus:rawAiE.some(t=>/status|aligned/i.test(t)),mismatch,aligned,pureRnr:allCommentsRnrLike(comments),streak:trailingRnrStreak(comments),buyingSignals:hasCumulativeBuyingSignals(comments),finalErrors:errors,finalHasStatus:errors.includes(STATUS_HISTORY_ERROR),oHasStatusTalk,oSnippet:oText.slice(0,140),ruleSeed:Number(settings.settingsSeed)||0,statusRuleHead:String((settings.rules||[]).find(r=>/lead status/i.test(String(r.field||"")))?.instruction||"").slice(0,80)}},log);
+    // #endregion
     const forceNoIntent=(trailingRnrStreak(comments)>=8&&!hasCumulativeBuyingSignals(comments))
       ||commentEntries(comments).some(hasActiveRejectionComment)
       ||(allCommentsRnrLike(comments)&&commentEntries(comments).length>=8);
