@@ -1,7 +1,7 @@
 import {buildTelecallerDashboardBlob} from "./dashboard-export.js?v=5.2.5";
 import {STATUS_HISTORY_PROMPT} from "./debug-prompts.js?v=5.2.13";
 
-export const APP_VERSION = "5.2.13";
+export const APP_VERSION = "5.2.14";
 /** Sentinel: use server OpenAI proxy (no raw key in the browser). */
 export const SERVER_API_KEY = "__server__";
 /** Bump when default AI rules / field defaults must refresh existing localStorage settings. */
@@ -176,7 +176,7 @@ export function buildChatCompletionBody(model,{temperature,maxTokens,messages,..
 
 /* Large stable prefix FIRST so OpenAI prompt caching can activate (>=1024 tokens;
    some models need closer to 2048). Run-specific rules come after; lead data last. */
-const CACHE_HANDBOOK = `LeadLens QA v5.2.13 — stable cacheable auditor handbook. Evidence only. Never invent facts, dates, budgets, locations, or prior calls.
+const CACHE_HANDBOOK = `LeadLens QA v5.2.14 — stable cacheable auditor handbook. Evidence only. Never invent facts, dates, budgets, locations, or prior calls.
 
 PURPOSE
 You audit Indian real-estate telecalling follow-up notes. Judge only the supplied fields for THIS call id. Optional day[] lists sibling calls on the same latest calendar day — context only; still return one result for THIS id.
@@ -986,10 +986,28 @@ function shouldCloseAsLost(comments){
 function hasNextFollowupDate(row){
   return Boolean(clean(row?.next)||clean(row?.nextDate)||clean(row?.n));
 }
-/** Local floor: Cold/Beyond Budget/Lost vs recency Rules 1–3 (matches STATUS_HISTORY_PROMPT). */
+function hasConfirmedSiteVisitComment(value){
+  const n=norm(value);
+  if(!n)return false;
+  return/\b(site visit|sitevisit|\bsv\b).{0,40}(done|booked|confirm|schedule|fix|tomorrow|today|saturday|sunday|monday|coming)|visit (on|confirm|booked|schedule|fix)|coming (for )?(a )?(site )?visit|visited (the )?(site|project)|sv done|sv booked\b/.test(n);
+}
+function isProspectOrQualifiedStatus(status){
+  const n=norm(status);
+  return n==="prospect"||n==="qualified";
+}
+/** Local floor: Prospect Rules 4–5 + Cold/Beyond Budget/Lost Rules 1–3. */
 function statusHardRuleMismatch(status,comments){
   const rank=leadStatusRank(status);
-  if(rank>3)return false;
+  // Rules 4–5: Prospect/Qualified only valid with last positive + confirmed site visit
+  if(isProspectOrQualifiedStatus(status)){
+    const last=latestMeaningfulComment(comments);
+    if(!last)return true;
+    if(isRnrLikeComment(last)||hasActiveRejectionComment(last)||isDeadNiComment(last))return true;
+    if(!(hasBuyingSignalComment(last)||isStrongPositiveComment(last)))return true;
+    return !hasConfirmedSiteVisitComment(last);
+  }
+  // Cold / Beyond Budget / Lost only (rank 1–3). Skip blank/unknown (rank 0) and Warm/Hot.
+  if(rank<1||rank>3)return false;
   // Rule 1: pure outbound RNR trail → Cold/Lost aligned
   if(allCommentsRnrLike(comments))return false;
   const streak=trailingRnrStreak(comments);
@@ -1000,8 +1018,9 @@ function statusHardRuleMismatch(status,comments){
 }
 /** Local ceiling: strip status error when Rule 1/2 or dead/NI trail says Cold/Lost is aligned. */
 function statusHardRuleAligned(status,comments){
+  if(isProspectOrQualifiedStatus(status))return false;
   const rank=leadStatusRank(status);
-  if(rank>3)return false;
+  if(rank<1||rank>3)return false;
   if(allCommentsRnrLike(comments))return true;
   const streak=trailingRnrStreak(comments);
   if(streak>=5)return true;
@@ -1619,16 +1638,19 @@ function finalizeRecommendation(aiText,row,errors,q){
   if((shouldCloseAsLost(row.comments)||hasDeadLostAlignedTrajectory(row.comments))&&/capture (customer )?details if|if (the customer |they )?connects?|gather (more )?details/i.test(clipped)){
     return fallbackRecommendation(row,errors,q);
   }
-  // Prefer model prose, but drop status-alignment coaching when e lacks the status error.
-  if(/\b(status|cold|lost|warm|hot|align|mismatch|prospect|qualified)\b/i.test(clipped)&&!errors.includes(STATUS_HISTORY_ERROR)&&!shouldCloseAsLost(row.comments)){
+  // Drop status-change / status-label coaching unless e has the status error.
+  // Allow Lost+close prose only when shouldCloseAsLost and text is about Lost/close (not Cold/Warm steps).
+  const statusTalk=/\b(status|cold|lost|warm|hot|align|mismatch|prospect|qualified)\b/i.test(clipped);
+  const lostCloseOk=shouldCloseAsLost(row.comments)&&/\blost\b/i.test(clipped)&&/\bclose\b/i.test(clipped)&&!/\b(warm|hot|prospect|qualified)\b/i.test(clipped);
+  if(statusTalk&&!errors.includes(STATUS_HISTORY_ERROR)&&!lostCloseOk){
     // #region agent log
     fetch('http://127.0.0.1:7843/ingest/f4ac7d78-fa93-4940-929e-852fd1791883',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'6866e6'},body:JSON.stringify({sessionId:'6866e6',runId:'post-fix',hypothesisId:'C',location:'audit.js:finalizeRecommendation',message:'scrubbed status talk without status error',data:{status:String(row?.status||''),snippet:clipped.slice(0,140)},timestamp:Date.now()})}).catch(()=>{});
     // #endregion
     return fallbackRecommendation(row,errors,q);
   }
   // #region agent log
-  if(/\b(status|cold|lost|warm|hot|align|mismatch)\b/i.test(clipped)){
-    fetch('http://127.0.0.1:7843/ingest/f4ac7d78-fa93-4940-929e-852fd1791883',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'6866e6'},body:JSON.stringify({sessionId:'6866e6',runId:'post-fix',hypothesisId:'C',location:'audit.js:finalizeRecommendation',message:'kept AI recommendation with status talk',data:{status:String(row?.status||''),hasStatusErr:errors.includes(STATUS_HISTORY_ERROR),snippet:clipped.slice(0,140)},timestamp:Date.now()})}).catch(()=>{});
+  if(statusTalk){
+    fetch('http://127.0.0.1:7843/ingest/f4ac7d78-fa93-4940-929e-852fd1791883',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'6866e6'},body:JSON.stringify({sessionId:'6866e6',runId:'post-fix',hypothesisId:'C',location:'audit.js:finalizeRecommendation',message:'kept AI recommendation with status talk',data:{status:String(row?.status||''),hasStatusErr:errors.includes(STATUS_HISTORY_ERROR),lostCloseOk,snippet:clipped.slice(0,140)},timestamp:Date.now()})}).catch(()=>{});
   }
   // #endregion
   return clipped;
