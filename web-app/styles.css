@@ -256,6 +256,11 @@ body.auth-body.home-mode{display:block;padding:0;place-items:unset}
 /* —— Right Filters rail (fixed to viewport edge) —— */
 body .dashboard-with-filters{display:block;min-width:0}
 body .dashboard-body{display:grid;gap:22px;min-width:0}
+body .dashboard-main-search{
+  display:grid;gap:8px;padding:12px 14px;background:#f7faf8;border:1px solid var(--line);border-radius:12px
+}
+body .dashboard-main-search-head{display:flex;align-items:baseline;justify-content:space-between;gap:8px}
+body .dashboard-main-search-input{min-height:40px;font-size:14px}
 body .dashboard-filters-rail{
   position:fixed;right:0;top:98px;bottom:0;z-index:30;
   display:flex;align-items:stretch;pointer-events:none
