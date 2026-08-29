@@ -7,11 +7,11 @@
   <meta name="description" content="LeadLens TeleCaller Audit">
   <title>LeadLens · TeleCaller Audit</title>
   <link rel="manifest" href="../manifest.webmanifest">
-  <link rel="stylesheet" href="../styles.css?v=5.2.12">
+  <link rel="stylesheet" href="../styles.css?v=5.2.10">
   <script defer src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
-  <script type="module" src="../app.js?v=5.2.12"></script>
+  <script type="module" src="../app.js?v=5.2.10"></script>
 </head>
 <body>
   <div id="update-banner" class="update-banner hidden" role="status">
@@ -162,10 +162,9 @@
             </section>
 
             <section class="settings-card">
-              <div class="card-title"><h2>4 · Fields sent to AI</h2><p><strong>Eligible Followups</strong> limits how many latest comments go to the AI (−1 = all).</p></div>
+              <div class="card-title"><h2>4 · Fields sent to AI</h2><p>Comments always send full chronological history.</p></div>
               <div id="ai-field-config" class="config-list"></div>
               <div class="field-grid settings-subgrid">
-                <label>Eligible Followups<input id="eligible-followups" type="number" step="1" value="-1" title="-1 sends all comments; 3 sends only the latest 3"></label>
                 <label>Connected = Yes values<input id="yes-values" type="text"></label>
                 <label>Connected = No values<input id="no-values" type="text"></label>
               </div>
