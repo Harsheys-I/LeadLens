@@ -1,11 +1,11 @@
 import {buildTelecallerDashboardBlob} from "./dashboard-export.js?v=5.2.20";
-import {STATUS_HISTORY_PROMPT} from "./debug-prompts.js?v=5.2.22";
+import {STATUS_HISTORY_PROMPT} from "./debug-prompts.js?v=5.2.23";
 
-export const APP_VERSION = "5.2.22";
+export const APP_VERSION = "5.2.23";
 /** Sentinel: use server OpenAI proxy (no raw key in the browser). */
 export const SERVER_API_KEY = "__server__";
 /** Bump when default AI rules / field defaults must refresh existing localStorage settings. */
-export const SETTINGS_SEED = 27;
+export const SETTINGS_SEED = 28;
 
 /** Settings limits — batch size is leads per request; concurrency is parallel requests. */
 export const MAX_BATCH_SIZE = 20;
@@ -137,7 +137,7 @@ export const DEFAULT_RULES = [
   {field:"Customer Requirement",instruction:`Only review Customer Requirement when k=Yes AND rq is present and not a fully empty string (fully blank rq is already in le). On a connected lead, rq should describe what the customer genuinely wants — for example a home configuration (2BHK/3BHK/plot), a budget, a preferred location/locality, facing, or a possession timeline. If rq is only a placeholder such as ".", "-", "**", "NA" or "nil", raise "${EMPTY_REQUIREMENT}". If rq instead holds call notes or jargon rather than a real need — for example RNR, CNP, Visited, Site visit, Busy, Follow-up, Callback, Interested/Not interested — raise "${WRONG_REQUIREMENT}". When k is No or blank, or rq is omitted, never raise either of these two errors.`,errors:`${EMPTY_REQUIREMENT} | ${WRONG_REQUIREMENT}`},
   {field:"Local-only errors",instruction:`Never emit Follow-up Missed, Estimate Budget Empty, Customer Location Empty, Analysis Parameter Empty, Fresh Call TAT Missed, TAT Error, or any TAT label. Those are precomputed in le. Explain labels in le in o/r, but do not copy them into e. Fully blank budget is local-only — even if b is omitted or empty, do not emit Estimate Budget Empty.`,errors:""},
   {field:"AI Observation",instruction:"Write o as a layman supervisor speaking to a telecaller (18-28 words). Cross-check every Error Type in le ∪ e against Comments (c): say specifically what in the comments supports (or conflicts with) each error. Also use Connected (k) naturally ('the call connected' / 'never connected'), never Connected=Yes/No dumps. Name the gap in plain words using STATUS Rules 1–5 (pure RNR → Cold/Lost aligned; 5+ trailing RNR → Cold aligned; 1–4 RNR after interest → Warm; positive no-visit → Hot; Prospect needs last-comment site visit). Forbidden: copying or paraphrasing c; stacking raw error labels; template fragments; inventing facts not in c; claiming Cold is wrong under Rules 1–2; forcing Cold→Lost for many RNRs alone. When le and e are both empty, judge note quality / connectedness only.",errors:""},
-  {field:"AI Recommendation",instruction:"Write r as layman coaching (20-40 words) grounded in comment history + Connected (k) + Error Types in le ∪ e + whether n (next follow-up date) is already set. Cover both: (1) how to fix those errors next time with concrete habits matching each error (write detailed comments with facing/size/purpose/timeline, fill location/budget/requirement, align status only when e contains Lead Status Not Aligned With Comments); (2) clearly state what to do next on the lead. HARD: if clear ACTIVE NI or dead ('not interested', 'stop calling', 'not looking', 'enquired by mistake') → tell telecaller to change or confirm Lead Status to Lost and **close the lead** — NOT 'capture details if connects' / generic warm follow-up. Do NOT coach status changes when status is aligned under Rules 1–2 (pure RNR or 5+ trailing RNR with Cold). Never force Cold→Lost solely for many RNRs. If n is already set, NEVER say 'set a follow-up date'; for Follow-up Missed explain the date is overdue — call/proceed now. Only coach setting a dated follow-up when n is blank/missing. Not a rewrite of the comment. Not vague ('follow up', 'update remarks', 'call again'). Not Connected=Yes/No or error-label dumps.",errors:""},
+  {field:"AI Recommendation",instruction:"Write r as layman coaching (20-40 words) grounded in comment history + Connected (k) + Error Types in le ∪ e + whether n (next follow-up date) is already set. Cover both: (1) how to fix those errors next time with concrete habits matching each error (write detailed comments with facing/size/purpose/timeline, fill location/budget/requirement, align status only when e contains Lead Status Not Aligned With Comments); (2) clearly state what to do next on the lead. HARD: NEVER recommend changing Lead Status to Lost — Cold is the lowest status you may coach (even for ACTIVE NI/dead). If clear ACTIVE NI or dead ('not interested', 'stop calling', 'not looking', 'enquired by mistake') → tell telecaller to change or confirm Lead Status to Cold and **close the lead** — NOT 'capture details if connects' / generic warm follow-up. Do NOT coach status changes when status is aligned under Rules 1–2 (pure RNR or 5+ trailing RNR with Cold). Never force Cold→Lost. If n is already set, NEVER say 'set a follow-up date'; for Follow-up Missed explain the date is overdue — call/proceed now. Only coach setting a dated follow-up when n is blank/missing. Not a rewrite of the comment. Not vague ('follow up', 'update remarks', 'call again'). Not Connected=Yes/No or error-label dumps.",errors:""},
   {field:"Buying intent",instruction:"i=1 only for genuine positive purchase interest evidenced in comments (assess cumulative intent from full c; 1–5 RNR/Busy/Unreachable are neutral and do not cancel prior interest). i=0 for clear ACTIVE NI/dead, wrong number, or 8+ consecutive RNR with no prior interest signal.",errors:""}
 ];
 /* gpt-5-nano OpenAI list price (USD/1M): $0.05 input, $0.005 cached, $0.40 output.
@@ -176,7 +176,7 @@ export function buildChatCompletionBody(model,{temperature,maxTokens,messages,..
 
 /* Large stable prefix FIRST so OpenAI prompt caching can activate (>=1024 tokens;
    some models need closer to 2048). Run-specific rules come after; lead data last. */
-const CACHE_HANDBOOK = `LeadLens QA v5.2.22 — stable cacheable auditor handbook. Evidence only. Never invent facts, dates, budgets, locations, or prior calls.
+const CACHE_HANDBOOK = `LeadLens QA v5.2.23 — stable cacheable auditor handbook. Evidence only. Never invent facts, dates, budgets, locations, or prior calls.
 
 PURPOSE
 You audit Indian real-estate telecalling follow-up notes. Judge only the supplied fields for THIS call id. Optional day[] lists sibling calls on the same latest calendar day — context only; still return one result for THIS id.
@@ -260,12 +260,13 @@ Good o: "Comments mention 2BHK under 90L then two RNRs, but status is Cold — R
 r (20–40 words): Coaching from full comment history + Connected + Error Types in le ∪ e + whether n is set. Must include (1) how to avoid those same errors next time and (2) what to do next on the lead.
 HARD r rules:
 - Only coach Lead Status changes when e contains "Lead Status Not Aligned With Comments" (or when closing a dead lead on clear ACTIVE NI). Do NOT write status-alignment coaching when that label is absent from e.
-- Clear ACTIVE NI/dead ("not interested", "stop calling", "not looking", "enquired by mistake") → tell telecaller to change/confirm Lead Status to Lost and **close the lead**. Do NOT say "capture details if connects" / keep chasing as warm pipeline.
-- Pure RNR trails or early interest + last 5+ RNR with Cold status are ALIGNED — do NOT coach stepping Cold up, and do NOT force Cold→Lost solely for many RNRs.
+- NEVER recommend Lead Status → Lost. Cold is the lowest status coaching may suggest.
+- Clear ACTIVE NI/dead ("not interested", "stop calling", "not looking", "enquired by mistake") → tell telecaller to change/confirm Lead Status to Cold and **close the lead**. Do NOT say "capture details if connects" / keep chasing as warm pipeline.
+- Pure RNR trails or early interest + last 5+ RNR with Cold status are ALIGNED — do NOT coach stepping Cold up, and do NOT force Cold→Lost.
 - If n is already set: NEVER say "set a follow-up date". For Follow-up Missed, say the date is overdue — call/proceed now and fix other errors.
 - Only coach setting a dated follow-up when n is blank/missing.
-Bad r: "Follow up and update comments." / "Capture details if the customer connects." (when history is dead NI)
-Good r: "Change Lead Status to Lost and close this lead — customer said not interested." / "Status is Cold but last notes still show budget interest with only 2 RNRs after — step to Warm (Rule 3); call on the overdue follow-up already on file."
+Bad r: "Follow up and update comments." / "Capture details if the customer connects." (when history is dead NI) / "Change Lead Status to Lost…"
+Good r: "Change Lead Status to Cold and close this lead — customer said not interested." / "Status is Cold but last notes still show budget interest with only 2 RNRs after — step to Warm (Rule 3); call on the overdue follow-up already on file."
 Never dump the full comment into o or r. Never restate this handbook.
 
 EXAMPLES
@@ -279,7 +280,7 @@ F2) s=Hot, c=last note confirms site visit Saturday => "Lead Status Not Aligned 
 G) c [interested 2BHK under 90L, RNR, RNR] and s=Cold => "Lead Status Not Aligned With Comments" (Rule 3 — 1–4 trailing RNR after interest → target Warm).
 G2) c [interested 2BHK, RNR×5] and s=Cold => e:[] — Rule 2 five-RNR drop; Cold aligned.
 G3) c [RNR×10 only] and s=Cold => e:[] — Rule 1 pure outbound trail; Cold aligned.
-G4) c has "enquired by mistake" / "not looking for properties" then RNR, s=Lost => e:[] for status; r → confirm Lost and close the lead.
+G4) c has "enquired by mistake" / "not looking for properties" then RNR, s=Lost or Cold => e:[] for status; r → confirm Cold and close the lead (never coach Lost).
 H) c latest shows clear purchase interest (no site visit) and s=Cold with no 5+ trailing RNR => "Lead Status Not Aligned With Comments" (Rule 4 — target Hot).
 H2) s=Prospect/Qualified, last comment positive budget talk but no site visit confirmed => "Lead Status Not Aligned With Comments" (Rule 4 — target Hot).
 H3) s=Prospect/Qualified, last comment confirms site visit => e:[] for status (Rule 5).
@@ -1604,10 +1605,10 @@ function fallbackObservation(row,errors,q){
 }
 function fallbackRecommendation(row,errors,q){
   if(isClosedLeadStatus(row.status)&&hasDeadLostAlignedTrajectory(row.comments)){
-    return clipWords("Confirm Lead Status as Lost and close the lead — the customer is not looking or the trail went dead. Do not keep chasing.",40);
+    return clipWords("Confirm Lead Status as Cold and close the lead — the customer is not looking or the trail went dead. Do not keep chasing.",40);
   }
   if(shouldCloseAsLost(row.comments)){
-    return clipWords("Change Lead Status to Lost and close this lead — clear NI/dead signal or long unanswered RNR. Do not keep chasing generic follow-ups.",40);
+    return clipWords("Change Lead Status to Cold and close this lead — clear NI/dead signal or long unanswered RNR. Do not keep chasing generic follow-ups.",40);
   }
   if(errors.includes(STATUS_HISTORY_ERROR)&&hasCumulativeBuyingSignals(row.comments)&&leadStatusRank(row.status)<=3){
     return clipWords("Step Lead Status up to Warm or Hot to match the buying signals in comments, then call on any follow-up date already on file.",40);
@@ -1668,12 +1669,22 @@ function finalizeObservation(aiText,row,errors,q){
   // #endregion
   return clipped;
 }
+/** Never coach Lead Status → Lost in recommendations; Cold is the floor. */
+function clampRecommendationStatusFloor(text){
+  let t=String(text||"");
+  t=t.replace(/\b(Lead Status|status)\s+(to|as)\s+Lost\b/gi,"$1 $2 Cold");
+  t=t.replace(/\bto Lost and close\b/gi,"to Cold and close");
+  t=t.replace(/\bas Lost and close\b/gi,"as Cold and close");
+  t=t.replace(/\bconfirm Lost\b/gi,"confirm Cold");
+  t=t.replace(/\bchange(?:\s+or\s+confirm)?\s+Lost\b/gi,"change Cold");
+  return t;
+}
 function finalizeRecommendation(aiText,row,errors,q){
-  if((shouldCloseAsLost(row.comments)||(isClosedLeadStatus(row.status)&&hasDeadLostAlignedTrajectory(row.comments)))&&!/\b(close|lost)\b/i.test(String(aiText||""))){
+  if((shouldCloseAsLost(row.comments)||(isClosedLeadStatus(row.status)&&hasDeadLostAlignedTrajectory(row.comments)))&&!/\b(close|cold|lost)\b/i.test(String(aiText||""))){
     return fallbackRecommendation(row,errors,q);
   }
   // Prefer model prose: empty, comment-echo, tiny, or single vague phrase → fallback.
-  const clipped=clipWords(aiText,40);
+  let clipped=clampRecommendationStatusFloor(clipWords(aiText,40));
   const words=clipped.split(/\s+/).filter(Boolean);
   const vague=/^(follow\s*up|call\s*again|update\s*(comments?|remarks?)|try\s*later|connect\s*again)\.?$/i.test(clipped);
   if(!clipped||isCommentEcho(clipped,row.comments)||words.length<10||vague)return fallbackRecommendation(row,errors,q);
@@ -1683,16 +1694,16 @@ function finalizeRecommendation(aiText,row,errors,q){
   if((shouldCloseAsLost(row.comments)||hasDeadLostAlignedTrajectory(row.comments))&&/capture (customer )?details if|if (the customer |they )?connects?|gather (more )?details/i.test(clipped)){
     return fallbackRecommendation(row,errors,q);
   }
-  // Drop status-change coaching unless e has the status error (or genuine Lost+close on dead lead).
+  // Drop status-change coaching unless e has the status error (or Cold+close on dead lead).
   const statusTalk=/\b(status|cold|lost|warm|hot|align|mismatch|prospect|qualified)\b/i.test(clipped);
-  const lostCloseOk=shouldCloseAsLost(row.comments)&&/\blost\b/i.test(clipped)&&/\bclose\b/i.test(clipped)&&!/\b(warm|hot|prospect|qualified)\b/i.test(clipped);
-  if(statusTalk&&!errors.includes(STATUS_HISTORY_ERROR)&&!lostCloseOk){
+  const coldCloseOk=shouldCloseAsLost(row.comments)&&/\bcold\b/i.test(clipped)&&/\bclose\b/i.test(clipped)&&!/\b(warm|hot|prospect|qualified)\b/i.test(clipped);
+  if(statusTalk&&!errors.includes(STATUS_HISTORY_ERROR)&&!coldCloseOk){
     // #region agent log
     fetch('http://127.0.0.1:7843/ingest/f4ac7d78-fa93-4940-929e-852fd1791883',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'6866e6'},body:JSON.stringify({sessionId:'6866e6',runId:'pre-fix',hypothesisId:'E',location:'audit.js:finalizeRecommendation',message:'rec scrubbed status talk',data:{status:String(row?.status||''),hasStatusErr:false,scrubRan:true,snippet:clipped.slice(0,100)},timestamp:Date.now()})}).catch(()=>{});
     // #endregion
     return fallbackRecommendation(row,errors,q);
   }
-  return clipped;
+  return clampRecommendationStatusFloor(clipped);
 }
 
 async function requestAudit(apiKey,settings,leads,signal,log,onUsage){
@@ -1703,7 +1714,7 @@ async function requestAudit(apiKey,settings,leads,signal,log,onUsage){
       prompt_cache_key:promptCacheKey(settings),
       messages:[
         {role:"system",content:buildPrompt(settings)},
-        {role:"user",content:`Audit ${leads.length} call(s). Echo each id. c=full history — judge Lead Status with STATUS Rules 1–5 (pure RNR / 5+ trailing RNR → Cold aligned; 1–4 RNR after interest → Warm; positive no-visit → Hot; Prospect needs last-comment site visit). Put mismatches in e as "Lead Status Not Aligned With Comments"; freeform Error: lines are ignored. le=local errors — explain in o/r, never copy into e. Judge non-blank rq empty-vs-wrong when k=Yes; comment quality + q; buying intent. Never emit Follow-up Missed, Budget/Location/Parameter Empty, or any TAT label. o (18-28 words): quote facts from c only. r (20-40 words): only coach status changes when that label is in e; Lost+close on ACTIVE NI; never Cold→Lost for RNRs alone under Rules 1–2; never "set a follow-up" when n is set; for overdue n say call/proceed now.\n${JSON.stringify({L:modelInput})}`}
+        {role:"user",content:`Audit ${leads.length} call(s). Echo each id. c=full history — judge Lead Status with STATUS Rules 1–5 (pure RNR / 5+ trailing RNR → Cold aligned; 1–4 RNR after interest → Warm; positive no-visit → Hot; Prospect needs last-comment site visit). Put mismatches in e as "Lead Status Not Aligned With Comments"; freeform Error: lines are ignored. le=local errors — explain in o/r, never copy into e. Judge non-blank rq empty-vs-wrong when k=Yes; comment quality + q; buying intent. Never emit Follow-up Missed, Budget/Location/Parameter Empty, or any TAT label. o (18-28 words): quote facts from c only. r (20-40 words): only coach status changes when that label is in e; NEVER recommend Status→Lost (Cold is the floor); Cold+close on ACTIVE NI; never Cold→Lost for RNRs alone under Rules 1–2; never "set a follow-up" when n is set; for overdue n say call/proceed now.\n${JSON.stringify({L:modelInput})}`}
       ],
       response_format:{type:"json_schema",json_schema:{name:"ll_audit",strict:true,schema:responseSchema}}
     });

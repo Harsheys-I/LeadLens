@@ -24,12 +24,12 @@ RNR-like outbound attempts include: RNR, CNP, Voicemail, Busy, Message Shared, r
 RULE 1 (DEAD AIR / PURE RNR):
 IF 100% of the timeline is outbound attempts (RNR-like) with ZERO buyer response, REGARDLESS of count (1 or 500).
 → Target Status: Cold or Lost. If current status is Cold or Lost → ALIGNED. Do NOT put "Lead Status Not Aligned With Comments" in e.
-NEVER suggest changing an already-Cold lead to Lost solely because of many RNRs.
+NEVER suggest changing status to Lost in r — Cold is the lowest status coaching may recommend (even with many RNRs).
 
 RULE 2 (THE 5-RNR DROP):
 IF there WAS early interest, BUT the LAST 5 (or more) consecutive comments are RNR-like.
 → Target Status: Cold. Early interest has decayed. If current status is Cold → ALIGNED. Do NOT put the status error in e.
-NEVER suggest Cold→Lost solely for many trailing RNRs under this rule.
+NEVER recommend Cold→Lost in r solely for many trailing RNRs.
 
 RULE 3 (THE COOLDOWN):
 IF the LAST 1 to 4 comments are RNR-like, BUT there is a positive/engaged comment immediately before them.
@@ -56,6 +56,7 @@ HOW TO WRITE THE JSON RESULT (required — freeform "Error :" / "Reason :" / <th
 - If Result is MISMATCH: e MUST include exactly "Lead Status Not Aligned With Comments".
 - If Result is ALIGNED: e must NOT include that label.
 - Put the Reason (rule violated or brief aligned justification) in o. Put next-step coaching in r.
+- In r, NEVER recommend changing Lead Status to Lost — Cold is the floor for status coaching.
 - Do not invent details. Prefer the Rules 1–5 outcome over weak polarity guesses.`;
 
 /** Shared CSV + output contract — prepended once; not duplicated in each error prompt. */

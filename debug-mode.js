@@ -16,7 +16,7 @@ import {
   sortResults,
   validateApiKey,
   SERVER_API_KEY,
-} from "./audit.js?v=5.2.22";
+} from "./audit.js?v=5.2.23";
 import {getApiKey,apiKeyIsRemembered,saveApiKey,forgetApiKey,setStorageUserId,storageKey} from "./db.js?v=5.2.19";
 import {requireAuth,logout,getUser,changePassword,updateProfile} from "./auth.js?v=5.2.19";
 import {SettingsApi} from "./api-client.js?v=5.2.19";
@@ -27,12 +27,12 @@ import {
   compareDebugVsTelecaller,
   activePromptsReady,
   normalizeActiveErrorTypes,
-} from "./debug-engine.js?v=5.2.22";
+} from "./debug-engine.js?v=5.2.23";
 import {
   LAB_ERROR_TYPES,
   STATUS_HISTORY_PROMPT,
   emptyErrorPrompts,
-} from "./debug-prompts.js?v=5.2.22";
+} from "./debug-prompts.js?v=5.2.23";
 
 const $=id=>document.getElementById(id);
 const ids=[
