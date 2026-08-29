@@ -7,12 +7,12 @@
   <meta name="description" content="LeadLens TeleCaller">
   <title>LeadLens · TeleCaller</title>
   <link rel="manifest" href="../manifest.webmanifest">
-  <link rel="stylesheet" href="../styles.css?v=5.2.28">
+  <link rel="stylesheet" href="../styles.css?v=5.2.29">
   <script defer src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js"></script>
-  <script type="module" src="../app.js?v=5.2.28"></script>
+  <script type="module" src="../app.js?v=5.2.29"></script>
 </head>
 <body>
   <div id="update-banner" class="update-banner hidden" role="status">
@@ -169,6 +169,12 @@
             <span>Lead Update Date</span>
             <strong>—</strong>
           </div>
+          <label class="perf-filter-row">
+            <span>TeleCaller</span>
+            <select id="perf-telecaller-filter" aria-label="Filter by TeleCaller">
+              <option value="">All TeleCallers</option>
+            </select>
+          </label>
           <div id="perf-view-toggle" class="format-toggle" role="group" aria-label="Summary or Graph">
             <button type="button" class="format-option active" data-perf-view="summary">Summary</button>
             <button type="button" class="format-option" data-perf-view="graph">Graph</button>
@@ -177,7 +183,33 @@
             <div id="perf-summary" class="perf-summary" aria-live="polite"></div>
           </div>
           <div id="perf-graph-panel" class="perf-graph-panel hidden">
-            <div class="empty-card">Coming soon</div>
+            <div class="perf-chart-block">
+              <div class="card-title">
+                <h2>Status breakdown</h2>
+                <p>Latest Telecalling Status per lead (Send to Enquiry shown as Site Visited).</p>
+              </div>
+              <div class="perf-chart-canvas">
+                <canvas id="perf-status-chart" aria-label="Status breakdown chart"></canvas>
+              </div>
+            </div>
+            <div class="perf-chart-block">
+              <div class="card-title">
+                <h2>Summary metrics</h2>
+                <p>Active leads, fresh assigned, overdue calls, and fresh leads not called yet.</p>
+              </div>
+              <div class="perf-chart-canvas">
+                <canvas id="perf-metrics-chart" aria-label="Summary metrics chart"></canvas>
+              </div>
+            </div>
+            <div id="perf-tc-chart-block" class="perf-chart-block hidden">
+              <div class="card-title">
+                <h2>Per TeleCaller</h2>
+                <p>Latest status counts by TeleCaller. Hidden when a single TeleCaller filter is applied.</p>
+              </div>
+              <div id="perf-tc-chart-wrap" class="perf-chart-canvas perf-chart-tall">
+                <canvas id="perf-tc-chart" aria-label="Per TeleCaller status chart"></canvas>
+              </div>
+            </div>
           </div>
         </div>
       </section>
