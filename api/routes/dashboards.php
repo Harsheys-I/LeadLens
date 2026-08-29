@@ -44,7 +44,10 @@ function ll_route_dashboards(string $action, ?int $id): void
       ll_error('dashboards array is required');
     }
     $pdo = ll_pdo();
-    $del = $pdo->prepare('DELETE FROM published_dashboards WHERE telecaller_name = ?');
+    // Case/whitespace-insensitive so re-uploads never leave orphan boards for the same TeleCaller.
+    $del = $pdo->prepare(
+      'DELETE FROM published_dashboards WHERE LOWER(TRIM(telecaller_name)) = LOWER(?)'
+    );
     $ins = $pdo->prepare(
       'INSERT INTO published_dashboards (telecaller_name, title, payload, meta, uploaded_by)
        VALUES (?, ?, ?, ?, ?)'
@@ -105,14 +108,16 @@ function ll_route_dashboards(string $action, ?int $id): void
     $pdo->beginTransaction();
     try {
       foreach ($pending as $row) {
-        // Replace (not merge): drop any prior board for this TeleCaller, then insert fresh.
+        // Replace (not merge): drop every prior board for this TeleCaller, then insert fresh.
         $del->execute([$row['telecaller']]);
+        $priorDeleted = $del->rowCount();
         $ins->execute([$row['telecaller'], $row['title'], $row['payload'], $row['metaJson'], (int) $user['id']]);
         $created[] = [
           'id' => (int) $pdo->lastInsertId(),
           'telecaller_name' => $row['telecaller'],
           'title' => $row['title'],
-          'replaced' => true,
+          'replaced' => $priorDeleted > 0,
+          'prior_deleted' => $priorDeleted,
           'merged' => false,
           'lead_count' => $row['lead_count'],
         ];
@@ -227,8 +232,13 @@ function ll_route_dashboards(string $action, ?int $id): void
     // One board per TeleCaller (latest only — publish replaces, never merges history).
     $byName = [];
     foreach ($rows as $row) {
-      $tc = (string) $row['telecaller_name'];
-      $byName[$tc] = [
+      $tc = trim((string) $row['telecaller_name']);
+      $key = strtolower($tc);
+      // Prefer higher id if a case/whitespace orphan somehow remains.
+      if (isset($byName[$key]) && (int) $byName[$key]['id'] > (int) $row['id']) {
+        continue;
+      }
+      $byName[$key] = [
         'id' => (int) $row['id'],
         'telecaller_name' => $tc,
         'title' => $row['title'],
@@ -367,8 +377,11 @@ function ll_route_dashboards(string $action, ?int $id): void
       ll_error('Dashboard not found', 404);
     }
     $rowName = trim((string) ($row['telecaller_name'] ?? ''));
-    // Remove the whole TeleCaller board (all legacy rows for that name).
-    ll_pdo()->prepare('DELETE FROM published_dashboards WHERE telecaller_name = ?')->execute([$rowName !== '' ? $rowName : $row['telecaller_name']]);
+    // Remove the whole TeleCaller board (all legacy/case-variant rows for that name).
+    $name = $rowName !== '' ? $rowName : (string) $row['telecaller_name'];
+    ll_pdo()->prepare(
+      'DELETE FROM published_dashboards WHERE LOWER(TRIM(telecaller_name)) = LOWER(?)'
+    )->execute([$name]);
     ll_ok(['deleted' => true, 'telecaller_name' => $rowName]);
   }
 
