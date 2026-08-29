@@ -7,12 +7,12 @@
   <meta name="description" content="LeadLens TeleCaller">
   <title>LeadLens · TeleCaller</title>
   <link rel="manifest" href="../manifest.webmanifest">
-  <link rel="stylesheet" href="../styles.css?v=5.2.27">
+  <link rel="stylesheet" href="../styles.css?v=5.2.28">
   <script defer src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js"></script>
-  <script type="module" src="../app.js?v=5.2.27"></script>
+  <script type="module" src="../app.js?v=5.2.28"></script>
 </head>
 <body>
   <div id="update-banner" class="update-banner hidden" role="status">
@@ -140,20 +140,20 @@
       <section id="view-perf-dashboard" class="view">
         <div class="intro">
           <h2>Dashboard</h2>
-          <p>Upload Master and History Excel files to match leads, flag orphans, and chart overdue / KPIs. Runs locally — no AI.</p>
+          <p>Upload Master and History Excel files for a local Summary of active leads, fresh assignments, statuses, and overdue calls. No AI.</p>
         </div>
         <div class="perf-upload-grid">
           <div id="perf-master-drop" class="drop-zone perf-drop" role="button" tabindex="0" aria-label="Upload Master Excel">
             <input id="perf-master-input" type="file" accept=".xlsx,.xls,.xlsm" hidden>
             <div class="upload-icon">⇧</div>
             <h3>Master Excel</h3>
-            <p>1 row = 1 lead · Project, Mobile, Telecaller, Reg Date, Next Followup · XLSX / XLS / XLSM</p>
+            <p>1 row = 1 lead · Project, Mobile, Reg Date, Next Followup · XLSX / XLS / XLSM</p>
           </div>
           <div id="perf-history-drop" class="drop-zone perf-drop" role="button" tabindex="0" aria-label="Upload History Excel">
             <input id="perf-history-input" type="file" accept=".xlsx,.xls,.xlsm" hidden>
             <div class="upload-icon">⇧</div>
             <h3>History Excel</h3>
-            <p>1 lead = many rows · Project, Mobile, Lead Update, Telecaller, Reg Date, Next Followup · XLSX / XLS / XLSM</p>
+            <p>1 lead = many rows · Project, Mobile, Lead Update Date, Reg Date, Next Followup, Telecalling Status · XLSX / XLS / XLSM</p>
           </div>
         </div>
         <div class="perf-file-metas">
@@ -166,75 +166,18 @@
         </div>
         <div id="perf-results" class="perf-results hidden">
           <div id="perf-date-range" class="perf-date-range" aria-live="polite">
-            <span>Lead Registration Date</span>
+            <span>Lead Update Date</span>
             <strong>—</strong>
           </div>
-          <div id="perf-kpi-strip" class="perf-kpi-strip" aria-live="polite"></div>
-          <div class="perf-chart-panel">
-            <div class="card-title">
-              <h2>Overdue by TeleCaller</h2>
-              <p>Master leads missing from History with overdue days &gt; 0 (Draft or first call missing from History).</p>
-            </div>
-            <div id="perf-chart-wrap" class="dashboard-chart-canvas perf-chart-canvas">
-              <canvas id="perf-overdue-chart" aria-label="Overdue leads by telecaller"></canvas>
-            </div>
+          <div id="perf-view-toggle" class="format-toggle" role="group" aria-label="Summary or Graph">
+            <button type="button" class="format-option active" data-perf-view="summary">Summary</button>
+            <button type="button" class="format-option" data-perf-view="graph">Graph</button>
           </div>
-          <div class="perf-chart-panel">
-            <div class="card-title">
-              <h2>Per TeleCaller</h2>
-              <p>Leads in History, Calls, and Missed leads (Master not in History).</p>
-            </div>
-            <div class="perf-table-wrap">
-              <table class="perf-table" id="perf-telecaller-table">
-                <thead>
-                  <tr>
-                    <th scope="col">Telecaller</th>
-                    <th scope="col">Leads in History</th>
-                    <th scope="col">Calls</th>
-                    <th scope="col">Missed leads</th>
-                    <th scope="col">Overdue leads</th>
-                  </tr>
-                </thead>
-                <tbody id="perf-telecaller-tbody"></tbody>
-              </table>
-            </div>
+          <div id="perf-summary-panel" class="perf-summary-panel">
+            <div id="perf-summary" class="perf-summary" aria-live="polite"></div>
           </div>
-          <div id="perf-orphan-panel" class="perf-chart-panel hidden">
-            <div class="card-title">
-              <h2>History-only errors</h2>
-              <p>History rows whose Mobile + Project are not in Master.</p>
-            </div>
-            <div class="perf-table-wrap">
-              <table class="perf-table" id="perf-orphan-table">
-                <thead>
-                  <tr>
-                    <th scope="col">Mobile</th>
-                    <th scope="col">Project Name</th>
-                  </tr>
-                </thead>
-                <tbody id="perf-orphan-tbody"></tbody>
-              </table>
-            </div>
-          </div>
-          <div id="perf-status-panel" class="perf-chart-panel">
-            <div class="card-title">
-              <h2>Reconcile status</h2>
-              <p>Matched leads are stubbed until History audit rules are defined. Unmatched Master rows show Draft / missing History + overdue.</p>
-            </div>
-            <div class="perf-table-wrap perf-status-scroll">
-              <table class="perf-table" id="perf-status-table">
-                <thead>
-                  <tr>
-                    <th scope="col">Mobile</th>
-                    <th scope="col">Project</th>
-                    <th scope="col">Telecaller</th>
-                    <th scope="col">Status</th>
-                    <th scope="col">Overdue (days)</th>
-                  </tr>
-                </thead>
-                <tbody id="perf-status-tbody"></tbody>
-              </table>
-            </div>
+          <div id="perf-graph-panel" class="perf-graph-panel hidden">
+            <div class="empty-card">Coming soon</div>
           </div>
         </div>
       </section>
