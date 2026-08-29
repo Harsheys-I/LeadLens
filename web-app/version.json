@@ -1,5 +1,5 @@
 {
   "version": "5.2.18",
   "name": "LeadLens",
-  "notes": "v5.2.18: Hide dashboard Search on Summary/Graphs; persistent left-nav hide (☰); filters rail collapse remembered."
+  "notes": "v5.2.18: Upload Dashboard replaces prior TeleCaller board (no orphans); hide Search on Summary/Graphs; persistent left-nav hide."
 }
