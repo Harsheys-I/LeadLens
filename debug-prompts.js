@@ -13,23 +13,50 @@ export const LAB_ERROR_TYPES = [
 /** Canonical production status-vs-comments rules (Bucket 1 / TeleCaller audit + DeBug). */
 export const STATUS_HISTORY_PROMPT = `STATUS vs FULL COMMENT HISTORY
 
-Allowed Lead Status labels (case-insensitive): Prospect, Hot, Warm, Cold, Beyond Budget, Lost.
-
+Allowed Lead Status labels (case-insensitive): Prospect (Qualified), Hot, Warm, Cold, Beyond Budget, Lost.
 Heat ladder highest→lowest: Prospect > Hot > Warm > Cold > Beyond Budget > Lost.
+Note: CRM may show "Prospect"; payload field s may arrive as "Qualified" for that same top tier — treat them as the same rank.
 
-c is the full chronological timeline — read ALL entries, then judge CURRENT s against the FULL timeline THEN the LATEST tone. Early interest does NOT keep Warm/Hot/Prospect when later notes cooled.
+CRITICAL ALIGNMENT RULES (RECENCY-BASED):
+Read the timeline chronologically. The MOST RECENT comments at the very end of the chain dictate the exact status, overriding early interest.
+RNR-like outbound attempts include: RNR, CNP, Voicemail, Busy, Message Shared, ringing, no answer, not reachable, switched off, callback/follow-up-only crumbs.
 
-Emit "Lead Status Not Aligned With Comments" ONLY on clear mismatch. Prefer e:[] when unsure or when s reasonably matches. Weak polarity guesses are forbidden.
+RULE 1 (DEAD AIR / PURE RNR):
+IF 100% of the timeline is outbound attempts (RNR-like) with ZERO buyer response, REGARDLESS of count (1 or 500).
+→ Target Status: Cold or Lost. If current status is Cold or Lost → ALIGNED. Do NOT put "Lead Status Not Aligned With Comments" in e.
+NEVER suggest changing an already-Cold lead to Lost solely because of many RNRs.
 
-Judge the Lead Status based on all the comments to that specific lead. Based on your understanding and reasoning, emit or not emit the error. Baseline is Warm for passive comments.
+RULE 2 (THE 5-RNR DROP):
+IF there WAS early interest, BUT the LAST 5 (or more) consecutive comments are RNR-like.
+→ Target Status: Cold. Early interest has decayed. If current status is Cold → ALIGNED. Do NOT put the status error in e.
+NEVER suggest Cold→Lost solely for many trailing RNRs under this rule.
 
-o MUST say why status mismatches (e.g. "s=Hot but latest notes are NI + trailing RNR"). For ~8+ calls all RNR / clear NI/dead → r must say change status to Lost and close the lead — not "capture details if connects".
+RULE 3 (THE COOLDOWN):
+IF the LAST 1 to 4 comments are RNR-like, BUT there is a positive/engaged comment immediately before them.
+→ Target Status: Warm. If currently Prospect, Hot, or Cold (or Beyond Budget / Lost) → MISMATCH — you MUST include "Lead Status Not Aligned With Comments" in e.
 
-HOW TO WRITE THE JSON RESULT (required — freeform "Error :" / "Reason :" lines are ignored by Bucket 1):
-- If Result is clear MISMATCH: e MUST include exactly "Lead Status Not Aligned With Comments".
-- If ALIGNED / unsure: e must NOT include that label (prefer e:[]).
-- Put the mismatch reason in o. Put next-step coaching in r.
-- CRM may show "Prospect" while payload s is "Qualified" — treat them as the same top tier.`;
+RULE 4 (THE HOT / NO-VISIT RULE):
+IF the VERY LAST meaningful comment is positive (asking for details, sharing budget, clear interest) BUT there is no confirmed site visit happening.
+→ Target Status: Hot. If currently Prospect/Qualified → MISMATCH — you MUST include "Lead Status Not Aligned With Comments" in e.
+Cold / Beyond Budget / Lost vs that live positive → also MISMATCH. Warm or Hot may be ALIGNED.
+
+RULE 5 (PROSPECT / QUALIFIED VALIDATION):
+Prospect/Qualified is ONLY valid if the VERY LAST meaningful comment is positive AND confirms a site visit.
+Otherwise (Prospect without that) → MISMATCH — include "Lead Status Not Aligned With Comments" in e.
+When the last meaningful comment is positive AND confirms a site visit → target Prospect; other statuses → MISMATCH.
+
+EVALUATION CHECKLIST (do this mentally before filling JSON — do NOT emit a <thinking> block or freeform Error:/Reason: lines):
+1. Count of consecutive RNR-like comments at the very end of the timeline
+2. Last positive/engaged comment before the RNRs (or None)
+3. Target Status based on Rules 1–5
+4. Current Lead Status (s)
+5. Result: Aligned or Mismatch
+
+HOW TO WRITE THE JSON RESULT (required — freeform "Error :" / "Reason :" / <thinking> are ignored by Bucket 1):
+- If Result is MISMATCH: e MUST include exactly "Lead Status Not Aligned With Comments".
+- If Result is ALIGNED: e must NOT include that label.
+- Put the Reason (rule violated or brief aligned justification) in o. Put next-step coaching in r.
+- Do not invent details. Prefer the Rules 1–5 outcome over weak polarity guesses.`;
 
 /** Shared CSV + output contract — prepended once; not duplicated in each error prompt. */
 export const SHARED_PREAMBLE = `LeadLens DeBug · Error Focus Lab. Evidence only. Never invent facts, dates, budgets, locations, or prior calls.
@@ -40,7 +67,7 @@ You audit Indian real-estate telecalling follow-up notes for THIS call id only. 
 INPUT (CSV columns — names may vary; use what is present)
 - id: opaque lead/call id. Echo it exactly. Never invent or drop ids.
 - s: Lead Status on THIS call
-- c: Comments — full chronological history (oldest→newest). Status weighs FULL timeline then LATEST tone; q/i focus on the last entry
+- c: Comments — full chronological history (oldest→newest). Status uses recency Rules 1–5; q/i focus on the last entry
 - n: Next Followup Date (DD/MM/YYYY). Context for o/r only — NEVER emit Follow-up Missed. If n is set, NEVER recommend "set a follow-up date"
 - u: Lead Update DateTime
 - rq: Customer Requirement (may be omitted when blank locally)

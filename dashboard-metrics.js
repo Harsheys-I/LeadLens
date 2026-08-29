@@ -99,6 +99,9 @@ function applyFilters(rows, filters = {}){
   const severities = normalizeFilterList(filters.severities ?? filters.severity);
   const errorTypes = normalizeFilterList(filters.errorTypes ?? filters.errorType);
   const overdueBuckets = normalizeFilterList(filters.overdueBuckets ?? filters.overdueBucket);
+  const commentQualityBuckets = normalizeFilterList(
+    filters.commentQualityBuckets ?? filters.commentQualityBucket
+  ).map(v => commentQualityBucketKeyFromLabel(v) || v).filter(Boolean);
   const dateFrom = parseFilterDate(filters.dateFrom);
   const dateTo = parseFilterDate(filters.dateTo);
   const search = String(filters.search ?? filters.q ?? "").trim();
@@ -115,6 +118,10 @@ function applyFilters(rows, filters = {}){
     if(overdueBuckets.length){
       const bucket = row.overdueBucket || overdueBucket(row.overdueDays);
       if(!bucket || !overdueBuckets.includes(bucket)) return false;
+    }
+    if(commentQualityBuckets.length){
+      const bucket = commentQualityBucket(row.commentQuality);
+      if(!bucket || !commentQualityBuckets.includes(bucket)) return false;
     }
     if(dateFrom || dateTo){
       if(!(row.registration instanceof Date) || Number.isNaN(row.registration.valueOf())) return false;
@@ -135,6 +142,25 @@ function seriesFromMap(map, {sortBy = "label"} = {}){
 }
 
 const CQ_BUCKETS = ["0-2", "3-4", "5-6", "7-8", "9-10"];
+/** Chart legend / series labels only — keys stay as CQ_BUCKETS. */
+const CQ_BUCKET_LABELS = {
+  "0-2": "Bad",
+  "3-4": "Average",
+  "5-6": "Good",
+  "7-8": "Very good",
+  "9-10": "Excellent"
+};
+
+/** Qualitative chart label → internal CQ band key (e.g. Bad → 0-2). */
+export function commentQualityBucketKeyFromLabel(label){
+  const s = String(label || "").trim();
+  if(!s) return null;
+  if(CQ_BUCKETS.includes(s)) return s;
+  for(const [key, name] of Object.entries(CQ_BUCKET_LABELS)){
+    if(name === s) return key;
+  }
+  return null;
+}
 
 function commentQualityBucket(score){
   const n = Number(score);
@@ -148,7 +174,7 @@ function commentQualityBucket(score){
 
 /**
  * @param {object[]} results LeadLens audit result rows
- * @param {{telecaller?:string|string[],telecallers?:string[],project?:string|string[],projects?:string[],dateFrom?:string|Date,dateTo?:string|Date,severity?:string|string[],severities?:string[],errorType?:string|string[],errorTypes?:string[],overdueBucket?:string|string[],overdueBuckets?:string[],search?:string,q?:string}} [filters]
+ * @param {{telecaller?:string|string[],telecallers?:string[],project?:string|string[],projects?:string[],dateFrom?:string|Date,dateTo?:string|Date,severity?:string|string[],severities?:string[],errorType?:string|string[],errorTypes?:string[],overdueBucket?:string|string[],overdueBuckets?:string[],commentQualityBucket?:string|string[],commentQualityBuckets?:string[],search?:string,q?:string}} [filters]
  * @param {{highSeverityErrors?: Set<string>|string[]}} [options]
  */
 export function buildDashboardModel(results, filters = {}, options = {}){
@@ -272,7 +298,7 @@ export function buildDashboardModel(results, filters = {}, options = {}){
     commentQualityDistribution: {
       labels: teleLabels,
       datasets: CQ_BUCKETS.map(bucket => ({
-        label: bucket,
+        label: CQ_BUCKET_LABELS[bucket] || bucket,
         values: teleLabels.map(name => cqByTele.get(name)?.get(bucket) || 0)
       }))
     },

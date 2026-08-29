@@ -2,7 +2,11 @@
  * In-app TeleCaller Review dashboard (KPIs, scorecard, Chart.js charts, error table).
  */
 
-import {buildDashboardModel, OVERDUE_BUCKETS} from "./dashboard-metrics.js?v=5.2.20";
+import {
+  buildDashboardModel,
+  OVERDUE_BUCKETS,
+  commentQualityBucketKeyFromLabel
+} from "./dashboard-metrics.js?v=5.2.20";
 import {storageKey} from "./db.js?v=5.2.19";
 
 /** Panel switcher labels (presentation) → internal section titles stay as-built. */
@@ -362,7 +366,51 @@ function barScaleOptions(){
   };
 }
 
-function renderCharts(charts){
+/**
+ * Map a Chart.js click hit → filter patch for the Detailed Error Report popup.
+ * @returns {{filters: object, subtitle: string}|null}
+ */
+function filtersFromChartClick(chartId, chart, elements){
+  if(!elements?.length || !chart) return null;
+  const hit = elements[0];
+  const index = hit.index;
+  const datasetIndex = hit.datasetIndex;
+  const labels = chart.data?.labels || [];
+  const axisLabel = labels[index];
+  if(axisLabel == null || axisLabel === "") return null;
+  const label = String(axisLabel);
+  const seriesLabel = String(chart.data?.datasets?.[datasetIndex]?.label || "");
+
+  switch(chartId){
+    case "accuracy":
+    case "errors":
+      return {filters: {telecallers: [label]}, subtitle: label};
+    case "errorTypes":
+      return {filters: {errorTypes: [label]}, subtitle: label};
+    case "projects":
+      return {filters: {projects: [label]}, subtitle: label};
+    case "severity":
+      if(!seriesLabel) return null;
+      return {
+        filters: {telecallers: [label], severities: [seriesLabel]},
+        subtitle: `${label} · ${seriesLabel}`
+      };
+    case "commentQuality": {
+      const cqKey = commentQualityBucketKeyFromLabel(seriesLabel);
+      if(!cqKey) return null;
+      return {
+        filters: {telecallers: [label], commentQualityBuckets: [cqKey]},
+        subtitle: `${label} · ${seriesLabel}`
+      };
+    }
+    case "overdue":
+      return {filters: {overdueBuckets: [label]}, subtitle: `Overdue ${label}`};
+    default:
+      return null;
+  }
+}
+
+function renderCharts(charts, {onSegmentClick} = {}){
   destroyCharts();
   const mount = el("div", "dashboard-charts");
   const Chart = requireChart();
@@ -404,7 +452,9 @@ function renderCharts(charts){
     }
     const canvasWrap = el("div", "dashboard-chart-canvas");
     const canvas = document.createElement("canvas");
-    canvas.setAttribute("aria-label", title);
+    canvas.setAttribute("aria-label", `${title} (click a segment for details)`);
+    canvas.classList.add("dashboard-chart-clickable");
+    canvas.style.cursor = "pointer";
     canvasWrap.append(canvas);
     card.append(canvasWrap);
     mount.append(card);
@@ -414,13 +464,21 @@ function renderCharts(charts){
     const values = series?.values || [];
     const isSegmented = type === "doughnut" || type === "pie";
     const severitySeriesColors = {Critical: CHART_COLORS.red, Medium: CHART_COLORS.amber};
+    /** CQ bands: Bad→Excellent = red→green (not palette order). */
+    const cqSeriesColors = {
+      Bad: CHART_COLORS.red,
+      Average: CHART_COLORS.amber,
+      Good: "#c9a227",
+      "Very good": "#3f8c68",
+      Excellent: CHART_COLORS.green2
+    };
 
     let datasets;
     if(grouped){
       datasets = series.datasets.map((ds, i) => {
-        const color = id === "severity"
-          ? (severitySeriesColors[ds.label] || CHART_COLORS.palette[i % CHART_COLORS.palette.length])
-          : CHART_COLORS.palette[i % CHART_COLORS.palette.length];
+        let color = CHART_COLORS.palette[i % CHART_COLORS.palette.length];
+        if(id === "severity") color = severitySeriesColors[ds.label] || color;
+        else if(id === "commentQuality") color = cqSeriesColors[ds.label] || color;
         return {
           label: ds.label,
           data: ds.values || [],
@@ -444,6 +502,12 @@ function renderCharts(charts){
     }
 
     const chartOptions = baseChartOptions(options);
+    if(typeof onSegmentClick === "function"){
+      chartOptions.onClick = (_evt, elements, chart) => {
+        const mapped = filtersFromChartClick(id, chart, elements);
+        if(mapped) onSegmentClick(mapped);
+      };
+    }
 
     const chart = new Chart(canvas.getContext("2d"), {
       type,
@@ -580,6 +644,110 @@ function closeLeadDetailModal(){
   document.removeEventListener("keydown", onLeadModalKeydown);
 }
 
+function onChartReportModalKeydown(e){
+  if(e.key === "Escape"){
+    e.preventDefault();
+    // Prefer closing nested lead detail first if open.
+    const lead = document.getElementById("dashboard-lead-modal");
+    if(lead && !lead.classList.contains("hidden")){
+      closeLeadDetailModal();
+      return;
+    }
+    closeChartErrorReportModal();
+  }
+}
+
+function closeChartErrorReportModal(){
+  const modal = document.getElementById("dashboard-chart-report-modal");
+  if(!modal) return;
+  modal.classList.add("hidden");
+  modal.setAttribute("aria-hidden", "true");
+  document.removeEventListener("keydown", onChartReportModalKeydown);
+  const body = modal.querySelector("#dashboard-chart-report-body");
+  if(body) body.replaceChildren();
+}
+
+function ensureChartErrorReportModal(){
+  let modal = document.getElementById("dashboard-chart-report-modal");
+  if(modal) return modal;
+
+  modal = el("div", "dashboard-lead-modal dashboard-chart-report-modal hidden");
+  modal.id = "dashboard-chart-report-modal";
+  modal.setAttribute("role", "dialog");
+  modal.setAttribute("aria-modal", "true");
+  modal.setAttribute("aria-labelledby", "dashboard-chart-report-title");
+  modal.setAttribute("aria-hidden", "true");
+
+  const backdrop = el("div", "dashboard-lead-modal-backdrop");
+  backdrop.addEventListener("click", closeChartErrorReportModal);
+
+  const card = el("div", "dashboard-lead-modal-card dashboard-chart-report-card");
+  card.setAttribute("role", "document");
+  card.addEventListener("click", e => e.stopPropagation());
+
+  const head = el("div", "dashboard-lead-modal-head");
+  const titleWrap = el("div", "dashboard-chart-report-title-wrap");
+  const title = el("h2", null, "Detailed Error Report");
+  title.id = "dashboard-chart-report-title";
+  const note = el("p", "dashboard-chart-report-subtitle");
+  note.id = "dashboard-chart-report-subtitle";
+  titleWrap.append(title, note);
+  const closeBtn = el("button", "dashboard-lead-modal-close", "×");
+  closeBtn.type = "button";
+  closeBtn.setAttribute("aria-label", "Close detailed error report");
+  closeBtn.addEventListener("click", closeChartErrorReportModal);
+  head.append(titleWrap, closeBtn);
+
+  const body = el("div", "dashboard-lead-modal-body dashboard-chart-report-body");
+  body.id = "dashboard-chart-report-body";
+
+  card.append(head, body);
+  modal.append(backdrop, card);
+  document.body.append(modal);
+  return modal;
+}
+
+/**
+ * Open Detailed Error Report popup filtered to a chart segment (plus current sidebar filters).
+ * @param {{results: object[], baseFilters: object, segmentFilters: object, subtitle?: string, highSeverityErrors?: Set|string[]}} opts
+ */
+function openChartErrorReportModal(opts){
+  const {
+    results,
+    baseFilters = {},
+    segmentFilters = {},
+    subtitle = "",
+    highSeverityErrors
+  } = opts || {};
+
+  hideClipPopover();
+  closeLeadDetailModal();
+
+  const mergedFilters = {...baseFilters, ...segmentFilters};
+  const model = buildDashboardModel(results, mergedFilters, {highSeverityErrors});
+  const rows = model.errorDetails || [];
+
+  const modal = ensureChartErrorReportModal();
+  const body = modal.querySelector("#dashboard-chart-report-body");
+  const note = modal.querySelector("#dashboard-chart-report-subtitle");
+  if(!body) return;
+
+  if(note){
+    const countLabel = `${num(rows.length)} error row(s)`;
+    note.textContent = subtitle ? `${subtitle} · ${countLabel}` : countLabel;
+  }
+
+  body.replaceChildren();
+  body.append(renderErrorDetails(rows));
+
+  modal.classList.remove("hidden");
+  modal.setAttribute("aria-hidden", "false");
+  document.removeEventListener("keydown", onChartReportModalKeydown);
+  document.addEventListener("keydown", onChartReportModalKeydown);
+  const closeBtn = modal.querySelector(".dashboard-lead-modal-close");
+  closeBtn?.focus();
+}
+
 function ensureLeadDetailModal(){
   let modal = document.getElementById("dashboard-lead-modal");
   if(modal) return modal;
@@ -649,7 +817,10 @@ function openLeadDetailModal(row){
   modal.classList.remove("hidden");
   modal.setAttribute("aria-hidden", "false");
   document.removeEventListener("keydown", onLeadModalKeydown);
-  document.addEventListener("keydown", onLeadModalKeydown);
+  // When nested under the chart report popup, that modal owns Escape (closes lead first).
+  const chartReport = document.getElementById("dashboard-chart-report-modal");
+  const chartOpen = chartReport && !chartReport.classList.contains("hidden");
+  if(!chartOpen) document.addEventListener("keydown", onLeadModalKeydown);
   const closeBtn = modal.querySelector(".dashboard-lead-modal-close");
   closeBtn?.focus();
 }
@@ -810,6 +981,8 @@ export function renderReviewDashboard(container, jobs, options = {}){
 
   destroyCharts();
   hideClipPopover();
+  closeLeadDetailModal();
+  closeChartErrorReportModal();
   container.replaceChildren();
   container.classList.add("dashboard-root", "dashboard-with-filters");
 
@@ -841,6 +1014,7 @@ export function renderReviewDashboard(container, jobs, options = {}){
     destroyCharts();
     hideClipPopover();
     closeLeadDetailModal();
+    closeChartErrorReportModal();
     container.replaceChildren();
     container.classList.add("dashboard-root", "dashboard-with-filters");
 
@@ -861,7 +1035,17 @@ export function renderReviewDashboard(container, jobs, options = {}){
     body.append(searchBar, bar);
     body.append(section("Executive KPIs", null, renderKpis(model.kpis, {showComparativeKpis}), "summary"));
     body.append(section("TeleCaller Performance", null, renderScorecard(model.scorecard), "performance"));
-    body.append(section("Charts", null, renderCharts(model.charts), "graphs"));
+    body.append(section("Charts", null, renderCharts(model.charts, {
+      onSegmentClick: ({filters: segmentFilters, subtitle}) => {
+        openChartErrorReportModal({
+          results,
+          baseFilters: filters,
+          segmentFilters,
+          subtitle,
+          highSeverityErrors
+        });
+      }
+    }), "graphs"));
     body.append(section("Detailed Error Report", `${num(model.errorDetails.length)} error row(s)`, renderErrorDetails(model.errorDetails), "errors"));
     container.append(body, aside);
     activePanel = applyActivePanel(body, activePanel);
@@ -908,5 +1092,6 @@ export function destroyReviewDashboard(){
   destroyCharts();
   hideClipPopover();
   closeLeadDetailModal();
+  closeChartErrorReportModal();
   document.body.classList.remove("dashboard-filters-open");
 }
