@@ -1,5 +1,5 @@
 {
-  "version": "5.2.15",
+  "version": "5.2.16",
   "name": "LeadLens",
-  "notes": "v5.2.15: Bucket 1 Lead Status prompt = DeBug Rules 1–5 with JSON e mapping."
+  "notes": "v5.2.16: Deterministic Rules 1–5 set Lead Status Not Aligned With Comments in Error Types."
 }
