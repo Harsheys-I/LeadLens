@@ -1,5 +1,5 @@
 {
-  "version": "5.2.10",
+  "version": "5.2.12",
   "name": "LeadLens",
-  "notes": "v5.2.10: DeBug Results per-row Re-Audit 10× updates that lead’s consistency bars."
+  "notes": "v5.2.12: Eligible Followups setting limits latest comments sent to the AI (−1 = all)."
 }

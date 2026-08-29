@@ -1,7 +1,7 @@
 import {buildTelecallerDashboardBlob} from "./dashboard-export.js?v=5.2.5";
 import {STATUS_HISTORY_PROMPT} from "./debug-prompts.js?v=5.2.5";
 
-export const APP_VERSION = "5.2.10";
+export const APP_VERSION = "5.2.12";
 /** Sentinel: use server OpenAI proxy (no raw key in the browser). */
 export const SERVER_API_KEY = "__server__";
 /** Bump when default AI rules / field defaults must refresh existing localStorage settings. */
@@ -146,6 +146,8 @@ export const DEFAULT_RULES = [
 export const DEFAULT_REVIEW_PRICING={input:4.35,cached:0.435,output:34.8};
 export const DEFAULT_SETTINGS = {
   batchSize:20,concurrency:2,model:"gpt-4o-mini",reviewModel:"gpt-5-nano",
+  /** How many latest comments to send to the AI per lead. -1 = all. */
+  eligibleFollowups:-1,
   inputFields:DEFAULT_INPUT_FIELDS,aiFields:DEFAULT_AI_FIELDS,outputFields:DEFAULT_OUTPUT_FIELDS,rules:DEFAULT_RULES,
   yesValues:"Booked In Other GPP Project, Booked in other project, Channel Partner Enquiry, Cross Pitched to Other GPP Project, Didnt Disclose, Immediate Possession, In Progress, Inventory Issue, Investment, Location Mismatch, Looking for commercial property, Not Interested, Plan Dropped, Pre Launch, Price mismatch, Property Mismatch, Site Visited",
   noValues:"1st RNR, 2nd RNR, 3rd RNR, Call Disconnected, Continues RNR, Duplicate Lead, Junk Lead, Marketing Enquiry, RNR, Re-Open, Wrong Number",
@@ -154,6 +156,25 @@ export const DEFAULT_SETTINGS = {
   pricing:{input:0,cached:0,output:0},
   reviewPricing:{...DEFAULT_REVIEW_PRICING}
 };
+
+/** Normalize Eligible Followups: -1 = all comments; n >= 1 = last n only. */
+export function normalizeEligibleFollowups(value,fallback=DEFAULT_SETTINGS.eligibleFollowups){
+  const n=Number(value);
+  if(!Number.isInteger(n))return fallback;
+  if(n===-1||n>=1)return n;
+  return fallback;
+}
+
+/** Keep the latest `limit` comments (oldest→newest order preserved). -1 / invalid = unchanged. */
+export function trimCommentsForAi(comments,limit){
+  const n=normalizeEligibleFollowups(limit,-1);
+  if(n===-1)return comments;
+  if(Array.isArray(comments)){
+    if(comments.length<=n)return comments;
+    return comments.slice(-n);
+  }
+  return comments;
+}
 
 /** GPT-5 / o-series Chat Completions: use max_completion_tokens; omit non-default temperature. */
 export function needsMaxCompletionTokens(model){
@@ -592,6 +613,7 @@ export function normalizeSettings(saved={}){
   merged.concurrency=Number.isInteger(concurrency)?Math.min(MAX_CONCURRENCY,Math.max(1,concurrency)):DEFAULT_SETTINGS.concurrency;
   const batchSize=Number(merged.batchSize);
   merged.batchSize=Number.isInteger(batchSize)?Math.min(MAX_BATCH_SIZE,Math.max(1,batchSize)):DEFAULT_SETTINGS.batchSize;
+  merged.eligibleFollowups=normalizeEligibleFollowups(merged.eligibleFollowups);
   merged.model=String(merged.model||"").trim()||DEFAULT_SETTINGS.model;
   merged.reviewModel=String(merged.reviewModel||"").trim()||DEFAULT_SETTINGS.reviewModel;
   const maps=buildErrorMaps(merged);
@@ -1033,11 +1055,13 @@ export function statusForAi(value){
   if(!text)return text;
   return norm(text)==="prospect"?"Qualified":text;
 }
-/** Build AI payload from leads; maps status s (and day[].s) through statusForAi. */
-export function buildAiModelInput(leads){
+/** Build AI payload from leads; maps status s (and day[].s) through statusForAi; trims c by eligibleFollowups. */
+export function buildAiModelInput(leads,rawSettings){
+  const limit=normalizeEligibleFollowups(rawSettings?.eligibleFollowups);
   return(leads||[]).map(lead=>{
     const ctx={id:lead.leadId,...lead.auditContext};
     if(ctx.s!==undefined)ctx.s=statusForAi(ctx.s);
+    if(ctx.c!==undefined)ctx.c=trimCommentsForAi(ctx.c,limit);
     if(Array.isArray(ctx.day)){
       ctx.day=ctx.day.map(snap=>snap&&typeof snap==="object"?{...snap,s:statusForAi(snap.s)}:snap);
     }
@@ -1425,6 +1449,7 @@ export function promptCacheKey(settings){
     model:settings.model,
     rules:settings.rules,
     additionalInstructions:settings.additionalInstructions||"",
+    eligibleFollowups:normalizeEligibleFollowups(settings.eligibleFollowups),
     aiFields:(settings.aiFields||[]).map(field=>({id:field.id,enabled:field.enabled!==false,history:Boolean(field.history)}))
   });
   let hash=2166136261;
@@ -1606,7 +1631,7 @@ function finalizeRecommendation(aiText,row,errors,q){
 }
 
 async function requestAudit(apiKey,settings,leads,signal,log,onUsage){
-  const modelInput=buildAiModelInput(leads);
+  const modelInput=buildAiModelInput(leads,settings);
   const auditBody=buildChatCompletionBody(settings.model,{
       temperature:0,
       maxTokens:Math.max(500,leads.length*140),
