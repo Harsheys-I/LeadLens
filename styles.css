@@ -468,3 +468,30 @@ body .dashboard-filter-reset{width:100%;justify-self:stretch;margin-top:4px}
   .debug-results-table td.debug-obs-cell{min-width:160px}
   .debug-obs-cell{max-width:220px}
 }
+
+body .perf-upload-grid{display:grid;grid-template-columns:1fr 1fr;gap:18px;margin:22px 0 0}
+body .perf-upload-grid .drop-zone{margin:0;padding:42px 20px}
+body .perf-summary-list{display:grid;gap:0;margin:18px 0 0;border:1px solid var(--line);border-radius:12px;overflow:hidden}
+body .perf-summary-row{display:grid;grid-template-columns:1fr auto;gap:16px;padding:14px 18px;border-bottom:1px solid var(--line);align-items:center}
+body .perf-summary-row:last-child{border-bottom:0}
+body .perf-summary-row dt{margin:0;font-size:14px;font-weight:600;color:var(--ink)}
+body .perf-summary-row dd{margin:0;font-size:20px;font-weight:800;color:var(--green-2);font-variant-numeric:tabular-nums}
+body .perf-date-range{margin:0 0 8px;color:var(--muted);font-size:13px}
+body .perf-view-tabs{display:flex;gap:8px;margin:8px 0 18px;border-bottom:1px solid var(--line);padding-bottom:10px}
+body .perf-view-tab{border:0;background:transparent;color:var(--muted);padding:8px 14px;border-radius:8px;font-weight:650;cursor:pointer}
+body .perf-view-tab:hover{background:#eef3ef;color:var(--green-2)}
+body .perf-view-tab.active{background:var(--mint);color:var(--green-2)}
+body .perf-tab-panel{display:grid;gap:18px}
+body .perf-filter-row{margin:0 0 12px}
+body .perf-filter-row label{display:flex;align-items:center;gap:10px;font-size:13px;font-weight:650}
+body .perf-filter-row select{min-width:200px;border:1px solid #cfd8d2;border-radius:9px;background:#fff;padding:9px 11px;color:var(--ink)}
+body .perf-chart-block{display:grid;gap:10px}
+body .perf-chart-block h3{margin:0;font-size:15px;color:var(--green-2)}
+body .perf-chart-wrap{position:relative;height:220px;background:#fbfcfb;border:1px solid var(--line);border-radius:12px;padding:12px}
+body .perf-chart-wrap-pie{height:320px}
+body .perf-help-list{margin:8px 0 18px;padding-left:22px;color:var(--ink);line-height:1.6}
+body .perf-help-list li{margin:4px 0}
+@media(max-width:850px){
+  body .perf-upload-grid{grid-template-columns:1fr}
+  body .perf-chart-wrap{height:200px}
+}

@@ -147,9 +147,19 @@ function ll_install_run(): void
     CONSTRAINT fk_audit_jobs_owner FOREIGN KEY (owner_user_id) REFERENCES users(id) ON DELETE SET NULL
   ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
 
-  // Retired TeleCaller Performance Report (removed in v5.2.32).
-  $pdo->exec('DROP TABLE IF EXISTS perf_published_dashboards');
-  $pdo->exec("DELETE FROM notifications WHERE type = 'perf_dashboard_update'");
+  $pdo->exec("CREATE TABLE IF NOT EXISTS perf_published_dashboards (
+    id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    telecaller_name VARCHAR(120) NOT NULL,
+    title VARCHAR(200) NOT NULL DEFAULT '',
+    payload LONGTEXT NOT NULL,
+    meta JSON NULL,
+    uploaded_by INT UNSIGNED NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    KEY idx_perf_pub_telecaller (telecaller_name),
+    KEY idx_perf_pub_uploaded (uploaded_by),
+    CONSTRAINT fk_perf_pub_user FOREIGN KEY (uploaded_by) REFERENCES users(id) ON DELETE SET NULL
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
 
   $roles = [
     ['Super User', 'super', 100, ll_default_role_permissions('super'), 1],

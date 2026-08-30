@@ -19,6 +19,10 @@ function ll_permission_catalog(): array
     ['id' => 'telecaller.upload_dashboard', 'label' => 'TeleCaller · Upload Dashboard', 'group' => 'TeleCaller'],
     ['id' => 'telecaller.history', 'label' => 'TeleCaller · History', 'group' => 'TeleCaller'],
     ['id' => 'telecaller.settings', 'label' => 'TeleCaller · Settings', 'group' => 'TeleCaller'],
+    ['id' => 'telecaller.perf_report', 'label' => 'TeleCaller · Performance Report', 'group' => 'TeleCaller'],
+    ['id' => 'telecaller.perf_dashboard', 'label' => 'TeleCaller · Performance Dashboard', 'group' => 'TeleCaller'],
+    ['id' => 'telecaller.perf_upload', 'label' => 'TeleCaller · Upload Performance Dashboard', 'group' => 'TeleCaller'],
+    ['id' => 'telecaller.perf_settings', 'label' => 'TeleCaller · Performance Settings', 'group' => 'TeleCaller'],
     ['id' => 'dashboards.view_all', 'label' => 'Dashboards · View all TeleCallers', 'group' => 'Dashboards'],
   ];
 }
@@ -41,6 +45,7 @@ function ll_default_role_permissions(string $key): array
     'telecaller' => [
       'module.telecaller_audit',
       'telecaller.dashboard',
+      'telecaller.perf_dashboard',
     ],
     default => [],
   };

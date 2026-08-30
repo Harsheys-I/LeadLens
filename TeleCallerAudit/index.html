@@ -7,12 +7,12 @@
   <meta name="description" content="LeadLens TeleCaller">
   <title>LeadLens · TeleCaller</title>
   <link rel="manifest" href="../manifest.webmanifest">
-  <link rel="stylesheet" href="../styles.css?v=5.2.32">
+  <link rel="stylesheet" href="../styles.css?v=5.2.33">
   <script defer src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js"></script>
-  <script type="module" src="../app.js?v=5.2.32"></script>
+  <script type="module" src="../app.js?v=5.2.33"></script>
 </head>
 <body>
   <div id="update-banner" class="update-banner hidden" role="status">
@@ -33,6 +33,16 @@
             <button class="nav-item nav-item-child" data-view="published" data-perm="telecaller.dashboard"><span>▦</span>Dashboard</button>
             <button class="nav-item nav-item-child" data-view="history" data-perm="telecaller.history"><span>◷</span>History</button>
             <button class="nav-item nav-item-child" data-view="settings" data-perm="telecaller.settings"><span>⚙</span>Settings</button>
+          </div>
+        </div>
+        <div class="nav-group is-collapsed" data-nav-group="perf">
+          <div class="nav-parent-row">
+            <button type="button" class="nav-toggle" aria-expanded="false" aria-label="Expand TeleCalling Performance Report"></button>
+            <button type="button" class="nav-item nav-item-parent" data-view="perf-report" data-nav-toggle-group data-perm="telecaller.perf_report"><span>◈</span>TeleCalling Performance Report</button>
+          </div>
+          <div class="nav-children">
+            <button class="nav-item nav-item-child" data-view="perf-dashboard" data-perm="telecaller.perf_dashboard"><span>▦</span>Dashboard</button>
+            <button class="nav-item nav-item-child" data-view="perf-settings" data-perm="telecaller.perf_settings"><span>⚙</span>Settings</button>
           </div>
         </div>
       </nav>
@@ -200,6 +210,83 @@
           </div>
         </div>
       </section>
+
+      <section id="view-perf-report" class="view">
+        <div class="intro"><h2>TeleCalling Performance Report</h2><p>Upload <strong>Master Data (M)</strong> and <strong>History Data (H)</strong> workbooks, reconcile metrics, then publish dashboards for each TeleCaller.</p></div>
+        <div class="perf-upload-grid">
+          <div id="perf-master-drop" class="drop-zone" role="button" tabindex="0" aria-label="Upload Master Excel">
+            <input id="perf-master-input" type="file" accept=".xlsx,.xls,.xlsm" hidden>
+            <div class="upload-icon">M</div><h3>Master Data (M)</h3><p>Active leads · Mobile, Project, LRD, NFD, Status, Telecaller</p>
+          </div>
+          <div id="perf-history-drop" class="drop-zone" role="button" tabindex="0" aria-label="Upload History Excel">
+            <input id="perf-history-input" type="file" accept=".xlsx,.xls,.xlsm" hidden>
+            <div class="upload-icon">H</div><h3>History Data (H)</h3><p>Call history · includes Lead Update Date &amp; Telecalling Status</p>
+          </div>
+        </div>
+        <div id="perf-file-list" class="file-list hidden"></div>
+        <div id="perf-validation" class="validation hidden" role="status"></div>
+        <div class="action-row"><button id="perf-create-dashboard" type="button" class="primary-button" disabled>Create Dashboard <span>→</span></button></div>
+        <div id="perf-preview-panel" class="review-dashboard-panel hidden">
+          <div class="card-title"><h2>Preview</h2><p id="perf-preview-telecallers"></p></div>
+          <div id="perf-preview-summary"></div>
+          <div class="inline-actions review-download-actions dashboard-footer-actions">
+            <button id="perf-upload-dashboard-btn" type="button" class="primary-button" disabled>Upload Dashboard</button>
+          </div>
+        </div>
+      </section>
+
+      <section id="view-perf-dashboard" class="view view-wide">
+        <div class="section-head">
+          <div><h2>Performance Dashboard</h2><p id="perf-published-meta">Published performance metrics from the latest upload.</p></div>
+          <button id="refresh-perf-published" type="button" class="secondary-button">Refresh</button>
+        </div>
+        <div id="perf-published-empty" class="empty-card hidden" aria-live="polite">No published performance dashboards yet.</div>
+        <div id="perf-published-panel" class="review-dashboard-panel hidden">
+          <div class="card-title"><h2 id="perf-published-title">Performance Dashboard</h2></div>
+          <div id="perf-filter-row" class="perf-filter-row hidden">
+            <label>TeleCaller filter<select id="perf-tc-filter"></select></label>
+          </div>
+          <div class="perf-view-tabs" role="tablist" aria-label="Performance dashboard views">
+            <button type="button" class="perf-view-tab active" data-perf-tab="summary" role="tab" aria-selected="true">Summary</button>
+            <button type="button" class="perf-view-tab" data-perf-tab="graphs" role="tab" aria-selected="false">Graphs</button>
+          </div>
+          <div id="perf-tab-summary" class="perf-tab-panel" role="tabpanel"></div>
+          <div id="perf-tab-graphs" class="perf-tab-panel hidden" role="tabpanel"></div>
+        </div>
+      </section>
+
+      <section id="view-perf-settings" class="view">
+        <div class="settings-card">
+          <div class="card-title"><h2>Performance Report · column reference</h2><p>Required headers are matched case-insensitively using common aliases.</p></div>
+          <h3>Master Data (M)</h3>
+          <ul class="perf-help-list">
+            <li>Mobile</li>
+            <li>Project Name</li>
+            <li>Lead Registration Date (LRD)</li>
+            <li>Next Followup Date (NFD)</li>
+            <li>Status — used for Draft / leads without calls</li>
+            <li>Telecaller Name</li>
+          </ul>
+          <h3>History Data (H)</h3>
+          <ul class="perf-help-list">
+            <li>Mobile</li>
+            <li>Project Name</li>
+            <li>Lead Registration Date</li>
+            <li>Lead Update Date (LUD) — min/max across H sets the report date range</li>
+            <li>Status — Not Interested, Sent to Enquiry</li>
+            <li>Telecalling Status — Site Visit Scheduled / Pending / Cancelled</li>
+            <li>Telecaller Name</li>
+          </ul>
+          <h3>Status matching (case-insensitive)</h3>
+          <ul class="perf-help-list">
+            <li><strong>Not Interested</strong> — History Status</li>
+            <li><strong>Site Visit Scheduled / Pending / Cancelled</strong> — History Telecalling Status</li>
+            <li><strong>Sent to Enquiry</strong> — History Status (<code>sent to enquiry</code> or <code>send to enquiry</code>)</li>
+            <li><strong>Draft</strong> — Master Status</li>
+          </ul>
+          <p class="muted">Overdue counts Master rows where Next Followup Date is before today (calendar day). No History filter is applied.</p>
+        </div>
+      </section>
     </main>
   </div>
 
@@ -230,6 +317,20 @@
       <div class="inline-actions">
         <button id="upload-dash-confirm" type="button" class="primary-button">Upload</button>
         <button id="upload-dash-cancel" type="button" class="text-button">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="perf-upload-dashboard-modal" class="key-modal hidden" role="dialog" aria-modal="true" aria-labelledby="perf-upload-dash-title">
+    <div class="key-modal-card upload-dash-card">
+      <p class="eyebrow">PUBLISH</p>
+      <h2 id="perf-upload-dash-title">Upload Performance Dashboard</h2>
+      <p class="key-modal-copy">Select TeleCallers to publish. Upload replaces all existing performance boards.</p>
+      <div id="perf-upload-telecaller-list" class="upload-telecaller-list"></div>
+      <div id="perf-upload-dash-message" class="form-message" role="status"></div>
+      <div class="inline-actions">
+        <button id="perf-upload-dash-confirm" type="button" class="primary-button">Upload</button>
+        <button id="perf-upload-dash-cancel" type="button" class="text-button">Cancel</button>
       </div>
     </div>
   </div>
