@@ -55,6 +55,7 @@ function ll_perf_empty_summary(): array
     'activeLeads' => 0,
     'siteVisited' => 0,
     'siteVisitScheduled' => 0,
+    'siteVisitPending' => 0,
     'siteVisitCancelled' => 0,
     'notInterested' => 0,
     'overdue' => 0,
@@ -66,6 +67,7 @@ function ll_perf_empty_pie(): array
   return [
     'notInterested' => 0,
     'siteVisitScheduled' => 0,
+    'siteVisitPending' => 0,
     'siteVisitCancelled' => 0,
     'siteVisited' => 0,
     'overdue' => 0,

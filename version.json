@@ -1,5 +1,5 @@
 {
-  "version": "5.2.40",
+  "version": "5.2.41",
   "name": "LeadLens",
-  "notes": "v5.2.40: Total Leads = Master rows + unique History leads (Mobile+Project) with Telecalling Status SIE/NI/SVC."
+  "notes": "v5.2.41: Lead = Mobile+TeleCaller; Total = Master∪History; STE/SVS/SVP/SVC/NI from History Status once per lead."
 }
