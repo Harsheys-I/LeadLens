@@ -76,13 +76,6 @@ export const DashboardApi = {
   removeAll: () => api('dashboards/all', {method: 'DELETE'}),
 };
 
-export const PerfDashboardApi = {
-  list: () => api('perf-dashboards/list'),
-  combined: () => api('perf-dashboards/combined'),
-  publish: (dashboards) => api('perf-dashboards/publish', {method: 'POST', body: {dashboards}}),
-  removeAll: () => api('perf-dashboards/all', {method: 'DELETE'}),
-};
-
 export const SettingsApi = {
   getAudit: () => api('settings/audit'),
   saveAudit: (settings) => api('settings/audit', {method: 'PUT', body: {settings}}),

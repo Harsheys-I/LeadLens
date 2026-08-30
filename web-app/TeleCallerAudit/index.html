@@ -7,12 +7,12 @@
   <meta name="description" content="LeadLens TeleCaller">
   <title>LeadLens · TeleCaller</title>
   <link rel="manifest" href="../manifest.webmanifest">
-  <link rel="stylesheet" href="../styles.css?v=5.2.31">
+  <link rel="stylesheet" href="../styles.css?v=5.2.32">
   <script defer src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js"></script>
-  <script type="module" src="../app.js?v=5.2.31"></script>
+  <script type="module" src="../app.js?v=5.2.32"></script>
 </head>
 <body>
   <div id="update-banner" class="update-banner hidden" role="status">
@@ -33,16 +33,6 @@
             <button class="nav-item nav-item-child" data-view="published" data-perm="telecaller.dashboard"><span>▦</span>Dashboard</button>
             <button class="nav-item nav-item-child" data-view="history" data-perm="telecaller.history"><span>◷</span>History</button>
             <button class="nav-item nav-item-child" data-view="settings" data-perm="telecaller.settings"><span>⚙</span>Settings</button>
-          </div>
-        </div>
-        <div class="nav-group is-collapsed" data-nav-group="performance">
-          <div class="nav-parent-row">
-            <button type="button" class="nav-toggle" aria-expanded="false" aria-label="Expand TeleCaller Performance Report"></button>
-            <button type="button" class="nav-item nav-item-parent" data-view="perf-report" data-nav-toggle-group data-perm="module.telecaller_audit"><span>▣</span>TeleCaller Performance Report</button>
-          </div>
-          <div class="nav-children">
-            <button class="nav-item nav-item-child" data-view="perf-dashboard" data-perm="telecaller.dashboard"><span>▦</span>Dashboard</button>
-            <button class="nav-item nav-item-child" data-view="perf-settings" data-perm="module.telecaller_audit"><span>⚙</span>Settings</button>
           </div>
         </div>
       </nav>
@@ -136,148 +126,6 @@
         <div class="section-head"><div><h2>Audit history</h2><p>Shared team history — anyone with History access can view, download, or resume these runs.</p></div><button id="clear-history" class="danger-button">Clear history</button></div>
         <div id="history-list" class="history-list"><div class="empty-card">No audits yet.</div></div>
       </section>
-
-      <section id="view-perf-report" class="view">
-        <div class="intro">
-          <h2>TeleCaller Performance Report</h2>
-          <p>Upload Master and History Excel files, build a local preview, then upload the dashboard so every account stays in sync. TeleCaller users only see their own board.</p>
-        </div>
-        <div id="perf-upload-gate" class="empty-card hidden">You can view published Performance dashboards under <strong>Dashboard</strong>. Upload access is limited to roles with Upload Dashboard permission.</div>
-        <div id="perf-upload-workspace">
-          <div class="perf-upload-grid">
-            <div id="perf-master-drop" class="drop-zone perf-drop" role="button" tabindex="0" aria-label="Upload Master Excel">
-              <input id="perf-master-input" type="file" accept=".xlsx,.xls,.xlsm" hidden>
-              <div class="upload-icon">⇧</div>
-              <h3>Master Excel</h3>
-              <p>1 row = 1 lead · Project, Mobile, Reg Date, Next Followup · XLSX / XLS / XLSM</p>
-            </div>
-            <div id="perf-history-drop" class="drop-zone perf-drop" role="button" tabindex="0" aria-label="Upload History Excel">
-              <input id="perf-history-input" type="file" accept=".xlsx,.xls,.xlsm" hidden>
-              <div class="upload-icon">⇧</div>
-              <h3>History Excel</h3>
-              <p>1 lead = many rows · Project, Mobile, Lead Update Date, Reg Date, Next Followup, Telecalling Status · XLSX / XLS / XLSM</p>
-            </div>
-          </div>
-          <div class="perf-file-metas">
-            <div id="perf-master-meta" class="file-card hidden"></div>
-            <div id="perf-history-meta" class="file-card hidden"></div>
-          </div>
-          <div id="perf-validation" class="validation hidden" role="status"></div>
-          <div class="action-row">
-            <button id="perf-build" class="primary-button" type="button" disabled>Build preview <span>→</span></button>
-            <button id="perf-upload-dashboard" class="primary-button" type="button" disabled>Upload Dashboard</button>
-          </div>
-          <div id="perf-preview-results" class="perf-results hidden">
-            <div id="perf-preview-date-range" class="perf-date-range" aria-live="polite">
-              <span>Lead Update Date</span>
-              <strong>—</strong>
-            </div>
-            <label class="perf-filter-row">
-              <span>Preview TeleCaller</span>
-              <select id="perf-preview-telecaller-filter" aria-label="Filter preview by TeleCaller">
-                <option value="">All TeleCallers</option>
-              </select>
-            </label>
-            <div id="perf-preview-summary" class="perf-summary-panel" aria-live="polite"></div>
-          </div>
-        </div>
-      </section>
-
-      <section id="view-perf-dashboard" class="view view-wide">
-        <div class="section-head">
-          <div>
-            <h2>Performance Dashboard</h2>
-            <p>Published Performance Report boards stored on the server. Each Upload Dashboard replaces every previous Performance board. TeleCaller accounts only see their linked board.</p>
-          </div>
-          <button id="perf-refresh-published" type="button" class="secondary-button">Refresh</button>
-        </div>
-        <div id="perf-published-empty" class="empty-card hidden" aria-live="polite">No published Performance dashboards yet.</div>
-        <div id="perf-published-panel" class="review-dashboard-panel hidden">
-          <div class="card-title">
-            <h2 id="perf-published-title">Dashboard</h2>
-            <p id="perf-published-meta"></p>
-            <div id="perf-published-actions" class="published-dash-actions"></div>
-          </div>
-          <div class="dashboard-layout">
-            <aside class="dashboard-filters-rail perf-filters-rail" aria-label="Performance dashboard filters">
-              <div class="dashboard-filters-head">
-                <strong>Filters</strong>
-                <button type="button" id="perf-filter-reset" class="text-button dashboard-filter-reset">Reset</button>
-              </div>
-              <label class="dashboard-filter-field">
-                <span>TeleCaller</span>
-                <select id="perf-published-telecaller-filter" aria-label="Filter published Performance by TeleCaller">
-                  <option value="">All TeleCallers</option>
-                </select>
-              </label>
-              <label class="dashboard-filter-field">
-                <span>View</span>
-                <select id="perf-published-view-filter" aria-label="Summary or Graph">
-                  <option value="summary">Summary</option>
-                  <option value="graph">Graph</option>
-                </select>
-              </label>
-            </aside>
-            <div class="dashboard-main-col">
-              <div id="perf-published-date-range" class="perf-date-range" aria-live="polite">
-                <span>Lead Update Date</span>
-                <strong>—</strong>
-              </div>
-              <div id="perf-published-summary-panel" class="perf-summary-panel">
-                <div id="perf-published-summary" class="perf-summary" aria-live="polite"></div>
-              </div>
-              <div id="perf-published-graph-panel" class="perf-graph-panel hidden">
-                <div class="perf-chart-block">
-                  <div class="card-title">
-                    <h2>Status breakdown</h2>
-                    <p>Latest Telecalling Status per lead (Send to Enquiry shown as Site Visited).</p>
-                  </div>
-                  <div class="perf-chart-canvas">
-                    <canvas id="perf-pub-status-chart" aria-label="Status breakdown chart"></canvas>
-                  </div>
-                </div>
-                <div class="perf-chart-block">
-                  <div class="card-title">
-                    <h2>Summary metrics</h2>
-                    <p>Active leads, fresh assigned, overdue calls, and fresh leads not called yet.</p>
-                  </div>
-                  <div class="perf-chart-canvas">
-                    <canvas id="perf-pub-metrics-chart" aria-label="Summary metrics chart"></canvas>
-                  </div>
-                </div>
-                <div id="perf-pub-tc-chart-block" class="perf-chart-block hidden">
-                  <div class="card-title">
-                    <h2>Per TeleCaller</h2>
-                    <p>Status counts by TeleCaller when viewing All.</p>
-                  </div>
-                  <div id="perf-pub-tc-chart-wrap" class="perf-chart-canvas perf-chart-tall">
-                    <canvas id="perf-pub-tc-chart" aria-label="Per TeleCaller status chart"></canvas>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <section id="view-perf-settings" class="view">
-        <div class="intro"><h2>Settings</h2><p>TeleCaller Performance Report settings — placeholder for upcoming options.</p></div>
-        <div class="empty-card">This page is a stub. Performance settings are not available yet.</div>
-      </section>
-
-      <div id="perf-upload-dashboard-modal" class="key-modal hidden" role="dialog" aria-modal="true" aria-labelledby="perf-upload-dash-title">
-        <div class="key-modal-card upload-dash-card">
-          <p class="eyebrow">PUBLISH</p>
-          <h2 id="perf-upload-dash-title">Upload Performance Dashboard</h2>
-          <p class="key-modal-copy">Select TeleCallers from this preview. Upload always deletes all currently published Performance boards first, then publishes only these selections (each TeleCaller sees only their board unless Admin/Super).</p>
-          <div id="perf-upload-telecaller-list" class="upload-telecaller-list"></div>
-          <div id="perf-upload-dash-message" class="form-message" role="status"></div>
-          <div class="inline-actions">
-            <button id="perf-upload-dash-confirm" type="button" class="primary-button">Upload</button>
-            <button id="perf-upload-dash-cancel" type="button" class="text-button">Cancel</button>
-          </div>
-        </div>
-      </div>
 
       <section id="view-settings" class="view">
         <div class="settings-page">
