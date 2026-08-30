@@ -1,7 +1,7 @@
 /**
  * TeleCalling Performance Report — Excel parse, metrics engine, published dashboard UI.
  */
-import {PerfDashboardApi} from "./api-client.js?v=5.2.36";
+import {PerfDashboardApi} from "./api-client.js?v=5.2.37";
 
 const MASTER_FIELDS = [
   {id: "mobile", label: "Mobile", aliases: "mobile, mobile number, phone"},
@@ -200,11 +200,11 @@ function leadKey(row) {
 
 function finalizeBucket(bucket) {
   const masterKeys = bucket._masterKeys || new Set();
-  const historyKeys = bucket._historyKeys || new Set();
-  // Total Leads = unique leads across Master ∪ History (never History row count).
-  const union = new Set([...masterKeys, ...historyKeys]);
+  const historyOnlyKeys = bucket._historyKeys || new Set();
+  // Total Leads = unique Master (this TC) ∪ unique History leads not in Master (any TC).
+  const union = new Set([...masterKeys, ...historyOnlyKeys]);
   bucket.activeLeads = Number(bucket.activeLeads) || 0;
-  bucket.historyLeads = historyKeys.size;
+  bucket.historyLeads = historyOnlyKeys.size;
   bucket.totalLeads = union.size;
   bucket.pie = {
     notInterested: Number(bucket.notInterested) || 0,
@@ -350,6 +350,13 @@ export function reconcilePerf(masterRows, historyRows) {
     if (!dateMax || d > dateMax) dateMax = d;
   }
 
+  // Global Master lead set — History leads already in any Master row are excluded from Total Leads.
+  const allMasterKeys = new Set();
+  for (const row of masterRows) {
+    const key = leadKey(row);
+    if (key) allMasterKeys.add(key);
+  }
+
   const byTelecaller = {};
   const ensureTc = name => {
     const key = clean(name) || "Unknown";
@@ -371,8 +378,10 @@ export function reconcilePerf(masterRows, historyRows) {
   for (const row of historyRows) {
     const tc = ensureTc(row.telecaller);
     const key = leadKey(row);
-    // Unique History leads (Mobile+Project) — one lead can have many History rows.
-    if (key) byTelecaller[tc]._historyKeys.add(key);
+    // Unique History leads not already in Master (any telecaller) — never History row count.
+    if (key && !allMasterKeys.has(key)) {
+      byTelecaller[tc]._historyKeys.add(key);
+    }
     const st = norm(row.status);
     const tcs = norm(row.telecallingStatus);
     if (st === "not interested") byTelecaller[tc].notInterested += 1;

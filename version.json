@@ -1,5 +1,5 @@
 {
-  "version": "5.2.36",
+  "version": "5.2.37",
   "name": "LeadLens",
-  "notes": "v5.2.36: Total Leads uses unique History leads (Mobile+Project), not History row count."
+  "notes": "v5.2.37: Total Leads History side excludes leads already in Master globally (any telecaller)."
 }
