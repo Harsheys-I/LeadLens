@@ -1,7 +1,7 @@
 /**
  * TeleCalling Performance Report — Excel parse, metrics engine, published dashboard UI.
  */
-import {PerfDashboardApi} from "./api-client.js?v=5.2.41";
+import {PerfDashboardApi} from "./api-client.js?v=5.2.42";
 
 const MASTER_FIELDS = [
   {id: "mobile", label: "Mobile", aliases: "mobile, mobile number, phone"},
@@ -437,7 +437,11 @@ function collapseHistoryToLatestLead(historyRows) {
       latest.set(key, {row, index, lud: nextLud});
     }
   });
-  return {filledCount: filled.length, leads: [...latest.values()].map(item => item.row)};
+  return {
+    filledCount: filled.length,
+    filled,
+    leads: [...latest.values()].map(item => item.row),
+  };
 }
 
 function matchesSentToEnquiry(status) {
@@ -447,7 +451,9 @@ function matchesSentToEnquiry(status) {
 
 /**
  * Build performance metrics from parsed Master + History rows.
- * Lead = Mobile + TeleCaller. History outcomes use Status, once per lead (max LUD).
+ * Lead = Mobile + TeleCaller.
+ * STE = any History Status Send/Sent to Enquiry, once per lead.
+ * SVS/SVP/SVC/NI = latest History Status (max LUD), once per lead.
  * @param {object[]} masterRows
  * @param {object[]} historyRows
  */
@@ -461,7 +467,7 @@ export function reconcilePerf(masterRows, historyRows) {
     if (!dateMax || d > dateMax) dateMax = d;
   }
 
-  const {leads: historyLeads} = collapseHistoryToLatestLead(historyRows);
+  const {filled: historyFilled, leads: historyLeads} = collapseHistoryToLatestLead(historyRows);
 
   const byTelecaller = {};
   const ensureTc = name => {
@@ -493,6 +499,16 @@ export function reconcilePerf(masterRows, historyRows) {
     bucket.siteVisited = 0;
   }
 
+  // STE: count a lead if ANY History call has Status = Send/Sent to Enquiry (once per Mobile+TC).
+  const steSeen = new Set();
+  for (const row of historyFilled) {
+    if (!matchesSentToEnquiry(row.status)) continue;
+    const key = leadIdentityKey(row);
+    if (!key || steSeen.has(key)) continue;
+    steSeen.add(key);
+    byTelecaller[ensureTc(row.telecaller)].siteVisited += 1;
+  }
+
   for (const row of historyLeads) {
     const tc = ensureTc(row.telecaller);
     const key = leadIdentityKey(row);
@@ -501,8 +517,7 @@ export function reconcilePerf(masterRows, historyRows) {
     allHistoryKeys.add(key);
 
     const st = norm(row.status);
-    // Status metrics — once per lead (collapsed History row).
-    if (matchesSentToEnquiry(row.status)) byTelecaller[tc].siteVisited += 1;
+    // Other Status metrics — latest LUD row only (once per lead).
     if (st === "site visit scheduled") byTelecaller[tc].siteVisitScheduled += 1;
     if (st === "site visit pending") byTelecaller[tc].siteVisitPending += 1;
     if (st === "site visit cancelled") byTelecaller[tc].siteVisitCancelled += 1;
