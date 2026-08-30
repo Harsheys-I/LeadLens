@@ -1,7 +1,7 @@
 /**
  * TeleCalling Performance Report — Excel parse, metrics engine, published dashboard UI.
  */
-import {PerfDashboardApi} from "./api-client.js?v=5.2.37";
+import {PerfDashboardApi} from "./api-client.js?v=5.2.38";
 
 const MASTER_FIELDS = [
   {id: "mobile", label: "Mobile", aliases: "mobile, mobile number, phone"},
@@ -586,7 +586,7 @@ function renderTelecallerTable(mount, data) {
   mount.append(wrap);
 }
 
-function renderSummaryPanel(mount, data) {
+function renderSummaryPanel(mount, data, {perTelecaller = false} = {}) {
   mount.replaceChildren();
   const header = document.createElement("p");
   header.className = "perf-date-range";
@@ -594,19 +594,85 @@ function renderSummaryPanel(mount, data) {
   mount.append(header);
 
   const names = telecallerNames(data);
-  const title = names.length === 1 ? `${names[0]} · totals` : "All TeleCallers · totals";
+  const title = perTelecaller && names.length === 1
+    ? `${names[0]} · totals`
+    : "Totals";
   renderTotalsBlock(mount, data.summary, title);
 
-  const tableTitle = document.createElement("h3");
-  tableTitle.className = "perf-section-title";
-  tableTitle.textContent = "Telecaller breakdown";
-  mount.append(tableTitle);
-  renderTelecallerTable(mount, data);
+  if (perTelecaller) {
+    const tableTitle = document.createElement("h3");
+    tableTitle.className = "perf-section-title";
+    tableTitle.textContent = "Telecaller breakdown";
+    mount.append(tableTitle);
+    renderTelecallerTable(mount, data);
+  }
 }
 
-function renderGraphsPanel(mount, data) {
+function renderAggregateBarCharts(mount, summary) {
+  const label = "All";
+  for (const metricKey of METRIC_KEYS) {
+    const block = document.createElement("div");
+    block.className = "perf-chart-block";
+    const title = document.createElement("h3");
+    title.textContent = METRIC_LABELS[metricKey];
+    block.append(title);
+    const wrap = document.createElement("div");
+    wrap.className = "perf-chart-wrap";
+    const canvas = document.createElement("canvas");
+    wrap.append(canvas);
+    block.append(wrap);
+    mount.append(block);
+    renderBarChart(canvas, [label], [Number(summary?.[metricKey] || 0)]);
+  }
+
+  for (const pctKey of PCT_KEYS) {
+    const block = document.createElement("div");
+    block.className = "perf-chart-block";
+    const title = document.createElement("h3");
+    title.textContent = PCT_LABELS[pctKey];
+    block.append(title);
+    const wrap = document.createElement("div");
+    wrap.className = "perf-chart-wrap";
+    const canvas = document.createElement("canvas");
+    wrap.append(canvas);
+    block.append(wrap);
+    mount.append(block);
+    const value = pctKey === "totalLeadsVsSiteVisitedPct"
+      ? (pct(summary?.siteVisited, summary?.totalLeads) ?? 0)
+      : (pct(summary?.siteVisited, summary?.siteVisitScheduled) ?? 0);
+    renderBarChart(canvas, [label], [value], "#2a5f9e");
+  }
+
+  const pieBlock = document.createElement("div");
+  pieBlock.className = "perf-chart-block perf-chart-block-pie";
+  const pieTitle = document.createElement("h3");
+  pieTitle.textContent = "Status breakdown";
+  pieBlock.append(pieTitle);
+  const pieWrap = document.createElement("div");
+  pieWrap.className = "perf-chart-wrap perf-chart-wrap-pie";
+  const pieCanvas = document.createElement("canvas");
+  pieWrap.append(pieCanvas);
+  pieBlock.append(pieWrap);
+  mount.append(pieBlock);
+}
+
+function renderGraphsPanel(mount, data, {perTelecaller = false} = {}) {
   destroyPerfCharts();
   mount.replaceChildren();
+
+  if (!perTelecaller) {
+    const hasTotals = METRIC_KEYS.some(k => Number(data.summary?.[k] || 0) > 0)
+      || PIE_KEYS.some(k => Number(data.pie?.[k] || 0) > 0);
+    if (!hasTotals) {
+      mount.innerHTML = '<div class="empty-card">No data to chart.</div>';
+      return;
+    }
+    renderAggregateBarCharts(mount, data.summary);
+    const pieCanvas = mount.querySelector(".perf-chart-block-pie canvas");
+    if (pieCanvas) renderPieChart(pieCanvas, data.pie || emptyPie(), "perf-pie-combined");
+    return;
+  }
+
   const names = telecallerNames(data);
   if (!names.length) {
     mount.innerHTML = '<div class="empty-card">No telecaller data to chart.</div>';
@@ -653,7 +719,7 @@ function renderGraphsPanel(mount, data) {
   pieSection.className = "perf-pie-section";
   const pieHeading = document.createElement("h3");
   pieHeading.className = "perf-section-title";
-  pieHeading.textContent = names.length === 1 ? "Status breakdown" : "Status breakdown by Telecaller";
+  pieHeading.textContent = "Status breakdown";
   pieSection.append(pieHeading);
 
   const pieGrid = document.createElement("div");
@@ -670,25 +736,21 @@ function renderGraphsPanel(mount, data) {
     pieWrap.append(pieCanvas);
     block.append(pieWrap);
     pieGrid.append(block);
-    const pieData = pieFromBucket(data.byTelecaller[name]);
-    renderPieChart(pieCanvas, pieData, `perf-pie-${name.replace(/\W+/g, "-")}`);
+    renderPieChart(pieCanvas, pieFromBucket(data.byTelecaller[name]), `perf-pie-${name.replace(/\W+/g, "-")}`);
   }
   pieSection.append(pieGrid);
   mount.append(pieSection);
+}
 
-  if (names.length > 1) {
-    const globalBlock = document.createElement("div");
-    globalBlock.className = "perf-chart-block perf-chart-block-pie";
-    const globalTitle = document.createElement("h4");
-    globalTitle.textContent = "Combined status (all TeleCallers)";
-    globalBlock.append(globalTitle);
-    const pieWrap = document.createElement("div");
-    pieWrap.className = "perf-chart-wrap perf-chart-wrap-pie";
-    const pieCanvas = document.createElement("canvas");
-    pieWrap.append(pieCanvas);
-    globalBlock.append(pieWrap);
-    mount.append(globalBlock);
-    renderPieChart(pieCanvas, data.pie || emptyPie(), "perf-pie-combined");
+function paintPerfPanels() {
+  if (!perfCombinedCache) return;
+  const perTelecaller = Boolean(perfTcFilter && perfTcFilter !== "__all__");
+  const filtered = filterByTelecaller(perfCombinedCache, perfTcFilter);
+  const summaryMount = document.getElementById("perf-tab-summary");
+  const graphsMount = document.getElementById("perf-tab-graphs");
+  if (summaryMount) renderSummaryPanel(summaryMount, filtered, {perTelecaller});
+  if (perfActiveTab === "graphs" && graphsMount) {
+    renderGraphsPanel(graphsMount, filtered, {perTelecaller});
   }
 }
 
@@ -715,7 +777,7 @@ function renderPerfPreview(panel, reconciled) {
     pie: reconciled.pie,
     date_min: reconciled.dateMin,
     date_max: reconciled.dateMax,
-  });
+  }, {perTelecaller: false});
   const tcList = panel.querySelector("#perf-preview-telecallers");
   if (tcList) {
     const names = Object.keys(reconciled.byTelecaller).sort((a, b) => a.localeCompare(b, undefined, {sensitivity: "base"}));
@@ -923,9 +985,7 @@ function setPerfTab(tab) {
   });
   document.getElementById("perf-tab-summary")?.classList.toggle("hidden", tab !== "summary");
   document.getElementById("perf-tab-graphs")?.classList.toggle("hidden", tab !== "graphs");
-  if (tab === "graphs" && perfCombinedCache) {
-    renderGraphsPanel(document.getElementById("perf-tab-graphs"), filterByTelecaller(perfCombinedCache, perfTcFilter));
-  }
+  if (tab === "graphs" && perfCombinedCache) paintPerfPanels();
 }
 
 /**
@@ -943,12 +1003,7 @@ export function mountPerfPublishedDashboard(ctx) {
   const filterSelect = document.getElementById("perf-tc-filter");
   filterSelect?.addEventListener("change", () => {
     perfTcFilter = filterSelect.value || "__all__";
-    if (!perfCombinedCache) return;
-    const filtered = filterByTelecaller(perfCombinedCache, perfTcFilter);
-    renderSummaryPanel(document.getElementById("perf-tab-summary"), filtered);
-    if (perfActiveTab === "graphs") {
-      renderGraphsPanel(document.getElementById("perf-tab-graphs"), filtered);
-    }
+    paintPerfPanels();
   });
 
   perfPublishedHandlers = {canViewAll, filterRow, filterSelect};
@@ -1012,10 +1067,7 @@ export async function refreshPerfPublished() {
       perfTcFilter = "__all__";
     }
 
-    if (summaryMount) renderSummaryPanel(summaryMount, filterByTelecaller(data, perfTcFilter));
-    if (perfActiveTab === "graphs" && graphsMount) {
-      renderGraphsPanel(graphsMount, filterByTelecaller(data, perfTcFilter));
-    }
+    if (summaryMount || graphsMount) paintPerfPanels();
     setPerfTab(perfActiveTab);
   } catch (err) {
     empty?.classList.remove("hidden");
