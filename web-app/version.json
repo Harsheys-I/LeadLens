@@ -1,5 +1,5 @@
 {
-  "version": "5.2.37",
+  "version": "5.2.38",
   "name": "LeadLens",
-  "notes": "v5.2.37: Total Leads History side excludes leads already in Master globally (any telecaller)."
+  "notes": "v5.2.38: Performance Dashboard shows aggregate totals unless a TeleCaller filter is set."
 }
