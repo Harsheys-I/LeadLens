@@ -73,6 +73,9 @@ function ll_normalize_permissions($raw): array
 
 function ll_user_has_permission(array $user, string $permission): bool
 {
+  if (!empty($user['is_super'])) {
+    return true;
+  }
   $perms = $user['permissions'] ?? [];
   if (!is_array($perms)) {
     $perms = ll_normalize_permissions($perms);
