@@ -29,10 +29,6 @@ try {
       require __DIR__ . '/routes/dashboards.php';
       ll_route_dashboards($action, $id);
       break;
-    case 'perf-dashboards':
-      require __DIR__ . '/routes/perf-dashboards.php';
-      ll_route_perf_dashboards($action, $id);
-      break;
     case 'settings':
       require __DIR__ . '/routes/settings.php';
       ll_route_settings($action);
