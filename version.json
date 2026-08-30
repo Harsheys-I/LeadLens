@@ -1,5 +1,5 @@
 {
-  "version": "5.2.33",
+  "version": "5.2.35",
   "name": "LeadLens",
-  "notes": "v5.2.33: Restore TeleCalling Performance Report — dual Excel upload, metrics dashboard, publish & notifications."
+  "notes": "v5.2.35: Performance scorecard — Total/Active Leads, STE/SVS/SVC/NI, overdue, conversion %."
 }

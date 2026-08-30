@@ -491,6 +491,18 @@ body .perf-chart-wrap{position:relative;height:220px;background:#fbfcfb;border:1
 body .perf-chart-wrap-pie{height:320px}
 body .perf-help-list{margin:8px 0 18px;padding-left:22px;color:var(--ink);line-height:1.6}
 body .perf-help-list li{margin:4px 0}
+body .perf-section-title{margin:18px 0 10px;font-size:15px;color:var(--green-2)}
+body .perf-totals-block{margin:0 0 8px}
+body .perf-totals-block h3{margin:0 0 10px;font-size:15px;color:var(--green-2)}
+body .perf-table-wrap{overflow:auto;border:1px solid var(--line);border-radius:12px;background:#fbfcfb}
+body .perf-scorecard{width:100%;border-collapse:collapse;font-size:13px}
+body .perf-scorecard th,body .perf-scorecard td{padding:10px 12px;border-bottom:1px solid var(--line);text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}
+body .perf-scorecard thead th{background:#eef3ef;color:var(--green-2);font-size:12px;font-weight:700;text-transform:none;letter-spacing:0}
+body .perf-scorecard tbody th{text-align:left;font-weight:650;color:var(--ink);background:#fff;position:sticky;left:0}
+body .perf-scorecard tbody tr:last-child td,body .perf-scorecard tbody tr:last-child th{border-bottom:0}
+body .perf-pie-section{display:grid;gap:12px}
+body .perf-pie-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:16px}
+body .perf-chart-block h4{margin:0;font-size:14px;color:var(--ink)}
 @media(max-width:850px){
   body .perf-upload-grid{grid-template-columns:1fr}
   body .perf-chart-wrap{height:200px}

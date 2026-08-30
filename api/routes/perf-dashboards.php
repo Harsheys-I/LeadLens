@@ -51,10 +51,12 @@ function ll_perf_dashboard_decode_payload($payload): array
 function ll_perf_empty_summary(): array
 {
   return [
-    'totalActiveLeads' => 0,
-    'totalNewLeads' => 0,
-    'leadsWithoutCalls' => 0,
-    'totalCalls' => 0,
+    'totalLeads' => 0,
+    'activeLeads' => 0,
+    'siteVisited' => 0,
+    'siteVisitScheduled' => 0,
+    'siteVisitCancelled' => 0,
+    'notInterested' => 0,
     'overdue' => 0,
   ];
 }
@@ -64,10 +66,9 @@ function ll_perf_empty_pie(): array
   return [
     'notInterested' => 0,
     'siteVisitScheduled' => 0,
-    'siteVisitPending' => 0,
     'siteVisitCancelled' => 0,
-    'sentToEnquiry' => 0,
-    'draft' => 0,
+    'siteVisited' => 0,
+    'overdue' => 0,
   ];
 }
 
@@ -80,6 +81,28 @@ function ll_perf_sum_summaries(array $summaries): array
     }
     foreach ($out as $key => $_) {
       $out[$key] += (int) ($summary[$key] ?? 0);
+    }
+  }
+  return $out;
+}
+
+function ll_perf_normalize_tc_bucket(array $metrics): array
+{
+  $out = array_merge(ll_perf_empty_summary(), array_intersect_key($metrics, ll_perf_empty_summary()));
+  $pie = is_array($metrics['pie'] ?? null) ? $metrics['pie'] : [];
+  $out['pie'] = array_merge(ll_perf_empty_pie(), array_intersect_key($pie, ll_perf_empty_pie()));
+  return $out;
+}
+
+function ll_perf_sum_pies(array $pies): array
+{
+  $out = ll_perf_empty_pie();
+  foreach ($pies as $pie) {
+    if (!is_array($pie)) {
+      continue;
+    }
+    foreach ($out as $key => $_) {
+      $out[$key] += (int) ($pie[$key] ?? 0);
     }
   }
   return $out;
@@ -306,14 +329,17 @@ function ll_route_perf_dashboards(string $action, ?int $id): void
       if ($viewAll) {
         foreach ($byTc as $name => $metrics) {
           if (is_array($metrics)) {
-            $mergedByTc[$name] = array_merge(ll_perf_empty_summary(), array_intersect_key($metrics, ll_perf_empty_summary()));
+            $mergedByTc[$name] = ll_perf_normalize_tc_bucket($metrics);
           }
         }
-        foreach (ll_perf_empty_pie() as $pieKey => $_) {
-          $pie[$pieKey] += (int) ($rowPie[$pieKey] ?? 0);
-        }
       } else {
-        $mergedByTc = $byTc;
+        $normalized = [];
+        foreach ($byTc as $name => $metrics) {
+          if (is_array($metrics)) {
+            $normalized[$name] = ll_perf_normalize_tc_bucket($metrics);
+          }
+        }
+        $mergedByTc = $normalized;
         $pie = array_merge(ll_perf_empty_pie(), array_intersect_key($rowPie, ll_perf_empty_pie()));
       }
 
@@ -343,6 +369,10 @@ function ll_route_perf_dashboards(string $action, ?int $id): void
 
     if ($viewAll && $mergedByTc) {
       $globalSummary = ll_perf_sum_summaries(array_values($mergedByTc));
+      $pie = ll_perf_sum_pies(array_map(
+        static fn (array $bucket): array => is_array($bucket['pie'] ?? null) ? $bucket['pie'] : [],
+        array_values($mergedByTc)
+      ));
     } else {
       $globalSummary = ll_perf_sum_summaries($summaries);
     }

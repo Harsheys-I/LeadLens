@@ -1,7 +1,7 @@
 /**
  * TeleCalling Performance Report — Excel parse, metrics engine, published dashboard UI.
  */
-import {PerfDashboardApi} from "./api-client.js?v=5.2.33";
+import {PerfDashboardApi} from "./api-client.js?v=5.2.35";
 
 const MASTER_FIELDS = [
   {id: "mobile", label: "Mobile", aliases: "mobile, mobile number, phone"},
@@ -18,23 +18,53 @@ const HISTORY_FIELDS = [
   {id: "telecallingStatus", label: "Telecalling Status", aliases: "telecalling status, tele calling status, telecaller status"},
 ];
 
-const METRIC_KEYS = ["totalActiveLeads", "totalNewLeads", "leadsWithoutCalls", "totalCalls", "overdue"];
+/** Count metrics stored per telecaller / summary. */
+const METRIC_KEYS = [
+  "totalLeads",
+  "activeLeads",
+  "siteVisited",
+  "siteVisitScheduled",
+  "siteVisitCancelled",
+  "notInterested",
+  "overdue",
+];
 const METRIC_LABELS = {
-  totalActiveLeads: "Total Active Leads",
-  totalNewLeads: "Total New Leads",
-  leadsWithoutCalls: "Total Leads without Calls",
-  totalCalls: "Total Calls",
-  overdue: "Overdue",
+  totalLeads: "Total Leads (Master + History)",
+  activeLeads: "Active Leads (Master)",
+  siteVisited: "Site Visited (STE)",
+  siteVisitScheduled: "Site Visit Scheduled (SVS)",
+  siteVisitCancelled: "Site Visit Cancelled (SVC)",
+  notInterested: "Not Interested (NI)",
+  overdue: "Overdue Leads (Master)",
 };
 
-const PIE_KEYS = ["notInterested", "siteVisitScheduled", "siteVisitPending", "siteVisitCancelled", "sentToEnquiry", "draft"];
+/** Percentage columns derived for the scorecard (not summed across telecallers). */
+const PCT_KEYS = ["totalLeadsVsSiteVisitedPct", "siteVisitScheduledVsSiteVisitedPct"];
+const PCT_LABELS = {
+  totalLeadsVsSiteVisitedPct: "Total Leads vs Site Visited (%)",
+  siteVisitScheduledVsSiteVisitedPct: "Site Visit Scheduled vs Site Visited (%)",
+};
+
+/** Scorecard column order (matches operator report). */
+const SCORECARD_COLUMNS = [
+  {key: "totalLeads", label: METRIC_LABELS.totalLeads, kind: "count"},
+  {key: "activeLeads", label: METRIC_LABELS.activeLeads, kind: "count"},
+  {key: "siteVisited", label: METRIC_LABELS.siteVisited, kind: "count"},
+  {key: "siteVisitScheduled", label: METRIC_LABELS.siteVisitScheduled, kind: "count"},
+  {key: "totalLeadsVsSiteVisitedPct", label: PCT_LABELS.totalLeadsVsSiteVisitedPct, kind: "pct"},
+  {key: "siteVisitScheduledVsSiteVisitedPct", label: PCT_LABELS.siteVisitScheduledVsSiteVisitedPct, kind: "pct"},
+  {key: "siteVisitCancelled", label: METRIC_LABELS.siteVisitCancelled, kind: "count"},
+  {key: "notInterested", label: METRIC_LABELS.notInterested, kind: "count"},
+  {key: "overdue", label: METRIC_LABELS.overdue, kind: "count"},
+];
+
+const PIE_KEYS = ["notInterested", "siteVisitScheduled", "siteVisitCancelled", "siteVisited", "overdue"];
 const PIE_LABELS = {
   notInterested: "Not Interested",
   siteVisitScheduled: "Site Visit Scheduled",
-  siteVisitPending: "Site Visit Pending",
   siteVisitCancelled: "Site Visit Cancelled",
-  sentToEnquiry: "Sent to Enquiry",
-  draft: "Draft",
+  siteVisited: "Site Visited",
+  overdue: "Overdue",
 };
 
 const CHART_COLORS = {
@@ -123,10 +153,12 @@ function todayStart() {
 
 function emptyMetrics() {
   return {
-    totalActiveLeads: 0,
-    totalNewLeads: 0,
-    leadsWithoutCalls: 0,
-    totalCalls: 0,
+    totalLeads: 0,
+    activeLeads: 0,
+    siteVisited: 0,
+    siteVisitScheduled: 0,
+    siteVisitCancelled: 0,
+    notInterested: 0,
     overdue: 0,
   };
 }
@@ -135,11 +167,90 @@ function emptyPie() {
   return {
     notInterested: 0,
     siteVisitScheduled: 0,
-    siteVisitPending: 0,
     siteVisitCancelled: 0,
-    sentToEnquiry: 0,
-    draft: 0,
+    siteVisited: 0,
+    overdue: 0,
   };
+}
+
+function emptyTelecallerBucket() {
+  return {...emptyMetrics(), pie: emptyPie(), _historyKeys: new Set(), _masterKeys: new Set()};
+}
+
+function pct(numerator, denominator) {
+  const n = Number(numerator) || 0;
+  const d = Number(denominator) || 0;
+  if (d <= 0) return null;
+  return Math.round((n / d) * 1000) / 10;
+}
+
+function formatPct(value) {
+  if (value === null || value === undefined || Number.isNaN(Number(value))) return "—";
+  return `${Number(value).toFixed(Number(value) % 1 === 0 ? 0 : 1)}%`;
+}
+
+function leadKey(row) {
+  return `${norm(row.mobile)}|${norm(row.project)}`;
+}
+
+function finalizeBucket(bucket) {
+  const historyOnly = [...(bucket._historyKeys || [])].filter(k => !(bucket._masterKeys || new Set()).has(k)).length;
+  bucket.activeLeads = Number(bucket.activeLeads) || 0;
+  bucket.totalLeads = bucket.activeLeads + historyOnly;
+  bucket.pie = {
+    notInterested: Number(bucket.notInterested) || 0,
+    siteVisitScheduled: Number(bucket.siteVisitScheduled) || 0,
+    siteVisitCancelled: Number(bucket.siteVisitCancelled) || 0,
+    siteVisited: Number(bucket.siteVisited) || 0,
+    overdue: Number(bucket.overdue) || 0,
+  };
+  delete bucket._historyKeys;
+  delete bucket._masterKeys;
+  return bucket;
+}
+
+function metricsFromBucket(bucket) {
+  if (!bucket || typeof bucket !== "object") return emptyMetrics();
+  const out = emptyMetrics();
+  for (const key of METRIC_KEYS) out[key] = Number(bucket[key] || 0);
+  return out;
+}
+
+function pieFromBucket(bucket) {
+  if (!bucket) return emptyPie();
+  if (bucket.pie && typeof bucket.pie === "object") {
+    const out = emptyPie();
+    for (const key of PIE_KEYS) out[key] = Number(bucket.pie[key] || 0);
+    return out;
+  }
+  return {
+    notInterested: Number(bucket.notInterested) || 0,
+    siteVisitScheduled: Number(bucket.siteVisitScheduled) || 0,
+    siteVisitCancelled: Number(bucket.siteVisitCancelled) || 0,
+    siteVisited: Number(bucket.siteVisited) || 0,
+    overdue: Number(bucket.overdue) || 0,
+  };
+}
+
+function sumPieSlices(slices) {
+  const out = emptyPie();
+  for (const pie of slices) {
+    for (const key of PIE_KEYS) out[key] += Number(pie[key] || 0);
+  }
+  return out;
+}
+
+function scorecardCellValue(bucket, col) {
+  if (col.kind === "pct") {
+    if (col.key === "totalLeadsVsSiteVisitedPct") {
+      return formatPct(pct(bucket.siteVisited, bucket.totalLeads));
+    }
+    if (col.key === "siteVisitScheduledVsSiteVisitedPct") {
+      return formatPct(pct(bucket.siteVisited, bucket.siteVisitScheduled));
+    }
+    return "—";
+  }
+  return String(bucket?.[col.key] ?? 0);
 }
 
 function requiredFieldsForKind(kind) {
@@ -210,12 +321,6 @@ export function parsePerfWorkbook(kind, arrayBuffer) {
   return {ok: true, kind, sheetName: sheet.name, rowCount: rows.length, missing: [], rows};
 }
 
-function inDateRange(date, min, max) {
-  if (!date || !min || !max) return false;
-  const t = date.getTime();
-  return t >= min.getTime() && t <= max.getTime();
-}
-
 function matchesSentToEnquiry(status) {
   const s = norm(status);
   return s === "sent to enquiry" || s === "send to enquiry";
@@ -236,23 +341,25 @@ export function reconcilePerf(masterRows, historyRows) {
     if (!dateMax || d > dateMax) dateMax = d;
   }
 
+  const allMasterKeys = new Set();
+  for (const row of masterRows) {
+    const key = leadKey(row);
+    if (key !== "|") allMasterKeys.add(key);
+  }
+
   const byTelecaller = {};
   const ensureTc = name => {
     const key = clean(name) || "Unknown";
-    if (!byTelecaller[key]) byTelecaller[key] = emptyMetrics();
+    if (!byTelecaller[key]) byTelecaller[key] = emptyTelecallerBucket();
     return key;
   };
 
   const today = todayStart();
   for (const row of masterRows) {
     const tc = ensureTc(row.telecaller);
-    byTelecaller[tc].totalActiveLeads += 1;
-    if (dateMin && dateMax && inDateRange(row.registrationDate, dateMin, dateMax)) {
-      byTelecaller[tc].totalNewLeads += 1;
-    }
-    if (norm(row.status) === "draft") {
-      byTelecaller[tc].leadsWithoutCalls += 1;
-    }
+    const key = leadKey(row);
+    byTelecaller[tc].activeLeads += 1;
+    if (key !== "|") byTelecaller[tc]._masterKeys.add(key);
     if (row.nextDate && row.nextDate < today) {
       byTelecaller[tc].overdue += 1;
     }
@@ -260,27 +367,26 @@ export function reconcilePerf(masterRows, historyRows) {
 
   for (const row of historyRows) {
     const tc = ensureTc(row.telecaller);
-    byTelecaller[tc].totalCalls += 1;
-  }
-
-  const summary = emptyMetrics();
-  for (const metrics of Object.values(byTelecaller)) {
-    for (const key of METRIC_KEYS) summary[key] += metrics[key];
-  }
-
-  const pie = emptyPie();
-  for (const row of historyRows) {
+    const key = leadKey(row);
+    if (key !== "|" && !allMasterKeys.has(key)) {
+      byTelecaller[tc]._historyKeys.add(key);
+    }
     const st = norm(row.status);
     const tcs = norm(row.telecallingStatus);
-    if (st === "not interested") pie.notInterested += 1;
-    if (tcs === "site visit scheduled") pie.siteVisitScheduled += 1;
-    if (tcs === "site visit pending") pie.siteVisitPending += 1;
-    if (tcs === "site visit cancelled") pie.siteVisitCancelled += 1;
-    if (matchesSentToEnquiry(row.status)) pie.sentToEnquiry += 1;
+    if (st === "not interested") byTelecaller[tc].notInterested += 1;
+    if (tcs === "site visit scheduled") byTelecaller[tc].siteVisitScheduled += 1;
+    if (tcs === "site visit cancelled") byTelecaller[tc].siteVisitCancelled += 1;
+    if (matchesSentToEnquiry(row.status)) byTelecaller[tc].siteVisited += 1;
   }
-  for (const row of masterRows) {
-    if (norm(row.status) === "draft") pie.draft += 1;
+
+  for (const bucket of Object.values(byTelecaller)) finalizeBucket(bucket);
+
+  const summary = emptyMetrics();
+  for (const bucket of Object.values(byTelecaller)) {
+    for (const key of METRIC_KEYS) summary[key] += Number(bucket[key] || 0);
   }
+
+  const pie = sumPieSlices(Object.values(byTelecaller).map(b => b.pie));
 
   return {
     summary,
@@ -341,7 +447,7 @@ function renderBarChart(canvas, labels, values, color = CHART_COLORS.bar) {
   perfChartRegistry.set(id, chart);
 }
 
-function renderPieChart(canvas, pie) {
+function renderPieChart(canvas, pie, chartId) {
   const Chart = requireChart();
   const labels = [];
   const values = [];
@@ -354,7 +460,7 @@ function renderPieChart(canvas, pie) {
       colors.push(CHART_COLORS.palette[i % CHART_COLORS.palette.length]);
     }
   });
-  const id = canvas.id || "perf-pie-chart";
+  const id = chartId || canvas.id || "perf-pie-chart";
   canvas.id = id;
   if (perfChartRegistry.has(id)) {
     perfChartRegistry.get(id).destroy();
@@ -386,14 +492,87 @@ function filterByTelecaller(data, tcFilter) {
     return {
       ...data,
       summary: emptyMetrics(),
+      pie: emptyPie(),
       byTelecaller: {},
     };
   }
   return {
     ...data,
-    summary: {...slice},
+    summary: metricsFromBucket(slice),
+    pie: pieFromBucket(slice),
     byTelecaller: {[tcFilter]: slice},
   };
+}
+
+function telecallerNames(data) {
+  return Object.keys(data.byTelecaller || {}).sort((a, b) => a.localeCompare(b, undefined, {sensitivity: "base"}));
+}
+
+function renderTotalsBlock(mount, summary, title = "Totals") {
+  const block = document.createElement("div");
+  block.className = "perf-totals-block";
+  const heading = document.createElement("h3");
+  heading.textContent = title;
+  block.append(heading);
+  const list = document.createElement("dl");
+  list.className = "perf-summary-list";
+  for (const col of SCORECARD_COLUMNS) {
+    const row = document.createElement("div");
+    row.className = "perf-summary-row";
+    const dt = document.createElement("dt");
+    dt.textContent = col.label;
+    const dd = document.createElement("dd");
+    dd.textContent = scorecardCellValue(summary, col);
+    row.append(dt, dd);
+    list.append(row);
+  }
+  block.append(list);
+  mount.append(block);
+}
+
+function renderTelecallerTable(mount, data) {
+  const names = telecallerNames(data);
+  if (!names.length) {
+    const empty = document.createElement("div");
+    empty.className = "empty-card";
+    empty.textContent = "No telecaller data.";
+    mount.append(empty);
+    return;
+  }
+
+  const wrap = document.createElement("div");
+  wrap.className = "perf-table-wrap";
+  const table = document.createElement("table");
+  table.className = "perf-scorecard";
+  const thead = document.createElement("thead");
+  const headRow = document.createElement("tr");
+  const columns = [{key: "name", label: "Telecaller Name", kind: "name"}, ...SCORECARD_COLUMNS];
+  for (const col of columns) {
+    const th = document.createElement("th");
+    th.textContent = col.label;
+    headRow.append(th);
+  }
+  thead.append(headRow);
+  table.append(thead);
+
+  const tbody = document.createElement("tbody");
+  for (const name of names) {
+    const bucket = data.byTelecaller[name];
+    const tr = document.createElement("tr");
+    const nameCell = document.createElement("th");
+    nameCell.scope = "row";
+    nameCell.textContent = name;
+    tr.append(nameCell);
+    for (const col of SCORECARD_COLUMNS) {
+      const td = document.createElement("td");
+      td.textContent = scorecardCellValue(bucket, col);
+      tr.append(td);
+    }
+    tbody.append(tr);
+  }
+  table.append(tbody);
+  wrap.append(table);
+  mount.append(wrap);
 }
 
 function renderSummaryPanel(mount, data) {
@@ -403,25 +582,21 @@ function renderSummaryPanel(mount, data) {
   header.textContent = `Report period (from History Lead Update Date): ${formatDisplayDate(data.date_min)} – ${formatDisplayDate(data.date_max)}`;
   mount.append(header);
 
-  const list = document.createElement("dl");
-  list.className = "perf-summary-list";
-  for (const key of METRIC_KEYS) {
-    const row = document.createElement("div");
-    row.className = "perf-summary-row";
-    const dt = document.createElement("dt");
-    dt.textContent = METRIC_LABELS[key];
-    const dd = document.createElement("dd");
-    dd.textContent = String(data.summary?.[key] ?? 0);
-    row.append(dt, dd);
-    list.append(row);
-  }
-  mount.append(list);
+  const names = telecallerNames(data);
+  const title = names.length === 1 ? `${names[0]} · totals` : "All TeleCallers · totals";
+  renderTotalsBlock(mount, data.summary, title);
+
+  const tableTitle = document.createElement("h3");
+  tableTitle.className = "perf-section-title";
+  tableTitle.textContent = "Telecaller breakdown";
+  mount.append(tableTitle);
+  renderTelecallerTable(mount, data);
 }
 
 function renderGraphsPanel(mount, data) {
   destroyPerfCharts();
   mount.replaceChildren();
-  const names = Object.keys(data.byTelecaller || {}).sort((a, b) => a.localeCompare(b, undefined, {sensitivity: "base"}));
+  const names = telecallerNames(data);
   if (!names.length) {
     mount.innerHTML = '<div class="empty-card">No telecaller data to chart.</div>';
     return;
@@ -443,18 +618,67 @@ function renderGraphsPanel(mount, data) {
     renderBarChart(canvas, names, values);
   }
 
-  const pieBlock = document.createElement("div");
-  pieBlock.className = "perf-chart-block perf-chart-block-pie";
-  const pieTitle = document.createElement("h3");
-  pieTitle.textContent = "Status breakdown";
-  pieBlock.append(pieTitle);
-  const pieWrap = document.createElement("div");
-  pieWrap.className = "perf-chart-wrap perf-chart-wrap-pie";
-  const pieCanvas = document.createElement("canvas");
-  pieWrap.append(pieCanvas);
-  pieBlock.append(pieWrap);
-  mount.append(pieBlock);
-  renderPieChart(pieCanvas, data.pie || emptyPie());
+  for (const pctKey of PCT_KEYS) {
+    const block = document.createElement("div");
+    block.className = "perf-chart-block";
+    const title = document.createElement("h3");
+    title.textContent = PCT_LABELS[pctKey];
+    block.append(title);
+    const wrap = document.createElement("div");
+    wrap.className = "perf-chart-wrap";
+    const canvas = document.createElement("canvas");
+    wrap.append(canvas);
+    block.append(wrap);
+    mount.append(block);
+    const values = names.map(n => {
+      const b = data.byTelecaller[n] || emptyMetrics();
+      if (pctKey === "totalLeadsVsSiteVisitedPct") return pct(b.siteVisited, b.totalLeads) ?? 0;
+      return pct(b.siteVisited, b.siteVisitScheduled) ?? 0;
+    });
+    renderBarChart(canvas, names, values, "#2a5f9e");
+  }
+
+  const pieSection = document.createElement("div");
+  pieSection.className = "perf-pie-section";
+  const pieHeading = document.createElement("h3");
+  pieHeading.className = "perf-section-title";
+  pieHeading.textContent = names.length === 1 ? "Status breakdown" : "Status breakdown by Telecaller";
+  pieSection.append(pieHeading);
+
+  const pieGrid = document.createElement("div");
+  pieGrid.className = "perf-pie-grid";
+  for (const name of names) {
+    const block = document.createElement("div");
+    block.className = "perf-chart-block perf-chart-block-pie";
+    const title = document.createElement("h4");
+    title.textContent = name;
+    block.append(title);
+    const pieWrap = document.createElement("div");
+    pieWrap.className = "perf-chart-wrap perf-chart-wrap-pie";
+    const pieCanvas = document.createElement("canvas");
+    pieWrap.append(pieCanvas);
+    block.append(pieWrap);
+    pieGrid.append(block);
+    const pieData = pieFromBucket(data.byTelecaller[name]);
+    renderPieChart(pieCanvas, pieData, `perf-pie-${name.replace(/\W+/g, "-")}`);
+  }
+  pieSection.append(pieGrid);
+  mount.append(pieSection);
+
+  if (names.length > 1) {
+    const globalBlock = document.createElement("div");
+    globalBlock.className = "perf-chart-block perf-chart-block-pie";
+    const globalTitle = document.createElement("h4");
+    globalTitle.textContent = "Combined status (all TeleCallers)";
+    globalBlock.append(globalTitle);
+    const pieWrap = document.createElement("div");
+    pieWrap.className = "perf-chart-wrap perf-chart-wrap-pie";
+    const pieCanvas = document.createElement("canvas");
+    pieWrap.append(pieCanvas);
+    globalBlock.append(pieWrap);
+    mount.append(globalBlock);
+    renderPieChart(pieCanvas, data.pie || emptyPie(), "perf-pie-combined");
+  }
 }
 
 function wireDropZone(zone, input, onFiles) {
@@ -476,6 +700,8 @@ function renderPerfPreview(panel, reconciled) {
   if (!mount) return;
   renderSummaryPanel(mount, {
     summary: reconciled.summary,
+    byTelecaller: reconciled.byTelecaller,
+    pie: reconciled.pie,
     date_min: reconciled.dateMin,
     date_max: reconciled.dateMax,
   });
@@ -644,15 +870,18 @@ export function mountPerfReportUpload(ctx) {
       if (modalMsg) modalMsg.textContent = "Select at least one TeleCaller.";
       return;
     }
-    const dashboards = selected.map(name => ({
-      telecaller_name: name,
-      title: `${name} · Performance`,
-      summary: perfReconciled.byTelecaller[name] || emptyMetrics(),
-      byTelecaller: perfReconciled.byTelecaller,
-      pie: perfReconciled.pie,
-      date_min: perfReconciled.dateMin,
-      date_max: perfReconciled.dateMax,
-    }));
+    const dashboards = selected.map(name => {
+      const bucket = perfReconciled.byTelecaller[name] || emptyTelecallerBucket();
+      return {
+        telecaller_name: name,
+        title: `${name} · Performance`,
+        summary: metricsFromBucket(bucket),
+        byTelecaller: perfReconciled.byTelecaller,
+        pie: pieFromBucket(bucket),
+        date_min: perfReconciled.dateMin,
+        date_max: perfReconciled.dateMax,
+      };
+    });
     if (modalMsg) modalMsg.textContent = "Uploading…";
     try {
       const data = await PerfDashboardApi.publish(dashboards);
@@ -704,11 +933,10 @@ export function mountPerfPublishedDashboard(ctx) {
   filterSelect?.addEventListener("change", () => {
     perfTcFilter = filterSelect.value || "__all__";
     if (!perfCombinedCache) return;
+    const filtered = filterByTelecaller(perfCombinedCache, perfTcFilter);
+    renderSummaryPanel(document.getElementById("perf-tab-summary"), filtered);
     if (perfActiveTab === "graphs") {
-      renderGraphsPanel(
-        document.getElementById("perf-tab-graphs"),
-        filterByTelecaller(perfCombinedCache, perfTcFilter),
-      );
+      renderGraphsPanel(document.getElementById("perf-tab-graphs"), filtered);
     }
   });
 
@@ -773,7 +1001,7 @@ export async function refreshPerfPublished() {
       perfTcFilter = "__all__";
     }
 
-    if (summaryMount) renderSummaryPanel(summaryMount, data);
+    if (summaryMount) renderSummaryPanel(summaryMount, filterByTelecaller(data, perfTcFilter));
     if (perfActiveTab === "graphs" && graphsMount) {
       renderGraphsPanel(graphsMount, filterByTelecaller(data, perfTcFilter));
     }
