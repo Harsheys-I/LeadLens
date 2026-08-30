@@ -1,7 +1,7 @@
 /**
  * TeleCalling Performance Report — Excel parse, metrics engine, published dashboard UI.
  */
-import {PerfDashboardApi} from "./api-client.js?v=5.2.40";
+import {PerfDashboardApi} from "./api-client.js?v=5.2.41";
 
 const MASTER_FIELDS = [
   {id: "mobile", label: "Mobile", aliases: "mobile, mobile number, phone"},
@@ -24,15 +24,17 @@ const METRIC_KEYS = [
   "activeLeads",
   "siteVisited",
   "siteVisitScheduled",
+  "siteVisitPending",
   "siteVisitCancelled",
   "notInterested",
   "overdue",
 ];
 const METRIC_LABELS = {
-  totalLeads: "Total Leads (Master + History SIE/NI/SVC)",
+  totalLeads: "Total Leads (Master ∪ History)",
   activeLeads: "Active Leads (Master)",
   siteVisited: "Site Visited (STE)",
   siteVisitScheduled: "Site Visit Scheduled (SVS)",
+  siteVisitPending: "Site Visit Pending (SVP)",
   siteVisitCancelled: "Site Visit Cancelled (SVC)",
   notInterested: "Not Interested (NI)",
   overdue: "Overdue Leads (Master)",
@@ -51,17 +53,26 @@ const SCORECARD_COLUMNS = [
   {key: "activeLeads", label: METRIC_LABELS.activeLeads, kind: "count"},
   {key: "siteVisited", label: METRIC_LABELS.siteVisited, kind: "count"},
   {key: "siteVisitScheduled", label: METRIC_LABELS.siteVisitScheduled, kind: "count"},
-  {key: "totalLeadsVsSiteVisitedPct", label: PCT_LABELS.totalLeadsVsSiteVisitedPct, kind: "pct"},
-  {key: "siteVisitScheduledVsSiteVisitedPct", label: PCT_LABELS.siteVisitScheduledVsSiteVisitedPct, kind: "pct"},
+  {key: "siteVisitPending", label: METRIC_LABELS.siteVisitPending, kind: "count"},
   {key: "siteVisitCancelled", label: METRIC_LABELS.siteVisitCancelled, kind: "count"},
   {key: "notInterested", label: METRIC_LABELS.notInterested, kind: "count"},
+  {key: "totalLeadsVsSiteVisitedPct", label: PCT_LABELS.totalLeadsVsSiteVisitedPct, kind: "pct"},
+  {key: "siteVisitScheduledVsSiteVisitedPct", label: PCT_LABELS.siteVisitScheduledVsSiteVisitedPct, kind: "pct"},
   {key: "overdue", label: METRIC_LABELS.overdue, kind: "count"},
 ];
 
-const PIE_KEYS = ["notInterested", "siteVisitScheduled", "siteVisitCancelled", "siteVisited", "overdue"];
+const PIE_KEYS = [
+  "notInterested",
+  "siteVisitScheduled",
+  "siteVisitPending",
+  "siteVisitCancelled",
+  "siteVisited",
+  "overdue",
+];
 const PIE_LABELS = {
   notInterested: "Not Interested",
   siteVisitScheduled: "Site Visit Scheduled",
+  siteVisitPending: "Site Visit Pending",
   siteVisitCancelled: "Site Visit Cancelled",
   siteVisited: "Site Visited",
   overdue: "Overdue",
@@ -168,6 +179,7 @@ function emptyMetrics() {
     activeLeads: 0,
     siteVisited: 0,
     siteVisitScheduled: 0,
+    siteVisitPending: 0,
     siteVisitCancelled: 0,
     notInterested: 0,
     overdue: 0,
@@ -178,6 +190,7 @@ function emptyPie() {
   return {
     notInterested: 0,
     siteVisitScheduled: 0,
+    siteVisitPending: 0,
     siteVisitCancelled: 0,
     siteVisited: 0,
     overdue: 0,
@@ -185,7 +198,13 @@ function emptyPie() {
 }
 
 function emptyTelecallerBucket() {
-  return {...emptyMetrics(), pie: emptyPie(), _historyKeys: new Set()};
+  return {
+    ...emptyMetrics(),
+    pie: emptyPie(),
+    _masterKeys: new Set(),
+    _historyKeys: new Set(),
+    _overdueKeys: new Set(),
+  };
 }
 
 function pct(numerator, denominator) {
@@ -200,29 +219,27 @@ function formatPct(value) {
   return `${Number(value).toFixed(Number(value) % 1 === 0 ? 0 : 1)}%`;
 }
 
-function leadKey(row) {
-  let mobile = norm(row.mobile);
-  // Excel often stores phones as numbers → "9876543210.0"
-  if (/^\d+\.0+$/.test(mobile)) mobile = mobile.replace(/\.0+$/, "");
-  const project = norm(row.project);
-  if (!mobile && !project) return "";
-  return `${mobile}|${project}`;
-}
-
 function finalizeBucket(bucket) {
-  const historyOnlyKeys = bucket._historyKeys || new Set();
-  // Total Leads = Master rows + unique History leads (Mobile+Project) with TCS SIE/NI/SVC.
-  bucket.activeLeads = Number(bucket.activeLeads) || 0;
-  bucket.historyLeads = historyOnlyKeys.size;
-  bucket.totalLeads = bucket.activeLeads + historyOnlyKeys.size;
+  const masterKeys = bucket._masterKeys || new Set();
+  const historyKeys = bucket._historyKeys || new Set();
+  const overdueKeys = bucket._overdueKeys || new Set();
+  const union = new Set([...masterKeys, ...historyKeys]);
+  // Active = Master leads; Total = Master ∪ History (Lead = Mobile + TeleCaller).
+  bucket.activeLeads = masterKeys.size;
+  bucket.historyLeads = historyKeys.size;
+  bucket.totalLeads = union.size;
+  bucket.overdue = overdueKeys.size;
   bucket.pie = {
     notInterested: Number(bucket.notInterested) || 0,
     siteVisitScheduled: Number(bucket.siteVisitScheduled) || 0,
+    siteVisitPending: Number(bucket.siteVisitPending) || 0,
     siteVisitCancelled: Number(bucket.siteVisitCancelled) || 0,
     siteVisited: Number(bucket.siteVisited) || 0,
     overdue: Number(bucket.overdue) || 0,
   };
+  delete bucket._masterKeys;
   delete bucket._historyKeys;
+  delete bucket._overdueKeys;
   return bucket;
 }
 
@@ -243,6 +260,7 @@ function pieFromBucket(bucket) {
   return {
     notInterested: Number(bucket.notInterested) || 0,
     siteVisitScheduled: Number(bucket.siteVisitScheduled) || 0,
+    siteVisitPending: Number(bucket.siteVisitPending) || 0,
     siteVisitCancelled: Number(bucket.siteVisitCancelled) || 0,
     siteVisited: Number(bucket.siteVisited) || 0,
     overdue: Number(bucket.overdue) || 0,
@@ -362,11 +380,12 @@ function leadMobile(row) {
   return mobile;
 }
 
-/** Lead identity in History: Mobile + Project Name (not TeleCaller). */
-function historyLeadKey(row) {
+/** Lead identity: Mobile + TeleCaller Name. */
+function leadIdentityKey(row) {
   const mobile = leadMobile(row);
   if (!mobile) return "";
-  return `${mobile}|${norm(row.project)}`;
+  const tc = norm(row.telecaller) || "unknown";
+  return `${mobile}|${tc}`;
 }
 
 /**
@@ -385,16 +404,12 @@ function forwardFillHistoryLeads(historyRows) {
     if (project) lastProject = project;
     if (!leadMobile(filled) && lastMobile) filled.mobile = lastMobile;
     if (!clean(filled.project) && lastProject) filled.project = lastProject;
-    // Re-normalize excel phone quirks after fill
     if (leadMobile(filled)) out.push(filled);
   }
   return out;
 }
 
-/**
- * One History row per lead: max Lead Update Date for each (Mobile + Project Name).
- * Multiple calls on the same lead count once (latest LUD only).
- */
+/** Max Lead Update Date (ms); -1 if missing. */
 function ludMs(row) {
   const d = row?.updateDate;
   if (d instanceof Date && !Number.isNaN(d.valueOf())) return d.valueOf();
@@ -403,11 +418,14 @@ function ludMs(row) {
   return -1;
 }
 
+/**
+ * One History row per lead (Mobile + TeleCaller): keep max Lead Update Date only.
+ */
 function collapseHistoryToLatestLead(historyRows) {
   const filled = forwardFillHistoryLeads(historyRows);
   const latest = new Map();
   filled.forEach((row, index) => {
-    const key = historyLeadKey(row);
+    const key = leadIdentityKey(row);
     if (!key) return;
     const nextLud = ludMs(row);
     const prev = latest.get(key);
@@ -415,7 +433,6 @@ function collapseHistoryToLatestLead(historyRows) {
       latest.set(key, {row, index, lud: nextLud});
       return;
     }
-    // Maximum Lead Update Date wins; same LUD → later file row wins.
     if (nextLud > prev.lud || (nextLud === prev.lud && index > prev.index)) {
       latest.set(key, {row, index, lud: nextLud});
     }
@@ -428,19 +445,9 @@ function matchesSentToEnquiry(status) {
   return s === "sent to enquiry" || s === "send to enquiry";
 }
 
-/** History Telecalling Status values that count toward Total Leads (SIE / NI / SVC). */
-function matchesTotalLeadsHistoryTcs(telecallingStatus) {
-  const tcs = norm(telecallingStatus);
-  return (
-    tcs === "send to enquiry" ||
-    tcs === "sent to enquiry" ||
-    tcs === "not interested" ||
-    tcs === "site visit cancelled"
-  );
-}
-
 /**
  * Build performance metrics from parsed Master + History rows.
+ * Lead = Mobile + TeleCaller. History outcomes use Status, once per lead (max LUD).
  * @param {object[]} masterRows
  * @param {object[]} historyRows
  */
@@ -454,8 +461,7 @@ export function reconcilePerf(masterRows, historyRows) {
     if (!dateMax || d > dateMax) dateMax = d;
   }
 
-  // Collapse History: forward-fill, then one latest row per Mobile + Project.
-  const {filledCount, leads: historyLeads} = collapseHistoryToLatestLead(historyRows);
+  const {leads: historyLeads} = collapseHistoryToLatestLead(historyRows);
 
   const byTelecaller = {};
   const ensureTc = name => {
@@ -464,134 +470,73 @@ export function reconcilePerf(masterRows, historyRows) {
     return key;
   };
 
+  const allMasterKeys = new Set();
+  const allHistoryKeys = new Set();
   const today = todayStart();
+
   for (const row of masterRows) {
     const tc = ensureTc(row.telecaller);
-    byTelecaller[tc].activeLeads += 1;
+    const key = leadIdentityKey(row);
+    if (!key) continue;
+    byTelecaller[tc]._masterKeys.add(key);
+    allMasterKeys.add(key);
     if (row.nextDate && row.nextDate < today) {
-      byTelecaller[tc].overdue += 1;
+      byTelecaller[tc]._overdueKeys.add(key);
     }
   }
 
-  // Total Leads History side: unique Mobile+Project with TCS in SIE / NI / SVC (max-LUD row).
-  const globalHistTotalKeys = new Set();
-  const histTcsBreakdown = {sie: 0, ni: 0, svc: 0, skippedOtherTcs: 0};
-  const ajithDebug = {rawSvcRows: 0, collapsedSvcRows: [], bucketSvc: null};
-
-  // How many Ajith SVC rows exist BEFORE collapse (proves double-count source).
-  for (const row of historyRows) {
-    if (!/ajithkumar/i.test(row.telecaller || "")) continue;
-    const st = norm(row.status);
-    const tcs = norm(row.telecallingStatus);
-    if (tcs === "site visit cancelled" || st === "site visit cancelled") ajithDebug.rawSvcRows += 1;
-  }
-
-  // Reset status counters — only assign from collapsed leads (max LUD per Mobile+Project).
   for (const bucket of Object.values(byTelecaller)) {
     bucket.notInterested = 0;
     bucket.siteVisitScheduled = 0;
+    bucket.siteVisitPending = 0;
     bucket.siteVisitCancelled = 0;
     bucket.siteVisited = 0;
   }
 
   for (const row of historyLeads) {
     const tc = ensureTc(row.telecaller);
-    const leadId = historyLeadKey(row);
+    const key = leadIdentityKey(row);
+    if (!key) continue;
+    byTelecaller[tc]._historyKeys.add(key);
+    allHistoryKeys.add(key);
+
     const st = norm(row.status);
-    const tcs = norm(row.telecallingStatus);
-
-    // Total Leads History contribution: SIE / NI / SVC only, one lead per Mobile+Project.
-    if (leadId && matchesTotalLeadsHistoryTcs(row.telecallingStatus)) {
-      globalHistTotalKeys.add(leadId);
-      byTelecaller[tc]._historyKeys.add(leadId);
-      if (tcs === "send to enquiry" || tcs === "sent to enquiry") histTcsBreakdown.sie += 1;
-      else if (tcs === "not interested") histTcsBreakdown.ni += 1;
-      else if (tcs === "site visit cancelled") histTcsBreakdown.svc += 1;
-    } else if (leadId) {
-      histTcsBreakdown.skippedOtherTcs += 1;
-    }
-
-    // Status metrics: already one row per (Mobile + Project) — count that latest status once.
-    if (st === "not interested") byTelecaller[tc].notInterested += 1;
-    if (tcs === "site visit scheduled") byTelecaller[tc].siteVisitScheduled += 1;
-    if (tcs === "site visit cancelled") byTelecaller[tc].siteVisitCancelled += 1;
+    // Status metrics — once per lead (collapsed History row).
     if (matchesSentToEnquiry(row.status)) byTelecaller[tc].siteVisited += 1;
-
-    if (/ajithkumar/i.test(tc) && tcs === "site visit cancelled") {
-      ajithDebug.collapsedSvcRows.push({
-        mobile: leadMobile(row),
-        project: clean(row.project),
-        key: leadId,
-        status: row.status,
-        tcs: row.telecallingStatus,
-        lud: ludMs(row),
-        update: String(row.update || ""),
-      });
-    }
+    if (st === "site visit scheduled") byTelecaller[tc].siteVisitScheduled += 1;
+    if (st === "site visit pending") byTelecaller[tc].siteVisitPending += 1;
+    if (st === "site visit cancelled") byTelecaller[tc].siteVisitCancelled += 1;
+    if (st === "not interested") byTelecaller[tc].notInterested += 1;
   }
 
   for (const bucket of Object.values(byTelecaller)) finalizeBucket(bucket);
 
   const summary = emptyMetrics();
-  summary.activeLeads = masterRows.length;
-  // Total Leads = Master rows + History (TCS = SIE/NI/SVC), unique Mobile+Project.
-  summary.totalLeads = summary.activeLeads + globalHistTotalKeys.size;
+  summary.activeLeads = allMasterKeys.size;
+  summary.totalLeads = new Set([...allMasterKeys, ...allHistoryKeys]).size;
   summary.notInterested = 0;
   summary.siteVisitScheduled = 0;
+  summary.siteVisitPending = 0;
   summary.siteVisitCancelled = 0;
   summary.siteVisited = 0;
   summary.overdue = 0;
   for (const bucket of Object.values(byTelecaller)) {
     summary.notInterested += Number(bucket.notInterested) || 0;
     summary.siteVisitScheduled += Number(bucket.siteVisitScheduled) || 0;
+    summary.siteVisitPending += Number(bucket.siteVisitPending) || 0;
     summary.siteVisitCancelled += Number(bucket.siteVisitCancelled) || 0;
     summary.siteVisited += Number(bucket.siteVisited) || 0;
     summary.overdue += Number(bucket.overdue) || 0;
   }
 
-  // Sync pie from status counts
-  for (const bucket of Object.values(byTelecaller)) {
-    bucket.pie = {
-      notInterested: bucket.notInterested,
-      siteVisitScheduled: bucket.siteVisitScheduled,
-      siteVisitCancelled: bucket.siteVisitCancelled,
-      siteVisited: bucket.siteVisited,
-      overdue: bucket.overdue,
-    };
-  }
-
   const pie = {
     notInterested: summary.notInterested,
     siteVisitScheduled: summary.siteVisitScheduled,
+    siteVisitPending: summary.siteVisitPending,
     siteVisitCancelled: summary.siteVisitCancelled,
     siteVisited: summary.siteVisited,
     overdue: summary.overdue,
   };
-
-  const ajithBucket = Object.entries(byTelecaller).find(([name]) => /ajithkumar/i.test(name));
-  ajithDebug.bucketSvc = ajithBucket?.[1]?.siteVisitCancelled ?? null;
-  ajithDebug.bucketName = ajithBucket?.[0] ?? null;
-  ajithDebug.historyRaw = historyRows.length;
-  ajithDebug.historyFilled = filledCount;
-  ajithDebug.historyCollapsed = historyLeads.length;
-  ajithDebug.summarySvc = summary.siteVisitCancelled;
-  ajithDebug.collapseKey = "mobile|project max-LUD";
-  ajithDebug.totalLeads = {
-    masterRows: summary.activeLeads,
-    historySieNiSvcLeads: globalHistTotalKeys.size,
-    total: summary.totalLeads,
-    breakdown: histTcsBreakdown,
-  };
-
-  // Expose for UI + console (ingest server may be unreachable on Hostinger).
-  if (typeof window !== "undefined") {
-    window.__perfAjithDebug = ajithDebug;
-    console.info("[LeadLens perf]", ajithDebug);
-  }
-
-  // #region agent log
-  fetch('http://127.0.0.1:7843/ingest/f4ac7d78-fa93-4940-929e-852fd1791883',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'301f07'},body:JSON.stringify({sessionId:'301f07',runId:'total-leads-sie-ni-svc',hypothesisId:'K',location:'perf-dashboard.js:reconcilePerf',message:'Total Leads = Master + History SIE/NI/SVC unique Mobile+Project',data:ajithDebug,timestamp:Date.now()})}).catch(()=>{});
-  // #endregion
 
   return {
     summary,
@@ -599,7 +544,6 @@ export function reconcilePerf(masterRows, historyRows) {
     pie,
     dateMin: dateToIso(dateMin),
     dateMax: dateToIso(dateMax),
-    _debug: {ajith: ajithDebug},
   };
 }
 
@@ -918,21 +862,7 @@ function renderPerfPreview(panel, reconciled) {
       ? `${names.length} TeleCaller${names.length === 1 ? "" : "s"}: ${names.join(", ")}`
       : "No TeleCallers found.";
   }
-  // Visible debug (ingest may be blocked): proves max-LUD collapse ran.
-  let debugEl = panel.querySelector("#perf-collapse-debug");
-  if (!debugEl) {
-    debugEl = document.createElement("p");
-    debugEl.id = "perf-collapse-debug";
-    debugEl.className = "muted";
-    debugEl.style.cssText = "margin-top:8px;padding:8px;border:1px dashed #888;font-size:12px;";
-    (tcList?.parentElement || panel).append(debugEl);
-  }
-  const d = reconciled?._debug?.ajith || window.__perfAjithDebug || {};
-  const tl = d.totalLeads || {};
-  debugEl.textContent =
-    `DEBUG Total Leads: Master ${tl.masterRows ?? "?"} + History SIE/NI/SVC ${tl.historySieNiSvcLeads ?? "?"} = ${tl.total ?? "?"}` +
-    ` (SIE ${tl.breakdown?.sie ?? "?"}/NI ${tl.breakdown?.ni ?? "?"}/SVC ${tl.breakdown?.svc ?? "?"}; skipped other TCS ${tl.breakdown?.skippedOtherTcs ?? "?"})` +
-    ` · Ajith SVC ${d.rawSvcRows ?? "?"}→${d.bucketSvc ?? "?"} · build 5.2.40`;
+  panel.querySelector("#perf-collapse-debug")?.remove();
 }
 
 function updatePerfValidation(el, messages, isError) {
