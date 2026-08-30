@@ -1,5 +1,5 @@
 {
-  "version": "5.2.38",
+  "version": "5.2.39",
   "name": "LeadLens",
-  "notes": "v5.2.38: Total Leads = Master rows + unique History leads not already in Master."
+  "notes": "v5.2.39: History metrics use one row per lead (Mobile + Project) with maximum Lead Update Date."
 }
