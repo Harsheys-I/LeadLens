@@ -1,5 +1,5 @@
 {
-  "version": "5.2.32",
+  "version": "5.2.33",
   "name": "LeadLens",
-  "notes": "v5.2.32: Remove TeleCaller Performance Report module; hard-reload if TeleCaller Audit fails to load."
+  "notes": "v5.2.33: Restore TeleCalling Performance Report — dual Excel upload, metrics dashboard, publish & notifications."
 }

@@ -1,15 +1,16 @@
-import {APP_VERSION,DEFAULT_SETTINGS,DEFAULT_OUTPUT_FIELDS,SETTINGS_SEED,MAX_BATCH_SIZE,MAX_CONCURRENCY,normalizeSettings,normalizeInputFields,slugFieldId,parseWorkbook,parseAuditedWorkbook,auditBatch,downloadWorkbook,downloadReviewPack,downloadReviewPdf,splitLeadsByTelecaller,splitResultsByTelecaller,validateApiKey,HIGH_SEVERITY_ERRORS,SERVER_API_KEY} from "./audit.js?v=5.2.32";
+import {APP_VERSION,DEFAULT_SETTINGS,DEFAULT_OUTPUT_FIELDS,SETTINGS_SEED,MAX_BATCH_SIZE,MAX_CONCURRENCY,normalizeSettings,normalizeInputFields,slugFieldId,parseWorkbook,parseAuditedWorkbook,auditBatch,downloadWorkbook,downloadReviewPack,downloadReviewPdf,splitLeadsByTelecaller,splitResultsByTelecaller,validateApiKey,HIGH_SEVERITY_ERRORS,SERVER_API_KEY} from "./audit.js?v=5.2.33";
 import {getJob,getJobs,loadSettings,saveSettings,getApiKey,apiKeyIsRemembered,saveApiKey,forgetApiKey,setStorageUserId,storageKey} from "./db.js?v=5.2.19";
-import {renderReviewDashboard,destroyReviewDashboard} from "./dashboard-view.js?v=5.2.32";
+import {renderReviewDashboard,destroyReviewDashboard} from "./dashboard-view.js?v=5.2.33";
 import {requireAuth,logout,hasPermission,getUser,changePassword,updateProfile} from "./auth.js?v=5.2.19";
-import {DashboardApi,SettingsApi} from "./api-client.js?v=5.2.32";
-import {mountNotifications} from "./notifications-ui.js?v=5.2.32";
+import {DashboardApi,SettingsApi} from "./api-client.js?v=5.2.33";
+import {mountNotifications} from "./notifications-ui.js?v=5.2.33";
 import {persistJob,removeJobSynced,clearJobsSynced,pullJobsFromServer} from "./jobs-sync.js?v=5.2.19";
+import {mountPerfReportUpload,mountPerfPublishedDashboard,refreshPerfPublished} from "./perf-dashboard.js?v=5.2.33";
 
 const $=id=>document.getElementById(id);
 const ids=["page-title","key-state","run-name","pause-run","download-result","progress-label","progress-percent","progress-bar","metric-leads","metric-excel-rows","metric-calls","metric-batch","metric-completed","metric-status","metric-input-tokens","metric-cached-tokens","metric-output-tokens","metric-duration","metric-cost","live-log","clear-console","history-list","clear-history","api-key","remember-key","toggle-key","save-key","forget-key","key-message","batch-size","concurrency","model","input-field-config","add-input-field","ai-field-config","output-field-config","yes-values","no-values","input-price","cached-price","output-price","save-settings","reset-settings","settings-message","toast","mobile-menu","active-job-switch","sort-field","sort-direction","app-version","export-settings","import-settings","import-settings-file","update-banner","update-banner-text","reload-app","key-modal","onboard-key","onboard-toggle","onboard-remember","onboard-message","onboard-save","onboard-skip","sidebar-version","sidebar-notes","review-drop-zone","review-file-input","review-drop-hint","review-file-list","review-validation","start-review","review-run-panel","review-aggregate","review-cards","review-dashboard-panel","review-dashboard-mount","download-review-excel","review-open-console","review-precounts","review-live-progress","review-progress-label","review-progress-percent","review-progress-bar","review-post-actions","create-review-dashboard","export-dashboard-pdf","upload-dashboard-btn","upload-dashboard-modal","upload-telecaller-list","upload-dash-message","upload-dash-confirm","upload-dash-cancel","published-list","refresh-published","published-dashboard-panel","published-dash-title","published-dash-meta","published-dash-actions","published-dashboard-mount","shell-user-label","shell-logout","shell-account"];
 const els=Object.fromEntries(ids.map(id=>[id,$(id)]));
-const titles={review:"Bucket 1 Lead Audit",console:"Run console",published:"Dashboard",history:"History",settings:"Settings"};
+const titles={review:"Bucket 1 Lead Audit",console:"Run console",published:"Dashboard",history:"History",settings:"Settings","perf-report":"TeleCalling Performance Report","perf-dashboard":"Performance Dashboard","perf-settings":"Performance Settings"};
 /** When false, completed audits do not auto-render charts until Create Dashboard. */
 let reviewDashboardRequested=false;
 let lastReadyReviewJobs=[];
@@ -193,6 +194,7 @@ function showView(name){
   if(name==="console")refreshJobSwitcher();
   if(name==="review")renderReviewProgress();
   if(name==="published")refreshPublishedDashboards();
+  if(name==="perf-dashboard")refreshPerfPublished();
 }
 function toast(message){els.toast.textContent=message;els.toast.classList.add("show");clearTimeout(toast.timer);toast.timer=setTimeout(()=>els.toast.classList.remove("show"),3200);}
 function updateKeyState(){
@@ -2125,15 +2127,20 @@ async function bootTeleCallerAudit(){
     els["review-open-console"].classList.add("hidden");
   }
 
-  if(/^#perf-/i.test(location.hash)){
-    const dest=hasPermission("telecaller.dashboard")?"#published":"";
-    history.replaceState(null,"",dest||location.pathname);
+  const hashView=location.hash.slice(1);
+  if(hashView==="published"&&hasPermission("telecaller.dashboard"))showView("published");
+  else if(hashView==="perf-dashboard"&&hasPermission("telecaller.perf_dashboard"))showView("perf-dashboard");
+  else if(hashView==="perf-report"&&hasPermission("telecaller.perf_report"))showView("perf-report");
+  else if(hashView==="perf-settings"&&hasPermission("telecaller.perf_settings"))showView("perf-settings");
+  else{
+    const firstVisible=[...document.querySelectorAll(".nav-item[data-view]:not(.hidden)")][0];
+    showView(firstVisible?.dataset.view||"review");
   }
-  const firstVisible=[...document.querySelectorAll(".nav-item[data-view]:not(.hidden)")][0];
-  showView(firstVisible?.dataset.view||"review");
   await restoreFromStorage();
   checkForUpdate();
   if(hasPermission("telecaller.bucket1")||hasPermission("telecaller.settings"))maybePromptForApiKey();
+  mountPerfReportUpload({hasPermission,toast,showView});
+  mountPerfPublishedDashboard({hasPermission,canViewAll:canSeeComparativeKpis});
   mountNotifications({
     variant:"chrome",
     onOpenAccessRequests:()=>{location.href="/admin/";},
@@ -2142,14 +2149,17 @@ async function bootTeleCallerAudit(){
       location.hash="#published";
       showView("published");
     },
+    onPerfDashboardUpdate:()=>{
+      if(!hasPermission("telecaller.perf_dashboard"))return;
+      location.hash="#perf-dashboard";
+      showView("perf-dashboard");
+    },
   });
-  if(location.hash==="#published"&&hasPermission("telecaller.dashboard"))showView("published");
   window.addEventListener("hashchange",()=>{
-    if(/^#perf-/i.test(location.hash)){
-      const dest=hasPermission("telecaller.dashboard")?"#published":"";
-      history.replaceState(null,"",dest||location.pathname);
-    }
     if(location.hash==="#published"&&hasPermission("telecaller.dashboard"))showView("published");
+    if(location.hash==="#perf-dashboard"&&hasPermission("telecaller.perf_dashboard"))showView("perf-dashboard");
+    if(location.hash==="#perf-report"&&hasPermission("telecaller.perf_report"))showView("perf-report");
+    if(location.hash==="#perf-settings"&&hasPermission("telecaller.perf_settings"))showView("perf-settings");
   });
   setInterval(()=>{
     if(currentJob?.status==="running"||currentJob?.status==="reviewing")renderProgress(currentJob);

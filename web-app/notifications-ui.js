@@ -1,7 +1,7 @@
 /**
  * Shared notifications bell + drawer for LeadLens shells (home, Admin, TeleCaller Audit).
  */
-import {NotifApi} from './api-client.js?v=5.2.1';
+import {NotifApi} from './api-client.js?v=5.2.33';
 
 const BELL_SVG = `<svg class="notif-bell-icon" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
   <path d="M15 17h5l-1.4-1.4A2 2 0 0 1 18 14.2V11a6 6 0 1 0-12 0v3.2c0 .5-.2 1-.6 1.4L4 17h5"/>
@@ -13,7 +13,7 @@ function escapeHtml(s){
 }
 
 function typeIcon(type){
-  if (type === 'dashboard_update') {
+  if (type === 'dashboard_update' || type === 'perf_dashboard_update') {
     return `<span class="notif-type-icon notif-type-dash" aria-hidden="true">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>
     </span>`;
@@ -69,8 +69,17 @@ function openDashboardFromNotification(opts){
   location.href = '/TeleCallerAudit/#published';
 }
 
+function openPerfDashboardFromNotification(opts){
+  if (typeof opts.onPerfDashboardUpdate === 'function') {
+    opts.onPerfDashboardUpdate();
+    return;
+  }
+  if (isTeleCallerAuditShell()) return;
+  location.href = '/TeleCallerAudit/#perf-dashboard';
+}
+
 /**
- * @param {{onOpenAccessRequests?: () => void, onDashboardUpdate?: () => void, variant?: 'sidebar'|'chrome'}} opts
+ * @param {{onOpenAccessRequests?: () => void, onDashboardUpdate?: () => void, onPerfDashboardUpdate?: () => void, variant?: 'sidebar'|'chrome'}} opts
  */
 export function mountNotifications(opts = {}){
   const bell = document.getElementById('notif-bell');
@@ -138,6 +147,8 @@ export function mountNotifications(opts = {}){
             location.href = '/admin/';
           } else if (n.type === 'dashboard_update') {
             openDashboardFromNotification(opts);
+          } else if (n.type === 'perf_dashboard_update') {
+            openPerfDashboardFromNotification(opts);
           }
           refresh();
         });
