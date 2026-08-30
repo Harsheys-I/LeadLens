@@ -7,12 +7,12 @@
   <meta name="description" content="LeadLens TeleCaller">
   <title>LeadLens · TeleCaller</title>
   <link rel="manifest" href="../manifest.webmanifest">
-  <link rel="stylesheet" href="../styles.css?v=5.2.35">
+  <link rel="stylesheet" href="../styles.css?v=5.2.36">
   <script defer src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js"></script>
-  <script type="module" src="../app.js?v=5.2.35"></script>
+  <script type="module" src="../app.js?v=5.2.36"></script>
 </head>
 <body>
   <div id="update-banner" class="update-banner hidden" role="status">
@@ -279,7 +279,7 @@
           </ul>
           <h3>Scorecard columns</h3>
           <ul class="perf-help-list">
-            <li><strong>Total Leads</strong> — Active (Master) + unique History-only leads (Mobile+Project not in Master)</li>
+            <li><strong>Total Leads</strong> — unique leads (Mobile+Project) across Master ∪ History for that Telecaller (History is lead count, not call-row count)</li>
             <li><strong>Active Leads</strong> — Master row count</li>
             <li><strong>Site Visited (STE)</strong> — History Status = Sent/Send to Enquiry</li>
             <li><strong>Site Visit Scheduled (SVS)</strong> — History Telecalling Status</li>
