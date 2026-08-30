@@ -1,7 +1,7 @@
 /**
  * TeleCalling Performance Report — Excel parse, metrics engine, published dashboard UI.
  */
-import {PerfDashboardApi} from "./api-client.js?v=5.2.38";
+import {PerfDashboardApi} from "./api-client.js?v=5.2.39";
 
 const MASTER_FIELDS = [
   {id: "mobile", label: "Mobile", aliases: "mobile, mobile number, phone"},
@@ -107,26 +107,37 @@ function matchColumns(headers, fields) {
 
 function parseDateValue(value) {
   if (value instanceof Date && !Number.isNaN(value.valueOf())) {
-    return new Date(value.getFullYear(), value.getMonth(), value.getDate());
+    return new Date(value.getTime());
   }
   if (typeof value === "number" && window.XLSX?.SSF) {
     const d = XLSX.SSF.parse_date_code(value);
-    if (d) return new Date(d.y, d.m - 1, d.d);
+    if (d) return new Date(d.y, d.m - 1, d.d, d.H || 0, d.M || 0, Math.floor(d.S || 0));
   }
   const s = clean(value);
   if (!s) return null;
-  const iso = s.match(/^(\d{4})[\/\-.](\d{1,2})[\/\-.](\d{1,2})/);
-  if (iso) return new Date(Number(iso[1]), Number(iso[2]) - 1, Number(iso[3]));
-  const dmy = s.match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})/);
+  // ISO / CRM datetime: 2026-08-01 14:55:57.952 (keep milliseconds for max-LUD)
+  const isoTime = s.match(/^(\d{4})[\/\-.](\d{1,2})[\/\-.](\d{1,2})(?:[ T](\d{1,2}):(\d{2})(?::(\d{2})(?:\.(\d+))?)?)?/);
+  if (isoTime) {
+    const msPart = isoTime[7] ? Number(String(isoTime[7]).padEnd(3, "0").slice(0, 3)) : 0;
+    return new Date(
+      Number(isoTime[1]),
+      Number(isoTime[2]) - 1,
+      Number(isoTime[3]),
+      Number(isoTime[4] || 0),
+      Number(isoTime[5] || 0),
+      Number(isoTime[6] || 0),
+      msPart,
+    );
+  }
+  const dmy = s.match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})(?:[ T](\d{1,2}):(\d{2})(?::(\d{2})(?:\.(\d+))?)?)?/);
   if (dmy) {
     let y = Number(dmy[3]);
     if (y < 100) y += 2000;
-    return new Date(y, Number(dmy[2]) - 1, Number(dmy[1]));
+    const msPart = dmy[7] ? Number(String(dmy[7]).padEnd(3, "0").slice(0, 3)) : 0;
+    return new Date(y, Number(dmy[2]) - 1, Number(dmy[1]), Number(dmy[4] || 0), Number(dmy[5] || 0), Number(dmy[6] || 0), msPart);
   }
   const parsed = new Date(s);
-  if (!Number.isNaN(parsed.valueOf())) {
-    return new Date(parsed.getFullYear(), parsed.getMonth(), parsed.getDate());
-  }
+  if (!Number.isNaN(parsed.valueOf())) return parsed;
   return null;
 }
 
@@ -288,15 +299,28 @@ function rowObjects(rawRows, columns, fields) {
     let blank = true;
     for (const field of fields) {
       const header = columns[field.id];
-      const val = header ? clean(raw[header]) : "";
-      obj[field.id] = val;
-      if (val) blank = false;
+      const rawVal = header ? raw[header] : "";
+      // Keep raw dates for parsing; stringify everything else.
+      if (field.id === "registration" || field.id === "next" || field.id === "update") {
+        obj[field.id] = rawVal;
+        if (rawVal !== "" && rawVal != null) blank = false;
+      } else {
+        const val = header ? clean(rawVal) : "";
+        obj[field.id] = val;
+        if (val) blank = false;
+      }
     }
     if (blank) continue;
+    // Skip Excel totals footer rows
+    if (norm(obj.project) === "totals" || norm(obj.telecaller) === "totals" || norm(obj.mobile) === "totals") continue;
     obj.registrationDate = parseDateValue(obj.registration);
     obj.nextDate = parseDateValue(obj.next);
     obj.updateDate = parseDateValue(obj.update);
     obj.telecaller = clean(obj.telecaller) || "Unknown";
+    obj.mobile = clean(obj.mobile);
+    obj.project = clean(obj.project);
+    obj.status = clean(obj.status);
+    obj.telecallingStatus = clean(obj.telecallingStatus);
     out.push(obj);
   }
   return out;
@@ -327,6 +351,78 @@ export function parsePerfWorkbook(kind, arrayBuffer) {
   return {ok: true, kind, sheetName: sheet.name, rowCount: rows.length, missing: [], rows};
 }
 
+function leadMobile(row) {
+  let mobile = norm(row.mobile);
+  if (/^\d+\.0+$/.test(mobile)) mobile = mobile.replace(/\.0+$/, "");
+  // Scientific / float phones from Excel (e.g. 9.535002478e9)
+  if (/^\d+(\.\d+)?e\+\d+$/i.test(mobile)) {
+    const n = Number(mobile);
+    if (Number.isFinite(n)) mobile = String(Math.round(n));
+  }
+  return mobile;
+}
+
+/** Lead identity in History: Mobile + Project Name (not TeleCaller). */
+function historyLeadKey(row) {
+  const mobile = leadMobile(row);
+  if (!mobile) return "";
+  return `${mobile}|${norm(row.project)}`;
+}
+
+/**
+ * CRM History exports often leave Mobile/Project blank on continuation rows
+ * for the same lead. Carry forward the last non-empty values.
+ */
+function forwardFillHistoryLeads(historyRows) {
+  let lastMobile = "";
+  let lastProject = "";
+  const out = [];
+  for (const row of historyRows) {
+    const filled = {...row};
+    const mobile = leadMobile(filled);
+    const project = clean(filled.project);
+    if (mobile) lastMobile = clean(filled.mobile) || mobile;
+    if (project) lastProject = project;
+    if (!leadMobile(filled) && lastMobile) filled.mobile = lastMobile;
+    if (!clean(filled.project) && lastProject) filled.project = lastProject;
+    // Re-normalize excel phone quirks after fill
+    if (leadMobile(filled)) out.push(filled);
+  }
+  return out;
+}
+
+/**
+ * One History row per lead: max Lead Update Date for each (Mobile + Project Name).
+ * Multiple calls on the same lead count once (latest LUD only).
+ */
+function ludMs(row) {
+  const d = row?.updateDate;
+  if (d instanceof Date && !Number.isNaN(d.valueOf())) return d.valueOf();
+  const again = parseDateValue(row?.update);
+  if (again instanceof Date && !Number.isNaN(again.valueOf())) return again.valueOf();
+  return -1;
+}
+
+function collapseHistoryToLatestLead(historyRows) {
+  const filled = forwardFillHistoryLeads(historyRows);
+  const latest = new Map();
+  filled.forEach((row, index) => {
+    const key = historyLeadKey(row);
+    if (!key) return;
+    const nextLud = ludMs(row);
+    const prev = latest.get(key);
+    if (!prev) {
+      latest.set(key, {row, index, lud: nextLud});
+      return;
+    }
+    // Maximum Lead Update Date wins; same LUD → later file row wins.
+    if (nextLud > prev.lud || (nextLud === prev.lud && index > prev.index)) {
+      latest.set(key, {row, index, lud: nextLud});
+    }
+  });
+  return {filledCount: filled.length, leads: [...latest.values()].map(item => item.row)};
+}
+
 function matchesSentToEnquiry(status) {
   const s = norm(status);
   return s === "sent to enquiry" || s === "send to enquiry";
@@ -347,11 +443,16 @@ export function reconcilePerf(masterRows, historyRows) {
     if (!dateMax || d > dateMax) dateMax = d;
   }
 
-  // Global Master lead set — History leads already in any Master row are excluded from Total Leads.
-  const allMasterKeys = new Set();
+  // Collapse History: forward-fill continuation rows, then one latest row per Mobile.
+  const {filledCount, leads: historyLeads} = collapseHistoryToLatestLead(historyRows);
+
+  // Master membership for Total Leads: by Mobile (Project often blank on Master).
+  const allMasterMobiles = new Set();
+  let masterEmptyProject = 0;
   for (const row of masterRows) {
-    const key = leadKey(row);
-    if (key) allMasterKeys.add(key);
+    const mobile = leadMobile(row);
+    if (mobile) allMasterMobiles.add(mobile);
+    if (!norm(row.project)) masterEmptyProject += 1;
   }
 
   const byTelecaller = {};
@@ -370,29 +471,114 @@ export function reconcilePerf(masterRows, historyRows) {
     }
   }
 
+  const globalHistOnly = new Set();
+  let histInMaster = 0;
+  const ajithDebug = {rawSvcRows: 0, collapsedSvcRows: [], bucketSvc: null};
+
+  // How many Ajith SVC rows exist BEFORE collapse (proves double-count source).
   for (const row of historyRows) {
-    const tc = ensureTc(row.telecaller);
-    const key = leadKey(row);
-    // Unique History leads not already in Master (any telecaller) — never History row count.
-    if (key && !allMasterKeys.has(key)) {
-      byTelecaller[tc]._historyKeys.add(key);
-    }
+    if (!/ajithkumar/i.test(row.telecaller || "")) continue;
     const st = norm(row.status);
     const tcs = norm(row.telecallingStatus);
+    if (tcs === "site visit cancelled" || st === "site visit cancelled") ajithDebug.rawSvcRows += 1;
+  }
+
+  // Reset status counters — only assign from collapsed leads (max LUD per Mobile+Project).
+  for (const bucket of Object.values(byTelecaller)) {
+    bucket.notInterested = 0;
+    bucket.siteVisitScheduled = 0;
+    bucket.siteVisitCancelled = 0;
+    bucket.siteVisited = 0;
+  }
+
+  for (const row of historyLeads) {
+    const tc = ensureTc(row.telecaller);
+    const mobile = leadMobile(row);
+    const leadId = historyLeadKey(row);
+    if (mobile && !allMasterMobiles.has(mobile)) {
+      globalHistOnly.add(leadId || mobile);
+      byTelecaller[tc]._historyKeys.add(leadId || mobile);
+    } else if (mobile) {
+      histInMaster += 1;
+    }
+
+    const st = norm(row.status);
+    const tcs = norm(row.telecallingStatus);
+
+    // Already one row per (Mobile + Project) — count that latest status once.
     if (st === "not interested") byTelecaller[tc].notInterested += 1;
     if (tcs === "site visit scheduled") byTelecaller[tc].siteVisitScheduled += 1;
     if (tcs === "site visit cancelled") byTelecaller[tc].siteVisitCancelled += 1;
     if (matchesSentToEnquiry(row.status)) byTelecaller[tc].siteVisited += 1;
+
+    if (/ajithkumar/i.test(tc) && tcs === "site visit cancelled") {
+      ajithDebug.collapsedSvcRows.push({
+        mobile,
+        project: clean(row.project),
+        key: leadId,
+        status: row.status,
+        tcs: row.telecallingStatus,
+        lud: ludMs(row),
+        update: String(row.update || ""),
+      });
+    }
   }
 
   for (const bucket of Object.values(byTelecaller)) finalizeBucket(bucket);
 
   const summary = emptyMetrics();
+  summary.activeLeads = masterRows.length;
+  summary.totalLeads = summary.activeLeads + globalHistOnly.size;
+  summary.notInterested = 0;
+  summary.siteVisitScheduled = 0;
+  summary.siteVisitCancelled = 0;
+  summary.siteVisited = 0;
+  summary.overdue = 0;
   for (const bucket of Object.values(byTelecaller)) {
-    for (const key of METRIC_KEYS) summary[key] += Number(bucket[key] || 0);
+    summary.notInterested += Number(bucket.notInterested) || 0;
+    summary.siteVisitScheduled += Number(bucket.siteVisitScheduled) || 0;
+    summary.siteVisitCancelled += Number(bucket.siteVisitCancelled) || 0;
+    summary.siteVisited += Number(bucket.siteVisited) || 0;
+    summary.overdue += Number(bucket.overdue) || 0;
   }
 
-  const pie = sumPieSlices(Object.values(byTelecaller).map(b => b.pie));
+  // Sync pie from status counts
+  for (const bucket of Object.values(byTelecaller)) {
+    bucket.pie = {
+      notInterested: bucket.notInterested,
+      siteVisitScheduled: bucket.siteVisitScheduled,
+      siteVisitCancelled: bucket.siteVisitCancelled,
+      siteVisited: bucket.siteVisited,
+      overdue: bucket.overdue,
+    };
+  }
+
+  const pie = {
+    notInterested: summary.notInterested,
+    siteVisitScheduled: summary.siteVisitScheduled,
+    siteVisitCancelled: summary.siteVisitCancelled,
+    siteVisited: summary.siteVisited,
+    overdue: summary.overdue,
+  };
+
+  const ajithBucket = Object.entries(byTelecaller).find(([name]) => /ajithkumar/i.test(name));
+  ajithDebug.bucketSvc = ajithBucket?.[1]?.siteVisitCancelled ?? null;
+  ajithDebug.bucketName = ajithBucket?.[0] ?? null;
+  ajithDebug.historyRaw = historyRows.length;
+  ajithDebug.historyFilled = filledCount;
+  ajithDebug.historyCollapsed = historyLeads.length;
+  ajithDebug.summarySvc = summary.siteVisitCancelled;
+  ajithDebug.collapseKey = "mobile|project max-LUD";
+
+  // Expose for UI + console (ingest server may be unreachable on Hostinger).
+  if (typeof window !== "undefined") {
+    window.__perfAjithDebug = ajithDebug;
+    console.info("[LeadLens perf]", ajithDebug);
+  }
+
+  // #region agent log
+  fetch('http://127.0.0.1:7843/ingest/f4ac7d78-fa93-4940-929e-852fd1791883',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'301f07'},body:JSON.stringify({sessionId:'301f07',runId:'post-fix-max-lud-project',hypothesisId:'J',location:'perf-dashboard.js:reconcilePerf',message:'Ajith SVC after max-LUD per Mobile+Project',data:ajithDebug,timestamp:Date.now()})}).catch(()=>{});
+  // #endregion
 
   return {
     summary,
@@ -400,6 +586,7 @@ export function reconcilePerf(masterRows, historyRows) {
     pie,
     dateMin: dateToIso(dateMin),
     dateMax: dateToIso(dateMax),
+    _debug: {ajith: ajithDebug},
   };
 }
 
@@ -718,6 +905,20 @@ function renderPerfPreview(panel, reconciled) {
       ? `${names.length} TeleCaller${names.length === 1 ? "" : "s"}: ${names.join(", ")}`
       : "No TeleCallers found.";
   }
+  // Visible debug (ingest may be blocked): proves max-LUD collapse ran.
+  let debugEl = panel.querySelector("#perf-collapse-debug");
+  if (!debugEl) {
+    debugEl = document.createElement("p");
+    debugEl.id = "perf-collapse-debug";
+    debugEl.className = "muted";
+    debugEl.style.cssText = "margin-top:8px;padding:8px;border:1px dashed #888;font-size:12px;";
+    (tcList?.parentElement || panel).append(debugEl);
+  }
+  const d = reconciled?._debug?.ajith || window.__perfAjithDebug || {};
+  debugEl.textContent =
+    `DEBUG max-LUD per Mobile+Project: History ${d.historyRaw ?? "?"} → ${d.historyCollapsed ?? "?"} leads` +
+    ` · Ajith raw SVC=${d.rawSvcRows ?? "?"} → after collapse SVC=${d.bucketSvc ?? "?"}` +
+    ` (build 5.2.39)`;
 }
 
 function updatePerfValidation(el, messages, isError) {
