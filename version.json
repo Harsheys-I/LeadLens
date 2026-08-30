@@ -1,5 +1,5 @@
 {
-  "version": "5.2.41",
+  "version": "5.2.42",
   "name": "LeadLens",
-  "notes": "v5.2.41: Lead = Mobile+TeleCaller; Total = Master∪History; STE/SVS/SVP/SVC/NI from History Status once per lead."
+  "notes": "v5.2.42: STE counts any History Status Send to Enquiry once per Mobile+TeleCaller (not only latest LUD)."
 }
