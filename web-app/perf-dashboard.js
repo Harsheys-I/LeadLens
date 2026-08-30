@@ -1,7 +1,7 @@
 /**
  * TeleCalling Performance Report — Excel parse, metrics engine, published dashboard UI.
  */
-import {PerfDashboardApi} from "./api-client.js?v=5.2.39";
+import {PerfDashboardApi} from "./api-client.js?v=5.2.40";
 
 const MASTER_FIELDS = [
   {id: "mobile", label: "Mobile", aliases: "mobile, mobile number, phone"},
@@ -29,7 +29,7 @@ const METRIC_KEYS = [
   "overdue",
 ];
 const METRIC_LABELS = {
-  totalLeads: "Total Leads (Master + History)",
+  totalLeads: "Total Leads (Master + History SIE/NI/SVC)",
   activeLeads: "Active Leads (Master)",
   siteVisited: "Site Visited (STE)",
   siteVisitScheduled: "Site Visit Scheduled (SVS)",
@@ -211,7 +211,7 @@ function leadKey(row) {
 
 function finalizeBucket(bucket) {
   const historyOnlyKeys = bucket._historyKeys || new Set();
-  // Total Leads = Master rows + unique History leads not already in Master (any telecaller).
+  // Total Leads = Master rows + unique History leads (Mobile+Project) with TCS SIE/NI/SVC.
   bucket.activeLeads = Number(bucket.activeLeads) || 0;
   bucket.historyLeads = historyOnlyKeys.size;
   bucket.totalLeads = bucket.activeLeads + historyOnlyKeys.size;
@@ -428,6 +428,17 @@ function matchesSentToEnquiry(status) {
   return s === "sent to enquiry" || s === "send to enquiry";
 }
 
+/** History Telecalling Status values that count toward Total Leads (SIE / NI / SVC). */
+function matchesTotalLeadsHistoryTcs(telecallingStatus) {
+  const tcs = norm(telecallingStatus);
+  return (
+    tcs === "send to enquiry" ||
+    tcs === "sent to enquiry" ||
+    tcs === "not interested" ||
+    tcs === "site visit cancelled"
+  );
+}
+
 /**
  * Build performance metrics from parsed Master + History rows.
  * @param {object[]} masterRows
@@ -443,17 +454,8 @@ export function reconcilePerf(masterRows, historyRows) {
     if (!dateMax || d > dateMax) dateMax = d;
   }
 
-  // Collapse History: forward-fill continuation rows, then one latest row per Mobile.
+  // Collapse History: forward-fill, then one latest row per Mobile + Project.
   const {filledCount, leads: historyLeads} = collapseHistoryToLatestLead(historyRows);
-
-  // Master membership for Total Leads: by Mobile (Project often blank on Master).
-  const allMasterMobiles = new Set();
-  let masterEmptyProject = 0;
-  for (const row of masterRows) {
-    const mobile = leadMobile(row);
-    if (mobile) allMasterMobiles.add(mobile);
-    if (!norm(row.project)) masterEmptyProject += 1;
-  }
 
   const byTelecaller = {};
   const ensureTc = name => {
@@ -471,8 +473,9 @@ export function reconcilePerf(masterRows, historyRows) {
     }
   }
 
-  const globalHistOnly = new Set();
-  let histInMaster = 0;
+  // Total Leads History side: unique Mobile+Project with TCS in SIE / NI / SVC (max-LUD row).
+  const globalHistTotalKeys = new Set();
+  const histTcsBreakdown = {sie: 0, ni: 0, svc: 0, skippedOtherTcs: 0};
   const ajithDebug = {rawSvcRows: 0, collapsedSvcRows: [], bucketSvc: null};
 
   // How many Ajith SVC rows exist BEFORE collapse (proves double-count source).
@@ -493,19 +496,22 @@ export function reconcilePerf(masterRows, historyRows) {
 
   for (const row of historyLeads) {
     const tc = ensureTc(row.telecaller);
-    const mobile = leadMobile(row);
     const leadId = historyLeadKey(row);
-    if (mobile && !allMasterMobiles.has(mobile)) {
-      globalHistOnly.add(leadId || mobile);
-      byTelecaller[tc]._historyKeys.add(leadId || mobile);
-    } else if (mobile) {
-      histInMaster += 1;
-    }
-
     const st = norm(row.status);
     const tcs = norm(row.telecallingStatus);
 
-    // Already one row per (Mobile + Project) — count that latest status once.
+    // Total Leads History contribution: SIE / NI / SVC only, one lead per Mobile+Project.
+    if (leadId && matchesTotalLeadsHistoryTcs(row.telecallingStatus)) {
+      globalHistTotalKeys.add(leadId);
+      byTelecaller[tc]._historyKeys.add(leadId);
+      if (tcs === "send to enquiry" || tcs === "sent to enquiry") histTcsBreakdown.sie += 1;
+      else if (tcs === "not interested") histTcsBreakdown.ni += 1;
+      else if (tcs === "site visit cancelled") histTcsBreakdown.svc += 1;
+    } else if (leadId) {
+      histTcsBreakdown.skippedOtherTcs += 1;
+    }
+
+    // Status metrics: already one row per (Mobile + Project) — count that latest status once.
     if (st === "not interested") byTelecaller[tc].notInterested += 1;
     if (tcs === "site visit scheduled") byTelecaller[tc].siteVisitScheduled += 1;
     if (tcs === "site visit cancelled") byTelecaller[tc].siteVisitCancelled += 1;
@@ -513,7 +519,7 @@ export function reconcilePerf(masterRows, historyRows) {
 
     if (/ajithkumar/i.test(tc) && tcs === "site visit cancelled") {
       ajithDebug.collapsedSvcRows.push({
-        mobile,
+        mobile: leadMobile(row),
         project: clean(row.project),
         key: leadId,
         status: row.status,
@@ -528,7 +534,8 @@ export function reconcilePerf(masterRows, historyRows) {
 
   const summary = emptyMetrics();
   summary.activeLeads = masterRows.length;
-  summary.totalLeads = summary.activeLeads + globalHistOnly.size;
+  // Total Leads = Master rows + History (TCS = SIE/NI/SVC), unique Mobile+Project.
+  summary.totalLeads = summary.activeLeads + globalHistTotalKeys.size;
   summary.notInterested = 0;
   summary.siteVisitScheduled = 0;
   summary.siteVisitCancelled = 0;
@@ -569,6 +576,12 @@ export function reconcilePerf(masterRows, historyRows) {
   ajithDebug.historyCollapsed = historyLeads.length;
   ajithDebug.summarySvc = summary.siteVisitCancelled;
   ajithDebug.collapseKey = "mobile|project max-LUD";
+  ajithDebug.totalLeads = {
+    masterRows: summary.activeLeads,
+    historySieNiSvcLeads: globalHistTotalKeys.size,
+    total: summary.totalLeads,
+    breakdown: histTcsBreakdown,
+  };
 
   // Expose for UI + console (ingest server may be unreachable on Hostinger).
   if (typeof window !== "undefined") {
@@ -577,7 +590,7 @@ export function reconcilePerf(masterRows, historyRows) {
   }
 
   // #region agent log
-  fetch('http://127.0.0.1:7843/ingest/f4ac7d78-fa93-4940-929e-852fd1791883',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'301f07'},body:JSON.stringify({sessionId:'301f07',runId:'post-fix-max-lud-project',hypothesisId:'J',location:'perf-dashboard.js:reconcilePerf',message:'Ajith SVC after max-LUD per Mobile+Project',data:ajithDebug,timestamp:Date.now()})}).catch(()=>{});
+  fetch('http://127.0.0.1:7843/ingest/f4ac7d78-fa93-4940-929e-852fd1791883',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'301f07'},body:JSON.stringify({sessionId:'301f07',runId:'total-leads-sie-ni-svc',hypothesisId:'K',location:'perf-dashboard.js:reconcilePerf',message:'Total Leads = Master + History SIE/NI/SVC unique Mobile+Project',data:ajithDebug,timestamp:Date.now()})}).catch(()=>{});
   // #endregion
 
   return {
@@ -915,10 +928,11 @@ function renderPerfPreview(panel, reconciled) {
     (tcList?.parentElement || panel).append(debugEl);
   }
   const d = reconciled?._debug?.ajith || window.__perfAjithDebug || {};
+  const tl = d.totalLeads || {};
   debugEl.textContent =
-    `DEBUG max-LUD per Mobile+Project: History ${d.historyRaw ?? "?"} → ${d.historyCollapsed ?? "?"} leads` +
-    ` · Ajith raw SVC=${d.rawSvcRows ?? "?"} → after collapse SVC=${d.bucketSvc ?? "?"}` +
-    ` (build 5.2.39)`;
+    `DEBUG Total Leads: Master ${tl.masterRows ?? "?"} + History SIE/NI/SVC ${tl.historySieNiSvcLeads ?? "?"} = ${tl.total ?? "?"}` +
+    ` (SIE ${tl.breakdown?.sie ?? "?"}/NI ${tl.breakdown?.ni ?? "?"}/SVC ${tl.breakdown?.svc ?? "?"}; skipped other TCS ${tl.breakdown?.skippedOtherTcs ?? "?"})` +
+    ` · Ajith SVC ${d.rawSvcRows ?? "?"}→${d.bucketSvc ?? "?"} · build 5.2.40`;
 }
 
 function updatePerfValidation(el, messages, isError) {
