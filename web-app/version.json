@@ -1,5 +1,5 @@
 {
-  "version": "5.2.35",
+  "version": "5.2.36",
   "name": "LeadLens",
-  "notes": "v5.2.35: Performance scorecard — Total/Active Leads, STE/SVS/SVC/NI, overdue, conversion %."
+  "notes": "v5.2.36: Total Leads uses unique History leads (Mobile+Project), not History row count."
 }

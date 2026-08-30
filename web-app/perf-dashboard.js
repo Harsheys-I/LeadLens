@@ -1,7 +1,7 @@
 /**
  * TeleCalling Performance Report — Excel parse, metrics engine, published dashboard UI.
  */
-import {PerfDashboardApi} from "./api-client.js?v=5.2.35";
+import {PerfDashboardApi} from "./api-client.js?v=5.2.36";
 
 const MASTER_FIELDS = [
   {id: "mobile", label: "Mobile", aliases: "mobile, mobile number, phone"},
@@ -190,13 +190,22 @@ function formatPct(value) {
 }
 
 function leadKey(row) {
-  return `${norm(row.mobile)}|${norm(row.project)}`;
+  let mobile = norm(row.mobile);
+  // Excel often stores phones as numbers → "9876543210.0"
+  if (/^\d+\.0+$/.test(mobile)) mobile = mobile.replace(/\.0+$/, "");
+  const project = norm(row.project);
+  if (!mobile && !project) return "";
+  return `${mobile}|${project}`;
 }
 
 function finalizeBucket(bucket) {
-  const historyOnly = [...(bucket._historyKeys || [])].filter(k => !(bucket._masterKeys || new Set()).has(k)).length;
+  const masterKeys = bucket._masterKeys || new Set();
+  const historyKeys = bucket._historyKeys || new Set();
+  // Total Leads = unique leads across Master ∪ History (never History row count).
+  const union = new Set([...masterKeys, ...historyKeys]);
   bucket.activeLeads = Number(bucket.activeLeads) || 0;
-  bucket.totalLeads = bucket.activeLeads + historyOnly;
+  bucket.historyLeads = historyKeys.size;
+  bucket.totalLeads = union.size;
   bucket.pie = {
     notInterested: Number(bucket.notInterested) || 0,
     siteVisitScheduled: Number(bucket.siteVisitScheduled) || 0,
@@ -341,12 +350,6 @@ export function reconcilePerf(masterRows, historyRows) {
     if (!dateMax || d > dateMax) dateMax = d;
   }
 
-  const allMasterKeys = new Set();
-  for (const row of masterRows) {
-    const key = leadKey(row);
-    if (key !== "|") allMasterKeys.add(key);
-  }
-
   const byTelecaller = {};
   const ensureTc = name => {
     const key = clean(name) || "Unknown";
@@ -359,7 +362,7 @@ export function reconcilePerf(masterRows, historyRows) {
     const tc = ensureTc(row.telecaller);
     const key = leadKey(row);
     byTelecaller[tc].activeLeads += 1;
-    if (key !== "|") byTelecaller[tc]._masterKeys.add(key);
+    if (key) byTelecaller[tc]._masterKeys.add(key);
     if (row.nextDate && row.nextDate < today) {
       byTelecaller[tc].overdue += 1;
     }
@@ -368,9 +371,8 @@ export function reconcilePerf(masterRows, historyRows) {
   for (const row of historyRows) {
     const tc = ensureTc(row.telecaller);
     const key = leadKey(row);
-    if (key !== "|" && !allMasterKeys.has(key)) {
-      byTelecaller[tc]._historyKeys.add(key);
-    }
+    // Unique History leads (Mobile+Project) — one lead can have many History rows.
+    if (key) byTelecaller[tc]._historyKeys.add(key);
     const st = norm(row.status);
     const tcs = norm(row.telecallingStatus);
     if (st === "not interested") byTelecaller[tc].notInterested += 1;
