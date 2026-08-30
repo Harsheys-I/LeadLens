@@ -1,2 +1,3 @@
 # Never commit Hostinger credentials
 web-app/api/config.local.php
+.cursor/
