@@ -174,7 +174,7 @@ function emptyPie() {
 }
 
 function emptyTelecallerBucket() {
-  return {...emptyMetrics(), pie: emptyPie(), _historyKeys: new Set(), _masterKeys: new Set()};
+  return {...emptyMetrics(), pie: emptyPie(), _historyKeys: new Set()};
 }
 
 function pct(numerator, denominator) {
@@ -199,13 +199,11 @@ function leadKey(row) {
 }
 
 function finalizeBucket(bucket) {
-  const masterKeys = bucket._masterKeys || new Set();
   const historyOnlyKeys = bucket._historyKeys || new Set();
-  // Total Leads = unique Master (this TC) ∪ unique History leads not in Master (any TC).
-  const union = new Set([...masterKeys, ...historyOnlyKeys]);
+  // Total Leads = Master rows + unique History leads not already in Master (any telecaller).
   bucket.activeLeads = Number(bucket.activeLeads) || 0;
   bucket.historyLeads = historyOnlyKeys.size;
-  bucket.totalLeads = union.size;
+  bucket.totalLeads = bucket.activeLeads + historyOnlyKeys.size;
   bucket.pie = {
     notInterested: Number(bucket.notInterested) || 0,
     siteVisitScheduled: Number(bucket.siteVisitScheduled) || 0,
@@ -214,7 +212,6 @@ function finalizeBucket(bucket) {
     overdue: Number(bucket.overdue) || 0,
   };
   delete bucket._historyKeys;
-  delete bucket._masterKeys;
   return bucket;
 }
 
@@ -367,9 +364,7 @@ export function reconcilePerf(masterRows, historyRows) {
   const today = todayStart();
   for (const row of masterRows) {
     const tc = ensureTc(row.telecaller);
-    const key = leadKey(row);
     byTelecaller[tc].activeLeads += 1;
-    if (key) byTelecaller[tc]._masterKeys.add(key);
     if (row.nextDate && row.nextDate < today) {
       byTelecaller[tc].overdue += 1;
     }
@@ -586,7 +581,7 @@ function renderTelecallerTable(mount, data) {
   mount.append(wrap);
 }
 
-function renderSummaryPanel(mount, data, {perTelecaller = false} = {}) {
+function renderSummaryPanel(mount, data) {
   mount.replaceChildren();
   const header = document.createElement("p");
   header.className = "perf-date-range";
@@ -594,85 +589,19 @@ function renderSummaryPanel(mount, data, {perTelecaller = false} = {}) {
   mount.append(header);
 
   const names = telecallerNames(data);
-  const title = perTelecaller && names.length === 1
-    ? `${names[0]} · totals`
-    : "Totals";
+  const title = names.length === 1 ? `${names[0]} · totals` : "All TeleCallers · totals";
   renderTotalsBlock(mount, data.summary, title);
 
-  if (perTelecaller) {
-    const tableTitle = document.createElement("h3");
-    tableTitle.className = "perf-section-title";
-    tableTitle.textContent = "Telecaller breakdown";
-    mount.append(tableTitle);
-    renderTelecallerTable(mount, data);
-  }
+  const tableTitle = document.createElement("h3");
+  tableTitle.className = "perf-section-title";
+  tableTitle.textContent = "Telecaller breakdown";
+  mount.append(tableTitle);
+  renderTelecallerTable(mount, data);
 }
 
-function renderAggregateBarCharts(mount, summary) {
-  const label = "All";
-  for (const metricKey of METRIC_KEYS) {
-    const block = document.createElement("div");
-    block.className = "perf-chart-block";
-    const title = document.createElement("h3");
-    title.textContent = METRIC_LABELS[metricKey];
-    block.append(title);
-    const wrap = document.createElement("div");
-    wrap.className = "perf-chart-wrap";
-    const canvas = document.createElement("canvas");
-    wrap.append(canvas);
-    block.append(wrap);
-    mount.append(block);
-    renderBarChart(canvas, [label], [Number(summary?.[metricKey] || 0)]);
-  }
-
-  for (const pctKey of PCT_KEYS) {
-    const block = document.createElement("div");
-    block.className = "perf-chart-block";
-    const title = document.createElement("h3");
-    title.textContent = PCT_LABELS[pctKey];
-    block.append(title);
-    const wrap = document.createElement("div");
-    wrap.className = "perf-chart-wrap";
-    const canvas = document.createElement("canvas");
-    wrap.append(canvas);
-    block.append(wrap);
-    mount.append(block);
-    const value = pctKey === "totalLeadsVsSiteVisitedPct"
-      ? (pct(summary?.siteVisited, summary?.totalLeads) ?? 0)
-      : (pct(summary?.siteVisited, summary?.siteVisitScheduled) ?? 0);
-    renderBarChart(canvas, [label], [value], "#2a5f9e");
-  }
-
-  const pieBlock = document.createElement("div");
-  pieBlock.className = "perf-chart-block perf-chart-block-pie";
-  const pieTitle = document.createElement("h3");
-  pieTitle.textContent = "Status breakdown";
-  pieBlock.append(pieTitle);
-  const pieWrap = document.createElement("div");
-  pieWrap.className = "perf-chart-wrap perf-chart-wrap-pie";
-  const pieCanvas = document.createElement("canvas");
-  pieWrap.append(pieCanvas);
-  pieBlock.append(pieWrap);
-  mount.append(pieBlock);
-}
-
-function renderGraphsPanel(mount, data, {perTelecaller = false} = {}) {
+function renderGraphsPanel(mount, data) {
   destroyPerfCharts();
   mount.replaceChildren();
-
-  if (!perTelecaller) {
-    const hasTotals = METRIC_KEYS.some(k => Number(data.summary?.[k] || 0) > 0)
-      || PIE_KEYS.some(k => Number(data.pie?.[k] || 0) > 0);
-    if (!hasTotals) {
-      mount.innerHTML = '<div class="empty-card">No data to chart.</div>';
-      return;
-    }
-    renderAggregateBarCharts(mount, data.summary);
-    const pieCanvas = mount.querySelector(".perf-chart-block-pie canvas");
-    if (pieCanvas) renderPieChart(pieCanvas, data.pie || emptyPie(), "perf-pie-combined");
-    return;
-  }
-
   const names = telecallerNames(data);
   if (!names.length) {
     mount.innerHTML = '<div class="empty-card">No telecaller data to chart.</div>';
@@ -719,7 +648,7 @@ function renderGraphsPanel(mount, data, {perTelecaller = false} = {}) {
   pieSection.className = "perf-pie-section";
   const pieHeading = document.createElement("h3");
   pieHeading.className = "perf-section-title";
-  pieHeading.textContent = "Status breakdown";
+  pieHeading.textContent = names.length === 1 ? "Status breakdown" : "Status breakdown by Telecaller";
   pieSection.append(pieHeading);
 
   const pieGrid = document.createElement("div");
@@ -736,21 +665,25 @@ function renderGraphsPanel(mount, data, {perTelecaller = false} = {}) {
     pieWrap.append(pieCanvas);
     block.append(pieWrap);
     pieGrid.append(block);
-    renderPieChart(pieCanvas, pieFromBucket(data.byTelecaller[name]), `perf-pie-${name.replace(/\W+/g, "-")}`);
+    const pieData = pieFromBucket(data.byTelecaller[name]);
+    renderPieChart(pieCanvas, pieData, `perf-pie-${name.replace(/\W+/g, "-")}`);
   }
   pieSection.append(pieGrid);
   mount.append(pieSection);
-}
 
-function paintPerfPanels() {
-  if (!perfCombinedCache) return;
-  const perTelecaller = Boolean(perfTcFilter && perfTcFilter !== "__all__");
-  const filtered = filterByTelecaller(perfCombinedCache, perfTcFilter);
-  const summaryMount = document.getElementById("perf-tab-summary");
-  const graphsMount = document.getElementById("perf-tab-graphs");
-  if (summaryMount) renderSummaryPanel(summaryMount, filtered, {perTelecaller});
-  if (perfActiveTab === "graphs" && graphsMount) {
-    renderGraphsPanel(graphsMount, filtered, {perTelecaller});
+  if (names.length > 1) {
+    const globalBlock = document.createElement("div");
+    globalBlock.className = "perf-chart-block perf-chart-block-pie";
+    const globalTitle = document.createElement("h4");
+    globalTitle.textContent = "Combined status (all TeleCallers)";
+    globalBlock.append(globalTitle);
+    const pieWrap = document.createElement("div");
+    pieWrap.className = "perf-chart-wrap perf-chart-wrap-pie";
+    const pieCanvas = document.createElement("canvas");
+    pieWrap.append(pieCanvas);
+    globalBlock.append(pieWrap);
+    mount.append(globalBlock);
+    renderPieChart(pieCanvas, data.pie || emptyPie(), "perf-pie-combined");
   }
 }
 
@@ -777,7 +710,7 @@ function renderPerfPreview(panel, reconciled) {
     pie: reconciled.pie,
     date_min: reconciled.dateMin,
     date_max: reconciled.dateMax,
-  }, {perTelecaller: false});
+  });
   const tcList = panel.querySelector("#perf-preview-telecallers");
   if (tcList) {
     const names = Object.keys(reconciled.byTelecaller).sort((a, b) => a.localeCompare(b, undefined, {sensitivity: "base"}));
@@ -985,7 +918,9 @@ function setPerfTab(tab) {
   });
   document.getElementById("perf-tab-summary")?.classList.toggle("hidden", tab !== "summary");
   document.getElementById("perf-tab-graphs")?.classList.toggle("hidden", tab !== "graphs");
-  if (tab === "graphs" && perfCombinedCache) paintPerfPanels();
+  if (tab === "graphs" && perfCombinedCache) {
+    renderGraphsPanel(document.getElementById("perf-tab-graphs"), filterByTelecaller(perfCombinedCache, perfTcFilter));
+  }
 }
 
 /**
@@ -1003,7 +938,12 @@ export function mountPerfPublishedDashboard(ctx) {
   const filterSelect = document.getElementById("perf-tc-filter");
   filterSelect?.addEventListener("change", () => {
     perfTcFilter = filterSelect.value || "__all__";
-    paintPerfPanels();
+    if (!perfCombinedCache) return;
+    const filtered = filterByTelecaller(perfCombinedCache, perfTcFilter);
+    renderSummaryPanel(document.getElementById("perf-tab-summary"), filtered);
+    if (perfActiveTab === "graphs") {
+      renderGraphsPanel(document.getElementById("perf-tab-graphs"), filtered);
+    }
   });
 
   perfPublishedHandlers = {canViewAll, filterRow, filterSelect};
@@ -1067,7 +1007,10 @@ export async function refreshPerfPublished() {
       perfTcFilter = "__all__";
     }
 
-    if (summaryMount || graphsMount) paintPerfPanels();
+    if (summaryMount) renderSummaryPanel(summaryMount, filterByTelecaller(data, perfTcFilter));
+    if (perfActiveTab === "graphs" && graphsMount) {
+      renderGraphsPanel(graphsMount, filterByTelecaller(data, perfTcFilter));
+    }
     setPerfTab(perfActiveTab);
   } catch (err) {
     empty?.classList.remove("hidden");
