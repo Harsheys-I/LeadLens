@@ -48,7 +48,7 @@ try {
     case 'meta':
       ll_ok([
         'permissions' => ll_permission_catalog(),
-        'app' => $GLOBALS['LL_CONFIG']['app']['name'] ?? 'LeadLens',
+        'app' => $GLOBALS['LL_CONFIG']['app']['name'] ?? 'GPP AI',
       ]);
       break;
     default:

@@ -12,7 +12,7 @@ header('Content-Type: text/html; charset=utf-8');
 $configLocal = __DIR__ . '/config.local.php';
 if (!is_file($configLocal)) {
   http_response_code(503);
-  echo '<h1>LeadLens install</h1><p>Copy <code>api/config.example.php</code> → <code>api/config.local.php</code> with MySQL credentials first.</p>';
+  echo '<h1>GPP AI install</h1><p>Copy <code>api/config.example.php</code> → <code>api/config.local.php</code> with MySQL credentials first.</p>';
   exit;
 }
 
@@ -206,7 +206,7 @@ function ll_install_run(): void
 
 try {
   ll_install_run();
-  echo '<h1>LeadLens install OK</h1>';
+  echo '<h1>GPP AI install OK</h1>';
   echo '<p>Tables created/verified. Seed Super User: <code>super user</code> / <code>12345</code> (change password on first login).</p>';
   echo '<p>Recommended: set <code>app.install_locked</code> to <code>true</code> in <code>config.local.php</code>, or delete/rename this file.</p>';
   echo '<p><a href="/">Go to login</a></p>';

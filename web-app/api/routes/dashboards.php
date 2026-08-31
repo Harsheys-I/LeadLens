@@ -281,17 +281,42 @@ function ll_route_dashboards(string $action, ?int $id): void
 
   if ($method === 'GET' && $action === 'telecaller-names') {
     ll_require_permission('admin.users');
-    $rows = ll_pdo()->query(
+    $pdo = ll_pdo();
+    // Merge Bucket 1 Followup Review + TeleCalling Performance published telecaller names (case-insensitive dedupe).
+    $byLower = [];
+    $addName = static function (string $raw) use (&$byLower): void {
+      $name = trim($raw);
+      if ($name === '') {
+        return;
+      }
+      $key = strtolower($name);
+      if (!isset($byLower[$key])) {
+        $byLower[$key] = $name;
+      }
+    };
+    $auditRows = $pdo->query(
       'SELECT DISTINCT telecaller_name
        FROM published_dashboards
-       WHERE telecaller_name IS NOT NULL AND telecaller_name <> \'\'
-       ORDER BY telecaller_name ASC'
+       WHERE telecaller_name IS NOT NULL AND telecaller_name <> \'\''
     )->fetchAll();
-    $names = [];
-    foreach ($rows as $row) {
-      $names[] = $row['telecaller_name'];
+    foreach ($auditRows as $row) {
+      $addName((string) ($row['telecaller_name'] ?? ''));
     }
-    ll_ok(['names' => $names]);
+    try {
+      $perfRows = $pdo->query(
+        'SELECT DISTINCT telecaller_name
+         FROM perf_published_dashboards
+         WHERE telecaller_name IS NOT NULL AND telecaller_name <> \'\''
+      )->fetchAll();
+      foreach ($perfRows as $row) {
+        $addName((string) ($row['telecaller_name'] ?? ''));
+      }
+    } catch (Throwable $e) {
+      // Perf table may not exist yet on older installs.
+    }
+    $names = array_values($byLower);
+    natcasesort($names);
+    ll_ok(['names' => array_values($names)]);
   }
 
   if ($method === 'GET' && ($action === 'get' || ctype_digit($action))) {

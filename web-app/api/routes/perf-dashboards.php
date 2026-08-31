@@ -112,7 +112,11 @@ function ll_perf_merge_dimension_buckets(array $existing, array $incoming): arra
   foreach (ll_perf_empty_pie() as $key => $_) {
     $merged['pie'][$key] = (int) ($existingPie[$key] ?? 0) + (int) ($incomingPie[$key] ?? 0);
   }
-  $additive = ['totalCalls', 'notFollowupLeads', 'draftLeads', 'siteVisited', 'siteVisitScheduled', 'siteVisitPending', 'siteVisitCancelled', 'notInterested', 'overdue'];
+  $additive = [
+    'totalLeads', 'activeLeads', 'totalCalls', 'notFollowupLeads', 'draftLeads',
+    'siteVisited', 'siteVisitScheduled', 'siteVisitPending', 'siteVisitCancelled',
+    'notInterested', 'overdue',
+  ];
   foreach ($additive as $key) {
     $merged[$key] = (int) ($existing[$key] ?? 0) + (int) ($incoming[$key] ?? 0);
   }
@@ -375,19 +379,19 @@ function ll_route_perf_dashboards(string $action, ?int $id): void
           if (!is_array($metrics)) {
             continue;
           }
-          if (isset($mergedByProject[$name])) {
-            continue;
-          }
-          $mergedByProject[$name] = ll_perf_normalize_dimension_bucket($metrics);
+          $bucket = ll_perf_normalize_dimension_bucket($metrics);
+          $mergedByProject[$name] = isset($mergedByProject[$name])
+            ? ll_perf_merge_dimension_buckets($mergedByProject[$name], $bucket)
+            : $bucket;
         }
         foreach ($bySource as $name => $metrics) {
           if (!is_array($metrics)) {
             continue;
           }
-          if (isset($mergedBySource[$name])) {
-            continue;
-          }
-          $mergedBySource[$name] = ll_perf_normalize_dimension_bucket($metrics);
+          $bucket = ll_perf_normalize_dimension_bucket($metrics);
+          $mergedBySource[$name] = isset($mergedBySource[$name])
+            ? ll_perf_merge_dimension_buckets($mergedBySource[$name], $bucket)
+            : $bucket;
         }
       } else {
         $normalized = [];
@@ -397,6 +401,16 @@ function ll_route_perf_dashboards(string $action, ?int $id): void
           }
         }
         $mergedByTc = $normalized;
+        foreach ($byProject as $name => $metrics) {
+          if (is_array($metrics)) {
+            $mergedByProject[$name] = ll_perf_normalize_dimension_bucket($metrics);
+          }
+        }
+        foreach ($bySource as $name => $metrics) {
+          if (is_array($metrics)) {
+            $mergedBySource[$name] = ll_perf_normalize_dimension_bucket($metrics);
+          }
+        }
         $pie = array_merge(ll_perf_empty_pie(), array_intersect_key($rowPie, ll_perf_empty_pie()));
       }
 
@@ -451,14 +465,9 @@ function ll_route_perf_dashboards(string $action, ?int $id): void
       'title' => $title,
       'updated_at' => $latestUpdated,
       'view_all' => $viewAll,
+      'byProject' => $mergedByProject ?: new stdClass(),
+      'bySource' => $mergedBySource ?: new stdClass(),
     ];
-    if ($viewAll) {
-      $response['byProject'] = $mergedByProject ?: new stdClass();
-      $response['bySource'] = $mergedBySource ?: new stdClass();
-    } else {
-      $response['byProject'] = new stdClass();
-      $response['bySource'] = new stdClass();
-    }
     ll_ok($response);
   }
 

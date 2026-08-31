@@ -1924,7 +1924,7 @@ function showUpdateBanner(latest){
   const box=els["update-banner-text"];
   if(!box)return;
   box.replaceChildren();
-  box.append(`LeadLens v${latest} is available (you are on v${APP_VERSION}). Hard-reload to update.`);
+  box.append(`GPP AI v${latest} is available (you are on v${APP_VERSION}). Hard-reload to update.`);
 }
 async function checkForUpdate(){
   if(els["app-version"])els["app-version"].textContent=APP_VERSION;

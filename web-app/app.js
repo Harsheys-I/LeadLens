@@ -5,12 +5,12 @@ import {requireAuth,logout,hasPermission,getUser,changePassword,updateProfile} f
 import {DashboardApi,SettingsApi} from "./api-client.js?v=5.4";
 import {mountNotifications} from "./notifications-ui.js?v=5.4";
 import {persistJob,removeJobSynced,clearJobsSynced,pullJobsFromServer} from "./jobs-sync.js?v=5.4";
-import {mountPerfReportUpload,mountPerfPublishedDashboard,refreshPerfPublished} from "./perf-dashboard.js?v=5.5";
+import {mountPerfReportUpload,mountPerfPublishedDashboard,refreshPerfPublished} from "./perf-dashboard.js?v=5.6";
 
 const $=id=>document.getElementById(id);
 const ids=["page-title","key-state","run-name","pause-run","download-result","progress-label","progress-percent","progress-bar","metric-leads","metric-excel-rows","metric-calls","metric-batch","metric-completed","metric-status","metric-input-tokens","metric-cached-tokens","metric-output-tokens","metric-duration","metric-cost","live-log","clear-console","history-list","clear-history","api-key","remember-key","toggle-key","save-key","forget-key","key-message","batch-size","concurrency","model","input-field-config","add-input-field","ai-field-config","output-field-config","yes-values","no-values","input-price","cached-price","output-price","save-settings","reset-settings","settings-message","toast","mobile-menu","active-job-switch","sort-field","sort-direction","app-version","export-settings","import-settings","import-settings-file","update-banner","update-banner-text","reload-app","key-modal","onboard-key","onboard-toggle","onboard-remember","onboard-message","onboard-save","onboard-skip","sidebar-version","sidebar-notes","review-drop-zone","review-file-input","review-drop-hint","review-file-list","review-validation","start-review","review-run-panel","review-aggregate","review-cards","review-dashboard-panel","review-dashboard-mount","download-review-excel","review-open-console","review-precounts","review-live-progress","review-progress-label","review-progress-percent","review-progress-bar","review-post-actions","create-review-dashboard","export-dashboard-pdf","upload-dashboard-btn","upload-dashboard-modal","upload-telecaller-list","upload-dash-message","upload-dash-confirm","upload-dash-cancel","published-list","refresh-published","published-dashboard-panel","published-dash-title","published-dash-meta","published-dash-actions","published-dashboard-mount","shell-user-label","shell-logout","shell-account"];
 const els=Object.fromEntries(ids.map(id=>[id,$(id)]));
-const titles={review:"Bucket 1 Lead Audit",console:"Run console",published:"Dashboard",history:"History",settings:"Settings","perf-report":"TeleCalling Performance Report","perf-dashboard":"Performance Dashboard","perf-settings":"Performance Settings"};
+const titles={review:"Bucket 1 Followup Review",console:"Run console",published:"Dashboard",history:"History",settings:"Settings","perf-report":"TeleCalling Performance","perf-dashboard":"Performance Dashboard","perf-settings":"Performance Settings"};
 /** When false, completed audits do not auto-render charts until Create Dashboard. */
 let reviewDashboardRequested=false;
 let lastReadyReviewJobs=[];
@@ -65,19 +65,15 @@ function dashboardRenderOptions(jobsForPdf){
 
 async function exportDashboardPdf(jobs){
   try{
-    let list=(jobs||[]).filter(job=>job&&job.results?.length);
+    const list=(jobs||[]).filter(job=>job&&job.results?.length);
     if(!list.length){
       toast("No dashboard data to export");
       return;
     }
-    if(list.length===1){
-      const split=splitResultsByTelecaller(list[0].results);
-      if(split.length>1)list=split;
-    }
     toast("Building PDF…");
     const stamp=new Date().toISOString().slice(0,10);
     await downloadReviewPdf(list,`TeleCaller_Dashboard_${stamp}.pdf`);
-    toast(list.length===1?"PDF downloaded":`PDF downloaded (${list.length} TeleCallers)`);
+    toast("PDF downloaded");
   }catch(err){
     toast(err.message||"PDF export failed");
   }
@@ -158,7 +154,7 @@ function clearInMemoryJobs(){
 }
 
 function setNavGroupExpanded(group,expanded){
-  if(!group)return;
+  if(!group||group.classList.contains("is-flat"))return;
   group.classList.toggle("is-collapsed",!expanded);
   group.querySelectorAll(".nav-toggle").forEach(btn=>{
     btn.setAttribute("aria-expanded",expanded?"true":"false");
@@ -1802,7 +1798,7 @@ function showUpdateBanner(latest){
   const box=els["update-banner-text"];
   box.replaceChildren();
   const appendKbd=label=>{const k=document.createElement("kbd");k.textContent=label;box.append(k);};
-  box.append("LeadLens ");
+  box.append("GPP AI ");
   const vNew=document.createElement("strong");vNew.textContent=`v${latest}`;box.append(vNew);
   box.append(" is available (you are on ");
   const vCur=document.createElement("strong");vCur.textContent=`v${APP_VERSION}`;box.append(vCur);
@@ -2120,8 +2116,17 @@ async function bootTeleCallerAudit(){
   });
   document.querySelectorAll(".nav-group").forEach(group=>{
     const items=[...group.querySelectorAll(".nav-item")];
-    const anyVisible=items.some(btn=>!btn.classList.contains("hidden"));
-    group.classList.toggle("hidden",!anyVisible);
+    const visible=items.filter(btn=>!btn.classList.contains("hidden"));
+    group.classList.toggle("hidden",!visible.length);
+    if(!visible.length)return;
+    // Parent hidden but children remain (e.g. Telecaller → Dashboard only):
+    // flatten to top-level items so caret/tree chrome is not orphaned.
+    const parentVisible=visible.some(btn=>btn.classList.contains("nav-item-parent"));
+    if(!parentVisible){
+      group.classList.add("is-flat");
+      group.classList.remove("is-collapsed");
+      group.querySelector(".nav-parent-row")?.classList.add("hidden");
+    }
   });
   if(els["review-open-console"]&&!hasPermission("telecaller.run_console")){
     els["review-open-console"].classList.add("hidden");

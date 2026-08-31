@@ -1,5 +1,5 @@
 /**
- * TeleCalling Performance Report — Excel parse, metrics engine, published dashboard UI.
+ * TeleCalling Performance — Excel parse, metrics engine, published dashboard UI.
  */
 import {PerfDashboardApi} from "./api-client.js?v=5.4";
 import {downloadBlobFile} from "./audit.js?v=5.4";
@@ -609,6 +609,9 @@ function createBucketMaps() {
     byProject: {},
     bySource: {},
   };
+  /** Flat compound maps: telecaller×project / telecaller×source for per-TC publish payloads. */
+  const byTcProjectFlat = {};
+  const byTcSourceFlat = {};
   const ensure = (map, name) => {
     const display = clean(name) || "Unknown";
     const key = norm(display) || "unknown";
@@ -620,13 +623,32 @@ function createBucketMaps() {
     }
     return key;
   };
+  const ensureCompound = (map, tcName, dimName) => {
+    const tcDisplay = clean(tcName) || "Unknown";
+    const dimDisplay = clean(dimName) || "Unknown";
+    const tcKey = norm(tcDisplay) || "unknown";
+    const dimKey = norm(dimDisplay) || "unknown";
+    const key = `${tcKey}\0${dimKey}`;
+    if (!map[key]) {
+      map[key] = emptyTelecallerBucket();
+      map[key]._tcDisplay = tcDisplay;
+      map[key]._dimDisplay = dimDisplay;
+    } else {
+      if (tcDisplay !== "Unknown" && map[key]._tcDisplay === "Unknown") map[key]._tcDisplay = tcDisplay;
+      if (dimDisplay !== "Unknown" && map[key]._dimDisplay === "Unknown") map[key]._dimDisplay = dimDisplay;
+    }
+    return key;
+  };
   const resolvers = [
     {map: maps.byTelecaller, resolve: row => ensure(maps.byTelecaller, row.telecaller)},
     {map: maps.byProject, resolve: row => ensure(maps.byProject, row.project)},
     {map: maps.bySource, resolve: row => ensure(maps.bySource, row.source)},
+    {map: byTcProjectFlat, resolve: row => ensureCompound(byTcProjectFlat, row.telecaller, row.project)},
+    {map: byTcSourceFlat, resolve: row => ensureCompound(byTcSourceFlat, row.telecaller, row.source)},
   ];
+  const allMaps = () => [...Object.values(maps), byTcProjectFlat, byTcSourceFlat];
   const resetVisitCounts = () => {
-    for (const map of Object.values(maps)) {
+    for (const map of allMaps()) {
       for (const bucket of Object.values(map)) {
         bucket.notInterested = 0;
         bucket.siteVisitScheduled = 0;
@@ -636,7 +658,7 @@ function createBucketMaps() {
       }
     }
   };
-  return {maps, resolvers, resetVisitCounts};
+  return {maps, byTcProjectFlat, byTcSourceFlat, resolvers, resetVisitCounts, allMaps};
 }
 
 function bucketsToDisplay(map) {
@@ -645,6 +667,20 @@ function bucketsToDisplay(map) {
     const name = bucket._displayName || "Unknown";
     delete bucket._displayName;
     out[name] = bucket;
+  }
+  return out;
+}
+
+/** Group compound telecaller×dimension buckets into { telecallerName: { dimName: metrics } }. */
+function compoundBucketsToNested(map) {
+  const out = {};
+  for (const bucket of Object.values(map)) {
+    const tc = bucket._tcDisplay || "Unknown";
+    const dim = bucket._dimDisplay || "Unknown";
+    delete bucket._tcDisplay;
+    delete bucket._dimDisplay;
+    if (!out[tc]) out[tc] = {};
+    out[tc][dim] = bucket;
   }
   return out;
 }
@@ -676,7 +712,7 @@ export function reconcilePerf(masterRows, historyRows) {
   const {filled: historyFilled, leads: historyLeads} = collapseHistoryToLatestLead(historyRows);
   const reportDays = reportDayCount(dateToIso(dateMin), dateToIso(dateMax));
 
-  const {maps, resolvers, resetVisitCounts} = createBucketMaps();
+  const {maps, byTcProjectFlat, byTcSourceFlat, resolvers, resetVisitCounts, allMaps} = createBucketMaps();
   const {byTelecaller, byProject, bySource} = maps;
 
   const allMasterKeys = new Set();
@@ -763,13 +799,15 @@ export function reconcilePerf(masterRows, historyRows) {
     }
   }
 
-  for (const map of Object.values(maps)) {
+  for (const map of allMaps()) {
     for (const bucket of Object.values(map)) finalizeBucket(bucket);
   }
 
   const byTelecallerDisplay = bucketsToDisplay(byTelecaller);
   const byProjectDisplay = bucketsToDisplay(byProject);
   const bySourceDisplay = bucketsToDisplay(bySource);
+  const byTelecallerProject = compoundBucketsToNested(byTcProjectFlat);
+  const byTelecallerSource = compoundBucketsToNested(byTcSourceFlat);
 
   const summary = emptyMetrics();
   summary.activeLeads = allMasterKeys.size;
@@ -809,6 +847,8 @@ export function reconcilePerf(masterRows, historyRows) {
     byTelecaller: byTelecallerDisplay,
     byProject: byProjectDisplay,
     bySource: bySourceDisplay,
+    byTelecallerProject,
+    byTelecallerSource,
     pie,
     dateMin: dateToIso(dateMin),
     dateMax: dateToIso(dateMax),
@@ -997,7 +1037,7 @@ function renderTotalsBlock(mount, summary, title = "Totals", reportDays = 0) {
   mount.append(block);
 }
 
-function renderBreakdownTable(mount, data, dimension) {
+function renderBreakdownTable(mount, data, dimension, {showTotalRow = true} = {}) {
   const cfg = PERF_DIMENSIONS[dimension] || PERF_DIMENSIONS.telecaller;
   const buckets = getBucketMap(data, dimension);
   const names = dimensionNames(data, dimension);
@@ -1041,19 +1081,21 @@ function renderBreakdownTable(mount, data, dimension) {
     tbody.append(tr);
   }
 
-  const totals = sumBucketMetrics(buckets, names);
-  const totalTr = document.createElement("tr");
-  totalTr.className = "perf-total-row";
-  const totalNameCell = document.createElement("th");
-  totalNameCell.scope = "row";
-  totalNameCell.textContent = "Total";
-  totalTr.append(totalNameCell);
-  for (const col of SCORECARD_COLUMNS) {
-    const td = document.createElement("td");
-    td.textContent = scorecardCellValue(totals, col, reportDays);
-    totalTr.append(td);
+  if (showTotalRow) {
+    const totals = sumBucketMetrics(buckets, names);
+    const totalTr = document.createElement("tr");
+    totalTr.className = "perf-total-row";
+    const totalNameCell = document.createElement("th");
+    totalNameCell.scope = "row";
+    totalNameCell.textContent = "Total";
+    totalTr.append(totalNameCell);
+    for (const col of SCORECARD_COLUMNS) {
+      const td = document.createElement("td");
+      td.textContent = scorecardCellValue(totals, col, reportDays);
+      totalTr.append(td);
+    }
+    tbody.append(totalTr);
   }
-  tbody.append(totalTr);
 
   table.append(tbody);
   wrap.append(table);
@@ -1071,27 +1113,14 @@ function renderPerfSummaryView(mount, data) {
   mount.replaceChildren();
   renderSummaryHeader(mount, data);
   const filtered = filterPerfData(data, "telecaller", perfFilters);
-  renderTotalsBlock(mount, filtered.summary, "All TeleCallers · totals", getReportDays(data));
-  const tableTitle = document.createElement("h3");
-  tableTitle.className = "perf-section-title";
-  tableTitle.textContent = PERF_DIMENSIONS.telecaller.tableTitle;
-  mount.append(tableTitle);
-  renderBreakdownTable(mount, filtered, "telecaller");
+  const title = data.view_all ? "All TeleCallers · totals" : "Totals";
+  renderTotalsBlock(mount, filtered.summary, title, getReportDays(data));
 }
 
 function renderPerfTableView(mount, data, dimension) {
   mount.replaceChildren();
-  const cfg = PERF_DIMENSIONS[dimension] || PERF_DIMENSIONS.telecaller;
   renderSummaryHeader(mount, data);
-  const names = dimensionNames(data, dimension);
-  let title = `All ${cfg.totalsLabel} · totals`;
-  if (names.length === 1) title = `${names[0]} · totals`;
-  renderTotalsBlock(mount, data.summary, title, getReportDays(data));
-  const tableTitle = document.createElement("h3");
-  tableTitle.className = "perf-section-title";
-  tableTitle.textContent = cfg.tableTitle;
-  mount.append(tableTitle);
-  renderBreakdownTable(mount, data, dimension);
+  renderBreakdownTable(mount, data, dimension, {showTotalRow: shouldShowPerfTotalRow()});
 }
 
 function renderSummaryPanel(mount, data, dimension = "telecaller") {
@@ -1377,15 +1406,15 @@ export function mountPerfReportUpload(ctx) {
       if (modalMsg) modalMsg.textContent = "Select at least one TeleCaller.";
       return;
     }
-    const dashboards = selected.map((name, index) => {
+    const dashboards = selected.map(name => {
       const bucket = perfReconciled.byTelecaller[name] || emptyTelecallerBucket();
       return {
         telecaller_name: name,
         title: `${name} · Performance`,
         summary: metricsFromBucket(bucket),
         byTelecaller: {[name]: bucket},
-        byProject: index === 0 ? perfReconciled.byProject : {},
-        bySource: index === 0 ? perfReconciled.bySource : {},
+        byProject: perfReconciled.byTelecallerProject?.[name] || {},
+        bySource: perfReconciled.byTelecallerSource?.[name] || {},
         pie: pieFromBucket(bucket),
         date_min: perfReconciled.dateMin,
         date_max: perfReconciled.dateMax,
@@ -1508,7 +1537,7 @@ function buildPerfFiltersPanel(filterOptions, filters, {collapsed = true} = {}) 
     const select = document.createElement("select");
     select.name = name;
     select.className = "dashboard-filter-select";
-    select.size = Math.min(5, Math.max(3, (options || []).length || 3));
+    select.size = Math.max(12, (options || []).length || 12);
     fillPerfMultiSelect(select, options || [], selected || []);
     fieldHead.append(fieldLabel, buildPerfFilterSelectActions(select));
     wrap.append(fieldHead, select);
@@ -1538,21 +1567,52 @@ function getActivePerfDimension() {
   return perfActiveView === "summary" ? "telecaller" : perfActiveView;
 }
 
+/** Admin / view-all: comparative filters, Graph tab, Total row. TeleCaller sees own scoped board only. */
+function isPerfAdminView() {
+  return Boolean(perfPublishedHandlers?.canViewAll?.() && perfCombinedCache?.view_all);
+}
+
+/** Admin / comparative roles keep the Total footer; TeleCaller-scoped users do not. */
+function shouldShowPerfTotalRow() {
+  return Boolean(perfPublishedHandlers?.canViewAll?.());
+}
+
 function getFilteredPerfData() {
   if (!perfCombinedCache) return null;
   return filterPerfData(perfCombinedCache, getActivePerfDimension(), perfFilters);
 }
 
 function updatePerfFilterVisibility(showAdminControls) {
-  const {filterSelects} = perfPublishedHandlers || {};
+  const {filterSelects, filtersRail} = perfPublishedHandlers || {};
   if (!filterSelects) return;
   const dim = getActivePerfDimension();
   const showTelecallers = showAdminControls && (perfActiveView === "summary" || dim === "telecaller");
-  const showProjects = showAdminControls && dim === "project";
-  const showSources = showAdminControls && dim === "source";
+  const showProjects = perfActiveView === "project";
+  const showSources = perfActiveView === "source";
   filterSelects.telecallers.closest(".dashboard-filter")?.classList.toggle("hidden", !showTelecallers);
   filterSelects.projects.closest(".dashboard-filter")?.classList.toggle("hidden", !showProjects);
   filterSelects.sources.closest(".dashboard-filter")?.classList.toggle("hidden", !showSources);
+  const showRail = showTelecallers || showProjects || showSources;
+  filtersRail?.classList.toggle("hidden", !showRail);
+  if (!showRail) syncPerfFiltersBodyPadding(null);
+  else syncPerfFiltersBodyPadding(filtersRail);
+}
+
+function syncPerfPresentationChrome() {
+  const isSummary = perfActiveView === "summary";
+  const showAdmin = isPerfAdminView();
+  // Task 8: TeleCallers only see table / summary metrics — no Table|Graph sub-tabs.
+  const showSubTabs = !isSummary && showAdmin;
+  if (!showAdmin) perfActiveTab = "table";
+
+  document.getElementById("perf-sub-tabs")?.classList.toggle("hidden", !showSubTabs);
+  document.getElementById("perf-panel-summary")?.classList.toggle("hidden", !isSummary);
+  document.getElementById("perf-panel-table")?.classList.toggle("hidden", isSummary || perfActiveTab !== "table");
+  document.getElementById("perf-panel-graphs")?.classList.toggle(
+    "hidden",
+    isSummary || !showAdmin || perfActiveTab !== "graphs",
+  );
+  updatePerfFilterVisibility(showAdmin);
 }
 
 function renderActivePerfPanels() {
@@ -1570,7 +1630,7 @@ function renderActivePerfPanels() {
   if (perfActiveTab === "table" && tableMount) {
     renderPerfTableView(tableMount, filtered, getActivePerfDimension());
   }
-  if (perfActiveTab === "graphs" && graphsMount) {
+  if (isPerfAdminView() && perfActiveTab === "graphs" && graphsMount) {
     renderGraphsPanel(graphsMount, filtered, getActivePerfDimension());
   }
 }
@@ -1585,25 +1645,21 @@ function setPerfView(view) {
     btn.setAttribute("aria-selected", active ? "true" : "false");
   });
 
-  const isSummary = next === "summary";
-  document.getElementById("perf-sub-tabs")?.classList.toggle("hidden", isSummary);
-  document.getElementById("perf-panel-summary")?.classList.toggle("hidden", !isSummary);
-  document.getElementById("perf-panel-table")?.classList.toggle("hidden", isSummary || perfActiveTab !== "table");
-  document.getElementById("perf-panel-graphs")?.classList.toggle("hidden", isSummary || perfActiveTab !== "graphs");
-
-  const showAdmin = Boolean(perfPublishedHandlers?.canViewAll?.() && perfCombinedCache?.view_all);
-  updatePerfFilterVisibility(showAdmin);
+  syncPerfPresentationChrome();
   renderActivePerfPanels();
 }
 
 function setPerfTab(tab) {
-  perfActiveTab = tab === "graphs" ? "graphs" : "table";
+  if (!isPerfAdminView()) {
+    perfActiveTab = "table";
+  } else {
+    perfActiveTab = tab === "graphs" ? "graphs" : "table";
+  }
   document.querySelectorAll("#perf-sub-tabs [data-perf-tab]").forEach(btn => {
     btn.classList.toggle("active", btn.dataset.perfTab === perfActiveTab);
     btn.setAttribute("aria-selected", btn.dataset.perfTab === perfActiveTab ? "true" : "false");
   });
-  document.getElementById("perf-panel-table")?.classList.toggle("hidden", perfActiveTab !== "table");
-  document.getElementById("perf-panel-graphs")?.classList.toggle("hidden", perfActiveTab !== "graphs");
+  syncPerfPresentationChrome();
   if (perfActiveView !== "summary" && perfCombinedCache) {
     renderActivePerfPanels();
   }
@@ -1665,6 +1721,7 @@ export function mountPerfPublishedDashboard(ctx) {
 
   const mainTabs = document.querySelector(".perf-main-tabs");
   perfPublishedHandlers = {canViewAll, filtersRail: aside, filterSelects: selects, mainTabs};
+  updatePerfFilterVisibility(Boolean(canViewAll?.() && perfCombinedCache?.view_all));
 }
 
 export async function refreshPerfPublished() {
@@ -1675,7 +1732,7 @@ export async function refreshPerfPublished() {
   const summaryMount = document.getElementById("perf-panel-summary");
   const tableMount = document.getElementById("perf-panel-table");
   const graphsMount = document.getElementById("perf-panel-graphs");
-  const {filtersRail, filterSelects, canViewAll, mainTabs} = perfPublishedHandlers || {};
+  const {filterSelects, canViewAll, mainTabs} = perfPublishedHandlers || {};
 
   destroyPerfCharts();
   try {
@@ -1707,13 +1764,13 @@ export async function refreshPerfPublished() {
     }
 
     const showAdminControls = Boolean(canViewAll?.() && data.view_all);
-    mainTabs?.querySelector('[data-perf-view="project"]')?.classList.toggle("hidden", !showAdminControls);
-    mainTabs?.querySelector('[data-perf-view="source"]')?.classList.toggle("hidden", !showAdminControls);
-    filtersRail?.classList.toggle("hidden", !showAdminControls);
+    // All perf-dashboard roles can open By Project / By Source (TeleCaller sees own-scoped data).
+    mainTabs?.querySelector('[data-perf-view="project"]')?.classList.remove("hidden");
+    mainTabs?.querySelector('[data-perf-view="source"]')?.classList.remove("hidden");
     if (!showAdminControls) {
-      syncPerfFiltersBodyPadding(null);
-      if (perfActiveView !== "summary" && perfActiveView !== "telecaller") perfActiveView = "summary";
-      perfFilters = {telecallers: [], projects: [], sources: []};
+      // Keep project/source selections; never expose other telecallers in the filter.
+      perfFilters = {telecallers: [], projects: perfFilters.projects, sources: perfFilters.sources};
+      perfActiveTab = "table";
     }
     if (!PERF_DIMENSIONS[perfActiveView] && perfActiveView !== "summary") {
       perfActiveView = "summary";
@@ -1729,13 +1786,15 @@ export async function refreshPerfPublished() {
       btn.setAttribute("aria-selected", active ? "true" : "false");
     });
 
-    if (showAdminControls && filterSelects) {
-      const tcNames = Object.keys(data.byTelecaller || {}).sort((a, b) => a.localeCompare(b, undefined, {sensitivity: "base"}));
+    if (filterSelects) {
+      const tcNames = showAdminControls
+        ? Object.keys(data.byTelecaller || {}).sort((a, b) => a.localeCompare(b, undefined, {sensitivity: "base"}))
+        : [];
       const projectNames = Object.keys(data.byProject || {}).sort((a, b) => a.localeCompare(b, undefined, {sensitivity: "base"}));
       const sourceNames = Object.keys(data.bySource || {}).sort((a, b) => a.localeCompare(b, undefined, {sensitivity: "base"}));
       const prune = (selected, options) => selected.filter(name => options.includes(name));
       perfFilters = {
-        telecallers: prune(perfFilters.telecallers, tcNames),
+        telecallers: showAdminControls ? prune(perfFilters.telecallers, tcNames) : [],
         projects: prune(perfFilters.projects, projectNames),
         sources: prune(perfFilters.sources, sourceNames),
       };
@@ -1819,7 +1878,7 @@ function buildPerfDashboardPdf(data, view, dimension) {
   pdfSetText(doc, PDF_BRAND.white);
   doc.setFont("helvetica", "bold");
   doc.setFontSize(14);
-  doc.text("LeadLens · Performance Dashboard", marginX, 10);
+  doc.text("GPP AI · Performance Dashboard", marginX, 10);
   doc.setFont("helvetica", "normal");
   doc.setFontSize(9);
   doc.text(viewLabel, pageW - marginX, 10, {align: "right"});
@@ -1835,24 +1894,29 @@ function buildPerfDashboardPdf(data, view, dimension) {
   y += 6;
 
   const reportDays = getReportDays(data);
-  const summary = data.summary || emptyMetrics();
-  doc.setFont("helvetica", "bold");
-  doc.text("Totals", marginX, y);
-  y += 5;
-  doc.setFont("helvetica", "normal");
-  doc.setFontSize(8);
-  const totalsLine = SCORECARD_COLUMNS.map(col => {
-    const val = scorecardCellValue(summary, col, reportDays);
-    return `${col.label}: ${val}`;
-  }).join("   ·   ");
-  const totalLines = doc.splitTextToSize(totalsLine, contentW);
-  doc.text(totalLines, marginX, y);
-  y += totalLines.length * 4 + 4;
 
-  const dim = view === "summary" ? "telecaller" : dimension;
-  const buckets = getBucketMap(data, dim);
-  const names = dimensionNames(data, dim);
-  const nameLabel = (PERF_DIMENSIONS[dim] || PERF_DIMENSIONS.telecaller).label;
+  if (view === "summary") {
+    const summary = data.summary || emptyMetrics();
+    doc.setFont("helvetica", "bold");
+    doc.text("Totals", marginX, y);
+    y += 5;
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(8);
+    for (const col of SCORECARD_COLUMNS) {
+      if (y + 5 > pageH - marginY) {
+        doc.addPage();
+        y = marginY;
+      }
+      const val = scorecardCellValue(summary, col, reportDays);
+      doc.text(`${col.label}: ${val}`, marginX, y);
+      y += 4.5;
+    }
+    return doc;
+  }
+
+  const buckets = getBucketMap(data, dimension);
+  const names = dimensionNames(data, dimension);
+  const nameLabel = cfg.label;
   const columns = [{key: "name", label: nameLabel}, ...SCORECARD_COLUMNS];
   const colCount = columns.length;
   const colW = contentW / colCount;
@@ -1892,7 +1956,7 @@ function buildPerfDashboardPdf(data, view, dimension) {
   };
 
   for (const name of names) drawRow(name, buckets[name] || emptyMetrics());
-  if (names.length) {
+  if (names.length && shouldShowPerfTotalRow()) {
     const totals = sumBucketMetrics(buckets, names);
     drawRow("Total", totals, true);
   }
