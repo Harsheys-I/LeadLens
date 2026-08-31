@@ -6,6 +6,7 @@ import {PerfDashboardApi} from "./api-client.js?v=5.2.7";
 const MASTER_FIELDS = [
   {id: "mobile", label: "Mobile", aliases: "mobile, mobile number, phone"},
   {id: "project", label: "Project Name", aliases: "project name, project"},
+  {id: "source", label: "Source", aliases: "source, source name"},
   {id: "registration", label: "Lead Registration Date", aliases: "lead registration date, registration date"},
   {id: "next", label: "Next Followup Date", aliases: "next followup date, next follow-up date, next follow up date"},
   {id: "status", label: "Status", aliases: "status, lead status"},
@@ -81,6 +82,12 @@ const PIE_LABELS = {
 const CHART_COLORS = {
   bar: "#1f5d45",
   palette: ["#12372a", "#1f5d45", "#3f8c68", "#c57924", "#a33a32", "#2a5f9e", "#6c7771", "#9bb7a8"],
+};
+
+const PERF_DIMENSIONS = {
+  telecaller: {bucketKey: "byTelecaller", label: "Telecaller Name", tableTitle: "Telecaller breakdown", totalsLabel: "TeleCallers"},
+  project: {bucketKey: "byProject", label: "Project Name", tableTitle: "Project breakdown", totalsLabel: "Projects"},
+  source: {bucketKey: "bySource", label: "Source", tableTitle: "Source breakdown", totalsLabel: "Sources"},
 };
 
 /** @type {Map<string, import("chart.js").Chart>} */
@@ -336,6 +343,7 @@ function rowObjects(rawRows, columns, fields) {
     obj.telecaller = clean(obj.telecaller);
     obj.mobile = clean(obj.mobile);
     obj.project = clean(obj.project);
+    obj.source = clean(obj.source);
     obj.status = clean(obj.status);
     obj.telecallingStatus = clean(obj.telecallingStatus);
     out.push(obj);
@@ -403,6 +411,7 @@ function steIdentityKey(row) {
 function forwardFillHistoryLeads(historyRows) {
   let lastMobile = "";
   let lastProject = "";
+  let lastSource = "";
   let lastTelecaller = "";
   let lastTelecallingStatus = "";
   const out = [];
@@ -410,14 +419,17 @@ function forwardFillHistoryLeads(historyRows) {
     const filled = {...row};
     const mobile = leadMobile(filled);
     const project = clean(filled.project);
+    const source = clean(filled.source);
     const telecaller = clean(filled.telecaller);
     const telecallingStatus = clean(filled.telecallingStatus);
     if (mobile) lastMobile = clean(filled.mobile) || mobile;
     if (project) lastProject = project;
+    if (source) lastSource = source;
     if (telecaller) lastTelecaller = telecaller;
     if (telecallingStatus) lastTelecallingStatus = telecallingStatus;
     if (!leadMobile(filled) && lastMobile) filled.mobile = lastMobile;
     if (!clean(filled.project) && lastProject) filled.project = lastProject;
+    if (!clean(filled.source) && lastSource) filled.source = lastSource;
     if (!clean(filled.telecaller) && lastTelecaller) filled.telecaller = lastTelecaller;
     if (!clean(filled.telecallingStatus) && lastTelecallingStatus) filled.telecallingStatus = lastTelecallingStatus;
     if (!clean(filled.telecaller)) filled.telecaller = "Unknown";
@@ -473,9 +485,9 @@ function matchesTelecallingStatus(row, target) {
 
 /**
  * Count when ANY History row matches Telecalling Status, once per Mobile+TeleCaller+Project.
- * Same pattern as STE (which uses History Status for Send/Sent to Enquiry).
+ * Credits each matching row to all dimension bucket maps.
  */
-function accumulateTelecallingStatusMetric(historyFilled, target, byTelecaller, ensureTc, field) {
+function accumulateTelecallingStatusMetric(historyFilled, target, bucketMaps, resolvers, field) {
   const best = new Map();
   for (const row of historyFilled) {
     if (!matchesTelecallingStatus(row, target)) continue;
@@ -486,9 +498,57 @@ function accumulateTelecallingStatusMetric(historyFilled, target, byTelecaller, 
     if (!prev || lud > prev.lud) best.set(key, {lud, row});
   }
   for (const {row} of best.values()) {
-    byTelecaller[ensureTc(row.telecaller)][field] += 1;
+    for (const {map, resolve} of resolvers) {
+      map[resolve(row)][field] += 1;
+    }
   }
   return best.size;
+}
+
+function createBucketMaps() {
+  const maps = {
+    byTelecaller: {},
+    byProject: {},
+    bySource: {},
+  };
+  const ensure = (map, name) => {
+    const display = clean(name) || "Unknown";
+    const key = norm(display) || "unknown";
+    if (!map[key]) {
+      map[key] = emptyTelecallerBucket();
+      map[key]._displayName = display;
+    } else if (display !== "Unknown" && map[key]._displayName === "Unknown") {
+      map[key]._displayName = display;
+    }
+    return key;
+  };
+  const resolvers = [
+    {map: maps.byTelecaller, resolve: row => ensure(maps.byTelecaller, row.telecaller)},
+    {map: maps.byProject, resolve: row => ensure(maps.byProject, row.project)},
+    {map: maps.bySource, resolve: row => ensure(maps.bySource, row.source)},
+  ];
+  const resetVisitCounts = () => {
+    for (const map of Object.values(maps)) {
+      for (const bucket of Object.values(map)) {
+        bucket.notInterested = 0;
+        bucket.siteVisitScheduled = 0;
+        bucket.siteVisitPending = 0;
+        bucket.siteVisitCancelled = 0;
+        bucket.siteVisited = 0;
+      }
+    }
+  };
+  return {maps, resolvers, resetVisitCounts};
+}
+
+function bucketsToDisplay(map) {
+  const out = {};
+  for (const bucket of Object.values(map)) {
+    const name = bucket._displayName || "Unknown";
+    delete bucket._displayName;
+    out[name] = bucket;
+  }
+  return out;
 }
 
 /**
@@ -512,41 +572,28 @@ export function reconcilePerf(masterRows, historyRows) {
 
   const {filled: historyFilled, leads: historyLeads} = collapseHistoryToLatestLead(historyRows);
 
-  const byTelecaller = {};
-  const ensureTc = name => {
-    const display = clean(name) || "Unknown";
-    const key = norm(display) || "unknown";
-    if (!byTelecaller[key]) {
-      byTelecaller[key] = emptyTelecallerBucket();
-      byTelecaller[key]._displayName = display;
-    } else if (display !== "Unknown" && byTelecaller[key]._displayName === "Unknown") {
-      byTelecaller[key]._displayName = display;
-    }
-    return key;
-  };
+  const {maps, resolvers, resetVisitCounts} = createBucketMaps();
+  const {byTelecaller, byProject, bySource} = maps;
 
   const allMasterKeys = new Set();
   const allHistoryKeys = new Set();
   const today = todayStart();
 
   for (const row of masterRows) {
-    const tc = ensureTc(row.telecaller);
     const key = leadIdentityKey(row);
     if (!key) continue;
-    byTelecaller[tc]._masterKeys.add(key);
+    for (const {map, resolve} of resolvers) {
+      map[resolve(row)]._masterKeys.add(key);
+    }
     allMasterKeys.add(key);
     if (row.nextDate && row.nextDate < today) {
-      byTelecaller[tc]._overdueKeys.add(key);
+      for (const {map, resolve} of resolvers) {
+        map[resolve(row)]._overdueKeys.add(key);
+      }
     }
   }
 
-  for (const bucket of Object.values(byTelecaller)) {
-    bucket.notInterested = 0;
-    bucket.siteVisitScheduled = 0;
-    bucket.siteVisitPending = 0;
-    bucket.siteVisitCancelled = 0;
-    bucket.siteVisited = 0;
-  }
+  resetVisitCounts();
 
   // STE: any History row with Status Send/Sent to Enquiry, once per Mobile+TeleCaller+Project.
   const steBest = new Map();
@@ -559,35 +606,40 @@ export function reconcilePerf(masterRows, historyRows) {
     if (!prev || lud > prev.lud) steBest.set(key, {lud, row});
   }
   for (const {row} of steBest.values()) {
-    byTelecaller[ensureTc(row.telecaller)].siteVisited += 1;
+    for (const {map, resolve} of resolvers) {
+      map[resolve(row)].siteVisited += 1;
+    }
   }
 
-  const svsKeys = accumulateTelecallingStatusMetric(historyFilled, "site visit scheduled", byTelecaller, ensureTc, "siteVisitScheduled");
-  const svpKeys = accumulateTelecallingStatusMetric(historyFilled, "site visit pending", byTelecaller, ensureTc, "siteVisitPending");
-  const svcKeys = accumulateTelecallingStatusMetric(historyFilled, "site visit cancelled", byTelecaller, ensureTc, "siteVisitCancelled");
+  const svsKeys = accumulateTelecallingStatusMetric(historyFilled, "site visit scheduled", maps, resolvers, "siteVisitScheduled");
+  const svpKeys = accumulateTelecallingStatusMetric(historyFilled, "site visit pending", maps, resolvers, "siteVisitPending");
+  const svcKeys = accumulateTelecallingStatusMetric(historyFilled, "site visit cancelled", maps, resolvers, "siteVisitCancelled");
   // #region agent log
   fetch('http://127.0.0.1:7564/ingest/5981bb77-f08e-4f6c-995e-18d8279225fc',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'c65e41'},body:JSON.stringify({sessionId:'c65e41',runId:'svs-tcs-ste',hypothesisId:'B',location:'perf-dashboard.js:reconcilePerf',message:'STE-style telecalling status metrics',data:{steKeys:steBest.size,svsKeys,svpKeys,svcKeys,historyFilled:historyFilled.length},timestamp:Date.now()})}).catch(()=>{});
   // #endregion
 
   for (const row of historyLeads) {
-    const tc = ensureTc(row.telecaller);
     const key = leadIdentityKey(row);
     if (!key) continue;
-    byTelecaller[tc]._historyKeys.add(key);
+    for (const {map, resolve} of resolvers) {
+      map[resolve(row)]._historyKeys.add(key);
+    }
     allHistoryKeys.add(key);
 
-    if (norm(row.status) === "not interested") byTelecaller[tc].notInterested += 1;
+    if (norm(row.status) === "not interested") {
+      for (const {map, resolve} of resolvers) {
+        map[resolve(row)].notInterested += 1;
+      }
+    }
   }
 
-  for (const bucket of Object.values(byTelecaller)) finalizeBucket(bucket);
-
-  const byTelecallerDisplay = {};
-  for (const bucket of Object.values(byTelecaller)) {
-    const name = bucket._displayName || "Unknown";
-    delete bucket._displayName;
-    delete bucket.historyLeads;
-    byTelecallerDisplay[name] = bucket;
+  for (const map of Object.values(maps)) {
+    for (const bucket of Object.values(map)) finalizeBucket(bucket);
   }
+
+  const byTelecallerDisplay = bucketsToDisplay(byTelecaller);
+  const byProjectDisplay = bucketsToDisplay(byProject);
+  const bySourceDisplay = bucketsToDisplay(bySource);
 
   const summary = emptyMetrics();
   summary.activeLeads = allMasterKeys.size;
@@ -598,7 +650,7 @@ export function reconcilePerf(masterRows, historyRows) {
   summary.siteVisitCancelled = 0;
   summary.siteVisited = 0;
   summary.overdue = 0;
-  for (const bucket of Object.values(byTelecaller)) {
+  for (const bucket of Object.values(byTelecallerDisplay)) {
     summary.notInterested += Number(bucket.notInterested) || 0;
     summary.siteVisitScheduled += Number(bucket.siteVisitScheduled) || 0;
     summary.siteVisitPending += Number(bucket.siteVisitPending) || 0;
@@ -619,6 +671,8 @@ export function reconcilePerf(masterRows, historyRows) {
   return {
     summary,
     byTelecaller: byTelecallerDisplay,
+    byProject: byProjectDisplay,
+    bySource: bySourceDisplay,
     pie,
     dateMin: dateToIso(dateMin),
     dateMax: dateToIso(dateMax),
@@ -675,42 +729,43 @@ function renderBarChart(canvas, labels, values, color = CHART_COLORS.bar) {
   perfChartRegistry.set(id, chart);
 }
 
-function renderPieChart(canvas, pie, chartId) {
+function renderStackedStatusChart(canvas, names, buckets, chartId) {
   const Chart = requireChart();
-  const labels = [];
-  const values = [];
-  const colors = [];
-  PIE_KEYS.forEach((key, i) => {
-    const val = Number(pie[key] || 0);
-    if (val > 0) {
-      labels.push(PIE_LABELS[key]);
-      values.push(val);
-      colors.push(CHART_COLORS.palette[i % CHART_COLORS.palette.length]);
-    }
-  });
-  const id = chartId || canvas.id || "perf-pie-chart";
+  const id = chartId || canvas.id || "perf-stacked-status";
   canvas.id = id;
   if (perfChartRegistry.has(id)) {
     perfChartRegistry.get(id).destroy();
     perfChartRegistry.delete(id);
   }
+  const datasets = PIE_KEYS.map((key, i) => ({
+    label: PIE_LABELS[key],
+    data: names.map(name => Number(pieFromBucket(buckets[name])?.[key] || 0)),
+    backgroundColor: CHART_COLORS.palette[i % CHART_COLORS.palette.length],
+    borderWidth: 0,
+    borderRadius: 2,
+    maxBarThickness: 48,
+  }));
   const chart = new Chart(canvas.getContext("2d"), {
-    type: "pie",
-    data: {
-      labels: labels.length ? labels : ["No data"],
-      datasets: [{
-        data: values.length ? values : [1],
-        backgroundColor: values.length ? colors : ["#dfe5e1"],
-        borderWidth: 0,
-      }],
-    },
+    type: "bar",
+    data: {labels: names, datasets},
     options: {
       responsive: true,
       maintainAspectRatio: false,
-      plugins: {legend: {position: "bottom", labels: {boxWidth: 12, font: {size: 11}}}},
+      plugins: {
+        legend: {position: "bottom", labels: {boxWidth: 12, font: {size: 11}}},
+      },
+      scales: {
+        x: {stacked: true, grid: {display: false}, ticks: {maxRotation: 45, minRotation: 0, font: {size: 11}}},
+        y: {stacked: true, beginAtZero: true, ticks: {precision: 0}},
+      },
     },
   });
   perfChartRegistry.set(id, chart);
+}
+
+function getBucketMap(data, dimension) {
+  const cfg = PERF_DIMENSIONS[dimension] || PERF_DIMENSIONS.telecaller;
+  return data?.[cfg.bucketKey] || {};
 }
 
 function filterByTelecaller(data, tcFilter) {
@@ -732,8 +787,14 @@ function filterByTelecaller(data, tcFilter) {
   };
 }
 
-function telecallerNames(data) {
-  return Object.keys(data.byTelecaller || {}).sort((a, b) => a.localeCompare(b, undefined, {sensitivity: "base"}));
+function filterPerfData(data, dimension, tcFilter) {
+  if (dimension === "telecaller") return filterByTelecaller(data, tcFilter);
+  return data;
+}
+
+function dimensionNames(data, dimension) {
+  const buckets = getBucketMap(data, dimension);
+  return Object.keys(buckets).sort((a, b) => a.localeCompare(b, undefined, {sensitivity: "base"}));
 }
 
 function renderTotalsBlock(mount, summary, title = "Totals") {
@@ -758,12 +819,14 @@ function renderTotalsBlock(mount, summary, title = "Totals") {
   mount.append(block);
 }
 
-function renderTelecallerTable(mount, data) {
-  const names = telecallerNames(data);
+function renderBreakdownTable(mount, data, dimension) {
+  const cfg = PERF_DIMENSIONS[dimension] || PERF_DIMENSIONS.telecaller;
+  const buckets = getBucketMap(data, dimension);
+  const names = dimensionNames(data, dimension);
   if (!names.length) {
     const empty = document.createElement("div");
     empty.className = "empty-card";
-    empty.textContent = "No telecaller data.";
+    empty.textContent = `No ${cfg.totalsLabel.toLowerCase()} data.`;
     mount.append(empty);
     return;
   }
@@ -774,7 +837,7 @@ function renderTelecallerTable(mount, data) {
   table.className = "perf-scorecard";
   const thead = document.createElement("thead");
   const headRow = document.createElement("tr");
-  const columns = [{key: "name", label: "Telecaller Name", kind: "name"}, ...SCORECARD_COLUMNS];
+  const columns = [{key: "name", label: cfg.label, kind: "name"}, ...SCORECARD_COLUMNS];
   for (const col of columns) {
     const th = document.createElement("th");
     th.textContent = col.label;
@@ -785,7 +848,7 @@ function renderTelecallerTable(mount, data) {
 
   const tbody = document.createElement("tbody");
   for (const name of names) {
-    const bucket = data.byTelecaller[name];
+    const bucket = buckets[name];
     const tr = document.createElement("tr");
     const nameCell = document.createElement("th");
     nameCell.scope = "row";
@@ -803,30 +866,35 @@ function renderTelecallerTable(mount, data) {
   mount.append(wrap);
 }
 
-function renderSummaryPanel(mount, data) {
+function renderSummaryPanel(mount, data, dimension = "telecaller") {
   mount.replaceChildren();
+  const cfg = PERF_DIMENSIONS[dimension] || PERF_DIMENSIONS.telecaller;
   const header = document.createElement("p");
   header.className = "perf-date-range";
   header.textContent = `Report period (from History Lead Update Date): ${formatDisplayDate(data.date_min)} – ${formatDisplayDate(data.date_max)}`;
   mount.append(header);
 
-  const names = telecallerNames(data);
-  const title = names.length === 1 ? `${names[0]} · totals` : "All TeleCallers · totals";
+  const names = dimensionNames(data, dimension);
+  let title = `All ${cfg.totalsLabel} · totals`;
+  if (names.length === 1) title = `${names[0]} · totals`;
+  else if (dimension === "telecaller" && names.length > 1) title = "All TeleCallers · totals";
   renderTotalsBlock(mount, data.summary, title);
 
   const tableTitle = document.createElement("h3");
   tableTitle.className = "perf-section-title";
-  tableTitle.textContent = "Telecaller breakdown";
+  tableTitle.textContent = cfg.tableTitle;
   mount.append(tableTitle);
-  renderTelecallerTable(mount, data);
+  renderBreakdownTable(mount, data, dimension);
 }
 
-function renderGraphsPanel(mount, data) {
+function renderGraphsPanel(mount, data, dimension = "telecaller") {
   destroyPerfCharts();
   mount.replaceChildren();
-  const names = telecallerNames(data);
+  const cfg = PERF_DIMENSIONS[dimension] || PERF_DIMENSIONS.telecaller;
+  const buckets = getBucketMap(data, dimension);
+  const names = dimensionNames(data, dimension);
   if (!names.length) {
-    mount.innerHTML = '<div class="empty-card">No telecaller data to chart.</div>';
+    mount.innerHTML = `<div class="empty-card">No ${cfg.totalsLabel.toLowerCase()} data to chart.</div>`;
     return;
   }
 
@@ -842,7 +910,7 @@ function renderGraphsPanel(mount, data) {
     wrap.append(canvas);
     block.append(wrap);
     mount.append(block);
-    const values = names.map(n => Number(data.byTelecaller[n]?.[metricKey] || 0));
+    const values = names.map(n => Number(buckets[n]?.[metricKey] || 0));
     renderBarChart(canvas, names, values);
   }
 
@@ -859,54 +927,31 @@ function renderGraphsPanel(mount, data) {
     block.append(wrap);
     mount.append(block);
     const values = names.map(n => {
-      const b = data.byTelecaller[n] || emptyMetrics();
+      const b = buckets[n] || emptyMetrics();
       if (pctKey === "totalLeadsVsSiteVisitedPct") return pct(b.siteVisited, b.totalLeads) ?? 0;
       return pct(b.siteVisited, b.siteVisitScheduled) ?? 0;
     });
     renderBarChart(canvas, names, values, "#2a5f9e");
   }
 
-  const pieSection = document.createElement("div");
-  pieSection.className = "perf-pie-section";
-  const pieHeading = document.createElement("h3");
-  pieHeading.className = "perf-section-title";
-  pieHeading.textContent = names.length === 1 ? "Status breakdown" : "Status breakdown by Telecaller";
-  pieSection.append(pieHeading);
+  const statusSection = document.createElement("div");
+  statusSection.className = "perf-stacked-section";
+  const statusHeading = document.createElement("h3");
+  statusHeading.className = "perf-section-title";
+  statusHeading.textContent = names.length === 1
+    ? "Status breakdown"
+    : `Status breakdown by ${cfg.label}`;
+  statusSection.append(statusHeading);
 
-  const pieGrid = document.createElement("div");
-  pieGrid.className = "perf-pie-grid";
-  for (const name of names) {
-    const block = document.createElement("div");
-    block.className = "perf-chart-block perf-chart-block-pie";
-    const title = document.createElement("h4");
-    title.textContent = name;
-    block.append(title);
-    const pieWrap = document.createElement("div");
-    pieWrap.className = "perf-chart-wrap perf-chart-wrap-pie";
-    const pieCanvas = document.createElement("canvas");
-    pieWrap.append(pieCanvas);
-    block.append(pieWrap);
-    pieGrid.append(block);
-    const pieData = pieFromBucket(data.byTelecaller[name]);
-    renderPieChart(pieCanvas, pieData, `perf-pie-${name.replace(/\W+/g, "-")}`);
-  }
-  pieSection.append(pieGrid);
-  mount.append(pieSection);
-
-  if (names.length > 1) {
-    const globalBlock = document.createElement("div");
-    globalBlock.className = "perf-chart-block perf-chart-block-pie";
-    const globalTitle = document.createElement("h4");
-    globalTitle.textContent = "Combined status (all TeleCallers)";
-    globalBlock.append(globalTitle);
-    const pieWrap = document.createElement("div");
-    pieWrap.className = "perf-chart-wrap perf-chart-wrap-pie";
-    const pieCanvas = document.createElement("canvas");
-    pieWrap.append(pieCanvas);
-    globalBlock.append(pieWrap);
-    mount.append(globalBlock);
-    renderPieChart(pieCanvas, data.pie || emptyPie(), "perf-pie-combined");
-  }
+  const statusWrap = document.createElement("div");
+  statusWrap.className = names.length >= 18
+    ? "perf-chart-wrap perf-stacked-chart-wrap perf-stacked-chart-wrap-wide"
+    : "perf-chart-wrap perf-stacked-chart-wrap";
+  const statusCanvas = document.createElement("canvas");
+  statusWrap.append(statusCanvas);
+  statusSection.append(statusWrap);
+  mount.append(statusSection);
+  renderStackedStatusChart(statusCanvas, names, buckets, `perf-stacked-${dimension}`);
 }
 
 function wireDropZone(zone, input, onFiles) {
@@ -1106,6 +1151,8 @@ export function mountPerfReportUpload(ctx) {
         title: `${name} · Performance`,
         summary: metricsFromBucket(bucket),
         byTelecaller: {[name]: bucket},
+        byProject: perfReconciled.byProject,
+        bySource: perfReconciled.bySource,
         pie: pieFromBucket(bucket),
         date_min: perfReconciled.dateMin,
         date_max: perfReconciled.dateMax,
@@ -1132,17 +1179,54 @@ export function mountPerfReportUpload(ctx) {
 
 let perfCombinedCache = null;
 let perfActiveTab = "summary";
+let perfActiveDimension = "telecaller";
 let perfTcFilter = "__all__";
+
+function getFilteredPerfData() {
+  if (!perfCombinedCache) return null;
+  return filterPerfData(perfCombinedCache, perfActiveDimension, perfTcFilter);
+}
+
+function renderActivePerfPanels() {
+  const filtered = getFilteredPerfData();
+  if (!filtered) return;
+  renderSummaryPanel(document.getElementById("perf-tab-summary"), filtered, perfActiveDimension);
+  if (perfActiveTab === "graphs") {
+    renderGraphsPanel(document.getElementById("perf-tab-graphs"), filtered, perfActiveDimension);
+  }
+}
+
+function setPerfDimension(dimension) {
+  const next = PERF_DIMENSIONS[dimension] ? dimension : "telecaller";
+  perfActiveDimension = next;
+  document.querySelectorAll(".perf-dimension-tabs [data-perf-dimension]").forEach(btn => {
+    btn.classList.toggle("active", btn.dataset.perfDimension === next);
+    btn.setAttribute("aria-selected", btn.dataset.perfDimension === next ? "true" : "false");
+  });
+  const {filterRow} = perfPublishedHandlers || {};
+  const showFilter = Boolean(
+    perfPublishedHandlers?.canViewAll?.()
+    && perfCombinedCache?.view_all
+    && next === "telecaller",
+  );
+  filterRow?.classList.toggle("hidden", !showFilter);
+  renderActivePerfPanels();
+}
 
 function setPerfTab(tab) {
   perfActiveTab = tab;
   document.querySelectorAll(".perf-view-tabs [data-perf-tab]").forEach(btn => {
     btn.classList.toggle("active", btn.dataset.perfTab === tab);
+    btn.setAttribute("aria-selected", btn.dataset.perfTab === tab ? "true" : "false");
   });
   document.getElementById("perf-tab-summary")?.classList.toggle("hidden", tab !== "summary");
   document.getElementById("perf-tab-graphs")?.classList.toggle("hidden", tab !== "graphs");
   if (tab === "graphs" && perfCombinedCache) {
-    renderGraphsPanel(document.getElementById("perf-tab-graphs"), filterByTelecaller(perfCombinedCache, perfTcFilter));
+    renderGraphsPanel(
+      document.getElementById("perf-tab-graphs"),
+      getFilteredPerfData(),
+      perfActiveDimension,
+    );
   }
 }
 
@@ -1155,21 +1239,21 @@ export function mountPerfPublishedDashboard(ctx) {
   document.querySelectorAll(".perf-view-tabs [data-perf-tab]").forEach(btn => {
     btn.addEventListener("click", () => setPerfTab(btn.dataset.perfTab || "summary"));
   });
+  document.querySelectorAll(".perf-dimension-tabs [data-perf-dimension]").forEach(btn => {
+    btn.addEventListener("click", () => setPerfDimension(btn.dataset.perfDimension || "telecaller"));
+  });
   document.getElementById("refresh-perf-published")?.addEventListener("click", () => refreshPerfPublished());
 
   const filterRow = document.getElementById("perf-filter-row");
   const filterSelect = document.getElementById("perf-tc-filter");
+  const dimensionTabs = document.querySelector(".perf-dimension-tabs");
   filterSelect?.addEventListener("change", () => {
     perfTcFilter = filterSelect.value || "__all__";
     if (!perfCombinedCache) return;
-    const filtered = filterByTelecaller(perfCombinedCache, perfTcFilter);
-    renderSummaryPanel(document.getElementById("perf-tab-summary"), filtered);
-    if (perfActiveTab === "graphs") {
-      renderGraphsPanel(document.getElementById("perf-tab-graphs"), filtered);
-    }
+    renderActivePerfPanels();
   });
 
-  perfPublishedHandlers = {canViewAll, filterRow, filterSelect};
+  perfPublishedHandlers = {canViewAll, filterRow, filterSelect, dimensionTabs};
 }
 
 export async function refreshPerfPublished() {
@@ -1179,7 +1263,7 @@ export async function refreshPerfPublished() {
   const metaEl = document.getElementById("perf-published-meta");
   const summaryMount = document.getElementById("perf-tab-summary");
   const graphsMount = document.getElementById("perf-tab-graphs");
-  const {filterRow, filterSelect, canViewAll} = perfPublishedHandlers || {};
+  const {filterRow, filterSelect, canViewAll, dimensionTabs} = perfPublishedHandlers || {};
 
   destroyPerfCharts();
   try {
@@ -1208,7 +1292,17 @@ export async function refreshPerfPublished() {
         : `Your board${when ? " · updated " + when : ""}`;
     }
 
-    const showFilter = Boolean(canViewAll?.() && data.view_all);
+    const showAdminControls = Boolean(canViewAll?.() && data.view_all);
+    dimensionTabs?.classList.toggle("hidden", !showAdminControls);
+    if (!showAdminControls && perfActiveDimension !== "telecaller") {
+      perfActiveDimension = "telecaller";
+    }
+    document.querySelectorAll(".perf-dimension-tabs [data-perf-dimension]").forEach(btn => {
+      btn.classList.toggle("active", btn.dataset.perfDimension === perfActiveDimension);
+      btn.setAttribute("aria-selected", btn.dataset.perfDimension === perfActiveDimension ? "true" : "false");
+    });
+
+    const showFilter = showAdminControls && perfActiveDimension === "telecaller";
     filterRow?.classList.toggle("hidden", !showFilter);
     if (showFilter && filterSelect) {
       const names = Object.keys(data.byTelecaller || {}).sort((a, b) => a.localeCompare(b, undefined, {sensitivity: "base"}));
@@ -1230,9 +1324,9 @@ export async function refreshPerfPublished() {
       perfTcFilter = "__all__";
     }
 
-    if (summaryMount) renderSummaryPanel(summaryMount, filterByTelecaller(data, perfTcFilter));
+    if (summaryMount) renderSummaryPanel(summaryMount, getFilteredPerfData(), perfActiveDimension);
     if (perfActiveTab === "graphs" && graphsMount) {
-      renderGraphsPanel(graphsMount, filterByTelecaller(data, perfTcFilter));
+      renderGraphsPanel(graphsMount, getFilteredPerfData(), perfActiveDimension);
     }
     setPerfTab(perfActiveTab);
   } catch (err) {

@@ -478,6 +478,10 @@ body .perf-summary-row dt{margin:0;font-size:14px;font-weight:600;color:var(--in
 body .perf-summary-row dd{margin:0;font-size:20px;font-weight:800;color:var(--green-2);font-variant-numeric:tabular-nums}
 body .perf-date-range{margin:0 0 8px;color:var(--muted);font-size:13px}
 body .perf-view-tabs{display:flex;gap:8px;margin:8px 0 18px;border-bottom:1px solid var(--line);padding-bottom:10px}
+body .perf-dimension-tabs{display:flex;gap:8px;margin:0 0 12px;border-bottom:1px solid var(--line);padding-bottom:10px}
+body .perf-dimension-tab{border:0;background:transparent;color:var(--muted);padding:8px 14px;border-radius:8px;font-weight:650;cursor:pointer}
+body .perf-dimension-tab:hover{background:#eef3ef;color:var(--green-2)}
+body .perf-dimension-tab.active{background:var(--mint);color:var(--green-2)}
 body .perf-view-tab{border:0;background:transparent;color:var(--muted);padding:8px 14px;border-radius:8px;font-weight:650;cursor:pointer}
 body .perf-view-tab:hover{background:#eef3ef;color:var(--green-2)}
 body .perf-view-tab.active{background:var(--mint);color:var(--green-2)}
@@ -489,6 +493,9 @@ body .perf-chart-block{display:grid;gap:10px}
 body .perf-chart-block h3{margin:0;font-size:15px;color:var(--green-2)}
 body .perf-chart-wrap{position:relative;height:220px;background:#fbfcfb;border:1px solid var(--line);border-radius:12px;padding:12px}
 body .perf-chart-wrap-pie{height:320px}
+body .perf-stacked-section{display:grid;gap:12px}
+body .perf-stacked-chart-wrap{height:320px}
+body .perf-stacked-chart-wrap-wide{min-height:320px;height:auto}
 body .perf-help-list{margin:8px 0 18px;padding-left:22px;color:var(--ink);line-height:1.6}
 body .perf-help-list li{margin:4px 0}
 body .perf-section-title{margin:18px 0 10px;font-size:15px;color:var(--green-2)}

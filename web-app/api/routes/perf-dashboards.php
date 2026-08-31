@@ -90,10 +90,26 @@ function ll_perf_sum_summaries(array $summaries): array
 
 function ll_perf_normalize_tc_bucket(array $metrics): array
 {
+  return ll_perf_normalize_dimension_bucket($metrics);
+}
+
+function ll_perf_normalize_dimension_bucket(array $metrics): array
+{
   $out = array_merge(ll_perf_empty_summary(), array_intersect_key($metrics, ll_perf_empty_summary()));
   $pie = is_array($metrics['pie'] ?? null) ? $metrics['pie'] : [];
   $out['pie'] = array_merge(ll_perf_empty_pie(), array_intersect_key($pie, ll_perf_empty_pie()));
   return $out;
+}
+
+function ll_perf_merge_dimension_buckets(array $existing, array $incoming): array
+{
+  $merged = ll_perf_normalize_dimension_bucket(array_merge($existing, $incoming));
+  $existingPie = is_array($existing['pie'] ?? null) ? $existing['pie'] : [];
+  $incomingPie = is_array($incoming['pie'] ?? null) ? $incoming['pie'] : [];
+  foreach (ll_perf_empty_pie() as $key => $_) {
+    $merged['pie'][$key] = (int) ($existingPie[$key] ?? 0) + (int) ($incomingPie[$key] ?? 0);
+  }
+  return $merged;
 }
 
 function ll_perf_sum_pies(array $pies): array
@@ -140,6 +156,8 @@ function ll_route_perf_dashboards(string $action, ?int $id): void
       $title = trim((string) ($item['title'] ?? ($telecaller . ' · Performance')));
       $summary = is_array($item['summary'] ?? null) ? $item['summary'] : [];
       $byTelecaller = is_array($item['byTelecaller'] ?? null) ? $item['byTelecaller'] : [];
+      $byProject = is_array($item['byProject'] ?? null) ? $item['byProject'] : [];
+      $bySource = is_array($item['bySource'] ?? null) ? $item['bySource'] : [];
       $pie = is_array($item['pie'] ?? null) ? $item['pie'] : [];
       $dateMin = $item['date_min'] ?? $item['dateMin'] ?? null;
       $dateMax = $item['date_max'] ?? $item['dateMax'] ?? null;
@@ -147,6 +165,8 @@ function ll_route_perf_dashboards(string $action, ?int $id): void
       $payload = json_encode([
         'summary' => array_merge(ll_perf_empty_summary(), array_intersect_key($summary, ll_perf_empty_summary())),
         'byTelecaller' => $byTelecaller,
+        'byProject' => $byProject,
+        'bySource' => $bySource,
         'pie' => array_merge(ll_perf_empty_pie(), array_intersect_key($pie, ll_perf_empty_pie())),
         'date_min' => $dateMin,
         'date_max' => $dateMax,
@@ -289,6 +309,8 @@ function ll_route_perf_dashboards(string $action, ?int $id): void
         ll_ok([
           'summary' => ll_perf_empty_summary(),
           'byTelecaller' => new stdClass(),
+          'byProject' => new stdClass(),
+          'bySource' => new stdClass(),
           'pie' => ll_perf_empty_pie(),
           'date_min' => null,
           'date_max' => null,
@@ -312,6 +334,8 @@ function ll_route_perf_dashboards(string $action, ?int $id): void
     $byName = [];
     $summaries = [];
     $mergedByTc = [];
+    $mergedByProject = [];
+    $mergedBySource = [];
     $pie = ll_perf_empty_pie();
     $dateMin = null;
     $dateMax = null;
@@ -326,19 +350,43 @@ function ll_route_perf_dashboards(string $action, ?int $id): void
       $payload = ll_perf_dashboard_decode_payload($row['payload']);
       $summary = is_array($payload['summary'] ?? null) ? $payload['summary'] : [];
       $byTc = is_array($payload['byTelecaller'] ?? null) ? $payload['byTelecaller'] : [];
+      $byProject = is_array($payload['byProject'] ?? null) ? $payload['byProject'] : [];
+      $bySource = is_array($payload['bySource'] ?? null) ? $payload['bySource'] : [];
       $rowPie = is_array($payload['pie'] ?? null) ? $payload['pie'] : [];
 
       if ($viewAll) {
         foreach ($byTc as $name => $metrics) {
           if (is_array($metrics)) {
-            $mergedByTc[$name] = ll_perf_normalize_tc_bucket($metrics);
+            $mergedByTc[$name] = ll_perf_normalize_dimension_bucket($metrics);
+          }
+        }
+        foreach ($byProject as $name => $metrics) {
+          if (!is_array($metrics)) {
+            continue;
+          }
+          $normalized = ll_perf_normalize_dimension_bucket($metrics);
+          if (isset($mergedByProject[$name])) {
+            $mergedByProject[$name] = ll_perf_merge_dimension_buckets($mergedByProject[$name], $normalized);
+          } else {
+            $mergedByProject[$name] = $normalized;
+          }
+        }
+        foreach ($bySource as $name => $metrics) {
+          if (!is_array($metrics)) {
+            continue;
+          }
+          $normalized = ll_perf_normalize_dimension_bucket($metrics);
+          if (isset($mergedBySource[$name])) {
+            $mergedBySource[$name] = ll_perf_merge_dimension_buckets($mergedBySource[$name], $normalized);
+          } else {
+            $mergedBySource[$name] = $normalized;
           }
         }
       } else {
         $normalized = [];
         foreach ($byTc as $name => $metrics) {
           if (is_array($metrics)) {
-            $normalized[$name] = ll_perf_normalize_tc_bucket($metrics);
+            $normalized[$name] = ll_perf_normalize_dimension_bucket($metrics);
           }
         }
         $mergedByTc = $normalized;
@@ -381,7 +429,7 @@ function ll_route_perf_dashboards(string $action, ?int $id): void
 
     $first = reset($byName);
     $title = $viewAll ? 'All TeleCallers · Performance' : (($first['title'] ?? null) ?: ($user['telecaller_name'] ?? 'Performance Dashboard'));
-    ll_ok([
+    $response = [
       'summary' => $globalSummary,
       'byTelecaller' => $mergedByTc ?: new stdClass(),
       'pie' => $pie,
@@ -391,7 +439,15 @@ function ll_route_perf_dashboards(string $action, ?int $id): void
       'title' => $title,
       'updated_at' => $latestUpdated,
       'view_all' => $viewAll,
-    ]);
+    ];
+    if ($viewAll) {
+      $response['byProject'] = $mergedByProject ?: new stdClass();
+      $response['bySource'] = $mergedBySource ?: new stdClass();
+    } else {
+      $response['byProject'] = new stdClass();
+      $response['bySource'] = new stdClass();
+    }
+    ll_ok($response);
   }
 
   if ($method === 'DELETE' && ($action === 'all' || $action === 'delete-all')) {
