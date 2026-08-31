@@ -2,6 +2,7 @@
  * TeleCalling Performance Report — Excel parse, metrics engine, published dashboard UI.
  */
 import {PerfDashboardApi} from "./api-client.js?v=5.4";
+import {downloadBlobFile} from "./audit.js?v=5.4";
 
 const MASTER_FIELDS = [
   {id: "mobile", label: "Mobile", aliases: "mobile, mobile number, phone"},
@@ -1584,6 +1585,17 @@ export function mountPerfPublishedDashboard(ctx) {
     btn.addEventListener("click", () => setPerfTab(btn.dataset.perfTab || "table"));
   });
   document.getElementById("refresh-perf-published")?.addEventListener("click", () => refreshPerfPublished());
+  document.getElementById("export-perf-pdf")?.addEventListener("click", async () => {
+    const btn = document.getElementById("export-perf-pdf");
+    try {
+      if (btn) btn.disabled = true;
+      await downloadPerfDashboardPdf();
+    } catch (err) {
+      window.alert(err.message || "PDF export failed.");
+    } finally {
+      if (btn && perfCombinedCache) btn.disabled = false;
+    }
+  });
 
   const view = document.getElementById("view-perf-dashboard");
   const {aside, form, reset, selects} = buildPerfFiltersPanel(
@@ -1638,11 +1650,13 @@ export async function refreshPerfPublished() {
       if (empty) empty.textContent = "No published performance dashboards yet.";
       panel?.classList.add("hidden");
       perfCombinedCache = null;
+      document.getElementById("export-perf-pdf")?.setAttribute("disabled", "disabled");
       return;
     }
     empty?.classList.add("hidden");
     panel?.classList.remove("hidden");
     perfCombinedCache = data;
+    document.getElementById("export-perf-pdf")?.removeAttribute("disabled");
 
     if (titleEl) titleEl.textContent = data.title || "Performance Dashboard";
     if (metaEl) {
@@ -1706,4 +1720,154 @@ export async function refreshPerfPublished() {
 export function destroyPerfDashboard() {
   destroyPerfCharts();
   syncPerfFiltersBodyPadding(null);
+}
+
+const PDF_BRAND = {
+  green: "#12372a",
+  mint: "#dff4e8",
+  ink: "#17211d",
+  muted: "#6c7771",
+  white: "#ffffff",
+  line: "#dfe5e1",
+};
+
+function requireJsPdf() {
+  const jsPDF = window.jspdf?.jsPDF;
+  if (typeof jsPDF !== "function") throw new Error("jsPDF failed to load. Reload the page.");
+  return jsPDF;
+}
+
+function pdfHexRgb(hex) {
+  const h = String(hex || "").replace("#", "");
+  return {
+    r: parseInt(h.slice(0, 2), 16),
+    g: parseInt(h.slice(2, 4), 16),
+    b: parseInt(h.slice(4, 6), 16),
+  };
+}
+
+function pdfSetFill(doc, hex) {
+  const {r, g, b} = pdfHexRgb(hex);
+  doc.setFillColor(r, g, b);
+}
+
+function pdfSetText(doc, hex) {
+  const {r, g, b} = pdfHexRgb(hex);
+  doc.setTextColor(r, g, b);
+}
+
+function pdfTruncate(doc, text, maxWidth) {
+  const s = String(text ?? "");
+  if (doc.getTextWidth(s) <= maxWidth) return s;
+  let out = s;
+  while (out.length > 1 && doc.getTextWidth(`${out}…`) > maxWidth) out = out.slice(0, -1);
+  return `${out}…`;
+}
+
+function buildPerfDashboardPdf(data, view, dimension) {
+  const jsPDF = requireJsPdf();
+  const doc = new jsPDF({orientation: "landscape", unit: "mm", format: "a4"});
+  const marginX = 10;
+  const marginY = 12;
+  const pageW = doc.internal.pageSize.getWidth();
+  const pageH = doc.internal.pageSize.getHeight();
+  const contentW = pageW - marginX * 2;
+  const cfg = PERF_DIMENSIONS[dimension] || PERF_DIMENSIONS.telecaller;
+  const viewLabel = view === "summary"
+    ? "Summary"
+    : `By ${cfg.label.replace(/ Name$/, "")}`;
+
+  pdfSetFill(doc, PDF_BRAND.green);
+  doc.rect(0, 0, pageW, 22, "F");
+  pdfSetText(doc, PDF_BRAND.white);
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(14);
+  doc.text("LeadLens · Performance Dashboard", marginX, 10);
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(9);
+  doc.text(viewLabel, pageW - marginX, 10, {align: "right"});
+
+  let y = 28;
+  pdfSetText(doc, PDF_BRAND.ink);
+  doc.setFontSize(9);
+  doc.text(
+    `Report period: ${formatDisplayDate(data.date_min)} – ${formatDisplayDate(data.date_max)}`,
+    marginX,
+    y,
+  );
+  y += 6;
+
+  const reportDays = getReportDays(data);
+  const summary = data.summary || emptyMetrics();
+  doc.setFont("helvetica", "bold");
+  doc.text("Totals", marginX, y);
+  y += 5;
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(8);
+  const totalsLine = SCORECARD_COLUMNS.map(col => {
+    const val = scorecardCellValue(summary, col, reportDays);
+    return `${col.label}: ${val}`;
+  }).join("   ·   ");
+  const totalLines = doc.splitTextToSize(totalsLine, contentW);
+  doc.text(totalLines, marginX, y);
+  y += totalLines.length * 4 + 4;
+
+  const dim = view === "summary" ? "telecaller" : dimension;
+  const buckets = getBucketMap(data, dim);
+  const names = dimensionNames(data, dim);
+  const nameLabel = (PERF_DIMENSIONS[dim] || PERF_DIMENSIONS.telecaller).label;
+  const columns = [{key: "name", label: nameLabel}, ...SCORECARD_COLUMNS];
+  const colCount = columns.length;
+  const colW = contentW / colCount;
+  const rowH = 5.5;
+  const headerH = 6;
+
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(7);
+  pdfSetFill(doc, PDF_BRAND.green);
+  doc.rect(marginX, y, contentW, headerH, "F");
+  pdfSetText(doc, PDF_BRAND.white);
+  columns.forEach((col, i) => {
+    const x = marginX + i * colW + 1;
+    doc.text(pdfTruncate(doc, col.label, colW - 2), x, y + 4);
+  });
+  y += headerH;
+
+  doc.setFont("helvetica", "normal");
+  const drawRow = (label, bucket, bold = false) => {
+    if (y + rowH > pageH - marginY) {
+      doc.addPage();
+      y = marginY;
+    }
+    if (bold) doc.setFont("helvetica", "bold");
+    pdfSetFill(doc, bold ? PDF_BRAND.mint : PDF_BRAND.white);
+    doc.rect(marginX, y, contentW, rowH, "F");
+    pdfSetText(doc, PDF_BRAND.ink);
+    columns.forEach((col, i) => {
+      const x = marginX + i * colW + 1;
+      const val = col.key === "name"
+        ? label
+        : scorecardCellValue(bucket, col, reportDays);
+      doc.text(pdfTruncate(doc, String(val), colW - 2), x, y + 4);
+    });
+    doc.setFont("helvetica", "normal");
+    y += rowH;
+  };
+
+  for (const name of names) drawRow(name, buckets[name] || emptyMetrics());
+  if (names.length) {
+    const totals = sumBucketMetrics(buckets, names);
+    drawRow("Total", totals, true);
+  }
+
+  return doc;
+}
+
+export async function downloadPerfDashboardPdf() {
+  const data = getFilteredPerfData();
+  if (!data) throw new Error("No dashboard data to export.");
+  const dimension = getActivePerfDimension();
+  const doc = buildPerfDashboardPdf(data, perfActiveView, dimension);
+  const stamp = new Date().toISOString().slice(0, 10);
+  downloadBlobFile(doc.output("blob"), `Performance_Dashboard_${stamp}.pdf`);
 }
