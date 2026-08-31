@@ -1,7 +1,7 @@
 /**
  * TeleCalling Performance Report — Excel parse, metrics engine, published dashboard UI.
  */
-import {PerfDashboardApi} from "./api-client.js?v=5.2.6";
+import {PerfDashboardApi} from "./api-client.js?v=5.2.7";
 
 const MASTER_FIELDS = [
   {id: "mobile", label: "Mobile", aliases: "mobile, mobile number, phone"},
@@ -404,18 +404,22 @@ function forwardFillHistoryLeads(historyRows) {
   let lastMobile = "";
   let lastProject = "";
   let lastTelecaller = "";
+  let lastTelecallingStatus = "";
   const out = [];
   for (const row of historyRows) {
     const filled = {...row};
     const mobile = leadMobile(filled);
     const project = clean(filled.project);
     const telecaller = clean(filled.telecaller);
+    const telecallingStatus = clean(filled.telecallingStatus);
     if (mobile) lastMobile = clean(filled.mobile) || mobile;
     if (project) lastProject = project;
     if (telecaller) lastTelecaller = telecaller;
+    if (telecallingStatus) lastTelecallingStatus = telecallingStatus;
     if (!leadMobile(filled) && lastMobile) filled.mobile = lastMobile;
     if (!clean(filled.project) && lastProject) filled.project = lastProject;
     if (!clean(filled.telecaller) && lastTelecaller) filled.telecaller = lastTelecaller;
+    if (!clean(filled.telecallingStatus) && lastTelecallingStatus) filled.telecallingStatus = lastTelecallingStatus;
     if (!clean(filled.telecaller)) filled.telecaller = "Unknown";
     if (leadMobile(filled)) out.push(filled);
   }
@@ -462,17 +466,19 @@ function matchesSentToEnquiry(status) {
   return s === "sent to enquiry" || s === "send to enquiry";
 }
 
-/** SVS/SVP/SVC: match if either Telecalling Status or Status equals target. */
-function matchesVisitStatus(row, target) {
-  const t = norm(target);
-  return norm(row.telecallingStatus) === t || norm(row.status) === t;
+/** Match History Telecalling Status column (visit statuses — parallel to STE using History Status). */
+function matchesTelecallingStatus(row, target) {
+  return norm(row.telecallingStatus) === norm(target);
 }
 
-/** Count visit status from any History row, once per Mobile+TeleCaller+Project (max-LUD row credits telecaller). */
-function accumulateVisitMetric(historyFilled, target, byTelecaller, ensureTc, field) {
+/**
+ * Count when ANY History row matches Telecalling Status, once per Mobile+TeleCaller+Project.
+ * Same pattern as STE (which uses History Status for Send/Sent to Enquiry).
+ */
+function accumulateTelecallingStatusMetric(historyFilled, target, byTelecaller, ensureTc, field) {
   const best = new Map();
   for (const row of historyFilled) {
-    if (!matchesVisitStatus(row, target)) continue;
+    if (!matchesTelecallingStatus(row, target)) continue;
     const key = steIdentityKey(row);
     if (!key) continue;
     const lud = ludMs(row);
@@ -489,7 +495,7 @@ function accumulateVisitMetric(historyFilled, target, byTelecaller, ensureTc, fi
  * Build performance metrics from parsed Master + History rows.
  * Lead = Mobile + TeleCaller.
  * STE = any History Status Send/Sent to Enquiry, once per Mobile+TeleCaller+Project.
- * SVS/SVP/SVC = any History row where Telecalling Status or Status matches, once per Mobile+TeleCaller+Project.
+ * SVS/SVP/SVC = any Telecalling Status match (parallel column to STE), once per Mobile+TeleCaller+Project.
  * NI = latest History Status (max LUD), once per lead.
  * @param {object[]} masterRows
  * @param {object[]} historyRows
@@ -542,8 +548,7 @@ export function reconcilePerf(masterRows, historyRows) {
     bucket.siteVisited = 0;
   }
 
-  // STE: count a lead if ANY History call has Status = Send/Sent to Enquiry
-  // (once per Mobile+TeleCaller+Project). Attribute to max-LUD STE row per key.
+  // STE: any History row with Status Send/Sent to Enquiry, once per Mobile+TeleCaller+Project.
   const steBest = new Map();
   for (const row of historyFilled) {
     if (!matchesSentToEnquiry(row.status)) continue;
@@ -557,9 +562,12 @@ export function reconcilePerf(masterRows, historyRows) {
     byTelecaller[ensureTc(row.telecaller)].siteVisited += 1;
   }
 
-  accumulateVisitMetric(historyFilled, "site visit scheduled", byTelecaller, ensureTc, "siteVisitScheduled");
-  accumulateVisitMetric(historyFilled, "site visit pending", byTelecaller, ensureTc, "siteVisitPending");
-  accumulateVisitMetric(historyFilled, "site visit cancelled", byTelecaller, ensureTc, "siteVisitCancelled");
+  const svsKeys = accumulateTelecallingStatusMetric(historyFilled, "site visit scheduled", byTelecaller, ensureTc, "siteVisitScheduled");
+  const svpKeys = accumulateTelecallingStatusMetric(historyFilled, "site visit pending", byTelecaller, ensureTc, "siteVisitPending");
+  const svcKeys = accumulateTelecallingStatusMetric(historyFilled, "site visit cancelled", byTelecaller, ensureTc, "siteVisitCancelled");
+  // #region agent log
+  fetch('http://127.0.0.1:7564/ingest/5981bb77-f08e-4f6c-995e-18d8279225fc',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'c65e41'},body:JSON.stringify({sessionId:'c65e41',runId:'svs-tcs-ste',hypothesisId:'B',location:'perf-dashboard.js:reconcilePerf',message:'STE-style telecalling status metrics',data:{steKeys:steBest.size,svsKeys,svpKeys,svcKeys,historyFilled:historyFilled.length},timestamp:Date.now()})}).catch(()=>{});
+  // #endregion
 
   for (const row of historyLeads) {
     const tc = ensureTc(row.telecaller);
