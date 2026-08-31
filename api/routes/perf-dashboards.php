@@ -375,23 +375,19 @@ function ll_route_perf_dashboards(string $action, ?int $id): void
           if (!is_array($metrics)) {
             continue;
           }
-          $normalized = ll_perf_normalize_dimension_bucket($metrics);
           if (isset($mergedByProject[$name])) {
-            $mergedByProject[$name] = ll_perf_merge_dimension_buckets($mergedByProject[$name], $normalized);
-          } else {
-            $mergedByProject[$name] = $normalized;
+            continue;
           }
+          $mergedByProject[$name] = ll_perf_normalize_dimension_bucket($metrics);
         }
         foreach ($bySource as $name => $metrics) {
           if (!is_array($metrics)) {
             continue;
           }
-          $normalized = ll_perf_normalize_dimension_bucket($metrics);
           if (isset($mergedBySource[$name])) {
-            $mergedBySource[$name] = ll_perf_merge_dimension_buckets($mergedBySource[$name], $normalized);
-          } else {
-            $mergedBySource[$name] = $normalized;
+            continue;
           }
+          $mergedBySource[$name] = ll_perf_normalize_dimension_bucket($metrics);
         }
       } else {
         $normalized = [];

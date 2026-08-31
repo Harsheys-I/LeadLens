@@ -101,7 +101,7 @@ const CHART_COLORS = {
 const PERF_DIMENSIONS = {
   telecaller: {bucketKey: "byTelecaller", label: "Telecaller Name", tableTitle: "Telecaller breakdown", totalsLabel: "TeleCallers"},
   project: {bucketKey: "byProject", label: "Project Name", tableTitle: "Project breakdown", totalsLabel: "Projects"},
-  source: {bucketKey: "bySource", label: "Source", tableTitle: "Source breakdown", totalsLabel: "Sources"},
+  source: {bucketKey: "bySource", label: "Status", tableTitle: "Status breakdown", totalsLabel: "Statuses"},
 };
 
 /** @type {Map<string, import("chart.js").Chart>} */
@@ -1014,25 +1014,42 @@ function renderBreakdownTable(mount, data, dimension) {
   mount.append(wrap);
 }
 
-function renderSummaryPanel(mount, data, dimension = "telecaller") {
-  mount.replaceChildren();
-  const cfg = PERF_DIMENSIONS[dimension] || PERF_DIMENSIONS.telecaller;
+function renderSummaryHeader(mount, data) {
   const header = document.createElement("p");
   header.className = "perf-date-range";
   header.textContent = `Report period (from History Lead Update Date): ${formatDisplayDate(data.date_min)} – ${formatDisplayDate(data.date_max)}`;
   mount.append(header);
+}
 
+function renderPerfSummaryView(mount, data) {
+  mount.replaceChildren();
+  renderSummaryHeader(mount, data);
+  const filtered = filterPerfData(data, "telecaller", perfFilters);
+  renderTotalsBlock(mount, filtered.summary, "All TeleCallers · totals", getReportDays(data));
+  const tableTitle = document.createElement("h3");
+  tableTitle.className = "perf-section-title";
+  tableTitle.textContent = PERF_DIMENSIONS.telecaller.tableTitle;
+  mount.append(tableTitle);
+  renderBreakdownTable(mount, filtered, "telecaller");
+}
+
+function renderPerfTableView(mount, data, dimension) {
+  mount.replaceChildren();
+  const cfg = PERF_DIMENSIONS[dimension] || PERF_DIMENSIONS.telecaller;
+  renderSummaryHeader(mount, data);
   const names = dimensionNames(data, dimension);
   let title = `All ${cfg.totalsLabel} · totals`;
   if (names.length === 1) title = `${names[0]} · totals`;
-  else if (dimension === "telecaller" && names.length > 1) title = "All TeleCallers · totals";
   renderTotalsBlock(mount, data.summary, title, getReportDays(data));
-
   const tableTitle = document.createElement("h3");
   tableTitle.className = "perf-section-title";
   tableTitle.textContent = cfg.tableTitle;
   mount.append(tableTitle);
   renderBreakdownTable(mount, data, dimension);
+}
+
+function renderSummaryPanel(mount, data, dimension = "telecaller") {
+  renderPerfTableView(mount, data, dimension);
 }
 
 function renderGraphsPanel(mount, data, dimension = "telecaller") {
@@ -1314,15 +1331,15 @@ export function mountPerfReportUpload(ctx) {
       if (modalMsg) modalMsg.textContent = "Select at least one TeleCaller.";
       return;
     }
-    const dashboards = selected.map(name => {
+    const dashboards = selected.map((name, index) => {
       const bucket = perfReconciled.byTelecaller[name] || emptyTelecallerBucket();
       return {
         telecaller_name: name,
         title: `${name} · Performance`,
         summary: metricsFromBucket(bucket),
         byTelecaller: {[name]: bucket},
-        byProject: perfReconciled.byProject,
-        bySource: perfReconciled.bySource,
+        byProject: index === 0 ? perfReconciled.byProject : {},
+        bySource: index === 0 ? perfReconciled.bySource : {},
         pie: pieFromBucket(bucket),
         date_min: perfReconciled.dateMin,
         date_max: perfReconciled.dateMax,
@@ -1349,8 +1366,8 @@ export function mountPerfReportUpload(ctx) {
 }
 
 let perfCombinedCache = null;
-let perfActiveTab = "summary";
-let perfActiveDimension = "telecaller";
+let perfActiveView = "summary";
+let perfActiveTab = "table";
 let perfFilters = {telecallers: [], projects: [], sources: []};
 
 function readPerfMultiSelect(select) {
@@ -1430,7 +1447,7 @@ function buildPerfFiltersPanel(filterOptions, filters, {collapsed = true} = {}) 
   const fields = [
     ["telecallers", "TeleCaller", filterOptions.telecallers, filters.telecallers],
     ["projects", "Project", filterOptions.projects, filters.projects],
-    ["sources", "Source", filterOptions.sources, filters.sources],
+    ["sources", "Status", filterOptions.sources, filters.sources],
   ];
 
   const selects = {};
@@ -1471,44 +1488,78 @@ function buildPerfFiltersPanel(filterOptions, filters, {collapsed = true} = {}) 
   return {aside, form, reset, selects};
 }
 
+function getActivePerfDimension() {
+  return perfActiveView === "summary" ? "telecaller" : perfActiveView;
+}
+
 function getFilteredPerfData() {
   if (!perfCombinedCache) return null;
-  return filterPerfData(perfCombinedCache, perfActiveDimension, perfFilters);
+  return filterPerfData(perfCombinedCache, getActivePerfDimension(), perfFilters);
+}
+
+function updatePerfFilterVisibility(showAdminControls) {
+  const {filterSelects} = perfPublishedHandlers || {};
+  if (!filterSelects) return;
+  const dim = getActivePerfDimension();
+  const showTelecallers = showAdminControls && (perfActiveView === "summary" || dim === "telecaller");
+  const showProjects = showAdminControls && dim === "project";
+  const showSources = showAdminControls && dim === "source";
+  filterSelects.telecallers.closest(".dashboard-filter")?.classList.toggle("hidden", !showTelecallers);
+  filterSelects.projects.closest(".dashboard-filter")?.classList.toggle("hidden", !showProjects);
+  filterSelects.sources.closest(".dashboard-filter")?.classList.toggle("hidden", !showSources);
 }
 
 function renderActivePerfPanels() {
   const filtered = getFilteredPerfData();
   if (!filtered) return;
-  renderSummaryPanel(document.getElementById("perf-tab-summary"), filtered, perfActiveDimension);
-  if (perfActiveTab === "graphs") {
-    renderGraphsPanel(document.getElementById("perf-tab-graphs"), filtered, perfActiveDimension);
+  const summaryMount = document.getElementById("perf-panel-summary");
+  const tableMount = document.getElementById("perf-panel-table");
+  const graphsMount = document.getElementById("perf-panel-graphs");
+
+  if (perfActiveView === "summary") {
+    if (summaryMount) renderPerfSummaryView(summaryMount, perfCombinedCache);
+    return;
+  }
+
+  if (perfActiveTab === "table" && tableMount) {
+    renderPerfTableView(tableMount, filtered, getActivePerfDimension());
+  }
+  if (perfActiveTab === "graphs" && graphsMount) {
+    renderGraphsPanel(graphsMount, filtered, getActivePerfDimension());
   }
 }
 
-function setPerfDimension(dimension) {
-  const next = PERF_DIMENSIONS[dimension] ? dimension : "telecaller";
-  perfActiveDimension = next;
-  document.querySelectorAll(".perf-dimension-tabs [data-perf-dimension]").forEach(btn => {
-    btn.classList.toggle("active", btn.dataset.perfDimension === next);
-    btn.setAttribute("aria-selected", btn.dataset.perfDimension === next ? "true" : "false");
+function setPerfView(view) {
+  const allowed = view === "summary" || PERF_DIMENSIONS[view];
+  const next = allowed ? view : "summary";
+  perfActiveView = next;
+  document.querySelectorAll(".perf-main-tabs [data-perf-view]").forEach(btn => {
+    const active = btn.dataset.perfView === next;
+    btn.classList.toggle("active", active);
+    btn.setAttribute("aria-selected", active ? "true" : "false");
   });
+
+  const isSummary = next === "summary";
+  document.getElementById("perf-sub-tabs")?.classList.toggle("hidden", isSummary);
+  document.getElementById("perf-panel-summary")?.classList.toggle("hidden", !isSummary);
+  document.getElementById("perf-panel-table")?.classList.toggle("hidden", isSummary || perfActiveTab !== "table");
+  document.getElementById("perf-panel-graphs")?.classList.toggle("hidden", isSummary || perfActiveTab !== "graphs");
+
+  const showAdmin = Boolean(perfPublishedHandlers?.canViewAll?.() && perfCombinedCache?.view_all);
+  updatePerfFilterVisibility(showAdmin);
   renderActivePerfPanels();
 }
 
 function setPerfTab(tab) {
-  perfActiveTab = tab;
-  document.querySelectorAll(".perf-view-tabs [data-perf-tab]").forEach(btn => {
-    btn.classList.toggle("active", btn.dataset.perfTab === tab);
-    btn.setAttribute("aria-selected", btn.dataset.perfTab === tab ? "true" : "false");
+  perfActiveTab = tab === "graphs" ? "graphs" : "table";
+  document.querySelectorAll("#perf-sub-tabs [data-perf-tab]").forEach(btn => {
+    btn.classList.toggle("active", btn.dataset.perfTab === perfActiveTab);
+    btn.setAttribute("aria-selected", btn.dataset.perfTab === perfActiveTab ? "true" : "false");
   });
-  document.getElementById("perf-tab-summary")?.classList.toggle("hidden", tab !== "summary");
-  document.getElementById("perf-tab-graphs")?.classList.toggle("hidden", tab !== "graphs");
-  if (tab === "graphs" && perfCombinedCache) {
-    renderGraphsPanel(
-      document.getElementById("perf-tab-graphs"),
-      getFilteredPerfData(),
-      perfActiveDimension,
-    );
+  document.getElementById("perf-panel-table")?.classList.toggle("hidden", perfActiveTab !== "table");
+  document.getElementById("perf-panel-graphs")?.classList.toggle("hidden", perfActiveTab !== "graphs");
+  if (perfActiveView !== "summary" && perfCombinedCache) {
+    renderActivePerfPanels();
   }
 }
 
@@ -1518,11 +1569,11 @@ function setPerfTab(tab) {
  */
 export function mountPerfPublishedDashboard(ctx) {
   const {canViewAll} = ctx;
-  document.querySelectorAll(".perf-view-tabs [data-perf-tab]").forEach(btn => {
-    btn.addEventListener("click", () => setPerfTab(btn.dataset.perfTab || "summary"));
+  document.querySelectorAll(".perf-main-tabs [data-perf-view]").forEach(btn => {
+    btn.addEventListener("click", () => setPerfView(btn.dataset.perfView || "summary"));
   });
-  document.querySelectorAll(".perf-dimension-tabs [data-perf-dimension]").forEach(btn => {
-    btn.addEventListener("click", () => setPerfDimension(btn.dataset.perfDimension || "telecaller"));
+  document.querySelectorAll("#perf-sub-tabs [data-perf-tab]").forEach(btn => {
+    btn.addEventListener("click", () => setPerfTab(btn.dataset.perfTab || "table"));
   });
   document.getElementById("refresh-perf-published")?.addEventListener("click", () => refreshPerfPublished());
 
@@ -1555,8 +1606,8 @@ export function mountPerfPublishedDashboard(ctx) {
     applyFilters();
   });
 
-  const dimensionTabs = document.querySelector(".perf-dimension-tabs");
-  perfPublishedHandlers = {canViewAll, filtersRail: aside, filterSelects: selects, dimensionTabs};
+  const mainTabs = document.querySelector(".perf-main-tabs");
+  perfPublishedHandlers = {canViewAll, filtersRail: aside, filterSelects: selects, mainTabs};
 }
 
 export async function refreshPerfPublished() {
@@ -1564,9 +1615,10 @@ export async function refreshPerfPublished() {
   const panel = document.getElementById("perf-published-panel");
   const titleEl = document.getElementById("perf-published-title");
   const metaEl = document.getElementById("perf-published-meta");
-  const summaryMount = document.getElementById("perf-tab-summary");
-  const graphsMount = document.getElementById("perf-tab-graphs");
-  const {filtersRail, filterSelects, canViewAll, dimensionTabs} = perfPublishedHandlers || {};
+  const summaryMount = document.getElementById("perf-panel-summary");
+  const tableMount = document.getElementById("perf-panel-table");
+  const graphsMount = document.getElementById("perf-panel-graphs");
+  const {filtersRail, filterSelects, canViewAll, mainTabs} = perfPublishedHandlers || {};
 
   destroyPerfCharts();
   try {
@@ -1596,16 +1648,26 @@ export async function refreshPerfPublished() {
     }
 
     const showAdminControls = Boolean(canViewAll?.() && data.view_all);
-    dimensionTabs?.classList.toggle("hidden", !showAdminControls);
+    mainTabs?.querySelector('[data-perf-view="project"]')?.classList.toggle("hidden", !showAdminControls);
+    mainTabs?.querySelector('[data-perf-view="source"]')?.classList.toggle("hidden", !showAdminControls);
     filtersRail?.classList.toggle("hidden", !showAdminControls);
     if (!showAdminControls) {
       syncPerfFiltersBodyPadding(null);
-      if (perfActiveDimension !== "telecaller") perfActiveDimension = "telecaller";
+      if (perfActiveView !== "summary" && perfActiveView !== "telecaller") perfActiveView = "summary";
       perfFilters = {telecallers: [], projects: [], sources: []};
     }
-    document.querySelectorAll(".perf-dimension-tabs [data-perf-dimension]").forEach(btn => {
-      btn.classList.toggle("active", btn.dataset.perfDimension === perfActiveDimension);
-      btn.setAttribute("aria-selected", btn.dataset.perfDimension === perfActiveDimension ? "true" : "false");
+    if (!PERF_DIMENSIONS[perfActiveView] && perfActiveView !== "summary") {
+      perfActiveView = "summary";
+    }
+    document.querySelectorAll(".perf-main-tabs [data-perf-view]").forEach(btn => {
+      if (btn.classList.contains("hidden") && btn.dataset.perfView === perfActiveView) {
+        perfActiveView = "summary";
+      }
+    });
+    document.querySelectorAll(".perf-main-tabs [data-perf-view]").forEach(btn => {
+      const active = btn.dataset.perfView === perfActiveView;
+      btn.classList.toggle("active", active);
+      btn.setAttribute("aria-selected", active ? "true" : "false");
     });
 
     if (showAdminControls && filterSelects) {
@@ -1623,10 +1685,8 @@ export async function refreshPerfPublished() {
       fillPerfMultiSelect(filterSelects.sources, sourceNames, perfFilters.sources);
     }
 
-    if (summaryMount) renderSummaryPanel(summaryMount, getFilteredPerfData(), perfActiveDimension);
-    if (perfActiveTab === "graphs" && graphsMount) {
-      renderGraphsPanel(graphsMount, getFilteredPerfData(), perfActiveDimension);
-    }
+    updatePerfFilterVisibility(showAdminControls);
+    setPerfView(perfActiveView);
     setPerfTab(perfActiveTab);
   } catch (err) {
     empty?.classList.remove("hidden");

@@ -243,17 +243,19 @@
         <div id="perf-published-empty" class="empty-card hidden" aria-live="polite">No published performance dashboards yet.</div>
         <div id="perf-published-panel" class="review-dashboard-panel hidden">
           <div class="card-title"><h2 id="perf-published-title">Performance Dashboard</h2></div>
-          <div class="perf-dimension-tabs hidden" role="tablist" aria-label="Performance breakdown dimension">
-            <button type="button" class="perf-dimension-tab active" data-perf-dimension="telecaller" role="tab" aria-selected="true">By Telecaller</button>
-            <button type="button" class="perf-dimension-tab" data-perf-dimension="project" role="tab" aria-selected="false">By Project</button>
-            <button type="button" class="perf-dimension-tab" data-perf-dimension="source" role="tab" aria-selected="false">By Source</button>
+          <div class="perf-main-tabs" role="tablist" aria-label="Performance dashboard views">
+            <button type="button" class="perf-main-tab active" data-perf-view="summary" role="tab" aria-selected="true">Summary</button>
+            <button type="button" class="perf-main-tab" data-perf-view="telecaller" role="tab" aria-selected="false">By Telecaller</button>
+            <button type="button" class="perf-main-tab hidden" data-perf-view="project" role="tab" aria-selected="false">By Project</button>
+            <button type="button" class="perf-main-tab hidden" data-perf-view="source" role="tab" aria-selected="false">By Status</button>
           </div>
-          <div class="perf-view-tabs" role="tablist" aria-label="Performance dashboard views">
-            <button type="button" class="perf-view-tab active" data-perf-tab="summary" role="tab" aria-selected="true">Summary</button>
-            <button type="button" class="perf-view-tab" data-perf-tab="graphs" role="tab" aria-selected="false">Graphs</button>
+          <div id="perf-sub-tabs" class="perf-view-tabs hidden" role="tablist" aria-label="Breakdown presentation">
+            <button type="button" class="perf-view-tab active" data-perf-tab="table" role="tab" aria-selected="true">Table</button>
+            <button type="button" class="perf-view-tab" data-perf-tab="graphs" role="tab" aria-selected="false">Graph</button>
           </div>
-          <div id="perf-tab-summary" class="perf-tab-panel" role="tabpanel"></div>
-          <div id="perf-tab-graphs" class="perf-tab-panel hidden" role="tabpanel"></div>
+          <div id="perf-panel-summary" class="perf-tab-panel" role="tabpanel"></div>
+          <div id="perf-panel-table" class="perf-tab-panel hidden" role="tabpanel"></div>
+          <div id="perf-panel-graphs" class="perf-tab-panel hidden" role="tabpanel"></div>
         </div>
       </section>
 
