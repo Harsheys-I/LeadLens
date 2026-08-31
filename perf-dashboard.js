@@ -34,17 +34,17 @@ const METRIC_KEYS = [
   "overdue",
 ];
 const METRIC_LABELS = {
-  totalLeads: "Total Leads (Master ∪ History)",
-  activeLeads: "Active Leads (Master)",
-  totalCalls: "Total Calls (History)",
-  notFollowupLeads: "Not Follow-up Leads (Master)",
-  draftLeads: "Draft Leads (Master)",
-  siteVisited: "Site Visited (STE)",
-  siteVisitScheduled: "Site Visit Scheduled (SVS)",
-  siteVisitPending: "Site Visit Pending (SVP)",
-  siteVisitCancelled: "Site Visit Cancelled (SVC)",
-  notInterested: "Not Interested (NI)",
-  overdue: "Overdue Leads (Master)",
+  totalLeads: "Total Leads",
+  activeLeads: "Active Leads",
+  totalCalls: "Total Calls",
+  notFollowupLeads: "Not Follow-up Leads",
+  draftLeads: "Draft Leads",
+  siteVisited: "Site Visited",
+  siteVisitScheduled: "Site Visit Scheduled",
+  siteVisitPending: "Site Visit Pending",
+  siteVisitCancelled: "Site Visit Cancelled",
+  notInterested: "Not Interested",
+  overdue: "Overdue Leads",
 };
 
 /** Derived average columns (not summed across rows). */
@@ -56,7 +56,7 @@ const AVG_LABELS = {
 /** Percentage columns derived for the scorecard (not summed across telecallers). */
 const PCT_KEYS = ["totalLeadsVsSiteVisitedPct"];
 const PCT_LABELS = {
-  totalLeadsVsSiteVisitedPct: "Total Leads vs Site Visited (%)",
+  totalLeadsVsSiteVisitedPct: "Total Leads vs Site Visited",
 };
 
 /** Scorecard column order (matches operator report). */
@@ -247,7 +247,7 @@ function formatPct(value) {
 
 function formatAvg(value) {
   if (value === null || value === undefined || Number.isNaN(Number(value))) return "—";
-  return Number(value).toFixed(1);
+  return String(Math.round(Number(value)));
 }
 
 /** Inclusive calendar days between History min/max LUD (from ISO date strings). */
@@ -266,7 +266,7 @@ function avgCallsPerDay(totalCalls, reportDays) {
   const calls = Number(totalCalls) || 0;
   const days = Number(reportDays) || 0;
   if (days <= 0) return null;
-  return Math.round((calls / days) * 10) / 10;
+  return Math.round(calls / days);
 }
 
 function finalizeBucket(bucket) {
