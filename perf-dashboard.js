@@ -1,7 +1,7 @@
 /**
  * TeleCalling Performance Report — Excel parse, metrics engine, published dashboard UI.
  */
-import {PerfDashboardApi} from "./api-client.js?v=5.2.42";
+import {PerfDashboardApi} from "./api-client.js?v=5.2.5";
 
 const MASTER_FIELDS = [
   {id: "mobile", label: "Mobile", aliases: "mobile, mobile number, phone"},
@@ -226,7 +226,6 @@ function finalizeBucket(bucket) {
   const union = new Set([...masterKeys, ...historyKeys]);
   // Active = Master leads; Total = Master ∪ History (Lead = Mobile + TeleCaller).
   bucket.activeLeads = masterKeys.size;
-  bucket.historyLeads = historyKeys.size;
   bucket.totalLeads = union.size;
   bucket.overdue = overdueKeys.size;
   bucket.pie = {
@@ -334,7 +333,7 @@ function rowObjects(rawRows, columns, fields) {
     obj.registrationDate = parseDateValue(obj.registration);
     obj.nextDate = parseDateValue(obj.next);
     obj.updateDate = parseDateValue(obj.update);
-    obj.telecaller = clean(obj.telecaller) || "Unknown";
+    obj.telecaller = clean(obj.telecaller);
     obj.mobile = clean(obj.mobile);
     obj.project = clean(obj.project);
     obj.status = clean(obj.status);
@@ -388,6 +387,15 @@ function leadIdentityKey(row) {
   return `${mobile}|${tc}`;
 }
 
+/** STE identity: Mobile + TeleCaller + Project (one enquiry per project). */
+function steIdentityKey(row) {
+  const mobile = leadMobile(row);
+  if (!mobile) return "";
+  const tc = norm(row.telecaller) || "unknown";
+  const project = norm(row.project) || "";
+  return `${mobile}|${tc}|${project}`;
+}
+
 /**
  * CRM History exports often leave Mobile/Project blank on continuation rows
  * for the same lead. Carry forward the last non-empty values.
@@ -395,15 +403,20 @@ function leadIdentityKey(row) {
 function forwardFillHistoryLeads(historyRows) {
   let lastMobile = "";
   let lastProject = "";
+  let lastTelecaller = "";
   const out = [];
   for (const row of historyRows) {
     const filled = {...row};
     const mobile = leadMobile(filled);
     const project = clean(filled.project);
+    const telecaller = clean(filled.telecaller);
     if (mobile) lastMobile = clean(filled.mobile) || mobile;
     if (project) lastProject = project;
+    if (telecaller) lastTelecaller = telecaller;
     if (!leadMobile(filled) && lastMobile) filled.mobile = lastMobile;
     if (!clean(filled.project) && lastProject) filled.project = lastProject;
+    if (!clean(filled.telecaller) && lastTelecaller) filled.telecaller = lastTelecaller;
+    if (!clean(filled.telecaller)) filled.telecaller = "Unknown";
     if (leadMobile(filled)) out.push(filled);
   }
   return out;
@@ -449,10 +462,15 @@ function matchesSentToEnquiry(status) {
   return s === "sent to enquiry" || s === "send to enquiry";
 }
 
+/** SVS/SVP/SVC: Telecalling Status is primary; Status is fallback. */
+function visitStatusField(row) {
+  return norm(row.telecallingStatus) || norm(row.status);
+}
+
 /**
  * Build performance metrics from parsed Master + History rows.
  * Lead = Mobile + TeleCaller.
- * STE = any History Status Send/Sent to Enquiry, once per lead.
+ * STE = any History Status Send/Sent to Enquiry, once per Mobile+TeleCaller+Project.
  * SVS/SVP/SVC/NI = latest History Status (max LUD), once per lead.
  * @param {object[]} masterRows
  * @param {object[]} historyRows
@@ -471,8 +489,14 @@ export function reconcilePerf(masterRows, historyRows) {
 
   const byTelecaller = {};
   const ensureTc = name => {
-    const key = clean(name) || "Unknown";
-    if (!byTelecaller[key]) byTelecaller[key] = emptyTelecallerBucket();
+    const display = clean(name) || "Unknown";
+    const key = norm(display) || "unknown";
+    if (!byTelecaller[key]) {
+      byTelecaller[key] = emptyTelecallerBucket();
+      byTelecaller[key]._displayName = display;
+    } else if (display !== "Unknown" && byTelecaller[key]._displayName === "Unknown") {
+      byTelecaller[key]._displayName = display;
+    }
     return key;
   };
 
@@ -499,13 +523,18 @@ export function reconcilePerf(masterRows, historyRows) {
     bucket.siteVisited = 0;
   }
 
-  // STE: count a lead if ANY History call has Status = Send/Sent to Enquiry (once per Mobile+TC).
-  const steSeen = new Set();
+  // STE: count a lead if ANY History call has Status = Send/Sent to Enquiry
+  // (once per Mobile+TeleCaller+Project). Attribute to max-LUD STE row per key.
+  const steBest = new Map();
   for (const row of historyFilled) {
     if (!matchesSentToEnquiry(row.status)) continue;
-    const key = leadIdentityKey(row);
-    if (!key || steSeen.has(key)) continue;
-    steSeen.add(key);
+    const key = steIdentityKey(row);
+    if (!key) continue;
+    const lud = ludMs(row);
+    const prev = steBest.get(key);
+    if (!prev || lud > prev.lud) steBest.set(key, {lud, row});
+  }
+  for (const {row} of steBest.values()) {
     byTelecaller[ensureTc(row.telecaller)].siteVisited += 1;
   }
 
@@ -516,15 +545,23 @@ export function reconcilePerf(masterRows, historyRows) {
     byTelecaller[tc]._historyKeys.add(key);
     allHistoryKeys.add(key);
 
-    const st = norm(row.status);
-    // Other Status metrics — latest LUD row only (once per lead).
-    if (st === "site visit scheduled") byTelecaller[tc].siteVisitScheduled += 1;
-    if (st === "site visit pending") byTelecaller[tc].siteVisitPending += 1;
-    if (st === "site visit cancelled") byTelecaller[tc].siteVisitCancelled += 1;
-    if (st === "not interested") byTelecaller[tc].notInterested += 1;
+    const visit = visitStatusField(row);
+    // SVS/SVP/SVC — latest LUD row; Telecalling Status primary. NI — History Status only.
+    if (visit === "site visit scheduled") byTelecaller[tc].siteVisitScheduled += 1;
+    if (visit === "site visit pending") byTelecaller[tc].siteVisitPending += 1;
+    if (visit === "site visit cancelled") byTelecaller[tc].siteVisitCancelled += 1;
+    if (norm(row.status) === "not interested") byTelecaller[tc].notInterested += 1;
   }
 
   for (const bucket of Object.values(byTelecaller)) finalizeBucket(bucket);
+
+  const byTelecallerDisplay = {};
+  for (const bucket of Object.values(byTelecaller)) {
+    const name = bucket._displayName || "Unknown";
+    delete bucket._displayName;
+    delete bucket.historyLeads;
+    byTelecallerDisplay[name] = bucket;
+  }
 
   const summary = emptyMetrics();
   summary.activeLeads = allMasterKeys.size;
@@ -555,7 +592,7 @@ export function reconcilePerf(masterRows, historyRows) {
 
   return {
     summary,
-    byTelecaller,
+    byTelecaller: byTelecallerDisplay,
     pie,
     dateMin: dateToIso(dateMin),
     dateMax: dateToIso(dateMax),
@@ -1042,7 +1079,7 @@ export function mountPerfReportUpload(ctx) {
         telecaller_name: name,
         title: `${name} · Performance`,
         summary: metricsFromBucket(bucket),
-        byTelecaller: perfReconciled.byTelecaller,
+        byTelecaller: {[name]: bucket},
         pie: pieFromBucket(bucket),
         date_min: perfReconciled.dateMin,
         date_max: perfReconciled.dateMax,

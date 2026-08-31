@@ -1,7 +1,7 @@
-import {buildTelecallerDashboardBlob} from "./dashboard-export.js?v=5.2.20";
-import {STATUS_HISTORY_PROMPT} from "./debug-prompts.js?v=5.2.23";
+import {buildTelecallerDashboardBlob} from "./dashboard-export.js?v=5.2.5";
+import {STATUS_HISTORY_PROMPT} from "./debug-prompts.js?v=5.2.5";
 
-export const APP_VERSION = "5.2.42";
+export const APP_VERSION = "5.2.5";
 /** Sentinel: use server OpenAI proxy (no raw key in the browser). */
 export const SERVER_API_KEY = "__server__";
 /** Bump when default AI rules / field defaults must refresh existing localStorage settings. */
@@ -1647,26 +1647,13 @@ function finalizeObservation(aiText,row,errors,q){
   // Reject wrong Cold/Lost attacks when NI/dead/RNR trail supports closed status and no buying signals remain.
   const attacksClosed=/does not support (a )?(cold|lost|beyond budget)|(?:cold|lost|beyond budget) (status )?(is )?(not |un)?support|vague.{0,80}(cold|lost)|(cold|lost).{0,80}vague|lack.{0,50}(detail|customer).{0,80}(cold|lost)|rnr.{0,50}(does not|don't|dont).{0,20}(cold|lost)|(cold|lost).{0,40}(wrong|incorrect|mismatch|unsupported)/i.test(clipped);
   if(coldOk&&attacksClosed&&!errors.includes(STATUS_HISTORY_ERROR)&&(deadAligned||rnrLike)&&!buyingSignals){
-    // #region agent log
-    fetch('http://127.0.0.1:7843/ingest/f4ac7d78-fa93-4940-929e-852fd1791883',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'6866e6'},body:JSON.stringify({sessionId:'6866e6',runId:'pre-fix',hypothesisId:'E',location:'audit.js:finalizeObservation',message:'obs scrubbed attacksClosed',data:{status:String(row?.status||''),pureRnr:rnrLike,scrubRan:true,scrubKind:'attacksClosed',snippet:clipped.slice(0,100)},timestamp:Date.now()})}).catch(()=>{});
-    // #endregion
     return fallbackObservation(row,errors,q);
   }
   // Reject claiming short RNR gaps alone cooled an interested lead.
   const shortRnrCooled=/two rnr|2 rnr|trailing rnr.{0,40}(cold|cooled)|rnr.{0,40}(mean|means).{0,20}(cold|cooled)/i.test(clipped);
   if(buyingSignals&&leadStatusRank(row.status)<=3&&shortRnrCooled&&!errors.includes(STATUS_HISTORY_ERROR)){
-    // #region agent log
-    fetch('http://127.0.0.1:7843/ingest/f4ac7d78-fa93-4940-929e-852fd1791883',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'6866e6'},body:JSON.stringify({sessionId:'6866e6',runId:'pre-fix',hypothesisId:'E',location:'audit.js:finalizeObservation',message:'obs scrubbed shortRnrCooled',data:{status:String(row?.status||''),pureRnr:rnrLike,scrubRan:true,scrubKind:'shortRnrCooled',snippet:clipped.slice(0,100)},timestamp:Date.now()})}).catch(()=>{});
-    // #endregion
     return fallbackObservation(row,errors,q);
   }
-  // #region agent log
-  // E: Obs keeps status talk when no status error — no general status scrub (unlike Recommendation).
-  const oStatusTalk=/\b(status|cold|lost|warm|hot|align|mismatch|prospect|qualified)\b/i.test(clipped);
-  if(oStatusTalk&&!errors.includes(STATUS_HISTORY_ERROR)){
-    fetch('http://127.0.0.1:7843/ingest/f4ac7d78-fa93-4940-929e-852fd1791883',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'6866e6'},body:JSON.stringify({sessionId:'6866e6',runId:'pre-fix',hypothesisId:'E',location:'audit.js:finalizeObservation',message:'observation status talk without status error',data:{status:String(row?.status||''),rank:leadStatusRank(row?.status),coldOk,pureRnr:rnrLike,hasStatusErr:false,scrubRan:false,snippet:clipped.slice(0,140)},timestamp:Date.now()})}).catch(()=>{});
-  }
-  // #endregion
   return clipped;
 }
 /** Never coach Lead Status → Lost in recommendations; Cold is the floor. */
@@ -1698,9 +1685,6 @@ function finalizeRecommendation(aiText,row,errors,q){
   const statusTalk=/\b(status|cold|lost|warm|hot|align|mismatch|prospect|qualified)\b/i.test(clipped);
   const coldCloseOk=shouldCloseAsLost(row.comments)&&/\bcold\b/i.test(clipped)&&/\bclose\b/i.test(clipped)&&!/\b(warm|hot|prospect|qualified)\b/i.test(clipped);
   if(statusTalk&&!errors.includes(STATUS_HISTORY_ERROR)&&!coldCloseOk){
-    // #region agent log
-    fetch('http://127.0.0.1:7843/ingest/f4ac7d78-fa93-4940-929e-852fd1791883',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'6866e6'},body:JSON.stringify({sessionId:'6866e6',runId:'pre-fix',hypothesisId:'E',location:'audit.js:finalizeRecommendation',message:'rec scrubbed status talk',data:{status:String(row?.status||''),hasStatusErr:false,scrubRan:true,snippet:clipped.slice(0,100)},timestamp:Date.now()})}).catch(()=>{});
-    // #endregion
     return fallbackRecommendation(row,errors,q);
   }
   return clampRecommendationStatusFloor(clipped);
@@ -1752,38 +1736,8 @@ async function requestAudit(apiKey,settings,leads,signal,log,onUsage){
 const unique=values=>[...new Set(values.filter(Boolean))];
 const severityFromErrors=errors=>!errors.length?"NONE":errors.some(error=>HIGH_SEVERITY_ERRORS.has(error))?"HIGH":"MEDIUM";
 
-// #region agent log
-function agentDbg(payload,logFn){
-  const entry={sessionId:"6866e6",timestamp:Date.now(),...payload};
-  try{
-    const key="ll-debug-6866e6";
-    const prev=JSON.parse(sessionStorage.getItem(key)||"[]");
-    prev.push(entry);
-    while(prev.length>250)prev.shift();
-    sessionStorage.setItem(key,JSON.stringify(prev));
-    if(typeof window!=="undefined")window.__LL_DEBUG_6866E6__=prev;
-  }catch{/* ignore */}
-  fetch("http://127.0.0.1:7843/ingest/f4ac7d78-fa93-4940-929e-852fd1791883",{method:"POST",headers:{"Content-Type":"application/json","X-Debug-Session-Id":"6866e6"},body:JSON.stringify(entry)}).catch(()=>{});
-  try{
-    const d=payload?.data||{};
-    const interesting=d.oHasStatusTalk&&!d.finalHasStatus||d.aiHadStatus||d.mismatch||d.aligned||d.strippedByCeiling;
-    if(interesting&&typeof logFn==="function"){
-      logFn(`[DBG-o] …${d.mobile||"?"} status=${d.status||"?"} rank=${d.statusRank} rawE=${JSON.stringify(d.rawAiE||[])} finalHasStatus=${d.finalHasStatus} mismatch=${d.mismatch} aligned=${d.aligned} stripped=${d.strippedByCeiling} pureRnr=${d.pureRnr} o="${String(d.oSnippet||"").slice(0,90)}"`, "warn");
-    }
-  }catch{/* ignore */}
-}
-// #endregion
-
 export async function auditBatch(apiKey,rawSettings,batch,signal,log,onUsage,requestFn=requestAudit){
   const settings=normalizeSettings(rawSettings);
-  // #region agent log
-  {
-    const statusRule=(settings.rules||[]).find(r=>norm(r.field)===norm("Lead Status + Comments"));
-    const instr=String(statusRule?.instruction||"");
-    fetch('http://127.0.0.1:7843/ingest/f4ac7d78-fa93-4940-929e-852fd1791883',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'6866e6'},body:JSON.stringify({sessionId:'6866e6',runId:'post-fix',hypothesisId:'D',location:'audit.js:auditBatch-start',message:'status rule pin check',data:{appVersion:APP_VERSION,settingsSeed:settings.settingsSeed,hasBaselineWarm:/Baseline is Warm/i.test(instr),hasJsonMap:/e MUST include/i.test(instr),hasFreeformError:/Error\s*:/i.test(instr),hasRules15:/RULE 1/i.test(instr),instrLen:instr.length,batchLen:(batch||[]).length},timestamp:Date.now()})}).catch(()=>{});
-    if(typeof log==="function")log(`[DBG-status] v=${APP_VERSION} seed=${settings.settingsSeed} rules15=${/RULE 1/i.test(instr)} jsonMap=${/e MUST include/i.test(instr)} baselineWarm=${/Baseline is Warm/i.test(instr)}`,"warn");
-  }
-  // #endregion
   const maps=buildErrorMaps(settings);
   const request=typeof requestFn==="function"?requestFn:requestAudit;
   async function requestWithRetry(leads,label){
@@ -1835,25 +1789,8 @@ export async function auditBatch(apiKey,rawSettings,batch,signal,log,onUsage,req
     const comments=Array.isArray(lead.auditContext?.c)?lead.auditContext.c:[lead.staticValues.comments];
     // Deterministic Rules 1–5 are the source of truth for this label (AI e is unreliable).
     const statusEval=evaluateStatusRules15(lead.staticValues.status,comments);
-    const rawAiE=Array.isArray(ai?.e)?ai.e.map(t=>String(t??"")):[];
-    const aiHadStatus=aiErrors.includes(STATUS_HISTORY_ERROR)||rawAiE.some(t=>/status|aligned/i.test(t));
     errors=errors.filter(label=>label!==STATUS_HISTORY_ERROR);
     if(statusEval.mismatch)errors=unique([...errors,STATUS_HISTORY_ERROR]);
-    // #region agent log
-    // A: Cold+pureRnr+aligned+!finalHasStatus+o talk → empty e correct; o wrongly mentions cold/status
-    // B: Warm/Hot/Prospect+mismatch+!aiHadStatus → should mismatch; AI omitted; hard rules must add
-    // C: aiHadStatus+!finalHasStatus → AI status stripped (or not re-added) by Rules 1–5
-    // D: prompt pin / seed
-    // E: o talks status without finalHasStatus
-    const oText=String(ai?.o??"");
-    const oHasStatusTalk=/\b(status|cold|lost|warm|hot|align|mismatch|prospect|qualified|rnr)\b/i.test(oText);
-    const pureRnr=allCommentsRnrLike(comments);
-    const mismatch=!!statusEval.mismatch;
-    const aligned=!!statusEval.aligned;
-    const finalHasStatus=errors.includes(STATUS_HISTORY_ERROR);
-    const strippedByCeiling=aiHadStatus&&!finalHasStatus;
-    agentDbg({runId:"post-fix",hypothesisId:"A-E",location:"audit.js:auditBatch-merge",message:"status vs observation",data:{mobile:String(lead.staticValues?.mobile||"").slice(-4),status:String(lead.staticValues?.status||""),statusRank:leadStatusRank(lead.staticValues?.status),rawAiE,aiErrors,aiHadStatus,mismatch,aligned,strippedByCeiling,statusEval,pureRnr,streak:trailingRnrStreak(comments),buyingSignals:hasCumulativeBuyingSignals(comments),finalErrors:errors,finalE:errors,finalHasStatus,oHasStatusTalk,oSnippet:oText.slice(0,140),ruleSeed:Number(settings.settingsSeed)||0,settingsSeedConst:SETTINGS_SEED,statusRuleHead:String((settings.rules||[]).find(r=>/lead status/i.test(String(r.field||"")))?.instruction||"").slice(0,80)}},log);
-    // #endregion
     const forceNoIntent=(trailingRnrStreak(comments)>=8&&!hasCumulativeBuyingSignals(comments))
       ||commentEntries(comments).some(hasActiveRejectionComment)
       ||(allCommentsRnrLike(comments)&&commentEntries(comments).length>=8);
