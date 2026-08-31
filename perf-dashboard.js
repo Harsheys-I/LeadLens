@@ -101,7 +101,7 @@ const CHART_COLORS = {
 const PERF_DIMENSIONS = {
   telecaller: {bucketKey: "byTelecaller", label: "Telecaller Name", tableTitle: "Telecaller breakdown", totalsLabel: "TeleCallers"},
   project: {bucketKey: "byProject", label: "Project Name", tableTitle: "Project breakdown", totalsLabel: "Projects"},
-  source: {bucketKey: "bySource", label: "Status", tableTitle: "Status breakdown", totalsLabel: "Statuses"},
+  source: {bucketKey: "bySource", label: "Source", tableTitle: "Source breakdown", totalsLabel: "Sources"},
 };
 
 /** @type {Map<string, import("chart.js").Chart>} */
@@ -247,8 +247,7 @@ function formatPct(value) {
 
 function formatAvg(value) {
   if (value === null || value === undefined || Number.isNaN(Number(value))) return "—";
-  const n = Number(value);
-  return n.toFixed(n % 1 === 0 ? 0 : 1);
+  return Number(value).toFixed(1);
 }
 
 /** Inclusive calendar days between History min/max LUD (from ISO date strings). */
@@ -825,13 +824,22 @@ function baseBarOptions() {
   };
 }
 
-function renderBarChart(canvas, labels, values, color = CHART_COLORS.bar) {
+function renderBarChart(canvas, labels, values, color = CHART_COLORS.bar, formatYAsAvg = false) {
   const Chart = requireChart();
   const id = canvas.id || `perf-bar-${Math.random().toString(36).slice(2)}`;
   canvas.id = id;
   if (perfChartRegistry.has(id)) {
     perfChartRegistry.get(id).destroy();
     perfChartRegistry.delete(id);
+  }
+  const options = baseBarOptions();
+  if (formatYAsAvg) {
+    options.scales.y.ticks.callback = (value) => formatAvg(value);
+    options.plugins.tooltip = {
+      callbacks: {
+        label: (ctx) => formatAvg(ctx.parsed.y),
+      },
+    };
   }
   const chart = new Chart(canvas.getContext("2d"), {
     type: "bar",
@@ -845,7 +853,7 @@ function renderBarChart(canvas, labels, values, color = CHART_COLORS.bar) {
         maxBarThickness: 42,
       }],
     },
-    options: baseBarOptions(),
+    options,
   });
   perfChartRegistry.set(id, chart);
 }
@@ -1117,7 +1125,7 @@ function renderGraphsPanel(mount, data, dimension = "telecaller") {
       if (avgKey === "avgCallsPerDay") return avgCallsPerDay(b.totalCalls, reportDays) ?? 0;
       return 0;
     });
-    renderBarChart(canvas, names, values, "#3f8c68");
+    renderBarChart(canvas, names, values, "#3f8c68", true);
   }
 
   const statusSection = document.createElement("div");
@@ -1447,7 +1455,7 @@ function buildPerfFiltersPanel(filterOptions, filters, {collapsed = true} = {}) 
   const fields = [
     ["telecallers", "TeleCaller", filterOptions.telecallers, filters.telecallers],
     ["projects", "Project", filterOptions.projects, filters.projects],
-    ["sources", "Status", filterOptions.sources, filters.sources],
+    ["sources", "Source", filterOptions.sources, filters.sources],
   ];
 
   const selects = {};
