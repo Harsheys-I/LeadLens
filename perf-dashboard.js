@@ -1,7 +1,7 @@
 /**
  * TeleCalling Performance Report — Excel parse, metrics engine, published dashboard UI.
  */
-import {PerfDashboardApi} from "./api-client.js?v=5.2.5";
+import {PerfDashboardApi} from "./api-client.js?v=5.2.6";
 
 const MASTER_FIELDS = [
   {id: "mobile", label: "Mobile", aliases: "mobile, mobile number, phone"},
@@ -462,16 +462,35 @@ function matchesSentToEnquiry(status) {
   return s === "sent to enquiry" || s === "send to enquiry";
 }
 
-/** SVS/SVP/SVC: Telecalling Status is primary; Status is fallback. */
-function visitStatusField(row) {
-  return norm(row.telecallingStatus) || norm(row.status);
+/** SVS/SVP/SVC: match if either Telecalling Status or Status equals target. */
+function matchesVisitStatus(row, target) {
+  const t = norm(target);
+  return norm(row.telecallingStatus) === t || norm(row.status) === t;
+}
+
+/** Count visit status from any History row, once per Mobile+TeleCaller+Project (max-LUD row credits telecaller). */
+function accumulateVisitMetric(historyFilled, target, byTelecaller, ensureTc, field) {
+  const best = new Map();
+  for (const row of historyFilled) {
+    if (!matchesVisitStatus(row, target)) continue;
+    const key = steIdentityKey(row);
+    if (!key) continue;
+    const lud = ludMs(row);
+    const prev = best.get(key);
+    if (!prev || lud > prev.lud) best.set(key, {lud, row});
+  }
+  for (const {row} of best.values()) {
+    byTelecaller[ensureTc(row.telecaller)][field] += 1;
+  }
+  return best.size;
 }
 
 /**
  * Build performance metrics from parsed Master + History rows.
  * Lead = Mobile + TeleCaller.
  * STE = any History Status Send/Sent to Enquiry, once per Mobile+TeleCaller+Project.
- * SVS/SVP/SVC/NI = latest History Status (max LUD), once per lead.
+ * SVS/SVP/SVC = any History row where Telecalling Status or Status matches, once per Mobile+TeleCaller+Project.
+ * NI = latest History Status (max LUD), once per lead.
  * @param {object[]} masterRows
  * @param {object[]} historyRows
  */
@@ -538,6 +557,10 @@ export function reconcilePerf(masterRows, historyRows) {
     byTelecaller[ensureTc(row.telecaller)].siteVisited += 1;
   }
 
+  accumulateVisitMetric(historyFilled, "site visit scheduled", byTelecaller, ensureTc, "siteVisitScheduled");
+  accumulateVisitMetric(historyFilled, "site visit pending", byTelecaller, ensureTc, "siteVisitPending");
+  accumulateVisitMetric(historyFilled, "site visit cancelled", byTelecaller, ensureTc, "siteVisitCancelled");
+
   for (const row of historyLeads) {
     const tc = ensureTc(row.telecaller);
     const key = leadIdentityKey(row);
@@ -545,11 +568,6 @@ export function reconcilePerf(masterRows, historyRows) {
     byTelecaller[tc]._historyKeys.add(key);
     allHistoryKeys.add(key);
 
-    const visit = visitStatusField(row);
-    // SVS/SVP/SVC — latest LUD row; Telecalling Status primary. NI — History Status only.
-    if (visit === "site visit scheduled") byTelecaller[tc].siteVisitScheduled += 1;
-    if (visit === "site visit pending") byTelecaller[tc].siteVisitPending += 1;
-    if (visit === "site visit cancelled") byTelecaller[tc].siteVisitCancelled += 1;
     if (norm(row.status) === "not interested") byTelecaller[tc].notInterested += 1;
   }
 
