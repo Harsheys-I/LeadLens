@@ -1,5 +1,5 @@
 {
-  "version": "5.2.6",
+  "version": "5.2.7",
   "name": "LeadLens",
-  "notes": "v5.2.6: SVS/SVP/SVC count any History row when Telecalling Status or Status matches (once per Mobile+TeleCaller+Project)."
+  "notes": "v5.2.7: SVS/SVP/SVC use Telecalling Status only (STE-style), any row, Mobile+TC+Project; forward-fill Telecalling Status."
 }
