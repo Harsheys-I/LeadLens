@@ -216,7 +216,7 @@
         <div class="perf-upload-grid">
           <div id="perf-master-drop" class="drop-zone" role="button" tabindex="0" aria-label="Upload Master Excel">
             <input id="perf-master-input" type="file" accept=".xlsx,.xls,.xlsm" hidden>
-            <div class="upload-icon">M</div><h3>Master Data (M)</h3><p>Active leads · Mobile, Project, LRD, NFD, Status, Telecaller</p>
+            <div class="upload-icon">M</div><h3>Master Data (M)</h3><p>Active leads · Mobile, Project, Source, LRD, NFD, Status, Telecaller</p>
           </div>
           <div id="perf-history-drop" class="drop-zone" role="button" tabindex="0" aria-label="Upload History Excel">
             <input id="perf-history-input" type="file" accept=".xlsx,.xls,.xlsm" hidden>
@@ -246,6 +246,11 @@
           <div id="perf-filter-row" class="perf-filter-row hidden">
             <label>TeleCaller filter<select id="perf-tc-filter"></select></label>
           </div>
+          <div class="perf-dimension-tabs hidden" role="tablist" aria-label="Performance breakdown dimension">
+            <button type="button" class="perf-dimension-tab active" data-perf-dimension="telecaller" role="tab" aria-selected="true">By Telecaller</button>
+            <button type="button" class="perf-dimension-tab" data-perf-dimension="project" role="tab" aria-selected="false">By Project</button>
+            <button type="button" class="perf-dimension-tab" data-perf-dimension="source" role="tab" aria-selected="false">By Source</button>
+          </div>
           <div class="perf-view-tabs" role="tablist" aria-label="Performance dashboard views">
             <button type="button" class="perf-view-tab active" data-perf-tab="summary" role="tab" aria-selected="true">Summary</button>
             <button type="button" class="perf-view-tab" data-perf-tab="graphs" role="tab" aria-selected="false">Graphs</button>
@@ -262,6 +267,7 @@
           <ul class="perf-help-list">
             <li>Mobile</li>
             <li>Project Name</li>
+            <li>Source</li>
             <li>Lead Registration Date (LRD)</li>
             <li>Next Followup Date (NFD)</li>
             <li>Status — used for Draft / leads without calls</li>
@@ -271,6 +277,7 @@
           <ul class="perf-help-list">
             <li>Mobile</li>
             <li>Project Name</li>
+            <li>Source</li>
             <li>Lead Registration Date</li>
             <li>Lead Update Date (LUD) — min/max across H sets the report date range</li>
             <li>Status — Not Interested, Sent to Enquiry</li>
@@ -280,7 +287,7 @@
           <h3>Scorecard columns</h3>
           <ul class="perf-help-list">
             <li><strong>Total Leads</strong> — unique leads (Mobile + TeleCaller) in Master ∪ History</li>
-            <li><strong>History rows</strong> — Mobile/Project/Telecaller forward-filled; STE uses any History <strong>Status</strong> row; SVS/SVP/SVC use any <strong>Telecalling Status</strong> row (once per Mobile+TeleCaller+Project); NI uses latest Status per Mobile+TeleCaller</li>
+            <li><strong>History rows</strong> — Mobile/Project/Source/Telecaller forward-filled; STE uses any History <strong>Status</strong> row; SVS/SVP/SVC use any <strong>Telecalling Status</strong> row (once per Mobile+TeleCaller+Project); NI uses latest Status per Mobile+TeleCaller</li>
             <li><strong>Active Leads</strong> — unique Master leads (Mobile + TeleCaller)</li>
             <li><strong>Site Visited (STE)</strong> — any History Status = Sent/Send to Enquiry (once per Mobile+TeleCaller+Project)</li>
             <li><strong>Site Visit Scheduled (SVS)</strong> — any Telecalling Status = Site Visit Scheduled (same rule as STE, parallel column)</li>
@@ -297,7 +304,7 @@
             <li><strong>Site Visit Scheduled / Pending / Cancelled</strong> — Telecalling Status on any row (once per Mobile+TeleCaller+Project)</li>
             <li><strong>Sent to Enquiry / Site Visited</strong> — History Status on any row (<code>sent to enquiry</code> or <code>send to enquiry</code>)</li>
           </ul>
-          <p class="muted">Pie slices are independent tallies (a lead may appear in STE and a latest-status bucket). Overdue counts Master rows where Next Followup Date is before today (calendar day). No History filter is applied to overdue.</p>
+          <p class="muted">Status stacks are independent tallies (a lead may appear in STE and a latest-status bucket). Overdue counts Master rows where Next Followup Date is before today (calendar day). No History filter is applied to overdue.</p>
         </div>
       </section>
     </main>
