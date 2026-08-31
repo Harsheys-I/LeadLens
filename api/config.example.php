@@ -18,7 +18,7 @@ return [
     'ttl_seconds' => 60 * 60 * 24 * 14, // 14 days
   ],
   'app' => [
-    'name' => 'LeadLens',
+    'name' => 'GPP AI',
     // Set true after first install if you want install.php to refuse re-runs
     'install_locked' => false,
     // Used to encrypt OpenAI API key at rest (AES-256-GCM). Falls back to session.secret if empty.

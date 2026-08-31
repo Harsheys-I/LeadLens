@@ -5,8 +5,8 @@
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="theme-color" media="(prefers-color-scheme: light)" content="#12372a">
   <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#0f2d22">
-  <meta name="description" content="LeadLens TeleCaller">
-  <title>LeadLens · TeleCaller</title>
+  <meta name="description" content="GPP AI · LeadLens">
+  <title>GPP AI · LeadLens</title>
   <link rel="manifest" href="../manifest.webmanifest">
   <link rel="stylesheet" href="../styles.css?v=5.5">
   <script defer src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
@@ -22,12 +22,12 @@
   </div>
   <div class="shell">
     <aside class="sidebar">
-      <a class="brand" href="/"><span class="brand-mark">L</span><span>LeadLens</span></a>
-      <nav aria-label="TeleCaller navigation">
+      <a class="brand" href="/"><img class="brand-mark" src="/assets/gpp-ai-logo.png" alt="" width="48" height="28"><span>GPP AI</span></a>
+      <nav aria-label="LeadLens navigation">
         <div class="nav-group is-collapsed" data-nav-group="bucket1">
           <div class="nav-parent-row">
-            <button type="button" class="nav-toggle" aria-expanded="false" aria-label="Expand Bucket 1 Lead Audit"></button>
-            <button type="button" class="nav-item nav-item-parent active" data-view="review" data-nav-toggle-group data-perm="telecaller.bucket1"><span>◎</span>Bucket 1 Lead Audit</button>
+            <button type="button" class="nav-toggle" aria-expanded="false" aria-label="Expand Bucket 1 Followup Review"></button>
+            <button type="button" class="nav-item nav-item-parent active" data-view="review" data-nav-toggle-group data-perm="telecaller.bucket1"><span>◎</span>Bucket 1 Followup Review</button>
           </div>
           <div class="nav-children">
             <button class="nav-item nav-item-child" data-view="console" data-perm="telecaller.run_console"><span>⌁</span>Run console</button>
@@ -38,8 +38,8 @@
         </div>
         <div class="nav-group is-collapsed" data-nav-group="perf">
           <div class="nav-parent-row">
-            <button type="button" class="nav-toggle" aria-expanded="false" aria-label="Expand TeleCalling Performance Report"></button>
-            <button type="button" class="nav-item nav-item-parent" data-view="perf-report" data-nav-toggle-group data-perm="telecaller.perf_report"><span>◈</span>TeleCalling Performance Report</button>
+            <button type="button" class="nav-toggle" aria-expanded="false" aria-label="Expand TeleCalling Performance"></button>
+            <button type="button" class="nav-item nav-item-parent" data-view="perf-report" data-nav-toggle-group data-perm="telecaller.perf_report"><span>◈</span>TeleCalling Performance</button>
           </div>
           <div class="nav-children">
             <button class="nav-item nav-item-child" data-view="perf-dashboard" data-perm="telecaller.perf_dashboard"><span>▦</span>Dashboard</button>
@@ -53,7 +53,7 @@
     <main>
       <header class="topbar">
         <button id="mobile-menu" class="icon-button" aria-label="Hide left panel" title="Hide left panel" aria-expanded="true">☰</button>
-        <div><p class="eyebrow">TELECALLER</p><h1 id="page-title">Bucket 1 Lead Audit</h1></div>
+        <div><p class="eyebrow">LEADLENS</p><h1 id="page-title">Bucket 1 Followup Review</h1></div>
         <div class="topbar-actions">
           <div id="key-state" class="key-state">API key not set</div>
           <span id="shell-user-label" class="topbar-user-label"></span>
@@ -66,7 +66,7 @@
       </header>
 
       <section id="view-review" class="view active">
-        <div class="intro"><h2>Bucket 1 Lead Audit</h2><p><strong>Excel RAW</strong> detects TeleCallers, audits the whole file, then lets you save Excel or create a dashboard. <strong>Excel Audit</strong> skips AI — upload an already-audited workbook and review.</p></div>
+        <div class="intro"><h2>Bucket 1 Followup Review</h2><p><strong>Excel RAW</strong> detects TeleCallers, audits the whole file, then lets you save Excel or create a dashboard. <strong>Excel Audit</strong> skips AI — upload an already-audited workbook and review.</p></div>
         <div class="format-toggle" role="group" aria-label="Upload format">
           <button type="button" class="format-option active" data-review-format="raw">Excel RAW</button>
           <button type="button" class="format-option" data-review-format="audit">Excel Audit</button>
@@ -213,7 +213,7 @@
       </section>
 
       <section id="view-perf-report" class="view">
-        <div class="intro"><h2>TeleCalling Performance Report</h2><p>Upload <strong>Master Data (M)</strong> and <strong>History Data (H)</strong> workbooks, reconcile metrics, then publish dashboards for each TeleCaller.</p></div>
+        <div class="intro"><h2>TeleCalling Performance</h2><p>Upload <strong>Master Data (M)</strong> and <strong>History Data (H)</strong> workbooks, reconcile metrics, then publish dashboards for each TeleCaller.</p></div>
         <div class="perf-upload-grid">
           <div id="perf-master-drop" class="drop-zone" role="button" tabindex="0" aria-label="Upload Master Excel">
             <input id="perf-master-input" type="file" accept=".xlsx,.xls,.xlsm" hidden>
@@ -250,8 +250,8 @@
           <div class="perf-main-tabs" role="tablist" aria-label="Performance dashboard views">
             <button type="button" class="perf-main-tab active" data-perf-view="summary" role="tab" aria-selected="true">Summary</button>
             <button type="button" class="perf-main-tab" data-perf-view="telecaller" role="tab" aria-selected="false">By Telecaller</button>
-            <button type="button" class="perf-main-tab hidden" data-perf-view="project" role="tab" aria-selected="false">By Project</button>
-            <button type="button" class="perf-main-tab hidden" data-perf-view="source" role="tab" aria-selected="false">By Source</button>
+            <button type="button" class="perf-main-tab" data-perf-view="project" role="tab" aria-selected="false">By Project</button>
+            <button type="button" class="perf-main-tab" data-perf-view="source" role="tab" aria-selected="false">By Source</button>
           </div>
           <div id="perf-sub-tabs" class="perf-view-tabs hidden" role="tablist" aria-label="Breakdown presentation">
             <button type="button" class="perf-view-tab active" data-perf-tab="table" role="tab" aria-selected="true">Table</button>
@@ -265,7 +265,7 @@
 
       <section id="view-perf-settings" class="view">
         <div class="settings-card">
-          <div class="card-title"><h2>Performance Report · column reference</h2><p>Required headers are matched case-insensitively using common aliases.</p></div>
+          <div class="card-title"><h2>TeleCalling Performance · column reference</h2><p>Required headers are matched case-insensitively using common aliases.</p></div>
           <h3>Master Data (M)</h3>
           <ul class="perf-help-list">
             <li>Mobile</li>

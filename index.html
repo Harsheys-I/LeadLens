@@ -5,8 +5,8 @@
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="theme-color" media="(prefers-color-scheme: light)" content="#12372a">
   <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#0f2d22">
-  <meta name="description" content="LeadLens — AI telecalling audit platform">
-  <title>LeadLens</title>
+  <meta name="description" content="GPP AI — AI telecalling audit platform">
+  <title>GPP AI</title>
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="stylesheet" href="styles.css?v=5.5">
   <script type="module" src="home.js?v=5.2.1"></script>
@@ -16,9 +16,9 @@
 
   <section id="panel-loading" class="auth-panel auth-loading-panel">
     <div class="auth-brand">
-      <span class="brand-mark">L</span>
+      <img class="brand-mark" src="/assets/gpp-ai-logo.png" alt="" width="64" height="36">
       <div>
-        <strong>LeadLens</strong>
+        <strong>GPP AI</strong>
         <p>Checking your session…</p>
       </div>
     </div>
@@ -27,14 +27,14 @@
 
   <section id="panel-login" class="auth-panel hidden">
     <div class="auth-brand">
-      <span class="brand-mark">L</span>
+      <img class="brand-mark" src="/assets/gpp-ai-logo.png" alt="" width="64" height="36">
       <div>
-        <strong>LeadLens</strong>
+        <strong>GPP AI</strong>
         <p>AI telecalling QA</p>
       </div>
     </div>
     <h1>Sign in</h1>
-    <p class="auth-lead">Use your LeadLens account to open TeleCaller, Admin, and more.</p>
+    <p class="auth-lead">Use your GPP AI account to open LeadLens, Admin, and more.</p>
     <form id="login-form" class="auth-form" autocomplete="on">
       <label>Username<input id="login-username" name="username" type="text" required autocomplete="username"></label>
       <label>Password<input id="login-password" name="password" type="password" required autocomplete="current-password"></label>
@@ -46,9 +46,9 @@
 
   <section id="panel-request" class="auth-panel hidden">
     <div class="auth-brand">
-      <span class="brand-mark">L</span>
+      <img class="brand-mark" src="/assets/gpp-ai-logo.png" alt="" width="64" height="36">
       <div>
-        <strong>LeadLens</strong>
+        <strong>GPP AI</strong>
         <p>Access request</p>
       </div>
     </div>
@@ -59,7 +59,7 @@
       <label>Preferred username<input id="req-username" type="text"></label>
       <label>Preferred module
         <select id="req-module">
-          <option value="TeleCaller">TeleCaller</option>
+          <option value="TeleCaller">LeadLens</option>
           <option value="Admin">Admin</option>
           <option value="Other">Other</option>
         </select>
@@ -75,7 +75,7 @@
 
   <section id="panel-home" class="home-shell hidden">
     <header class="home-topbar">
-      <a class="brand" href="/"><span class="brand-mark">L</span><span>LeadLens</span></a>
+      <a class="brand" href="/"><img class="brand-mark" src="/assets/gpp-ai-logo.png" alt="" width="48" height="28"><span>GPP AI</span></a>
       <div class="home-user">
         <span id="home-user-label"></span>
         <button type="button" id="notif-bell" class="notif-bell notif-bell-chrome" title="Notifications" aria-label="Notifications">
@@ -88,7 +88,7 @@
     <main class="home-main">
       <p class="eyebrow">YOUR WORKSPACE</p>
       <h1>Where do you want to work?</h1>
-      <p class="home-sub">Pick a module your role can open. Admins manage people and access; auditors run TeleCaller QA.</p>
+      <p class="home-sub">Pick a module your role can open. Admins manage people and access; auditors run LeadLens QA.</p>
       <div id="home-tiles" class="home-tiles"></div>
     </main>
   </section>

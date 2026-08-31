@@ -185,7 +185,10 @@ export function mountNotifications(opts = {}){
   }, {signal: ac.signal});
   clearAll?.addEventListener('click', async () => {
     if (!confirm('Clear all notifications?')) return;
-    try { await NotifApi.clearAll(); } catch { /* ignore */ }
+    try {
+      await NotifApi.clearAll();
+      closeDrawer();
+    } catch { /* ignore */ }
     refresh();
   }, {signal: ac.signal});
   drawer.addEventListener('click', (e) => {

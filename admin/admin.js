@@ -92,34 +92,103 @@ function roleNeedsTelecaller(roleId){
   return role?.role_key === 'telecaller';
 }
 
-function fillTelecallerSelect(select, selectedName){
-  select.replaceChildren();
-  const none = document.createElement('option');
-  none.value = '';
-  none.textContent = '— None —';
-  select.append(none);
-  const names = [...telecallerNames];
-  const current = String(selectedName || '').trim();
-  if (current && !names.includes(current)) names.unshift(current);
-  for (const name of names) {
-    const opt = document.createElement('option');
-    opt.value = name;
-    opt.textContent = name;
-    if (current && name === current) opt.selected = true;
-    select.append(opt);
-  }
-  if (!current) none.selected = true;
+function telecallerListId(inputId){
+  return `${inputId}-list`;
 }
 
-function syncTelecallerField(roleSelectId, wrapId, selectId, selectedName){
+function closeTelecallerList(inputId){
+  const input = $(inputId);
+  const list = $(telecallerListId(inputId));
+  list?.classList.add('hidden');
+  input?.setAttribute('aria-expanded', 'false');
+}
+
+function filterTelecallerNames(query){
+  const q = String(query || '').trim().toLowerCase();
+  if (!q) return [...telecallerNames];
+  return telecallerNames.filter(name => name.toLowerCase().includes(q));
+}
+
+function openTelecallerList(inputId, query){
+  const input = $(inputId);
+  const list = $(telecallerListId(inputId));
+  if (!input || !list || input.disabled) return;
+  const names = filterTelecallerNames(query ?? input.value);
+  list.replaceChildren();
+  if (!names.length) {
+    closeTelecallerList(inputId);
+    return;
+  }
+  for (const name of names) {
+    const li = document.createElement('li');
+    li.className = 'telecaller-combobox-option';
+    li.setAttribute('role', 'option');
+    li.textContent = name;
+    li.addEventListener('mousedown', (e) => {
+      e.preventDefault();
+      input.value = name;
+      closeTelecallerList(inputId);
+    });
+    list.append(li);
+  }
+  list.classList.remove('hidden');
+  input.setAttribute('aria-expanded', 'true');
+}
+
+function wireTelecallerCombobox(inputId){
+  const input = $(inputId);
+  if (!input || input.dataset.comboboxWired) return;
+  input.dataset.comboboxWired = '1';
+  input.addEventListener('focus', () => openTelecallerList(inputId, input.value));
+  input.addEventListener('input', () => openTelecallerList(inputId, input.value));
+  input.addEventListener('keydown', (e) => {
+    const list = $(telecallerListId(inputId));
+    const options = list ? [...list.querySelectorAll('.telecaller-combobox-option')] : [];
+    const active = list?.querySelector('.telecaller-combobox-option.is-active');
+    const idx = active ? options.indexOf(active) : -1;
+    if (e.key === 'Escape') {
+      closeTelecallerList(inputId);
+      return;
+    }
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault();
+      let opts = options;
+      if (!opts.length) {
+        openTelecallerList(inputId, input.value);
+        opts = [...($(telecallerListId(inputId))?.querySelectorAll('.telecaller-combobox-option') || [])];
+        if (!opts.length) return;
+      }
+      const next = e.key === 'ArrowDown'
+        ? Math.min(idx + 1, opts.length - 1)
+        : Math.max(idx < 0 ? opts.length - 1 : idx - 1, 0);
+      opts.forEach((el, i) => el.classList.toggle('is-active', i === next));
+      opts[next]?.scrollIntoView({block: 'nearest'});
+      return;
+    }
+    if (e.key === 'Enter' && active) {
+      e.preventDefault();
+      input.value = active.textContent || '';
+      closeTelecallerList(inputId);
+    }
+  });
+  input.addEventListener('blur', () => {
+    // Allow mousedown on an option to run before closing.
+    setTimeout(() => closeTelecallerList(inputId), 120);
+  });
+}
+
+function syncTelecallerField(roleSelectId, wrapId, inputId, selectedName){
   const wrap = $(wrapId);
-  const select = $(selectId);
+  const input = $(inputId);
   const needed = roleNeedsTelecaller($(roleSelectId).value);
   wrap.classList.toggle('hidden', !needed);
-  select.disabled = !needed;
-  if (needed) fillTelecallerSelect(select, selectedName ?? select.value);
-  else {
-    select.value = '';
+  input.disabled = !needed;
+  if (needed) {
+    if (selectedName !== undefined) input.value = String(selectedName || '');
+    wireTelecallerCombobox(inputId);
+  } else {
+    input.value = '';
+    closeTelecallerList(inputId);
   }
 }
 

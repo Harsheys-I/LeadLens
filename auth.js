@@ -97,11 +97,11 @@ export function moduleTilesForUser(user = currentUser){
   const tiles = [
     {
       id: 'telecaller',
-      title: 'TeleCaller',
+      title: 'LeadLens',
       href: '/TeleCallerAudit/',
       perm: 'module.telecaller_audit',
       soon: false,
-      desc: 'Bucket 1 audits, Run console, published dashboards',
+      desc: 'Bucket 1 Followup Review, Run console, published dashboards',
       icon: `<svg viewBox="0 0 96 96" fill="none" aria-hidden="true">
         <rect x="22" y="18" width="36" height="48" rx="8" stroke="currentColor" stroke-width="3.5"/>
         <path d="M32 32h16M32 42h12M32 52h8" stroke="currentColor" stroke-width="3" stroke-linecap="round"/>

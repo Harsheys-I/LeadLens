@@ -1,4 +1,5 @@
 import {buildTelecallerDashboardBlob} from "./dashboard-export.js?v=5.4";
+import {buildDashboardModel} from "./dashboard-metrics.js?v=5.4";
 import {STATUS_HISTORY_PROMPT} from "./debug-prompts.js?v=5.4";
 
 export const APP_VERSION = "5.4";
@@ -2002,10 +2003,6 @@ function requirePdfLibs(){
   return{jsPDF,Chart:window.Chart};
 }
 
-function jobReviewReport(job){
-  return buildDeterministicInsights(buildReviewSummary(job));
-}
-
 /** Manager-facing copy derived only from audit tallies (no LLM). */
 export function buildDeterministicInsights(metrics){
   const audited=Math.max(1,Number(metrics.auditedRows)||0);
@@ -2037,7 +2034,7 @@ export function buildDeterministicInsights(metrics){
   }else{
     summaryParts.push("No recurring error labels dominated this slice.");
   }
-  summaryParts.push("This report is built from LeadLens audit metrics only (no generative AI narrative).");
+  summaryParts.push("This report is built from GPP AI audit metrics only (no generative AI narrative).");
 
   const strengths=[];
   if(avg>=6)strengths.push(`Average comment quality holds at ${avg}/10.`);
@@ -2097,17 +2094,6 @@ function pdfSetText(doc,hex){
   doc.setTextColor(r,g,b);
 }
 
-function pdfWrap(doc,text,maxWidth){
-  return doc.splitTextToSize(String(text||""),maxWidth);
-}
-
-function pdfEnsureSpace(doc,y,need,marginBottom){
-  const pageH=doc.internal.pageSize.getHeight();
-  if(y+need<=pageH-marginBottom)return y;
-  doc.addPage();
-  return 18;
-}
-
 async function renderOffscreenChart(Chart,type,data,options,width,height){
   const canvas=document.createElement("canvas");
   canvas.width=width;
@@ -2131,280 +2117,295 @@ async function renderOffscreenChart(Chart,type,data,options,width,height){
   return url;
 }
 
-async function buildReviewChartImages(Chart,metrics){
-  const qualityLabels=Object.keys(metrics.qualityDistribution||{});
-  const qualityValues=qualityLabels.map(key=>Number(metrics.qualityDistribution[key])||0);
-  const errorLabels=(metrics.errorTallies||[]).slice(0,8).map(item=>item.label.length>36?item.label.slice(0,34)+"…":item.label);
-  const errorValues=(metrics.errorTallies||[]).slice(0,8).map(item=>item.count);
-  const severityLabels=["NONE","MEDIUM","HIGH"];
-  const severityValues=severityLabels.map(key=>Number(metrics.severityMix?.[key])||0);
-  const commonPlugins={legend:{display:false},title:{display:false},tooltip:{enabled:false}};
-  const [qualityImg,errorsImg,severityImg]=await Promise.all([
-    renderOffscreenChart(Chart,"bar",{
-      labels:qualityLabels,
-      datasets:[{data:qualityValues,backgroundColor:PDF_BRAND.green2,borderWidth:0,borderRadius:3}]
-    },{
-      plugins:commonPlugins,
-      scales:{
-        x:{ticks:{color:PDF_BRAND.muted,font:{size:10}},grid:{display:false}},
-        y:{beginAtZero:true,ticks:{precision:0,color:PDF_BRAND.muted,font:{size:10}},grid:{color:PDF_BRAND.line}}
-      }
-    },520,260),
-    renderOffscreenChart(Chart,"bar",{
-      labels:errorLabels.length?errorLabels:["No errors"],
-      datasets:[{data:errorValues.length?errorValues:[0],backgroundColor:PDF_BRAND.amber,borderWidth:0,borderRadius:3}]
-    },{
-      indexAxis:"y",
-      plugins:commonPlugins,
-      scales:{
-        x:{beginAtZero:true,ticks:{precision:0,color:PDF_BRAND.muted,font:{size:9}},grid:{color:PDF_BRAND.line}},
-        y:{ticks:{color:PDF_BRAND.ink,font:{size:8}},grid:{display:false}}
-      }
-    },520,260),
-    renderOffscreenChart(Chart,"doughnut",{
-      labels:severityLabels,
-      datasets:[{data:severityValues,backgroundColor:[PDF_BRAND.green2,PDF_BRAND.amber,PDF_BRAND.red],borderWidth:2,borderColor:"#ffffff"}]
-    },{
-      plugins:{
-        legend:{display:true,position:"bottom",labels:{color:PDF_BRAND.ink,boxWidth:10,font:{size:10}}},
-        title:{display:false},
-        tooltip:{enabled:false}
-      }
-    },320,260)
-  ]);
-  return{qualityImg,errorsImg,severityImg};
+function pdfTruncate(doc,text,maxWidth){
+  const s=String(text??"");
+  if(doc.getTextWidth(s)<=maxWidth)return s;
+  let out=s;
+  while(out.length>1&&doc.getTextWidth(out+"...")>maxWidth)out=out.slice(0,-1);
+  return out+"...";
 }
 
-function scorePercents(metrics){
-  const audited=Math.max(1,Number(metrics.auditedRows)||0);
-  const high=Number(metrics.severityMix?.HIGH)||0;
-  const medium=Number(metrics.severityMix?.MEDIUM)||0;
-  const errorRows=high+medium;
-  const intentYes=Number(metrics.buyingIntentMix?.Yes)||0;
+const PDF_CHART_PALETTE=[
+  PDF_BRAND.green,
+  PDF_BRAND.green2,
+  "#3f8c68",
+  PDF_BRAND.amber,
+  PDF_BRAND.red,
+  "#2a5f9e",
+  PDF_BRAND.muted,
+  "#9bb7a8"
+];
+
+const PDF_SCORECARD_COLUMNS=[
+  {key:"name",label:"TeleCaller",align:"left",flex:2.4},
+  {key:"leads",label:"Leads",align:"right",flex:1},
+  {key:"correct",label:"Correct",align:"right",flex:1},
+  {key:"errors",label:"Errors",align:"right",flex:1},
+  {key:"accuracy",label:"Accuracy %",align:"right",flex:1.2},
+  {key:"rating",label:"Rating",align:"left",flex:1.1},
+  {key:"critical",label:"Critical",align:"right",flex:1},
+  {key:"medium",label:"Medium",align:"right",flex:1}
+];
+
+function pdfBarScales(yMax){
+  const y={
+    beginAtZero:true,
+    ticks:{precision:0,color:PDF_BRAND.muted,font:{size:10}},
+    grid:{color:PDF_BRAND.line}
+  };
+  if(yMax!=null){
+    y.min=0;
+    y.max=yMax;
+    y.ticks={color:PDF_BRAND.muted,font:{size:10},callback:v=>v+"%"};
+  }
   return{
-    avgQuality:Number(metrics.avgCommentQuality)||0,
-    errorRate:Math.round((errorRows/audited)*1000)/10,
-    highSeverity:Math.round((high/audited)*1000)/10,
-    buyingIntent:Math.round((intentYes/audited)*1000)/10
+    x:{ticks:{color:PDF_BRAND.muted,font:{size:9},maxRotation:45,autoSkip:true},grid:{display:false}},
+    y
   };
 }
 
-async function drawTelecallerReviewPage(doc,Chart,job,{isFirstPage=true}={}){
-  const marginX=14;
-  const marginBottom=14;
-  const pageW=doc.internal.pageSize.getWidth();
-  const contentW=pageW-marginX*2;
-  if(!isFirstPage)doc.addPage();
-  const startPage=doc.getNumberOfPages();
-
-  const metrics=buildReviewSummary(job);
-  const report=jobReviewReport(job);
-  const scores=scorePercents(metrics);
-  const runDate=job.updatedAt||job.createdAt||new Date().toISOString();
-  const runLabel=(()=>{
-    const d=new Date(runDate);
-    return Number.isNaN(d.valueOf())?String(runDate):d.toLocaleString(undefined,{dateStyle:"medium",timeStyle:"short"});
-  })();
-
-  // Header band
-  pdfSetFill(doc,PDF_BRAND.green);
-  doc.rect(0,0,pageW,32,"F");
-  pdfSetText(doc,PDF_BRAND.white);
-  doc.setFont("helvetica","bold");
-  doc.setFontSize(16);
-  doc.text("LeadLens",marginX,13);
-  doc.setFont("helvetica","normal");
-  doc.setFontSize(10);
-  doc.text("TeleCaller performance report · audit metrics",marginX,22);
-  doc.setFont("helvetica","bold");
-  doc.setFontSize(11);
-  doc.text(String(metrics.telecallerName||"Unknown"),pageW-marginX,13,{align:"right"});
-  doc.setFont("helvetica","normal");
-  doc.setFontSize(8);
-  doc.text(runLabel,pageW-marginX,21,{align:"right"});
-
-  let y=38;
-  pdfSetFill(doc,PDF_BRAND.paper);
-  doc.roundedRect(marginX,y,contentW,10,2,2,"F");
-  pdfSetText(doc,PDF_BRAND.ink);
-  doc.setFontSize(9);
-  doc.text(`Leads ${Number(metrics.leadCount||0).toLocaleString()}   ·   Calls ${Number(metrics.callCount||0).toLocaleString()}   ·   Audited rows ${Number(metrics.auditedRows||0).toLocaleString()}`,marginX+4,y+6.5);
-  y+=14;
-
-  if(report.headline){
-    pdfSetText(doc,PDF_BRAND.green);
-    doc.setFont("helvetica","bold");
-    doc.setFontSize(12);
-    const headlineLines=pdfWrap(doc,report.headline,contentW);
-    doc.text(headlineLines,marginX,y);
-    y+=headlineLines.length*5.5+3;
-    doc.setFont("helvetica","normal");
-  }
-
-  // Score strip
-  const scoreCards=[
-    {label:"Avg comment quality",value:String(scores.avgQuality)},
-    {label:"Error rate",value:`${scores.errorRate}%`},
-    {label:"High-severity",value:`${scores.highSeverity}%`},
-    {label:"Buying intent",value:`${scores.buyingIntent}%`}
-  ];
-  const gap=3.5;
-  const cardW=(contentW-(scoreCards.length-1)*gap)/scoreCards.length;
-  const cardH=18;
-  scoreCards.forEach((card,i)=>{
-    const x=marginX+i*(cardW+gap);
-    pdfSetFill(doc,PDF_BRAND.mint);
-    doc.roundedRect(x,y,cardW,cardH,2,2,"F");
-    pdfSetText(doc,PDF_BRAND.muted);
-    doc.setFontSize(7);
-    doc.text(card.label,x+3,y+6);
-    pdfSetText(doc,PDF_BRAND.green);
-    doc.setFont("helvetica","bold");
-    doc.setFontSize(13);
-    doc.text(card.value,x+3,y+14);
-    doc.setFont("helvetica","normal");
-  });
-  y+=cardH+8;
-
-  // Charts — larger
-  const charts=await buildReviewChartImages(Chart,metrics);
-  const chartH=48;
-  const colGap=4;
-  const leftW=(contentW-colGap)/2;
-  pdfSetText(doc,PDF_BRAND.ink);
-  doc.setFont("helvetica","bold");
-  doc.setFontSize(9);
-  doc.text("Comment quality distribution",marginX,y);
-  doc.text("Top error types",marginX+leftW+colGap,y);
-  y+=3;
-  doc.addImage(charts.qualityImg,"PNG",marginX,y,leftW,chartH);
-  doc.addImage(charts.errorsImg,"PNG",marginX+leftW+colGap,y,leftW,chartH);
-  y+=chartH+7;
-
-  y=pdfEnsureSpace(doc,y,58,marginBottom);
-  doc.setFont("helvetica","bold");
-  doc.setFontSize(9);
-  pdfSetText(doc,PDF_BRAND.ink);
-  doc.text("Severity mix",marginX,y);
-  doc.text("Error frequency table",marginX+72,y);
-  y+=3;
-  const sevW=62;
-  doc.addImage(charts.severityImg,"PNG",marginX,y,sevW,50);
-
-  // Error table beside severity
-  let tableY=y+2;
-  const tableX=marginX+72;
-  const tableW=contentW-72;
-  pdfSetFill(doc,PDF_BRAND.green);
-  doc.rect(tableX,tableY,tableW,6,"F");
-  pdfSetText(doc,PDF_BRAND.white);
-  doc.setFontSize(7);
-  doc.setFont("helvetica","bold");
-  doc.text("Error type",tableX+2,tableY+4);
-  doc.text("Count",tableX+tableW-2,tableY+4,{align:"right"});
-  tableY+=6;
-  doc.setFont("helvetica","normal");
-  const rows=(metrics.errorTallies||[]).slice(0,8);
-  if(!rows.length){
-    pdfSetFill(doc,PDF_BRAND.paper);
-    doc.rect(tableX,tableY,tableW,6,"F");
-    pdfSetText(doc,PDF_BRAND.muted);
-    doc.text("No error labels in this slice",tableX+2,tableY+4);
-    tableY+=6;
-  }else{
-    rows.forEach((item,idx)=>{
-      pdfSetFill(doc,idx%2?PDF_BRAND.paper:PDF_BRAND.white);
-      doc.rect(tableX,tableY,tableW,6,"F");
-      pdfSetText(doc,PDF_BRAND.ink);
-      const label=item.label.length>42?item.label.slice(0,40)+"…":item.label;
-      doc.text(label,tableX+2,tableY+4);
-      doc.text(String(item.count),tableX+tableW-2,tableY+4,{align:"right"});
-      tableY+=6;
-    });
-  }
-  y=Math.max(y+52,tableY)+6;
-
-  const writeBulletSection=(title,items)=>{
-    const list=items?.length?items:["None noted from this audit pass."];
-    y=pdfEnsureSpace(doc,y,16,marginBottom);
-    pdfSetFill(doc,PDF_BRAND.green);
-    doc.rect(marginX,y,2.2,5,"F");
-    pdfSetText(doc,PDF_BRAND.ink);
-    doc.setFont("helvetica","bold");
-    doc.setFontSize(10);
-    doc.text(title,marginX+5,y+4);
-    y+=8;
-    doc.setFont("helvetica","normal");
-    doc.setFontSize(9);
-    for(const item of list){
-      const lines=pdfWrap(doc,`•  ${item}`,contentW-2);
-      for(const line of lines){
-        y=pdfEnsureSpace(doc,y,5,marginBottom);
-        doc.text(line,marginX,y);
-        y+=4.4;
-      }
-      y+=1;
-    }
-    y+=3;
+function pdfSeriesToChartConfig(id,series,solidColor){
+  const labels=series?.labels||[];
+  const grouped=Array.isArray(series?.datasets)&&series.datasets.length>0;
+  const values=series?.values||[];
+  const isSegmented=id==="errorTypes"||id==="overdue";
+  const severityColors={Critical:PDF_BRAND.red,Medium:PDF_BRAND.amber};
+  const cqColors={
+    Bad:PDF_BRAND.red,
+    Average:PDF_BRAND.amber,
+    Good:"#c9a227",
+    "Very good":"#3f8c68",
+    Excellent:PDF_BRAND.green2
   };
+  let datasets;
+  if(grouped){
+    datasets=series.datasets.map((ds,i)=>{
+      let color=PDF_CHART_PALETTE[i%PDF_CHART_PALETTE.length];
+      if(id==="severity")color=severityColors[ds.label]||color;
+      else if(id==="commentQuality")color=cqColors[ds.label]||color;
+      return{
+        label:ds.label,
+        data:ds.values||[],
+        backgroundColor:color,
+        borderWidth:0,
+        borderRadius:3,
+        maxBarThickness:28
+      };
+    });
+  }else{
+    const backgroundColor=isSegmented
+      ?labels.map((_,i)=>PDF_CHART_PALETTE[i%PDF_CHART_PALETTE.length])
+      :solidColor;
+    datasets=[{
+      data:values.length?values:[0],
+      backgroundColor,
+      borderWidth:isSegmented?2:0,
+      borderColor:isSegmented?"#ffffff":undefined,
+      borderRadius:isSegmented?0:3,
+      maxBarThickness:42
+    }];
+  }
+  return{labels:labels.length?labels:["-"],datasets};
+}
 
-  // Narrative from metrics
-  y=pdfEnsureSpace(doc,y,24,marginBottom);
+async function buildDashboardChartImages(Chart,charts){
+  const noTip={legend:{display:false},title:{display:false},tooltip:{enabled:false}};
+  const legendBottom={
+    legend:{display:true,position:"bottom",labels:{color:PDF_BRAND.ink,boxWidth:10,font:{size:10}}},
+    title:{display:false},
+    tooltip:{enabled:false}
+  };
+  const specs=[
+    ["accuracy","TeleCaller Accuracy %","bar",charts.telecallerAccuracy,{scales:pdfBarScales(100),plugins:noTip},PDF_BRAND.green2],
+    ["errors","Errors by TeleCaller","bar",charts.errorsByTelecaller,{scales:pdfBarScales(),plugins:noTip},PDF_BRAND.amber],
+    ["errorTypes","Error Type Distribution","doughnut",charts.errorTypeDistribution,{plugins:legendBottom}],
+    ["projects","Project-wise Errors","bar",charts.projectErrors,{scales:pdfBarScales(),plugins:noTip},PDF_BRAND.red],
+    ["severity","Severity Distribution","bar",charts.severityDistribution,{scales:pdfBarScales(),plugins:legendBottom}],
+    ["commentQuality","Comment Quality Score","bar",charts.commentQualityDistribution,{scales:pdfBarScales(),plugins:legendBottom}],
+    ["overdue","Overdue Days","pie",charts.overdueDistribution,{plugins:legendBottom}]
+  ];
+  const images=[];
+  for(const [id,title,type,series,options,solidColor] of specs){
+    const data=pdfSeriesToChartConfig(id,series,solidColor);
+    const url=await renderOffscreenChart(Chart,type,data,options,640,320);
+    images.push({id,title,url});
+  }
+  return images;
+}
+
+function drawPdfHeader(doc,subtitle){
+  const pageW=doc.internal.pageSize.getWidth();
+  const marginX=12;
   pdfSetFill(doc,PDF_BRAND.green);
-  doc.rect(marginX,y,2.2,5,"F");
-  pdfSetText(doc,PDF_BRAND.ink);
+  doc.rect(0,0,pageW,20,"F");
+  pdfSetText(doc,PDF_BRAND.white);
   doc.setFont("helvetica","bold");
-  doc.setFontSize(10);
-  doc.text("Executive summary",marginX+5,y+4);
-  y+=9;
+  doc.setFontSize(13);
+  doc.text("GPP AI - Bucket 1",marginX,9);
   doc.setFont("helvetica","normal");
   doc.setFontSize(9);
-  pdfSetText(doc,PDF_BRAND.ink);
-  const summaryLines=pdfWrap(doc,report.summary||"No audit metrics available.",contentW);
-  for(const line of summaryLines){
-    y=pdfEnsureSpace(doc,y,5,marginBottom);
-    doc.text(line,marginX,y);
-    y+=4.4;
-  }
-  y+=4;
+  doc.text(subtitle||"Performance Table & Graphs",marginX,15.5);
+  return 26;
+}
 
-  writeBulletSection("Strengths",report.strengths);
-  writeBulletSection("Risks",report.risks);
-  writeBulletSection("Coaching focus",report.coachingFocus);
-
-  const samples=(metrics.sampleObservations||[]).slice(0,5);
-  const tips=(metrics.sampleRecommendations||[]).slice(0,5);
-  if(samples.length)writeBulletSection("Sample auditor observations",samples);
-  if(tips.length)writeBulletSection("Sample auditor recommendations",tips);
-
-  const endPage=doc.getNumberOfPages();
+function drawPdfFooter(doc,pageLabel){
+  const pageW=doc.internal.pageSize.getWidth();
   const pageH=doc.internal.pageSize.getHeight();
-  for(let p=startPage;p<=endPage;p++){
+  const marginX=12;
+  const pageCount=doc.getNumberOfPages();
+  for(let p=1;p<=pageCount;p++){
     doc.setPage(p);
     pdfSetDraw(doc,PDF_BRAND.line);
     doc.setLineWidth(0.2);
-    doc.line(marginX,pageH-10,pageW-marginX,pageH-10);
+    doc.line(marginX,pageH-8,pageW-marginX,pageH-8);
     pdfSetText(doc,PDF_BRAND.muted);
+    doc.setFont("helvetica","normal");
     doc.setFontSize(7);
-    doc.text(`LeadLens ${APP_VERSION} · Confidential · Audit-metrics report (no generative AI)`,marginX,pageH-6);
-    doc.text(`${metrics.telecallerName||"TeleCaller"} · ${p}`,pageW-marginX,pageH-6,{align:"right"});
+    doc.text(`GPP AI ${APP_VERSION} - Confidential`,marginX,pageH-4.5);
+    doc.text(`${pageLabel||"Dashboard"} - ${p}/${pageCount}`,pageW-marginX,pageH-4.5,{align:"right"});
   }
 }
 
-/** Build a multi-page TeleCaller performance PDF (one section/page set per job). */
-export async function buildReviewPdfBlob(jobs){
+function drawPerformanceTable(doc,scorecard,{startY}={}){
+  const marginX=12;
+  const marginBottom=12;
+  const pageW=doc.internal.pageSize.getWidth();
+  const pageH=doc.internal.pageSize.getHeight();
+  const contentW=pageW-marginX*2;
+  const flexTotal=PDF_SCORECARD_COLUMNS.reduce((s,c)=>s+c.flex,0);
+  const colWidths=PDF_SCORECARD_COLUMNS.map(c=>contentW*(c.flex/flexTotal));
+  const rowH=6.2;
+  const headerH=7;
+
+  let y=startY??drawPdfHeader(doc,"TeleCaller Performance");
+  pdfSetText(doc,PDF_BRAND.ink);
+  doc.setFont("helvetica","bold");
+  doc.setFontSize(11);
+  doc.text("TeleCaller Performance",marginX,y);
+  y+=5;
+
+  const drawHeader=()=>{
+    pdfSetFill(doc,PDF_BRAND.green);
+    doc.rect(marginX,y,contentW,headerH,"F");
+    pdfSetText(doc,PDF_BRAND.white);
+    doc.setFont("helvetica","bold");
+    doc.setFontSize(7.5);
+    let x=marginX;
+    for(let i=0;i<PDF_SCORECARD_COLUMNS.length;i++){
+      const col=PDF_SCORECARD_COLUMNS[i];
+      const w=colWidths[i];
+      const label=pdfTruncate(doc,col.label,w-2);
+      if(col.align==="right")doc.text(label,x+w-1,y+4.8,{align:"right"});
+      else doc.text(label,x+1.5,y+4.8);
+      x+=w;
+    }
+    y+=headerH;
+  };
+
+  drawHeader();
+
+  const rows=scorecard?.length?scorecard:[{name:"No TeleCaller rows",leads:"",correct:"",errors:"",accuracyPct:null,rating:"",critical:"",medium:""}];
+  doc.setFont("helvetica","normal");
+  doc.setFontSize(7.5);
+
+  for(let r=0;r<rows.length;r++){
+    if(y+rowH>pageH-marginBottom){
+      doc.addPage();
+      y=drawPdfHeader(doc,"TeleCaller Performance (continued)");
+      drawHeader();
+      doc.setFont("helvetica","normal");
+      doc.setFontSize(7.5);
+    }
+    const row=rows[r];
+    pdfSetFill(doc,r%2?PDF_BRAND.paper:PDF_BRAND.white);
+    doc.rect(marginX,y,contentW,rowH,"F");
+    pdfSetText(doc,PDF_BRAND.ink);
+    const cells=[
+      row.name,
+      row.leads===""?"":Number(row.leads||0).toLocaleString(),
+      row.correct===""?"":Number(row.correct||0).toLocaleString(),
+      row.errors===""?"":Number(row.errors||0).toLocaleString(),
+      row.accuracyPct==null?"":`${(Number(row.accuracyPct)||0).toFixed(1)}%`,
+      row.rating||"",
+      row.critical===""?"":Number(row.critical||0).toLocaleString(),
+      row.medium===""?"":Number(row.medium||0).toLocaleString()
+    ];
+    let x=marginX;
+    for(let i=0;i<PDF_SCORECARD_COLUMNS.length;i++){
+      const col=PDF_SCORECARD_COLUMNS[i];
+      const w=colWidths[i];
+      const text=pdfTruncate(doc,cells[i],w-2);
+      if(col.align==="right")doc.text(text,x+w-1,y+4.2,{align:"right"});
+      else doc.text(text,x+1.5,y+4.2);
+      x+=w;
+    }
+    y+=rowH;
+  }
+  return y+4;
+}
+
+async function drawGraphsPages(doc,Chart,charts,{isContinuation=false}={}){
+  const marginX=12;
+  const marginBottom=12;
+  const pageW=doc.internal.pageSize.getWidth();
+  const pageH=doc.internal.pageSize.getHeight();
+  const contentW=pageW-marginX*2;
+  const gap=5;
+  const colW=(contentW-gap)/2;
+  const chartH=58;
+  const titleH=5;
+  const blockH=titleH+chartH+6;
+
+  if(isContinuation)doc.addPage();
+  let y=drawPdfHeader(doc,"Charts");
+  pdfSetText(doc,PDF_BRAND.ink);
+  doc.setFont("helvetica","bold");
+  doc.setFontSize(11);
+  doc.text("Charts",marginX,y);
+  y+=6;
+
+  const images=await buildDashboardChartImages(Chart,charts||{});
+  for(let i=0;i<images.length;i+=2){
+    if(y+blockH>pageH-marginBottom){
+      doc.addPage();
+      y=drawPdfHeader(doc,"Charts (continued)");
+    }
+    const pair=images.slice(i,i+2);
+    for(let c=0;c<pair.length;c++){
+      const img=pair[c];
+      const x=marginX+c*(colW+gap);
+      pdfSetText(doc,PDF_BRAND.ink);
+      doc.setFont("helvetica","bold");
+      doc.setFontSize(9);
+      doc.text(img.title,x,y);
+      doc.addImage(img.url,"PNG",x,y+titleH,colW,chartH);
+    }
+    y+=blockH;
+  }
+}
+
+/** Build a landscape PDF with Performance table + Graphs (matches Bucket 1 dashboard panels). */
+export async function buildReviewPdfBlob(jobs,options={}){
   const list=(jobs||[]).filter(job=>job&&job.results?.length);
   if(!list.length)throw new Error("No completed TeleCaller audits to export as PDF.");
+  const results=list.flatMap(job=>job.results||[]);
+  if(!results.length)throw new Error("No completed TeleCaller audits to export as PDF.");
   const{jsPDF,Chart}=requirePdfLibs();
-  const doc=new jsPDF({orientation:"portrait",unit:"mm",format:"a4"});
-  for(let i=0;i<list.length;i++){
-    await drawTelecallerReviewPage(doc,Chart,list[i],{isFirstPage:i===0});
-  }
+  const model=buildDashboardModel(results,{},{
+    highSeverityErrors:options.highSeverityErrors||HIGH_SEVERITY_ERRORS
+  });
+  const doc=new jsPDF({orientation:"landscape",unit:"mm",format:"a4"});
+  drawPerformanceTable(doc,model.scorecard);
+  await drawGraphsPages(doc,Chart,model.charts,{isContinuation:true});
+  const period=model.kpis?.reportingPeriod&&model.kpis.reportingPeriod!=="No data"
+    ?model.kpis.reportingPeriod
+    :"";
+  drawPdfFooter(doc,period?`Performance & Graphs - ${period}`:"Performance & Graphs");
   return doc.output("blob");
 }
 
-export async function downloadReviewPdf(jobs,filename){
-  const blob=await buildReviewPdfBlob(jobs);
+export async function downloadReviewPdf(jobs,filename,options){
+  const blob=await buildReviewPdfBlob(jobs,options);
   downloadBlobFile(blob,filename);
 }
 
