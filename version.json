@@ -1,5 +1,5 @@
 {
-  "version": "5.2.7",
+  "version": "5.3",
   "name": "LeadLens",
-  "notes": "v5.2.7: SVS/SVP/SVC use Telecalling Status only (STE-style), any row, Mobile+TC+Project; forward-fill Telecalling Status."
+  "notes": "v5.3: Perf dashboard filters (multi-select, right panel), table totals row, SVS from latest Status per Mobile+Project+Telecaller, project/source dimensions, stacked status chart."
 }

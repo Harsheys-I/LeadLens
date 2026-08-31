@@ -486,9 +486,9 @@ body .perf-view-tab{border:0;background:transparent;color:var(--muted);padding:8
 body .perf-view-tab:hover{background:#eef3ef;color:var(--green-2)}
 body .perf-view-tab.active{background:var(--mint);color:var(--green-2)}
 body .perf-tab-panel{display:grid;gap:18px}
-body .perf-filter-row{margin:0 0 12px}
-body .perf-filter-row label{display:flex;align-items:center;gap:10px;font-size:13px;font-weight:650}
-body .perf-filter-row select{min-width:200px;border:1px solid #cfd8d2;border-radius:9px;background:#fff;padding:9px 11px;color:var(--ink)}
+body .perf-scorecard tbody tr.perf-total-row th,
+body .perf-scorecard tbody tr.perf-total-row td{font-weight:750;background:#eef5f0;border-top:2px solid #c5d3cb}
+body .dashboard-filters-rail.hidden{display:none!important}
 body .perf-chart-block{display:grid;gap:10px}
 body .perf-chart-block h3{margin:0;font-size:15px;color:var(--green-2)}
 body .perf-chart-wrap{position:relative;height:220px;background:#fbfcfb;border:1px solid var(--line);border-radius:12px;padding:12px}

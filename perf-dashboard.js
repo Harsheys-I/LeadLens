@@ -1,7 +1,7 @@
 /**
  * TeleCalling Performance Report — Excel parse, metrics engine, published dashboard UI.
  */
-import {PerfDashboardApi} from "./api-client.js?v=5.2.7";
+import {PerfDashboardApi} from "./api-client.js?v=5.3";
 
 const MASTER_FIELDS = [
   {id: "mobile", label: "Mobile", aliases: "mobile, mobile number, phone"},
@@ -42,10 +42,9 @@ const METRIC_LABELS = {
 };
 
 /** Percentage columns derived for the scorecard (not summed across telecallers). */
-const PCT_KEYS = ["totalLeadsVsSiteVisitedPct", "siteVisitScheduledVsSiteVisitedPct"];
+const PCT_KEYS = ["totalLeadsVsSiteVisitedPct"];
 const PCT_LABELS = {
   totalLeadsVsSiteVisitedPct: "Total Leads vs Site Visited (%)",
-  siteVisitScheduledVsSiteVisitedPct: "Site Visit Scheduled vs Site Visited (%)",
 };
 
 /** Scorecard column order (matches operator report). */
@@ -58,7 +57,6 @@ const SCORECARD_COLUMNS = [
   {key: "siteVisitCancelled", label: METRIC_LABELS.siteVisitCancelled, kind: "count"},
   {key: "notInterested", label: METRIC_LABELS.notInterested, kind: "count"},
   {key: "totalLeadsVsSiteVisitedPct", label: PCT_LABELS.totalLeadsVsSiteVisitedPct, kind: "pct"},
-  {key: "siteVisitScheduledVsSiteVisitedPct", label: PCT_LABELS.siteVisitScheduledVsSiteVisitedPct, kind: "pct"},
   {key: "overdue", label: METRIC_LABELS.overdue, kind: "count"},
 ];
 
@@ -286,12 +284,19 @@ function scorecardCellValue(bucket, col) {
     if (col.key === "totalLeadsVsSiteVisitedPct") {
       return formatPct(pct(bucket.siteVisited, bucket.totalLeads));
     }
-    if (col.key === "siteVisitScheduledVsSiteVisitedPct") {
-      return formatPct(pct(bucket.siteVisited, bucket.siteVisitScheduled));
-    }
     return "—";
   }
   return String(bucket?.[col.key] ?? 0);
+}
+
+function sumBucketMetrics(buckets, names) {
+  const out = emptyMetrics();
+  for (const name of names) {
+    const bucket = buckets[name];
+    if (!bucket) continue;
+    for (const key of METRIC_KEYS) out[key] += Number(bucket[key] || 0);
+  }
+  return out;
 }
 
 function requiredFieldsForKind(kind) {
@@ -473,6 +478,27 @@ function collapseHistoryToLatestLead(historyRows) {
   };
 }
 
+/**
+ * One History row per Mobile+TeleCaller+Project: keep max Lead Update Date only.
+ */
+function latestRowPerSteKey(historyFilled) {
+  const latest = new Map();
+  historyFilled.forEach((row, index) => {
+    const key = steIdentityKey(row);
+    if (!key) return;
+    const nextLud = ludMs(row);
+    const prev = latest.get(key);
+    if (!prev || nextLud > prev.lud || (nextLud === prev.lud && index > prev.index)) {
+      latest.set(key, {row, index, lud: nextLud});
+    }
+  });
+  return [...latest.values()].map(item => item.row);
+}
+
+function matchesSiteVisitScheduled(status) {
+  return norm(status) === "site visit scheduled";
+}
+
 function matchesSentToEnquiry(status) {
   const s = norm(status);
   return s === "sent to enquiry" || s === "send to enquiry";
@@ -555,7 +581,8 @@ function bucketsToDisplay(map) {
  * Build performance metrics from parsed Master + History rows.
  * Lead = Mobile + TeleCaller.
  * STE = any History Status Send/Sent to Enquiry, once per Mobile+TeleCaller+Project.
- * SVS/SVP/SVC = any Telecalling Status match (parallel column to STE), once per Mobile+TeleCaller+Project.
+ * SVS = latest History Status per Mobile+TeleCaller+Project (Site Visit Scheduled).
+ * SVP/SVC = any Telecalling Status match, once per Mobile+TeleCaller+Project.
  * NI = latest History Status (max LUD), once per lead.
  * @param {object[]} masterRows
  * @param {object[]} historyRows
@@ -611,12 +638,16 @@ export function reconcilePerf(masterRows, historyRows) {
     }
   }
 
-  const svsKeys = accumulateTelecallingStatusMetric(historyFilled, "site visit scheduled", maps, resolvers, "siteVisitScheduled");
-  const svpKeys = accumulateTelecallingStatusMetric(historyFilled, "site visit pending", maps, resolvers, "siteVisitPending");
-  const svcKeys = accumulateTelecallingStatusMetric(historyFilled, "site visit cancelled", maps, resolvers, "siteVisitCancelled");
-  // #region agent log
-  fetch('http://127.0.0.1:7564/ingest/5981bb77-f08e-4f6c-995e-18d8279225fc',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'c65e41'},body:JSON.stringify({sessionId:'c65e41',runId:'svs-tcs-ste',hypothesisId:'B',location:'perf-dashboard.js:reconcilePerf',message:'STE-style telecalling status metrics',data:{steKeys:steBest.size,svsKeys,svpKeys,svcKeys,historyFilled:historyFilled.length},timestamp:Date.now()})}).catch(()=>{});
-  // #endregion
+  // SVS: latest History Status per Mobile+TeleCaller+Project.
+  for (const row of latestRowPerSteKey(historyFilled)) {
+    if (!matchesSiteVisitScheduled(row.status)) continue;
+    for (const {map, resolve} of resolvers) {
+      map[resolve(row)].siteVisitScheduled += 1;
+    }
+  }
+
+  accumulateTelecallingStatusMetric(historyFilled, "site visit pending", maps, resolvers, "siteVisitPending");
+  accumulateTelecallingStatusMetric(historyFilled, "site visit cancelled", maps, resolvers, "siteVisitCancelled");
 
   for (const row of historyLeads) {
     const key = leadIdentityKey(row);
@@ -768,28 +799,31 @@ function getBucketMap(data, dimension) {
   return data?.[cfg.bucketKey] || {};
 }
 
-function filterByTelecaller(data, tcFilter) {
-  if (!tcFilter || tcFilter === "__all__") return data;
-  const slice = data.byTelecaller?.[tcFilter];
-  if (!slice) {
-    return {
-      ...data,
-      summary: emptyMetrics(),
-      pie: emptyPie(),
-      byTelecaller: {},
-    };
+function filterBucketMap(map, selected) {
+  if (!selected?.length) return {...(map || {})};
+  const out = {};
+  for (const name of selected) {
+    if (map?.[name]) out[name] = map[name];
   }
-  return {
-    ...data,
-    summary: metricsFromBucket(slice),
-    pie: pieFromBucket(slice),
-    byTelecaller: {[tcFilter]: slice},
-  };
+  return out;
 }
 
-function filterPerfData(data, dimension, tcFilter) {
-  if (dimension === "telecaller") return filterByTelecaller(data, tcFilter);
-  return data;
+function filterPerfData(data, dimension, filters = {}) {
+  const byTelecaller = filterBucketMap(data.byTelecaller, filters.telecallers);
+  const byProject = filterBucketMap(data.byProject, filters.projects);
+  const bySource = filterBucketMap(data.bySource, filters.sources);
+  const activeMap = getBucketMap({byTelecaller, byProject, bySource}, dimension);
+  const names = Object.keys(activeMap).sort((a, b) => a.localeCompare(b, undefined, {sensitivity: "base"}));
+  const summary = sumBucketMetrics(activeMap, names);
+  const pie = sumPieSlices(names.map(name => pieFromBucket(activeMap[name])));
+  return {
+    ...data,
+    summary,
+    pie,
+    byTelecaller,
+    byProject,
+    bySource,
+  };
 }
 
 function dimensionNames(data, dimension) {
@@ -861,6 +895,21 @@ function renderBreakdownTable(mount, data, dimension) {
     }
     tbody.append(tr);
   }
+
+  const totals = sumBucketMetrics(buckets, names);
+  const totalTr = document.createElement("tr");
+  totalTr.className = "perf-total-row";
+  const totalNameCell = document.createElement("th");
+  totalNameCell.scope = "row";
+  totalNameCell.textContent = "Total";
+  totalTr.append(totalNameCell);
+  for (const col of SCORECARD_COLUMNS) {
+    const td = document.createElement("td");
+    td.textContent = scorecardCellValue(totals, col);
+    totalTr.append(td);
+  }
+  tbody.append(totalTr);
+
   table.append(tbody);
   wrap.append(table);
   mount.append(wrap);
@@ -929,7 +978,7 @@ function renderGraphsPanel(mount, data, dimension = "telecaller") {
     const values = names.map(n => {
       const b = buckets[n] || emptyMetrics();
       if (pctKey === "totalLeadsVsSiteVisitedPct") return pct(b.siteVisited, b.totalLeads) ?? 0;
-      return pct(b.siteVisited, b.siteVisitScheduled) ?? 0;
+      return 0;
     });
     renderBarChart(canvas, names, values, "#2a5f9e");
   }
@@ -1180,11 +1229,129 @@ export function mountPerfReportUpload(ctx) {
 let perfCombinedCache = null;
 let perfActiveTab = "summary";
 let perfActiveDimension = "telecaller";
-let perfTcFilter = "__all__";
+let perfFilters = {telecallers: [], projects: [], sources: []};
+
+function readPerfMultiSelect(select) {
+  if (!select) return [];
+  return [...select.selectedOptions].map(opt => opt.value);
+}
+
+function syncPerfFiltersBodyPadding(aside) {
+  const open = aside && !aside.classList.contains("is-collapsed") && document.body.contains(aside);
+  document.body.classList.toggle("dashboard-filters-open", Boolean(open));
+}
+
+function fillPerfMultiSelect(select, values, selected) {
+  select.replaceChildren();
+  select.multiple = true;
+  const selectedSet = new Set(selected || []);
+  for (const value of values) {
+    const opt = document.createElement("option");
+    opt.value = value;
+    opt.textContent = value;
+    if (selectedSet.has(value)) opt.selected = true;
+    select.append(opt);
+  }
+}
+
+function buildPerfFilterSelectActions(select) {
+  const actions = document.createElement("span");
+  actions.className = "dashboard-filter-actions";
+  const selectAll = document.createElement("button");
+  selectAll.type = "button";
+  selectAll.className = "dashboard-filter-action";
+  selectAll.textContent = "Select All";
+  const selectNone = document.createElement("button");
+  selectNone.type = "button";
+  selectNone.className = "dashboard-filter-action";
+  selectNone.textContent = "Select None";
+  selectAll.addEventListener("click", () => {
+    for (const opt of select.options) opt.selected = true;
+    select.dispatchEvent(new Event("change", {bubbles: true}));
+  });
+  selectNone.addEventListener("click", () => {
+    for (const opt of select.options) opt.selected = false;
+    select.dispatchEvent(new Event("change", {bubbles: true}));
+  });
+  actions.append(selectAll, selectNone);
+  return actions;
+}
+
+function buildPerfFiltersPanel(filterOptions, filters, {collapsed = true} = {}) {
+  const aside = document.createElement("aside");
+  aside.className = "dashboard-filters-rail";
+  aside.id = "perf-filters-rail";
+  if (collapsed) aside.classList.add("is-collapsed");
+
+  const toggle = document.createElement("button");
+  toggle.type = "button";
+  toggle.className = "filters-tab-toggle";
+  toggle.textContent = "Filters";
+  toggle.setAttribute("aria-expanded", collapsed ? "false" : "true");
+
+  const panel = document.createElement("div");
+  panel.className = "dashboard-filters-panel";
+  const form = document.createElement("form");
+  form.className = "dashboard-filters";
+  form.id = "perf-filters-form";
+
+  const head = document.createElement("div");
+  head.className = "filters-panel-head";
+  const title = document.createElement("h3");
+  title.textContent = "Filters";
+  const hint = document.createElement("p");
+  hint.className = "filters-panel-hint";
+  hint.textContent = "Hold Ctrl/Cmd to multi-select. Empty = all.";
+  head.append(title, hint);
+  form.append(head);
+
+  const fields = [
+    ["telecallers", "TeleCaller", filterOptions.telecallers, filters.telecallers],
+    ["projects", "Project", filterOptions.projects, filters.projects],
+    ["sources", "Source", filterOptions.sources, filters.sources],
+  ];
+
+  const selects = {};
+  for (const [name, label, options, selected] of fields) {
+    const wrap = document.createElement("div");
+    wrap.className = "dashboard-filter";
+    const fieldHead = document.createElement("div");
+    fieldHead.className = "dashboard-filter-head";
+    const fieldLabel = document.createElement("span");
+    fieldLabel.className = "dashboard-filter-label";
+    fieldLabel.textContent = label;
+    const select = document.createElement("select");
+    select.name = name;
+    select.className = "dashboard-filter-select";
+    select.size = Math.min(5, Math.max(3, (options || []).length || 3));
+    fillPerfMultiSelect(select, options || [], selected || []);
+    fieldHead.append(fieldLabel, buildPerfFilterSelectActions(select));
+    wrap.append(fieldHead, select);
+    form.append(wrap);
+    selects[name] = select;
+  }
+
+  const reset = document.createElement("button");
+  reset.type = "button";
+  reset.className = "secondary-button dashboard-filter-reset";
+  reset.textContent = "Reset filters";
+  form.append(reset);
+  panel.append(form);
+  aside.append(toggle, panel);
+
+  toggle.addEventListener("click", () => {
+    const willCollapse = !aside.classList.contains("is-collapsed");
+    aside.classList.toggle("is-collapsed", willCollapse);
+    toggle.setAttribute("aria-expanded", willCollapse ? "false" : "true");
+    syncPerfFiltersBodyPadding(aside);
+  });
+
+  return {aside, form, reset, selects};
+}
 
 function getFilteredPerfData() {
   if (!perfCombinedCache) return null;
-  return filterPerfData(perfCombinedCache, perfActiveDimension, perfTcFilter);
+  return filterPerfData(perfCombinedCache, perfActiveDimension, perfFilters);
 }
 
 function renderActivePerfPanels() {
@@ -1203,13 +1370,6 @@ function setPerfDimension(dimension) {
     btn.classList.toggle("active", btn.dataset.perfDimension === next);
     btn.setAttribute("aria-selected", btn.dataset.perfDimension === next ? "true" : "false");
   });
-  const {filterRow} = perfPublishedHandlers || {};
-  const showFilter = Boolean(
-    perfPublishedHandlers?.canViewAll?.()
-    && perfCombinedCache?.view_all
-    && next === "telecaller",
-  );
-  filterRow?.classList.toggle("hidden", !showFilter);
   renderActivePerfPanels();
 }
 
@@ -1244,16 +1404,37 @@ export function mountPerfPublishedDashboard(ctx) {
   });
   document.getElementById("refresh-perf-published")?.addEventListener("click", () => refreshPerfPublished());
 
-  const filterRow = document.getElementById("perf-filter-row");
-  const filterSelect = document.getElementById("perf-tc-filter");
-  const dimensionTabs = document.querySelector(".perf-dimension-tabs");
-  filterSelect?.addEventListener("change", () => {
-    perfTcFilter = filterSelect.value || "__all__";
+  const view = document.getElementById("view-perf-dashboard");
+  const {aside, form, reset, selects} = buildPerfFiltersPanel(
+    {telecallers: [], projects: [], sources: []},
+    perfFilters,
+    {collapsed: true},
+  );
+  view?.append(aside);
+  queueMicrotask(() => syncPerfFiltersBodyPadding(aside));
+
+  const applyFilters = () => {
+    perfFilters = {
+      telecallers: readPerfMultiSelect(selects.telecallers),
+      projects: readPerfMultiSelect(selects.projects),
+      sources: readPerfMultiSelect(selects.sources),
+    };
     if (!perfCombinedCache) return;
     renderActivePerfPanels();
+  };
+
+  form.addEventListener("submit", e => e.preventDefault());
+  form.addEventListener("change", applyFilters);
+  reset.addEventListener("click", () => {
+    perfFilters = {telecallers: [], projects: [], sources: []};
+    for (const select of Object.values(selects)) {
+      for (const opt of select.options) opt.selected = false;
+    }
+    applyFilters();
   });
 
-  perfPublishedHandlers = {canViewAll, filterRow, filterSelect, dimensionTabs};
+  const dimensionTabs = document.querySelector(".perf-dimension-tabs");
+  perfPublishedHandlers = {canViewAll, filtersRail: aside, filterSelects: selects, dimensionTabs};
 }
 
 export async function refreshPerfPublished() {
@@ -1263,7 +1444,7 @@ export async function refreshPerfPublished() {
   const metaEl = document.getElementById("perf-published-meta");
   const summaryMount = document.getElementById("perf-tab-summary");
   const graphsMount = document.getElementById("perf-tab-graphs");
-  const {filterRow, filterSelect, canViewAll, dimensionTabs} = perfPublishedHandlers || {};
+  const {filtersRail, filterSelects, canViewAll, dimensionTabs} = perfPublishedHandlers || {};
 
   destroyPerfCharts();
   try {
@@ -1294,34 +1475,30 @@ export async function refreshPerfPublished() {
 
     const showAdminControls = Boolean(canViewAll?.() && data.view_all);
     dimensionTabs?.classList.toggle("hidden", !showAdminControls);
-    if (!showAdminControls && perfActiveDimension !== "telecaller") {
-      perfActiveDimension = "telecaller";
+    filtersRail?.classList.toggle("hidden", !showAdminControls);
+    if (!showAdminControls) {
+      syncPerfFiltersBodyPadding(null);
+      if (perfActiveDimension !== "telecaller") perfActiveDimension = "telecaller";
+      perfFilters = {telecallers: [], projects: [], sources: []};
     }
     document.querySelectorAll(".perf-dimension-tabs [data-perf-dimension]").forEach(btn => {
       btn.classList.toggle("active", btn.dataset.perfDimension === perfActiveDimension);
       btn.setAttribute("aria-selected", btn.dataset.perfDimension === perfActiveDimension ? "true" : "false");
     });
 
-    const showFilter = showAdminControls && perfActiveDimension === "telecaller";
-    filterRow?.classList.toggle("hidden", !showFilter);
-    if (showFilter && filterSelect) {
-      const names = Object.keys(data.byTelecaller || {}).sort((a, b) => a.localeCompare(b, undefined, {sensitivity: "base"}));
-      const prev = perfTcFilter;
-      filterSelect.replaceChildren();
-      const allOpt = document.createElement("option");
-      allOpt.value = "__all__";
-      allOpt.textContent = "All TeleCallers";
-      filterSelect.append(allOpt);
-      for (const name of names) {
-        const opt = document.createElement("option");
-        opt.value = name;
-        opt.textContent = name;
-        filterSelect.append(opt);
-      }
-      perfTcFilter = names.includes(prev) ? prev : "__all__";
-      filterSelect.value = perfTcFilter;
-    } else {
-      perfTcFilter = "__all__";
+    if (showAdminControls && filterSelects) {
+      const tcNames = Object.keys(data.byTelecaller || {}).sort((a, b) => a.localeCompare(b, undefined, {sensitivity: "base"}));
+      const projectNames = Object.keys(data.byProject || {}).sort((a, b) => a.localeCompare(b, undefined, {sensitivity: "base"}));
+      const sourceNames = Object.keys(data.bySource || {}).sort((a, b) => a.localeCompare(b, undefined, {sensitivity: "base"}));
+      const prune = (selected, options) => selected.filter(name => options.includes(name));
+      perfFilters = {
+        telecallers: prune(perfFilters.telecallers, tcNames),
+        projects: prune(perfFilters.projects, projectNames),
+        sources: prune(perfFilters.sources, sourceNames),
+      };
+      fillPerfMultiSelect(filterSelects.telecallers, tcNames, perfFilters.telecallers);
+      fillPerfMultiSelect(filterSelects.projects, projectNames, perfFilters.projects);
+      fillPerfMultiSelect(filterSelects.sources, sourceNames, perfFilters.sources);
     }
 
     if (summaryMount) renderSummaryPanel(summaryMount, getFilteredPerfData(), perfActiveDimension);
@@ -1338,4 +1515,5 @@ export async function refreshPerfPublished() {
 
 export function destroyPerfDashboard() {
   destroyPerfCharts();
+  syncPerfFiltersBodyPadding(null);
 }
