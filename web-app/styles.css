@@ -159,6 +159,7 @@ body .dashboard-chart-report-card{width:94vw;max-width:94vw;height:92vh;max-heig
 body .dashboard-chart-report-title-wrap{min-width:0;flex:1}
 body .dashboard-chart-report-subtitle{margin:4px 0 0;font-size:12px;font-weight:500;color:rgba(255,255,255,.82);line-height:1.35}
 body .dashboard-chart-report-body{padding:14px 16px;flex:1;min-height:0;display:flex;flex-direction:column;overflow:hidden}
+body .dashboard-chart-report-search{margin:0;padding:10px 16px;border-bottom:1px solid var(--line);background:#f7faf8;flex-shrink:0}
 body .dashboard-chart-report-body .dashboard-errors-wrap{max-height:none;flex:1;min-height:0}
 body .dashboard-chart-canvas canvas.dashboard-chart-clickable{cursor:pointer}
 body .dashboard-lead-detail-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}

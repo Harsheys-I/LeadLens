@@ -38,6 +38,9 @@ function writeFiltersCollapsedPref(collapsed){
   }catch{/* ignore */}
 }
 
+/** @type {null|{results: object[], baseFilters: object, segmentFilters: object, subtitle: string, highSeverityErrors?: Set|string[], search: string}} */
+let chartReportState = null;
+
 const CHART_COLORS = {
   green2: "#1f5d45",
   amber: "#c57924",
@@ -665,6 +668,57 @@ function closeChartErrorReportModal(){
   document.removeEventListener("keydown", onChartReportModalKeydown);
   const body = modal.querySelector("#dashboard-chart-report-body");
   if(body) body.replaceChildren();
+  chartReportState = null;
+}
+
+function renderChartErrorReportBody(){
+  if(!chartReportState) return;
+  const modal = document.getElementById("dashboard-chart-report-modal");
+  const body = modal?.querySelector("#dashboard-chart-report-body");
+  const note = modal?.querySelector("#dashboard-chart-report-subtitle");
+  if(!body) return;
+
+  const {
+    results,
+    baseFilters = {},
+    segmentFilters = {},
+    subtitle = "",
+    highSeverityErrors,
+    search = ""
+  } = chartReportState;
+
+  const mergedFilters = {...baseFilters, ...segmentFilters, search: String(search || "").trim()};
+  const model = buildDashboardModel(results, mergedFilters, {highSeverityErrors});
+  const rows = model.errorDetails || [];
+
+  if(note){
+    const countLabel = `${num(rows.length)} error row(s)`;
+    note.textContent = subtitle ? `${subtitle} · ${countLabel}` : countLabel;
+  }
+
+  body.replaceChildren();
+  body.append(renderErrorDetails(rows));
+}
+
+function wireChartErrorReportSearch(modal){
+  if(!modal || modal.dataset.searchWired === "1") return;
+  const searchInput = modal.querySelector('input[name="chart-report-search"]');
+  const clearSearch = modal.querySelector(".dashboard-chart-report-search-clear");
+  if(!searchInput) return;
+
+  searchInput.addEventListener("input", () => {
+    if(!chartReportState) return;
+    chartReportState.search = searchInput.value.trim();
+    renderChartErrorReportBody();
+  });
+  clearSearch?.addEventListener("click", () => {
+    if(!searchInput.value && !chartReportState?.search) return;
+    searchInput.value = "";
+    if(chartReportState) chartReportState.search = "";
+    renderChartErrorReportBody();
+    searchInput.focus();
+  });
+  modal.dataset.searchWired = "1";
 }
 
 function ensureChartErrorReportModal(){
@@ -698,10 +752,27 @@ function ensureChartErrorReportModal(){
   closeBtn.addEventListener("click", closeChartErrorReportModal);
   head.append(titleWrap, closeBtn);
 
+  const searchWrap = el("div", "dashboard-main-search dashboard-chart-report-search");
+  const searchHead = el("div", "dashboard-main-search-head");
+  searchHead.append(el("span", "dashboard-filter-label", "Search all"));
+  const clearSearch = el("button", "dashboard-filter-action dashboard-chart-report-search-clear", "Clear");
+  clearSearch.type = "button";
+  clearSearch.setAttribute("aria-label", "Clear search");
+  searchHead.append(clearSearch);
+  const searchInput = document.createElement("input");
+  searchInput.type = "search";
+  searchInput.name = "chart-report-search";
+  searchInput.className = "dashboard-filter-search-input dashboard-main-search-input";
+  searchInput.placeholder = "Search all fields…";
+  searchInput.autocomplete = "off";
+  searchInput.spellcheck = false;
+  searchInput.setAttribute("aria-label", "Search all fields in this report");
+  searchWrap.append(searchHead, searchInput);
+
   const body = el("div", "dashboard-lead-modal-body dashboard-chart-report-body");
   body.id = "dashboard-chart-report-body";
 
-  card.append(head, body);
+  card.append(head, searchWrap, body);
   modal.append(backdrop, card);
   document.body.append(modal);
   return modal;
@@ -723,22 +794,21 @@ function openChartErrorReportModal(opts){
   hideClipPopover();
   closeLeadDetailModal();
 
-  const mergedFilters = {...baseFilters, ...segmentFilters};
-  const model = buildDashboardModel(results, mergedFilters, {highSeverityErrors});
-  const rows = model.errorDetails || [];
+  chartReportState = {
+    results,
+    baseFilters,
+    segmentFilters,
+    subtitle,
+    highSeverityErrors,
+    search: ""
+  };
 
   const modal = ensureChartErrorReportModal();
-  const body = modal.querySelector("#dashboard-chart-report-body");
-  const note = modal.querySelector("#dashboard-chart-report-subtitle");
-  if(!body) return;
+  wireChartErrorReportSearch(modal);
+  const searchInput = modal.querySelector('input[name="chart-report-search"]');
+  if(searchInput) searchInput.value = "";
 
-  if(note){
-    const countLabel = `${num(rows.length)} error row(s)`;
-    note.textContent = subtitle ? `${subtitle} · ${countLabel}` : countLabel;
-  }
-
-  body.replaceChildren();
-  body.append(renderErrorDetails(rows));
+  renderChartErrorReportBody();
 
   modal.classList.remove("hidden");
   modal.setAttribute("aria-hidden", "false");

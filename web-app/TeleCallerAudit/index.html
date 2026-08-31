@@ -238,7 +238,10 @@
       <section id="view-perf-dashboard" class="view view-wide">
         <div class="section-head">
           <div><h2>Performance Dashboard</h2><p id="perf-published-meta">Published performance metrics from the latest upload.</p></div>
-          <button id="refresh-perf-published" type="button" class="secondary-button">Refresh</button>
+          <div class="inline-actions">
+            <button id="export-perf-pdf" type="button" class="secondary-button" disabled>Export PDF</button>
+            <button id="refresh-perf-published" type="button" class="secondary-button">Refresh</button>
+          </div>
         </div>
         <div id="perf-published-empty" class="empty-card hidden" aria-live="polite">No published performance dashboards yet.</div>
         <div id="perf-published-panel" class="review-dashboard-panel hidden">
