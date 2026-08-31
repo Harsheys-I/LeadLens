@@ -1,7 +1,7 @@
 /**
  * TeleCalling Performance Report — Excel parse, metrics engine, published dashboard UI.
  */
-import {PerfDashboardApi} from "./api-client.js?v=5.3";
+import {PerfDashboardApi} from "./api-client.js?v=5.4";
 
 const MASTER_FIELDS = [
   {id: "mobile", label: "Mobile", aliases: "mobile, mobile number, phone"},
@@ -23,6 +23,9 @@ const HISTORY_FIELDS = [
 const METRIC_KEYS = [
   "totalLeads",
   "activeLeads",
+  "totalCalls",
+  "notFollowupLeads",
+  "draftLeads",
   "siteVisited",
   "siteVisitScheduled",
   "siteVisitPending",
@@ -33,12 +36,21 @@ const METRIC_KEYS = [
 const METRIC_LABELS = {
   totalLeads: "Total Leads (Master ∪ History)",
   activeLeads: "Active Leads (Master)",
+  totalCalls: "Total Calls (History)",
+  notFollowupLeads: "Not Follow-up Leads (Master)",
+  draftLeads: "Draft Leads (Master)",
   siteVisited: "Site Visited (STE)",
   siteVisitScheduled: "Site Visit Scheduled (SVS)",
   siteVisitPending: "Site Visit Pending (SVP)",
   siteVisitCancelled: "Site Visit Cancelled (SVC)",
   notInterested: "Not Interested (NI)",
   overdue: "Overdue Leads (Master)",
+};
+
+/** Derived average columns (not summed across rows). */
+const AVG_KEYS = ["avgCallsPerDay"];
+const AVG_LABELS = {
+  avgCallsPerDay: "Avg Calls per Day",
 };
 
 /** Percentage columns derived for the scorecard (not summed across telecallers). */
@@ -51,6 +63,10 @@ const PCT_LABELS = {
 const SCORECARD_COLUMNS = [
   {key: "totalLeads", label: METRIC_LABELS.totalLeads, kind: "count"},
   {key: "activeLeads", label: METRIC_LABELS.activeLeads, kind: "count"},
+  {key: "totalCalls", label: METRIC_LABELS.totalCalls, kind: "count"},
+  {key: "avgCallsPerDay", label: AVG_LABELS.avgCallsPerDay, kind: "avg"},
+  {key: "draftLeads", label: METRIC_LABELS.draftLeads, kind: "count"},
+  {key: "notFollowupLeads", label: METRIC_LABELS.notFollowupLeads, kind: "count"},
   {key: "siteVisited", label: METRIC_LABELS.siteVisited, kind: "count"},
   {key: "siteVisitScheduled", label: METRIC_LABELS.siteVisitScheduled, kind: "count"},
   {key: "siteVisitPending", label: METRIC_LABELS.siteVisitPending, kind: "count"},
@@ -182,6 +198,9 @@ function emptyMetrics() {
   return {
     totalLeads: 0,
     activeLeads: 0,
+    totalCalls: 0,
+    notFollowupLeads: 0,
+    draftLeads: 0,
     siteVisited: 0,
     siteVisitScheduled: 0,
     siteVisitPending: 0,
@@ -209,6 +228,8 @@ function emptyTelecallerBucket() {
     _masterKeys: new Set(),
     _historyKeys: new Set(),
     _overdueKeys: new Set(),
+    _draftKeys: new Set(),
+    _notFollowupKeys: new Set(),
   };
 }
 
@@ -224,6 +245,31 @@ function formatPct(value) {
   return `${Number(value).toFixed(Number(value) % 1 === 0 ? 0 : 1)}%`;
 }
 
+function formatAvg(value) {
+  if (value === null || value === undefined || Number.isNaN(Number(value))) return "—";
+  const n = Number(value);
+  return n.toFixed(n % 1 === 0 ? 0 : 1);
+}
+
+/** Inclusive calendar days between History min/max LUD (from ISO date strings). */
+function reportDayCount(dateMinIso, dateMaxIso) {
+  const min = parseDateValue(dateMinIso);
+  const max = parseDateValue(dateMaxIso);
+  if (!min || !max) return 0;
+  const start = new Date(min);
+  const end = new Date(max);
+  start.setHours(0, 0, 0, 0);
+  end.setHours(0, 0, 0, 0);
+  return Math.floor((end - start) / 86400000) + 1;
+}
+
+function avgCallsPerDay(totalCalls, reportDays) {
+  const calls = Number(totalCalls) || 0;
+  const days = Number(reportDays) || 0;
+  if (days <= 0) return null;
+  return Math.round((calls / days) * 10) / 10;
+}
+
 function finalizeBucket(bucket) {
   const masterKeys = bucket._masterKeys || new Set();
   const historyKeys = bucket._historyKeys || new Set();
@@ -233,6 +279,8 @@ function finalizeBucket(bucket) {
   bucket.activeLeads = masterKeys.size;
   bucket.totalLeads = union.size;
   bucket.overdue = overdueKeys.size;
+  bucket.draftLeads = (bucket._draftKeys || new Set()).size;
+  bucket.notFollowupLeads = (bucket._notFollowupKeys || new Set()).size;
   bucket.pie = {
     notInterested: Number(bucket.notInterested) || 0,
     siteVisitScheduled: Number(bucket.siteVisitScheduled) || 0,
@@ -244,6 +292,8 @@ function finalizeBucket(bucket) {
   delete bucket._masterKeys;
   delete bucket._historyKeys;
   delete bucket._overdueKeys;
+  delete bucket._draftKeys;
+  delete bucket._notFollowupKeys;
   return bucket;
 }
 
@@ -279,10 +329,16 @@ function sumPieSlices(slices) {
   return out;
 }
 
-function scorecardCellValue(bucket, col) {
+function scorecardCellValue(bucket, col, reportDays = 0) {
   if (col.kind === "pct") {
     if (col.key === "totalLeadsVsSiteVisitedPct") {
       return formatPct(pct(bucket.siteVisited, bucket.totalLeads));
+    }
+    return "—";
+  }
+  if (col.kind === "avg") {
+    if (col.key === "avgCallsPerDay") {
+      return formatAvg(avgCallsPerDay(bucket?.totalCalls, reportDays));
     }
     return "—";
   }
@@ -584,6 +640,10 @@ function bucketsToDisplay(map) {
  * SVS = latest History Status per Mobile+TeleCaller+Project (Site Visit Scheduled).
  * SVP/SVC = any Telecalling Status match, once per Mobile+TeleCaller+Project.
  * NI = latest History Status (max LUD), once per lead.
+ * Total Calls = History row count (after forward-fill).
+ * Avg Calls per Day = Total Calls ÷ inclusive days between min/max History LUD.
+ * Draft Leads = Master leads (Mobile+TeleCaller) with Status Draft.
+ * Not Follow-up Leads = Master leads not in History, Status ≠ Draft.
  * @param {object[]} masterRows
  * @param {object[]} historyRows
  */
@@ -598,13 +658,20 @@ export function reconcilePerf(masterRows, historyRows) {
   }
 
   const {filled: historyFilled, leads: historyLeads} = collapseHistoryToLatestLead(historyRows);
+  const reportDays = reportDayCount(dateToIso(dateMin), dateToIso(dateMax));
 
   const {maps, resolvers, resetVisitCounts} = createBucketMaps();
   const {byTelecaller, byProject, bySource} = maps;
 
   const allMasterKeys = new Set();
   const allHistoryKeys = new Set();
+  const allHistoryLeadKeys = new Set();
   const today = todayStart();
+
+  for (const row of historyFilled) {
+    const key = leadIdentityKey(row);
+    if (key) allHistoryLeadKeys.add(key);
+  }
 
   for (const row of masterRows) {
     const key = leadIdentityKey(row);
@@ -613,10 +680,26 @@ export function reconcilePerf(masterRows, historyRows) {
       map[resolve(row)]._masterKeys.add(key);
     }
     allMasterKeys.add(key);
+    if (norm(row.status) === "draft") {
+      for (const {map, resolve} of resolvers) {
+        map[resolve(row)]._draftKeys.add(key);
+      }
+    }
+    if (!allHistoryLeadKeys.has(key) && norm(row.status) !== "draft") {
+      for (const {map, resolve} of resolvers) {
+        map[resolve(row)]._notFollowupKeys.add(key);
+      }
+    }
     if (row.nextDate && row.nextDate < today) {
       for (const {map, resolve} of resolvers) {
         map[resolve(row)]._overdueKeys.add(key);
       }
+    }
+  }
+
+  for (const row of historyFilled) {
+    for (const {map, resolve} of resolvers) {
+      map[resolve(row)].totalCalls += 1;
     }
   }
 
@@ -675,6 +758,9 @@ export function reconcilePerf(masterRows, historyRows) {
   const summary = emptyMetrics();
   summary.activeLeads = allMasterKeys.size;
   summary.totalLeads = new Set([...allMasterKeys, ...allHistoryKeys]).size;
+  summary.totalCalls = 0;
+  summary.notFollowupLeads = 0;
+  summary.draftLeads = 0;
   summary.notInterested = 0;
   summary.siteVisitScheduled = 0;
   summary.siteVisitPending = 0;
@@ -682,6 +768,9 @@ export function reconcilePerf(masterRows, historyRows) {
   summary.siteVisited = 0;
   summary.overdue = 0;
   for (const bucket of Object.values(byTelecallerDisplay)) {
+    summary.totalCalls += Number(bucket.totalCalls) || 0;
+    summary.notFollowupLeads += Number(bucket.notFollowupLeads) || 0;
+    summary.draftLeads += Number(bucket.draftLeads) || 0;
     summary.notInterested += Number(bucket.notInterested) || 0;
     summary.siteVisitScheduled += Number(bucket.siteVisitScheduled) || 0;
     summary.siteVisitPending += Number(bucket.siteVisitPending) || 0;
@@ -707,6 +796,7 @@ export function reconcilePerf(masterRows, historyRows) {
     pie,
     dateMin: dateToIso(dateMin),
     dateMax: dateToIso(dateMax),
+    reportDays,
   };
 }
 
@@ -808,6 +898,12 @@ function filterBucketMap(map, selected) {
   return out;
 }
 
+function getReportDays(data) {
+  if (Number(data?.reportDays) > 0) return Number(data.reportDays);
+  if (Number(data?.report_days) > 0) return Number(data.report_days);
+  return reportDayCount(data?.date_min, data?.date_max);
+}
+
 function filterPerfData(data, dimension, filters = {}) {
   const byTelecaller = filterBucketMap(data.byTelecaller, filters.telecallers);
   const byProject = filterBucketMap(data.byProject, filters.projects);
@@ -816,6 +912,7 @@ function filterPerfData(data, dimension, filters = {}) {
   const names = Object.keys(activeMap).sort((a, b) => a.localeCompare(b, undefined, {sensitivity: "base"}));
   const summary = sumBucketMetrics(activeMap, names);
   const pie = sumPieSlices(names.map(name => pieFromBucket(activeMap[name])));
+  const reportDays = getReportDays(data);
   return {
     ...data,
     summary,
@@ -823,6 +920,7 @@ function filterPerfData(data, dimension, filters = {}) {
     byTelecaller,
     byProject,
     bySource,
+    reportDays,
   };
 }
 
@@ -831,7 +929,7 @@ function dimensionNames(data, dimension) {
   return Object.keys(buckets).sort((a, b) => a.localeCompare(b, undefined, {sensitivity: "base"}));
 }
 
-function renderTotalsBlock(mount, summary, title = "Totals") {
+function renderTotalsBlock(mount, summary, title = "Totals", reportDays = 0) {
   const block = document.createElement("div");
   block.className = "perf-totals-block";
   const heading = document.createElement("h3");
@@ -845,7 +943,7 @@ function renderTotalsBlock(mount, summary, title = "Totals") {
     const dt = document.createElement("dt");
     dt.textContent = col.label;
     const dd = document.createElement("dd");
-    dd.textContent = scorecardCellValue(summary, col);
+    dd.textContent = scorecardCellValue(summary, col, reportDays);
     row.append(dt, dd);
     list.append(row);
   }
@@ -857,6 +955,7 @@ function renderBreakdownTable(mount, data, dimension) {
   const cfg = PERF_DIMENSIONS[dimension] || PERF_DIMENSIONS.telecaller;
   const buckets = getBucketMap(data, dimension);
   const names = dimensionNames(data, dimension);
+  const reportDays = getReportDays(data);
   if (!names.length) {
     const empty = document.createElement("div");
     empty.className = "empty-card";
@@ -890,7 +989,7 @@ function renderBreakdownTable(mount, data, dimension) {
     tr.append(nameCell);
     for (const col of SCORECARD_COLUMNS) {
       const td = document.createElement("td");
-      td.textContent = scorecardCellValue(bucket, col);
+      td.textContent = scorecardCellValue(bucket, col, reportDays);
       tr.append(td);
     }
     tbody.append(tr);
@@ -905,7 +1004,7 @@ function renderBreakdownTable(mount, data, dimension) {
   totalTr.append(totalNameCell);
   for (const col of SCORECARD_COLUMNS) {
     const td = document.createElement("td");
-    td.textContent = scorecardCellValue(totals, col);
+    td.textContent = scorecardCellValue(totals, col, reportDays);
     totalTr.append(td);
   }
   tbody.append(totalTr);
@@ -927,7 +1026,7 @@ function renderSummaryPanel(mount, data, dimension = "telecaller") {
   let title = `All ${cfg.totalsLabel} · totals`;
   if (names.length === 1) title = `${names[0]} · totals`;
   else if (dimension === "telecaller" && names.length > 1) title = "All TeleCallers · totals";
-  renderTotalsBlock(mount, data.summary, title);
+  renderTotalsBlock(mount, data.summary, title, getReportDays(data));
 
   const tableTitle = document.createElement("h3");
   tableTitle.className = "perf-section-title";
@@ -983,6 +1082,27 @@ function renderGraphsPanel(mount, data, dimension = "telecaller") {
     renderBarChart(canvas, names, values, "#2a5f9e");
   }
 
+  const reportDays = getReportDays(data);
+  for (const avgKey of AVG_KEYS) {
+    const block = document.createElement("div");
+    block.className = "perf-chart-block";
+    const title = document.createElement("h3");
+    title.textContent = AVG_LABELS[avgKey];
+    block.append(title);
+    const wrap = document.createElement("div");
+    wrap.className = "perf-chart-wrap";
+    const canvas = document.createElement("canvas");
+    wrap.append(canvas);
+    block.append(wrap);
+    mount.append(block);
+    const values = names.map(n => {
+      const b = buckets[n] || emptyMetrics();
+      if (avgKey === "avgCallsPerDay") return avgCallsPerDay(b.totalCalls, reportDays) ?? 0;
+      return 0;
+    });
+    renderBarChart(canvas, names, values, "#3f8c68");
+  }
+
   const statusSection = document.createElement("div");
   statusSection.className = "perf-stacked-section";
   const statusHeading = document.createElement("h3");
@@ -1026,6 +1146,7 @@ function renderPerfPreview(panel, reconciled) {
     pie: reconciled.pie,
     date_min: reconciled.dateMin,
     date_max: reconciled.dateMax,
+    reportDays: reconciled.reportDays,
   });
   const tcList = panel.querySelector("#perf-preview-telecallers");
   if (tcList) {
@@ -1205,6 +1326,7 @@ export function mountPerfReportUpload(ctx) {
         pie: pieFromBucket(bucket),
         date_min: perfReconciled.dateMin,
         date_max: perfReconciled.dateMax,
+        report_days: perfReconciled.reportDays,
       };
     });
     if (modalMsg) modalMsg.textContent = "Uploading…";

@@ -7,12 +7,12 @@
   <meta name="description" content="LeadLens TeleCaller">
   <title>LeadLens · TeleCaller</title>
   <link rel="manifest" href="../manifest.webmanifest">
-  <link rel="stylesheet" href="../styles.css?v=5.3">
+  <link rel="stylesheet" href="../styles.css?v=5.4">
   <script defer src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js"></script>
-  <script type="module" src="../app.js?v=5.3"></script>
+  <script type="module" src="../app.js?v=5.4"></script>
 </head>
 <body>
   <div id="update-banner" class="update-banner hidden" role="status">
@@ -286,6 +286,10 @@
             <li><strong>Total Leads</strong> — unique leads (Mobile + TeleCaller) in Master ∪ History</li>
             <li><strong>History rows</strong> — Mobile/Project/Source/Telecaller forward-filled; STE uses any History <strong>Status</strong> row; SVS uses latest History <strong>Status</strong> per Mobile+TeleCaller+Project; SVP/SVC use any <strong>Telecalling Status</strong> row (once per Mobile+TeleCaller+Project); NI uses latest Status per Mobile+TeleCaller</li>
             <li><strong>Active Leads</strong> — unique Master leads (Mobile + TeleCaller)</li>
+            <li><strong>Total Calls</strong> — History row count (each call row after forward-fill)</li>
+            <li><strong>Avg Calls per Day</strong> — Total Calls ÷ inclusive calendar days between min and max History Lead Update Date</li>
+            <li><strong>Draft Leads</strong> — Master leads with Status = Draft</li>
+            <li><strong>Not Follow-up Leads</strong> — Master leads not present in History, Status ≠ Draft</li>
             <li><strong>Site Visited (STE)</strong> — any History Status = Sent/Send to Enquiry (once per Mobile+TeleCaller+Project)</li>
             <li><strong>Site Visit Scheduled (SVS)</strong> — latest History Status = Site Visit Scheduled (once per Mobile+TeleCaller+Project)</li>
             <li><strong>Site Visit Pending (SVP)</strong> — any Telecalling Status = Site Visit Pending</li>

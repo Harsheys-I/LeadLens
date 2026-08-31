@@ -53,6 +53,9 @@ function ll_perf_empty_summary(): array
   return [
     'totalLeads' => 0,
     'activeLeads' => 0,
+    'totalCalls' => 0,
+    'notFollowupLeads' => 0,
+    'draftLeads' => 0,
     'siteVisited' => 0,
     'siteVisitScheduled' => 0,
     'siteVisitPending' => 0,
@@ -109,6 +112,10 @@ function ll_perf_merge_dimension_buckets(array $existing, array $incoming): arra
   foreach (ll_perf_empty_pie() as $key => $_) {
     $merged['pie'][$key] = (int) ($existingPie[$key] ?? 0) + (int) ($incomingPie[$key] ?? 0);
   }
+  $additive = ['totalCalls', 'notFollowupLeads', 'draftLeads', 'siteVisited', 'siteVisitScheduled', 'siteVisitPending', 'siteVisitCancelled', 'notInterested', 'overdue'];
+  foreach ($additive as $key) {
+    $merged[$key] = (int) ($existing[$key] ?? 0) + (int) ($incoming[$key] ?? 0);
+  }
   return $merged;
 }
 
@@ -161,6 +168,7 @@ function ll_route_perf_dashboards(string $action, ?int $id): void
       $pie = is_array($item['pie'] ?? null) ? $item['pie'] : [];
       $dateMin = $item['date_min'] ?? $item['dateMin'] ?? null;
       $dateMax = $item['date_max'] ?? $item['dateMax'] ?? null;
+      $reportDays = (int) ($item['report_days'] ?? $item['reportDays'] ?? 0);
 
       $payload = json_encode([
         'summary' => array_merge(ll_perf_empty_summary(), array_intersect_key($summary, ll_perf_empty_summary())),
@@ -170,6 +178,7 @@ function ll_route_perf_dashboards(string $action, ?int $id): void
         'pie' => array_merge(ll_perf_empty_pie(), array_intersect_key($pie, ll_perf_empty_pie())),
         'date_min' => $dateMin,
         'date_max' => $dateMax,
+        'report_days' => $reportDays,
         'telecaller_name' => $telecaller,
       ], JSON_UNESCAPED_UNICODE);
       if ($payload === false) {
@@ -314,6 +323,7 @@ function ll_route_perf_dashboards(string $action, ?int $id): void
           'pie' => ll_perf_empty_pie(),
           'date_min' => null,
           'date_max' => null,
+          'report_days' => 0,
           'dashboards' => [],
           'title' => 'Performance Dashboard',
           'updated_at' => null,
@@ -339,6 +349,7 @@ function ll_route_perf_dashboards(string $action, ?int $id): void
     $pie = ll_perf_empty_pie();
     $dateMin = null;
     $dateMax = null;
+    $reportDays = 0;
     $latestUpdated = null;
 
     foreach ($rows as $row) {
@@ -402,6 +413,10 @@ function ll_route_perf_dashboards(string $action, ?int $id): void
       if ($dMax && ($dateMax === null || strcmp((string) $dMax, (string) $dateMax) > 0)) {
         $dateMax = $dMax;
       }
+      $rowReportDays = (int) ($payload['report_days'] ?? 0);
+      if ($rowReportDays > $reportDays) {
+        $reportDays = $rowReportDays;
+      }
 
       $byName[$key] = [
         'id' => (int) $row['id'],
@@ -435,6 +450,7 @@ function ll_route_perf_dashboards(string $action, ?int $id): void
       'pie' => $pie,
       'date_min' => $dateMin,
       'date_max' => $dateMax,
+      'report_days' => $reportDays,
       'dashboards' => array_values($byName),
       'title' => $title,
       'updated_at' => $latestUpdated,
