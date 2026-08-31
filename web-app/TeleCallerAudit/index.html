@@ -7,12 +7,12 @@
   <meta name="description" content="LeadLens TeleCaller">
   <title>LeadLens · TeleCaller</title>
   <link rel="manifest" href="../manifest.webmanifest">
-  <link rel="stylesheet" href="../styles.css?v=5.2.5">
+  <link rel="stylesheet" href="../styles.css?v=5.2.6">
   <script defer src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js"></script>
-  <script type="module" src="../app.js?v=5.2.5"></script>
+  <script type="module" src="../app.js?v=5.2.6"></script>
 </head>
 <body>
   <div id="update-banner" class="update-banner hidden" role="status">
@@ -280,21 +280,21 @@
           <h3>Scorecard columns</h3>
           <ul class="perf-help-list">
             <li><strong>Total Leads</strong> — unique leads (Mobile + TeleCaller) in Master ∪ History</li>
-            <li><strong>History rows</strong> — Mobile/Project/Telecaller are forward-filled on continuation rows; SVS/SVP/SVC/NI use the latest row per Mobile+TeleCaller; STE uses any History row with Send/Sent to Enquiry</li>
+            <li><strong>History rows</strong> — Mobile/Project/Telecaller are forward-filled on continuation rows; STE/SVS/SVP/SVC use any History row (once per Mobile+TeleCaller+Project); NI uses the latest row per Mobile+TeleCaller</li>
             <li><strong>Active Leads</strong> — unique Master leads (Mobile + TeleCaller)</li>
             <li><strong>Site Visited (STE)</strong> — any History Status = Sent/Send to Enquiry (once per Mobile+TeleCaller+Project; credited to telecaller on max-LUD STE row)</li>
-            <li><strong>Site Visit Scheduled (SVS)</strong> — latest History Telecalling Status (Status fallback)</li>
-            <li><strong>Site Visit Pending (SVP)</strong> — latest History Telecalling Status (Status fallback)</li>
+            <li><strong>Site Visit Scheduled (SVS)</strong> — any History row where Telecalling Status or Status = Site Visit Scheduled</li>
+            <li><strong>Site Visit Pending (SVP)</strong> — any History row where Telecalling Status or Status = Site Visit Pending</li>
             <li><strong>Total Leads vs Site Visited (%)</strong> — Site Visited ÷ Total Leads</li>
             <li><strong>Site Visit Scheduled vs Site Visited (%)</strong> — Site Visited ÷ Site Visit Scheduled</li>
-            <li><strong>Site Visit Cancelled (SVC)</strong> — latest History Telecalling Status (Status fallback)</li>
+            <li><strong>Site Visit Cancelled (SVC)</strong> — any History row where Telecalling Status or Status = Site Visit Cancelled</li>
             <li><strong>Not Interested (NI)</strong> — latest History Status</li>
             <li><strong>Overdue Leads</strong> — Master Next Followup Date before today (once per lead)</li>
           </ul>
           <h3>Status matching (case-insensitive)</h3>
           <ul class="perf-help-list">
             <li><strong>Not Interested</strong> — History Status on latest row</li>
-            <li><strong>Site Visit Scheduled / Pending / Cancelled</strong> — History Telecalling Status on latest row (Status used if Telecalling Status is blank)</li>
+            <li><strong>Site Visit Scheduled / Pending / Cancelled</strong> — any History row where Telecalling Status or Status matches (once per Mobile+TeleCaller+Project)</li>
             <li><strong>Sent to Enquiry / Site Visited</strong> — any History Status (<code>sent to enquiry</code> or <code>send to enquiry</code>), once per Mobile+TeleCaller+Project</li>
           </ul>
           <p class="muted">Pie slices are independent tallies (a lead may appear in STE and a latest-status bucket). Overdue counts Master rows where Next Followup Date is before today (calendar day). No History filter is applied to overdue.</p>

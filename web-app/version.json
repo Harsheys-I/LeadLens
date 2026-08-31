@@ -1,5 +1,5 @@
 {
-  "version": "5.2.5",
+  "version": "5.2.6",
   "name": "LeadLens",
-  "notes": "v5.2.5: Perf report fixes — Telecalling Status for SVS/SVP/SVC, telecaller forward-fill, STE per Mobile+TeleCaller+Project, scoped publish payloads."
+  "notes": "v5.2.6: SVS/SVP/SVC count any History row when Telecalling Status or Status matches (once per Mobile+TeleCaller+Project)."
 }
