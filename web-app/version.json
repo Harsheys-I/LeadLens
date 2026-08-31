@@ -1,5 +1,5 @@
 {
-  "version": "5.2.43",
+  "version": "5.2.44",
   "name": "LeadLens",
-  "notes": "v5.2.43: Fix perf metrics (Telecalling Status for SVS/SVP/SVC, telecaller forward-fill, case-normalized buckets), cache-bust, remove audit debug logs."
+  "notes": "v5.2.44: STE dedupes by Mobile+TeleCaller+Project so multi-project enquiries count separately (76 not 72)."
 }

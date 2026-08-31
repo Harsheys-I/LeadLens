@@ -1,7 +1,7 @@
 /**
  * TeleCalling Performance Report — Excel parse, metrics engine, published dashboard UI.
  */
-import {PerfDashboardApi} from "./api-client.js?v=5.2.43";
+import {PerfDashboardApi} from "./api-client.js?v=5.2.44";
 
 const MASTER_FIELDS = [
   {id: "mobile", label: "Mobile", aliases: "mobile, mobile number, phone"},
@@ -387,6 +387,15 @@ function leadIdentityKey(row) {
   return `${mobile}|${tc}`;
 }
 
+/** STE identity: Mobile + TeleCaller + Project (one enquiry per project). */
+function steIdentityKey(row) {
+  const mobile = leadMobile(row);
+  if (!mobile) return "";
+  const tc = norm(row.telecaller) || "unknown";
+  const project = norm(row.project) || "";
+  return `${mobile}|${tc}|${project}`;
+}
+
 /**
  * CRM History exports often leave Mobile/Project blank on continuation rows
  * for the same lead. Carry forward the last non-empty values.
@@ -461,7 +470,7 @@ function visitStatusField(row) {
 /**
  * Build performance metrics from parsed Master + History rows.
  * Lead = Mobile + TeleCaller.
- * STE = any History Status Send/Sent to Enquiry, once per lead.
+ * STE = any History Status Send/Sent to Enquiry, once per Mobile+TeleCaller+Project.
  * SVS/SVP/SVC/NI = latest History Status (max LUD), once per lead.
  * @param {object[]} masterRows
  * @param {object[]} historyRows
@@ -514,12 +523,12 @@ export function reconcilePerf(masterRows, historyRows) {
     bucket.siteVisited = 0;
   }
 
-  // STE: count a lead if ANY History call has Status = Send/Sent to Enquiry (once per Mobile+TC).
-  // Attribute to the telecaller on the STE row with max Lead Update Date.
+  // STE: count a lead if ANY History call has Status = Send/Sent to Enquiry
+  // (once per Mobile+TeleCaller+Project). Attribute to max-LUD STE row per key.
   const steBest = new Map();
   for (const row of historyFilled) {
     if (!matchesSentToEnquiry(row.status)) continue;
-    const key = leadIdentityKey(row);
+    const key = steIdentityKey(row);
     if (!key) continue;
     const lud = ludMs(row);
     const prev = steBest.get(key);
