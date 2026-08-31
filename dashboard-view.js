@@ -41,15 +41,31 @@ function writeFiltersCollapsedPref(collapsed){
 /** @type {null|{results: object[], baseFilters: object, segmentFilters: object, subtitle: string, highSeverityErrors?: Set|string[], search: string}} */
 let chartReportState = null;
 
-const CHART_COLORS = {
-  green2: "#1f5d45",
-  amber: "#c57924",
-  red: "#a33a32",
-  line: "#dfe5e1",
-  ink: "#17211d",
-  muted: "#6c7771",
-  palette: ["#12372a", "#1f5d45", "#3f8c68", "#c57924", "#a33a32", "#2a5f9e", "#6c7771", "#9bb7a8"]
-};
+function cssVar(name, fallback){
+  const value = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+  return value || fallback;
+}
+
+function chartColors(){
+  return {
+    green2: cssVar("--chart-bar", "#1f5d45"),
+    amber: cssVar("--amber", "#c57924"),
+    red: cssVar("--red", "#a33a32"),
+    line: cssVar("--line", "#dfe5e1"),
+    ink: cssVar("--ink", "#17211d"),
+    muted: cssVar("--muted", "#6c7771"),
+    palette: [
+      cssVar("--chart-1", "#12372a"),
+      cssVar("--chart-2", "#1f5d45"),
+      cssVar("--chart-3", "#3f8c68"),
+      cssVar("--chart-4", "#c57924"),
+      cssVar("--chart-5", "#a33a32"),
+      cssVar("--chart-6", "#2a5f9e"),
+      cssVar("--chart-7", "#6c7771"),
+      cssVar("--chart-8", "#9bb7a8")
+    ]
+  };
+}
 
 const EYE_SVG = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
   <path d="M2.5 12s3.6-7 9.5-7 9.5 7 9.5 7-3.6 7-9.5 7-9.5-7-9.5-7z"/>
@@ -335,6 +351,7 @@ function renderScorecard(scorecard){
 }
 
 function baseChartOptions(extra = {}){
+  const CHART_COLORS = chartColors();
   return {
     responsive: true,
     maintainAspectRatio: false,
@@ -350,6 +367,7 @@ function baseChartOptions(extra = {}){
 }
 
 function barScaleOptions(){
+  const CHART_COLORS = chartColors();
   return {
     x: {
       ticks: {
@@ -417,6 +435,7 @@ function renderCharts(charts, {onSegmentClick} = {}){
   destroyCharts();
   const mount = el("div", "dashboard-charts");
   const Chart = requireChart();
+  const CHART_COLORS = chartColors();
 
   const specs = [
     ["accuracy", "TeleCaller Accuracy %", "bar", charts.telecallerAccuracy, {

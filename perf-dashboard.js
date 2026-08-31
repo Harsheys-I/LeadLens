@@ -94,10 +94,26 @@ const PIE_LABELS = {
   overdue: "Overdue",
 };
 
-const CHART_COLORS = {
-  bar: "#1f5d45",
-  palette: ["#12372a", "#1f5d45", "#3f8c68", "#c57924", "#a33a32", "#2a5f9e", "#6c7771", "#9bb7a8"],
-};
+function cssVar(name, fallback) {
+  const value = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+  return value || fallback;
+}
+
+function chartColors() {
+  return {
+    bar: cssVar("--chart-bar", "#1f5d45"),
+    palette: [
+      cssVar("--chart-1", "#12372a"),
+      cssVar("--chart-2", "#1f5d45"),
+      cssVar("--chart-3", "#3f8c68"),
+      cssVar("--chart-4", "#c57924"),
+      cssVar("--chart-5", "#a33a32"),
+      cssVar("--chart-6", "#2a5f9e"),
+      cssVar("--chart-7", "#6c7771"),
+      cssVar("--chart-8", "#9bb7a8"),
+    ],
+  };
+}
 
 const PERF_DIMENSIONS = {
   telecaller: {bucketKey: "byTelecaller", label: "Telecaller Name", tableTitle: "Telecaller breakdown", totalsLabel: "TeleCallers"},
@@ -814,19 +830,27 @@ function requireChart() {
 }
 
 function baseBarOptions() {
+  const colors = chartColors();
+  const tick = {color: cssVar("--muted", "#6c7771"), font: {size: 11}};
   return {
     responsive: true,
     maintainAspectRatio: false,
     plugins: {legend: {display: false}},
     scales: {
-      x: {grid: {display: false}, ticks: {maxRotation: 45, minRotation: 0, font: {size: 11}}},
-      y: {beginAtZero: true, ticks: {precision: 0}},
+      x: {grid: {display: false}, ticks: {...tick, maxRotation: 45, minRotation: 0}},
+      y: {
+        beginAtZero: true,
+        ticks: {...tick, precision: 0},
+        grid: {color: cssVar("--line", "#dfe5e1"), drawBorder: false},
+      },
     },
   };
 }
 
-function renderBarChart(canvas, labels, values, color = CHART_COLORS.bar, formatYAsAvg = false) {
+function renderBarChart(canvas, labels, values, color, formatYAsAvg = false) {
   const Chart = requireChart();
+  const colors = chartColors();
+  if (color == null) color = colors.bar;
   const id = canvas.id || `perf-bar-${Math.random().toString(36).slice(2)}`;
   canvas.id = id;
   if (perfChartRegistry.has(id)) {
@@ -861,6 +885,7 @@ function renderBarChart(canvas, labels, values, color = CHART_COLORS.bar, format
 
 function renderStackedStatusChart(canvas, names, buckets, chartId) {
   const Chart = requireChart();
+  const colors = chartColors();
   const id = chartId || canvas.id || "perf-stacked-status";
   canvas.id = id;
   if (perfChartRegistry.has(id)) {
@@ -870,7 +895,7 @@ function renderStackedStatusChart(canvas, names, buckets, chartId) {
   const datasets = PIE_KEYS.map((key, i) => ({
     label: PIE_LABELS[key],
     data: names.map(name => Number(pieFromBucket(buckets[name])?.[key] || 0)),
-    backgroundColor: CHART_COLORS.palette[i % CHART_COLORS.palette.length],
+    backgroundColor: colors.palette[i % colors.palette.length],
     borderWidth: 0,
     borderRadius: 2,
     maxBarThickness: 48,
@@ -882,11 +907,23 @@ function renderStackedStatusChart(canvas, names, buckets, chartId) {
       responsive: true,
       maintainAspectRatio: false,
       plugins: {
-        legend: {position: "bottom", labels: {boxWidth: 12, font: {size: 11}}},
+        legend: {
+          position: "bottom",
+          labels: {boxWidth: 12, font: {size: 11}, color: cssVar("--ink", "#17211d")},
+        },
       },
       scales: {
-        x: {stacked: true, grid: {display: false}, ticks: {maxRotation: 45, minRotation: 0, font: {size: 11}}},
-        y: {stacked: true, beginAtZero: true, ticks: {precision: 0}},
+        x: {
+          stacked: true,
+          grid: {display: false},
+          ticks: {maxRotation: 45, minRotation: 0, font: {size: 11}, color: cssVar("--muted", "#6c7771")},
+        },
+        y: {
+          stacked: true,
+          beginAtZero: true,
+          ticks: {precision: 0, color: cssVar("--muted", "#6c7771")},
+          grid: {color: cssVar("--line", "#dfe5e1"), drawBorder: false},
+        },
       },
     },
   });
