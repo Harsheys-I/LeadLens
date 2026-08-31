@@ -478,10 +478,12 @@ body .perf-summary-row dt{margin:0;font-size:14px;font-weight:600;color:var(--in
 body .perf-summary-row dd{margin:0;font-size:20px;font-weight:800;color:var(--green-2);font-variant-numeric:tabular-nums}
 body .perf-date-range{margin:0 0 8px;color:var(--muted);font-size:13px}
 body .perf-view-tabs{display:flex;gap:8px;margin:8px 0 18px;border-bottom:1px solid var(--line);padding-bottom:10px}
-body .perf-dimension-tabs{display:flex;gap:8px;margin:0 0 12px;border-bottom:1px solid var(--line);padding-bottom:10px}
-body .perf-dimension-tab{border:0;background:transparent;color:var(--muted);padding:8px 14px;border-radius:8px;font-weight:650;cursor:pointer}
-body .perf-dimension-tab:hover{background:#eef3ef;color:var(--green-2)}
-body .perf-dimension-tab.active{background:var(--mint);color:var(--green-2)}
+body .perf-main-tabs{display:flex;flex-wrap:wrap;gap:8px;margin:0 0 12px;border-bottom:1px solid var(--line);padding-bottom:10px}
+body .perf-main-tab{border:0;background:transparent;color:var(--muted);padding:8px 14px;border-radius:8px;font-weight:650;cursor:pointer}
+body .perf-main-tab:hover{background:#eef3ef;color:var(--green-2)}
+body .perf-main-tab.active{background:var(--mint);color:var(--green-2)}
+body .perf-main-tab.hidden{display:none}
+body .perf-view-tabs{margin-top:0}
 body .perf-view-tab{border:0;background:transparent;color:var(--muted);padding:8px 14px;border-radius:8px;font-weight:650;cursor:pointer}
 body .perf-view-tab:hover{background:#eef3ef;color:var(--green-2)}
 body .perf-view-tab.active{background:var(--mint);color:var(--green-2)}
@@ -489,6 +491,7 @@ body .perf-tab-panel{display:grid;gap:18px}
 body .perf-scorecard tbody tr.perf-total-row th,
 body .perf-scorecard tbody tr.perf-total-row td{font-weight:750;background:#eef5f0;border-top:2px solid #c5d3cb}
 body .dashboard-filters-rail.hidden{display:none!important}
+body .dashboard-filter.hidden{display:none!important}
 body .perf-chart-block{display:grid;gap:10px}
 body .perf-chart-block h3{margin:0;font-size:15px;color:var(--green-2)}
 body .perf-chart-wrap{position:relative;height:220px;background:#fbfcfb;border:1px solid var(--line);border-radius:12px;padding:12px}
