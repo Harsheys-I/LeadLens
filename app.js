@@ -153,6 +153,20 @@ function clearInMemoryJobs(){
   reviewParsedFiles=[];
 }
 
+function setNavItemText(btn,text){
+  const icon=btn.querySelector(":scope > span");
+  btn.replaceChildren();
+  if(icon)btn.append(icon);
+  btn.append(document.createTextNode(text));
+}
+
+function applyFlatNavLabels(group){
+  if(!group?.classList.contains("is-flat"))return;
+  group.querySelectorAll(".nav-item[data-label-flat]").forEach(btn=>{
+    setNavItemText(btn,btn.dataset.labelFlat);
+  });
+}
+
 function setNavGroupExpanded(group,expanded){
   if(!group||group.classList.contains("is-flat"))return;
   group.classList.toggle("is-collapsed",!expanded);
@@ -2126,6 +2140,7 @@ async function bootTeleCallerAudit(){
       group.classList.add("is-flat");
       group.classList.remove("is-collapsed");
       group.querySelector(".nav-parent-row")?.classList.add("hidden");
+      applyFlatNavLabels(group);
     }
   });
   if(els["review-open-console"]&&!hasPermission("telecaller.run_console")){
