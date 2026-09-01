@@ -1,6 +1,7 @@
 import {login, logout, loadSession, changePassword, updateProfile, moduleTilesForUser, hasSessionHint, getUser} from './auth.js?v=5.2.1';
 import {AuthApi} from './api-client.js?v=5.2.1';
 import {mountNotifications} from './notifications-ui.js?v=5.2.1';
+import {initTheme} from './theme.js?v=5.6';
 
 const $ = id => document.getElementById(id);
 let notifCtl = null;
@@ -211,6 +212,7 @@ $('pw-save').onclick = async () => {
 };
 
 (async function boot(){
+  initTheme();
   // Avoid login flash when a session cookie likely exists (Admin → Home).
   showPanel(hasSessionHint() ? 'loading' : 'loading');
   if ('serviceWorker' in navigator) {
