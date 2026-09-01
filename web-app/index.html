@@ -7,8 +7,9 @@
   <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#0f2d22">
   <meta name="description" content="GPP AI — AI telecalling audit platform">
   <title>GPP AI</title>
+  <script src="theme-boot.js"></script>
   <link rel="manifest" href="manifest.webmanifest">
-  <link rel="stylesheet" href="styles.css?v=5.5">
+  <link rel="stylesheet" href="styles.css?v=5.6">
   <script type="module" src="home.js?v=5.2.1"></script>
 </head>
 <body class="auth-body auth-loading">
@@ -116,6 +117,13 @@
       <label>Username<input id="account-username" type="text" autocomplete="username"></label>
       <label>Display name<input id="account-display" type="text" autocomplete="nickname"></label>
       <label>Linked TeleCaller<input id="account-telecaller" type="text" disabled></label>
+      <label>Appearance
+        <select data-theme-select aria-label="Theme">
+          <option value="system">System</option>
+          <option value="light">Light</option>
+          <option value="dark">Dark</option>
+        </select>
+      </label>
       <hr class="account-divider">
       <p class="muted">Change password (optional)</p>
       <label>Current password<input id="account-pw-current" type="password" autocomplete="current-password"></label>
@@ -149,6 +157,16 @@
       </div>
     </div>
     <div id="notif-list" class="notif-list"></div>
+  </div>
+
+  <div id="auth-theme-bar" class="auth-theme-bar">
+    <label>Appearance
+      <select data-theme-select aria-label="Theme">
+        <option value="system">System</option>
+        <option value="light">Light</option>
+        <option value="dark">Dark</option>
+      </select>
+    </label>
   </div>
 </body>
 </html>

@@ -1,6 +1,7 @@
 import {requireAuth, logout, getUser, hasPermission, requirePermission, changePassword, updateProfile} from '../auth.js?v=5.2.1';
 import {AdminApi, DashboardApi} from '../api-client.js?v=5.2.1';
 import {mountNotifications} from '../notifications-ui.js?v=5.2.1';
+import {initTheme} from '../theme.js?v=5.6';
 
 const $ = id => document.getElementById(id);
 const titles = {users: 'User creation', roles: 'Roles'};
@@ -602,6 +603,7 @@ $('account-save')?.addEventListener('click', async () => {
 });
 
 (async function boot(){
+  initTheme();
   const user = await requireAuth({loginPath: '/'});
   if (!user) return;
   if (!requirePermission('module.admin', {fallback: '/'})) return;

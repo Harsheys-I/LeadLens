@@ -21,6 +21,7 @@ import {getApiKey,apiKeyIsRemembered,saveApiKey,forgetApiKey,setStorageUserId,st
 import {requireAuth,logout,getUser,changePassword,updateProfile} from "./auth.js?v=5.2.19";
 import {SettingsApi} from "./api-client.js?v=5.2.19";
 import {mountNotifications} from "./notifications-ui.js?v=5.2.19";
+import {initTheme} from "./theme.js?v=5.6";
 import {
   debugAuditBatch,
   telecallerAuditBatch,
@@ -2161,6 +2162,7 @@ els["import-settings-file"]?.addEventListener("change",event=>importSettingsFile
 els["reload-app"]?.addEventListener("click",()=>location.reload());
 
 async function bootDeBugMode(){
+  initTheme();
   const user=await requireAuth({loginPath:"/"});
   if(!user?.is_super){
     location.href="/";

@@ -7,8 +7,9 @@
   <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#0f2d22">
   <meta name="description" content="GPP AI · LeadLens">
   <title>GPP AI · LeadLens</title>
+  <script src="../theme-boot.js"></script>
   <link rel="manifest" href="../manifest.webmanifest">
-  <link rel="stylesheet" href="../styles.css?v=5.5">
+  <link rel="stylesheet" href="../styles.css?v=5.6">
   <script defer src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
@@ -379,6 +380,13 @@
       <label>Username<input id="account-username" type="text"></label>
       <label>Display name<input id="account-display" type="text"></label>
       <label>Linked TeleCaller<input id="account-telecaller" type="text" disabled></label>
+      <label>Appearance
+        <select data-theme-select aria-label="Theme">
+          <option value="system">System</option>
+          <option value="light">Light</option>
+          <option value="dark">Dark</option>
+        </select>
+      </label>
       <hr class="account-divider">
       <p class="muted">Change password (optional)</p>
       <label>Current password<input id="account-pw-current" type="password"></label>

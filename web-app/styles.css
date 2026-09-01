@@ -413,6 +413,7 @@ body .dashboard-filter-reset{width:100%;justify-self:stretch;margin-top:4px}
 #perf-filters-rail .dashboard-filters-panel{
   display:flex;flex-direction:column;overflow:hidden
 }
+#perf-filters-rail.is-collapsed .dashboard-filters-panel{display:none}
 #perf-filters-rail .dashboard-filters{
   display:flex;flex-direction:column;flex:1;min-height:0;height:100%;gap:14px
 }
@@ -621,9 +622,12 @@ body .perf-chart-block h4{margin:0;font-size:14px;color:var(--ink)}
   body .perf-upload-grid{grid-template-columns:1fr}
   body .perf-chart-wrap{height:200px}
 }
-/* —— System dark theme —— */
-@media (prefers-color-scheme: dark) {
-  :root{
+.auth-theme-bar{position:fixed;bottom:16px;right:16px;z-index:5;font-size:13px;color:var(--muted)}
+.auth-theme-bar label{display:inline-flex;align-items:center;gap:8px}
+.auth-theme-bar select{min-width:7.5rem}
+body.home-mode .auth-theme-bar{display:none}
+/* —— Dark theme —— */
+:root[data-theme="dark"]{
     color-scheme:dark;
     --ink:#e6efe9;
     --muted:#9aaba2;
@@ -700,14 +704,13 @@ body .perf-chart-block h4{margin:0;font-size:14px;color:var(--ink)}
     --chart-6:#8bb4e0;
     --chart-7:#9aaba2;
     --chart-8:#4a7a62;
-  }
-  .sidebar,.home-topbar{background:#0f2d22}
-  .brand-mark{background:transparent}
-  .primary-button:hover{background:#3f8c68}
-  body .update-banner{background:#1a4a38}
-  body .update-banner .primary-button{background:#e6efe9;color:#0f2d22}
-  .log-list{background:#0a100d;color:#d8e5de}
-  .dashboard-lead-modal-head,.notif-drawer-head{background:linear-gradient(180deg,#0f2d22 0%,#16382b 100%)}
-  body .perf-scorecard tbody th{background:var(--panel)}
-  .notif-count{border-color:#0f2d22}
 }
+:root[data-theme="dark"] .sidebar,:root[data-theme="dark"] .home-topbar{background:#0f2d22}
+:root[data-theme="dark"] .brand-mark{background:transparent}
+:root[data-theme="dark"] .primary-button:hover{background:#3f8c68}
+:root[data-theme="dark"] body .update-banner{background:#1a4a38}
+:root[data-theme="dark"] body .update-banner .primary-button{background:#e6efe9;color:#0f2d22}
+:root[data-theme="dark"] .log-list{background:#0a100d;color:#d8e5de}
+:root[data-theme="dark"] .dashboard-lead-modal-head,:root[data-theme="dark"] .notif-drawer-head{background:linear-gradient(180deg,#0f2d22 0%,#16382b 100%)}
+:root[data-theme="dark"] body .perf-scorecard tbody th{background:var(--panel)}
+:root[data-theme="dark"] .notif-count{border-color:#0f2d22}
