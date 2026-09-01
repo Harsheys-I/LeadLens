@@ -153,6 +153,34 @@ function clearInMemoryJobs(){
   reviewParsedFiles=[];
 }
 
+function isTelecallerDashboardsOnlyUser(){
+  if(!hasPermission("telecaller.dashboard")&&!hasPermission("telecaller.perf_dashboard"))return false;
+  return !hasPermission("telecaller.bucket1")&&!hasPermission("telecaller.perf_report");
+}
+
+function titleForView(name){
+  if(isTelecallerDashboardsOnlyUser()){
+    if(name==="published")return "B1 Leads Audit";
+    if(name==="perf-dashboard")return "Telecalling Performance";
+  }
+  return titles[name]||titles.review;
+}
+
+function setupTelecallerDashboardsNav(){
+  if(!isTelecallerDashboardsOnlyUser())return;
+  const hub=document.getElementById("nav-telecaller-dashboards");
+  if(!hub)return;
+  document.querySelectorAll('[data-nav-group="bucket1"], [data-nav-group="perf"]').forEach(group=>{
+    group.classList.add("hidden");
+  });
+  hub.classList.remove("hidden","is-collapsed");
+  hub.querySelectorAll(".nav-item[data-perm]").forEach(btn=>{
+    if(btn.dataset.perm&&!hasPermission(btn.dataset.perm))btn.classList.add("hidden");
+  });
+  const childItems=[...hub.querySelectorAll(".nav-item-child")].filter(btn=>!btn.classList.contains("hidden"));
+  hub.classList.toggle("hidden",!childItems.length);
+}
+
 function setNavItemText(btn,text){
   const icon=btn.querySelector(":scope > span");
   btn.replaceChildren();
@@ -180,21 +208,27 @@ function setNavGroupExpanded(group,expanded){
 }
 
 function expandNavGroupForView(name){
-  const btn=document.querySelector(`.nav-item[data-view="${name}"]`);
+  const btn=document.querySelector(`.nav-item[data-view="${name}"]:not(.hidden)`)
+    ||document.querySelector(`.nav-item[data-view="${name}"]`);
   if(!btn?.classList.contains("nav-item-child"))return;
   const group=btn?.closest(".nav-group");
   if(group)setNavGroupExpanded(group,true);
 }
 
 function showView(name){
-  const btn=document.querySelector(`.nav-item[data-view="${name}"]`);
+  const btn=document.querySelector(`.nav-item[data-view="${name}"]:not(.hidden)`)
+    ||document.querySelector(`.nav-item[data-view="${name}"]`);
   if(btn?.dataset.perm&&!hasPermission(btn.dataset.perm)){
     toast("You do not have permission for this screen.");
     return;
   }
   document.querySelectorAll(".view").forEach(view=>view.classList.toggle("active",view.id===`view-${name}`));
-  document.querySelectorAll(".nav-item").forEach(button=>button.classList.toggle("active",button.dataset.view===name));
-  if(els["page-title"])els["page-title"].textContent=titles[name]||titles.review;
+  document.querySelectorAll(".nav-item").forEach(button=>{
+    const match=button.dataset.view===name;
+    const visible=!button.classList.contains("hidden")&&!button.closest(".hidden");
+    button.classList.toggle("active",match&&visible);
+  });
+  if(els["page-title"])els["page-title"].textContent=titleForView(name);
   expandNavGroupForView(name);
   document.querySelector(".shell")?.classList.remove("menu-open");
   const activeRail=document.querySelector(".view.active .dashboard-filters-rail:not(.is-collapsed)");
@@ -2128,7 +2162,10 @@ async function bootTeleCallerAudit(){
     const perm=btn.dataset.perm;
     if(perm&&!hasPermission(perm))btn.classList.add("hidden");
   });
+  setupTelecallerDashboardsNav();
   document.querySelectorAll(".nav-group").forEach(group=>{
+    if(group.classList.contains("hidden"))return;
+    if(isTelecallerDashboardsOnlyUser()&&(group.dataset.navGroup==="bucket1"||group.dataset.navGroup==="perf"))return;
     const items=[...group.querySelectorAll(".nav-item")];
     const visible=items.filter(btn=>!btn.classList.contains("hidden"));
     group.classList.toggle("hidden",!visible.length);
