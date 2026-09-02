@@ -1,6 +1,25 @@
 # Hostinger setup (LeadLens multi-page auth)
 
-The `hostinger` Git branch is a flat copy of `web-app/` (including `api/`). Deploy that branch to the site document root for https://ai.gurupunvaanii.com/.
+The `hostinger` Git branch is what Hostinger serves at https://ai.gurupunvaanii.com/.
+
+- **Site root `/`** = production (frozen until you promote)
+- **`/dev/`** = full copy of `web-app/` from the latest `main` push (HTML, JS, CSS, PHP API)
+
+`/dev` is not linked from live home tiles. Open it by URL. A **Preview** banner and `robots.txt` `Disallow: /dev` keep it unlisted, not secret.
+
+## Deploy flow
+
+1. **Push to `main`** (or run this workflow without Promote). The **Sync hostinger deploy branch** GitHub Action rsyncs `web-app/` → `hostinger` branch `dev/` only. Production `/` is left unchanged.
+2. Try the new UI at **https://ai.gurupunvaanii.com/dev** (sign in with a real account).
+3. When ready, run the same GitHub Action with **Promote /dev to live** checked (`workflow_dispatch`). That copies `dev/` over the site root, **keeps** the `dev/` folder, and pushes `hostinger`. Production `/` updates; `/dev` stays as the next preview.
+
+Do not replace the entire `hostinger` tree on a normal push.
+
+## Staging notes (`/dev`)
+
+- **Same MySQL as production.** UI/CSS previews are safe. Creating users, changing passwords, publishing dashboards, or running audits on `/dev` writes live data. Treat it as a UI preview against real accounts, not a disposable sandbox.
+- **Config:** `api/config.local.php` is gitignored and lives on the server at production `api/config.local.php`. Staging PHP falls back to that file (`/dev/api/lib` → `../../../api/config.local.php`) so you do not need a second FTP upload.
+- **Sessions:** `/dev` uses cookie `leadlens_session_dev` with path `/dev/`. Logging into preview does not log you into (or out of) production.
 
 ## One-time MySQL + install
 
@@ -27,9 +46,10 @@ The API fell back to `config.example.php` because live `config.local.php` is mis
 
 ## Verify after sync
 
-- `/api/` is present on the live tree (comes from `web-app/api/` via the hostinger sync workflow).
+- After a `main` push: `/dev/` matches latest `web-app/`; live `/` is unchanged.
+- After promote: live `/` matches what you just previewed; `/dev/` is still present.
 - Live `api/config.local.php` exists with real credentials (check File Manager; Git will not create it).
-- `.htaccess` routes `/api/*` to `api/index.php` and blocks direct download of `config.local.php`.
+- `.htaccess` routes `/api/*` to `api/index.php` (and `/dev/api/*` via the copy under `dev/`) and blocks direct download of `config.local.php`.
 - PHP and `mod_rewrite` are enabled (default on Hostinger shared hosting).
 
 ## Roles reminder

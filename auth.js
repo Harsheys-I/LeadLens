@@ -1,7 +1,8 @@
 /**
  * Session helpers + permission checks for LeadLens shells.
  */
-import {AuthApi} from './api-client.js';
+import {AuthApi} from './api-client.js?v=5.7';
+import {appUrl, homePath, isHomePath} from './app-base.js?v=5.7';
 
 let currentUser = null;
 
@@ -73,18 +74,16 @@ export async function updateProfile({username, display_name} = {}){
 }
 
 /** Redirect to login (home) if no session. Returns user or null after redirect. */
-export async function requireAuth({loginPath = '/'} = {}){
+export async function requireAuth({loginPath = homePath()} = {}){
   const user = await loadSession();
   if (user) return user;
-  const path = location.pathname.replace(/\/index\.html$/i, '/');
-  const onLogin = path === '/' || path === '';
-  if (onLogin) return null;
+  if (isHomePath()) return null;
   const next = encodeURIComponent(location.pathname + location.search + location.hash);
   location.href = `${loginPath}?next=${next}`;
   return null;
 }
 
-export function requirePermission(perm, {fallback = '/'} = {}){
+export function requirePermission(perm, {fallback = homePath()} = {}){
   if (!hasPermission(perm)) {
     location.href = fallback;
     return false;
@@ -98,7 +97,7 @@ export function moduleTilesForUser(user = currentUser){
     {
       id: 'telecaller',
       title: 'LeadLens',
-      href: '/TeleCallerAudit/',
+      href: appUrl('/TeleCallerAudit/'),
       perm: 'module.telecaller_audit',
       soon: false,
       desc: 'Bucket 1 Followup Review, Run console, published dashboards',
@@ -113,7 +112,7 @@ export function moduleTilesForUser(user = currentUser){
     {
       id: 'debug',
       title: 'DeBug Mode',
-      href: '/DeBugMode/',
+      href: appUrl('/DeBugMode/'),
       superOnly: true,
       soon: false,
       desc: 'SuperUser CSV prompt auditor — custom prompt + Structured Outputs',
@@ -126,7 +125,7 @@ export function moduleTilesForUser(user = currentUser){
     {
       id: 'admin',
       title: 'Admin',
-      href: '/admin/',
+      href: appUrl('/admin/'),
       perm: 'module.admin',
       soon: false,
       desc: 'Users, roles, access requests',

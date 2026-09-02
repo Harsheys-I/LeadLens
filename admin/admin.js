@@ -1,6 +1,7 @@
-import {requireAuth, logout, getUser, hasPermission, requirePermission, changePassword, updateProfile} from '../auth.js?v=5.2.1';
-import {AdminApi, DashboardApi} from '../api-client.js?v=5.2.1';
-import {mountNotifications} from '../notifications-ui.js?v=5.2.1';
+import {requireAuth, logout, getUser, hasPermission, requirePermission, changePassword, updateProfile} from '../auth.js?v=5.7';
+import {AdminApi, DashboardApi} from '../api-client.js?v=5.7';
+import {mountNotifications} from '../notifications-ui.js?v=5.7';
+import {appUrl, homePath} from '../app-base.js?v=5.7';
 import {initTheme} from '../theme.js?v=5.6';
 
 const $ = id => document.getElementById(id);
@@ -450,7 +451,7 @@ document.querySelectorAll('.nav-item').forEach(btn => {
     showView(btn.dataset.view);
   });
 });
-$('shell-logout').onclick = async () => { await logout(); location.href = '/'; };
+$('shell-logout').onclick = async () => { await logout(); location.href = homePath(); };
 $('btn-new-user').onclick = () => openUserModal(null);
 $('user-cancel').onclick = closeUserModal;
 $('approve-cancel').onclick = () => $('approve-modal').classList.add('hidden');
@@ -604,9 +605,9 @@ $('account-save')?.addEventListener('click', async () => {
 
 (async function boot(){
   initTheme();
-  const user = await requireAuth({loginPath: '/'});
+  const user = await requireAuth({loginPath: homePath()});
   if (!user) return;
-  if (!requirePermission('module.admin', {fallback: '/'})) return;
+  if (!requirePermission('module.admin', {fallback: homePath()})) return;
   $('shell-user-label').textContent = user.display_name || user.username;
 
   document.querySelectorAll('.nav-item[data-perm]').forEach(btn => {
@@ -622,6 +623,7 @@ $('account-save')?.addEventListener('click', async () => {
   showView(first?.dataset.view || 'users');
   notifCtl = mountNotifications({
     onOpenAccessRequests: () => showView('users'),
-    onDashboardUpdate: () => { location.href = '/TeleCallerAudit/#published'; },
+    onDashboardUpdate: () => { location.href = appUrl('/TeleCallerAudit/#published'); },
+    onPerfDashboardUpdate: () => { location.href = appUrl('/TeleCallerAudit/#perf-dashboard'); },
   });
 })();

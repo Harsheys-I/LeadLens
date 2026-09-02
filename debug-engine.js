@@ -13,7 +13,8 @@ import {
   auditBatch,
   resolveAuditResultId,
   promptCacheKey,
-} from "./audit.js?v=5.2.23";
+} from "./audit.js?v=5.7";
+import {apiBase} from "./app-base.js?v=5.7";
 import {
   LAB_ERROR_TYPES,
   SHARED_PREAMBLE,
@@ -145,7 +146,7 @@ async function requestDebugAudit(apiKey,settings,leads,signal,log,onUsage){
     response_format:{type:"json_schema",json_schema:{name:"ll_audit",strict:true,schema}}
   });
   const useProxy=!apiKey||apiKey===SERVER_API_KEY;
-  const response=await fetch(useProxy?"/api/openai/chat/completions":"https://api.openai.com/v1/chat/completions",{
+  const response=await fetch(useProxy?`${apiBase()}openai/chat/completions`:"https://api.openai.com/v1/chat/completions",{
     method:"POST",signal,
     credentials:useProxy?"same-origin":"omit",
     headers:useProxy

@@ -1,11 +1,12 @@
-import {APP_VERSION,DEFAULT_SETTINGS,DEFAULT_OUTPUT_FIELDS,SETTINGS_SEED,MAX_BATCH_SIZE,MAX_CONCURRENCY,normalizeSettings,normalizeInputFields,slugFieldId,parseWorkbook,parseAuditedWorkbook,auditBatch,downloadWorkbook,downloadReviewPack,downloadReviewPdf,splitLeadsByTelecaller,splitResultsByTelecaller,validateApiKey,HIGH_SEVERITY_ERRORS,SERVER_API_KEY} from "./audit.js?v=5.4";
+import {APP_VERSION,DEFAULT_SETTINGS,DEFAULT_OUTPUT_FIELDS,SETTINGS_SEED,MAX_BATCH_SIZE,MAX_CONCURRENCY,normalizeSettings,normalizeInputFields,slugFieldId,parseWorkbook,parseAuditedWorkbook,auditBatch,downloadWorkbook,downloadReviewPack,downloadReviewPdf,splitLeadsByTelecaller,splitResultsByTelecaller,validateApiKey,HIGH_SEVERITY_ERRORS,SERVER_API_KEY} from "./audit.js?v=5.7";
 import {getJob,getJobs,loadSettings,saveSettings,getApiKey,apiKeyIsRemembered,saveApiKey,forgetApiKey,setStorageUserId,storageKey} from "./db.js?v=5.4";
 import {renderReviewDashboard,destroyReviewDashboard} from "./dashboard-view.js?v=5.5";
-import {requireAuth,logout,hasPermission,getUser,changePassword,updateProfile} from "./auth.js?v=5.4";
-import {DashboardApi,SettingsApi} from "./api-client.js?v=5.4";
-import {mountNotifications} from "./notifications-ui.js?v=5.4";
-import {persistJob,removeJobSynced,clearJobsSynced,pullJobsFromServer} from "./jobs-sync.js?v=5.4";
-import {mountPerfReportUpload,mountPerfPublishedDashboard,refreshPerfPublished} from "./perf-dashboard.js?v=5.6";
+import {requireAuth,logout,hasPermission,getUser,changePassword,updateProfile} from "./auth.js?v=5.7";
+import {DashboardApi,SettingsApi} from "./api-client.js?v=5.7";
+import {mountNotifications} from "./notifications-ui.js?v=5.7";
+import {persistJob,removeJobSynced,clearJobsSynced,pullJobsFromServer} from "./jobs-sync.js?v=5.7";
+import {mountPerfReportUpload,mountPerfPublishedDashboard,refreshPerfPublished} from "./perf-dashboard.js?v=5.8";
+import {appUrl, homePath} from "./app-base.js?v=5.7";
 import {initTheme} from "./theme.js?v=5.6";
 
 const $=id=>document.getElementById(id);
@@ -1937,7 +1938,7 @@ document.querySelectorAll(".nav-item").forEach(button=>button.addEventListener("
   if(button.dataset.view)showView(button.dataset.view);
 }));
 document.querySelector(".brand")?.addEventListener("click",event=>{
-  // Brand goes to home hub (href="/"); only prevent default if we want in-module nav
+  // Brand goes to home hub (relative href); only prevent default if we want in-module nav
 });
 document.getElementById("settings-form")?.addEventListener("submit",event=>event.preventDefault());
 els["mobile-menu"]?.addEventListener("click",()=>{
@@ -1954,7 +1955,7 @@ els["shell-logout"]?.addEventListener("click",async()=>{
   await logout();
   clearInMemoryJobs();
   setStorageUserId(null);
-  location.href="/";
+  location.href=homePath();
 });
 els["shell-account"]?.addEventListener("click",()=>{
   const user=getUser();
@@ -2142,10 +2143,10 @@ setReviewFormat("raw");
 
 async function bootTeleCallerAudit(){
   initTheme();
-  const user=await requireAuth({loginPath:"/"});
+  const user=await requireAuth({loginPath:homePath()});
   if(!user)return;
   if(!hasPermission("module.telecaller_audit")&&!user.is_super){
-    location.href="/";
+    location.href=homePath();
     return;
   }
 
@@ -2202,7 +2203,7 @@ async function bootTeleCallerAudit(){
   mountPerfPublishedDashboard({hasPermission,canViewAll:canSeeComparativeKpis});
   mountNotifications({
     variant:"chrome",
-    onOpenAccessRequests:()=>{location.href="/admin/";},
+    onOpenAccessRequests:()=>{location.href=appUrl("/admin/");},
     onDashboardUpdate:()=>{
       if(!hasPermission("telecaller.dashboard"))return;
       location.hash="#published";
