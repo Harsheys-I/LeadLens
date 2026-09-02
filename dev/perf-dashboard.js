@@ -1,8 +1,8 @@
 /**
  * TeleCalling Performance — Excel parse, metrics engine, published dashboard UI.
  */
-import {PerfDashboardApi} from "./api-client.js?v=5.4";
-import {downloadBlobFile} from "./audit.js?v=5.4";
+import {PerfDashboardApi} from "./api-client.js?v=5.7";
+import {downloadBlobFile} from "./audit.js?v=5.7";
 
 const MASTER_FIELDS = [
   {id: "mobile", label: "Mobile", aliases: "mobile, mobile number, phone"},
@@ -17,7 +17,6 @@ const MASTER_FIELDS = [
 const HISTORY_FIELDS = [
   ...MASTER_FIELDS.filter(f => f.id !== "next"),
   {id: "update", label: "Lead Update Date", aliases: "lead update date, call date, update date, lead update"},
-  {id: "telecallingStatus", label: "Telecalling Status", aliases: "telecalling status, tele calling status, telecaller status"},
 ];
 
 /** Count metrics stored per telecaller / summary. */
@@ -238,16 +237,115 @@ function emptyPie() {
   };
 }
 
+const PERF_DETAIL_METRIC_KEYS = [
+  "totalLeads",
+  "activeLeads",
+  "totalCalls",
+  "draftLeads",
+  "notFollowupLeads",
+  "siteVisited",
+  "siteVisitScheduled",
+  "siteVisitPending",
+  "siteVisitCancelled",
+  "notInterested",
+  "overdue",
+];
+
+const PERF_DETAIL_COLUMNS = [
+  ["Mobile", "mobile"],
+  ["Telecaller", "telecaller"],
+  ["Project", "project"],
+  ["Source", "source"],
+  ["Status", "status"],
+  ["Registration", "registration"],
+  ["Next Followup", "nextFollowup"],
+  ["Update Date", "updateDate"],
+];
+
 function emptyTelecallerBucket() {
   return {
     ...emptyMetrics(),
     pie: emptyPie(),
+    details: {},
     _masterKeys: new Set(),
     _historyKeys: new Set(),
     _overdueKeys: new Set(),
     _draftKeys: new Set(),
     _notFollowupKeys: new Set(),
+    _leadMasterRow: {},
+    _leadHistoryRow: {},
+    _details: null,
+    _detailKeys: null,
   };
+}
+
+function serializePerfDetail(row) {
+  return {
+    mobile: clean(row.mobile) || "",
+    telecaller: clean(row.telecaller) || "",
+    project: clean(row.project) || "",
+    source: clean(row.source) || "",
+    status: clean(row.status) || "",
+    registration: formatDisplayDate(dateToIso(row.registrationDate)),
+    nextFollowup: formatDisplayDate(dateToIso(row.nextDate)),
+    updateDate: formatDisplayDate(dateToIso(row.updateDate)),
+  };
+}
+
+function ensureBucketDetails(bucket) {
+  if (!bucket._details) {
+    bucket._details = Object.fromEntries(PERF_DETAIL_METRIC_KEYS.map(k => [k, []]));
+  }
+  return bucket._details;
+}
+
+function pushBucketDetail(bucket, metricKey, row) {
+  if (!bucket || !row || !PERF_DETAIL_METRIC_KEYS.includes(metricKey)) return;
+  ensureBucketDetails(bucket)[metricKey].push(serializePerfDetail(row));
+}
+
+function pushBucketDetailOnce(bucket, metricKey, row, dedupeKey) {
+  if (!dedupeKey) return;
+  if (!bucket._detailKeys) bucket._detailKeys = {};
+  if (!bucket._detailKeys[metricKey]) bucket._detailKeys[metricKey] = new Set();
+  if (bucket._detailKeys[metricKey].has(dedupeKey)) return;
+  bucket._detailKeys[metricKey].add(dedupeKey);
+  pushBucketDetail(bucket, metricKey, row);
+}
+
+function pushBucketDetailToResolvers(resolvers, row, metricKey) {
+  for (const {map, resolve} of resolvers) {
+    pushBucketDetail(map[resolve(row)], metricKey, row);
+  }
+}
+
+function getMetricDetails(bucket, metricKey) {
+  const details = bucket?.details?.[metricKey];
+  return Array.isArray(details) ? details : [];
+}
+
+function mergeMetricDetails(buckets, names, metricKey) {
+  const out = [];
+  for (const name of names || []) {
+    out.push(...getMetricDetails(buckets?.[name], metricKey));
+  }
+  return out;
+}
+
+function detailMetricKey(col) {
+  if (col.key === "avgCallsPerDay") return "totalCalls";
+  if (col.key === "totalLeadsVsSiteVisitedPct") return "siteVisited";
+  if (col.kind === "count") return col.key;
+  return null;
+}
+
+function metricCellIsClickable(bucket, col, reportDays) {
+  const metricKey = detailMetricKey(col);
+  if (!metricKey) return false;
+  const display = scorecardCellValue(bucket, col, reportDays);
+  if (display === "—" || display === "0") return false;
+  if (col.kind === "pct" && !(Number(bucket?.siteVisited) > 0)) return false;
+  return true;
 }
 
 function pct(numerator, denominator) {
@@ -297,6 +395,19 @@ function finalizeBucket(bucket) {
   bucket.overdue = overdueKeys.size;
   bucket.draftLeads = (bucket._draftKeys || new Set()).size;
   bucket.notFollowupLeads = (bucket._notFollowupKeys || new Set()).size;
+  const details = ensureBucketDetails(bucket);
+  const totalLeadKeys = new Set();
+  for (const key of union) {
+    if (totalLeadKeys.has(key)) continue;
+    totalLeadKeys.add(key);
+    const row = bucket._leadHistoryRow?.[key] || bucket._leadMasterRow?.[key];
+    if (row) details.totalLeads.push(serializePerfDetail(row));
+  }
+  bucket.details = bucket._details || {};
+  delete bucket._details;
+  delete bucket._detailKeys;
+  delete bucket._leadMasterRow;
+  delete bucket._leadHistoryRow;
   bucket.pie = {
     notInterested: Number(bucket.notInterested) || 0,
     siteVisitScheduled: Number(bucket.siteVisitScheduled) || 0,
@@ -422,7 +533,6 @@ function rowObjects(rawRows, columns, fields) {
     obj.project = clean(obj.project);
     obj.source = clean(obj.source);
     obj.status = clean(obj.status);
-    obj.telecallingStatus = clean(obj.telecallingStatus);
     out.push(obj);
   }
   return out;
@@ -490,7 +600,6 @@ function forwardFillHistoryLeads(historyRows) {
   let lastProject = "";
   let lastSource = "";
   let lastTelecaller = "";
-  let lastTelecallingStatus = "";
   const out = [];
   for (const row of historyRows) {
     const filled = {...row};
@@ -498,17 +607,14 @@ function forwardFillHistoryLeads(historyRows) {
     const project = clean(filled.project);
     const source = clean(filled.source);
     const telecaller = clean(filled.telecaller);
-    const telecallingStatus = clean(filled.telecallingStatus);
     if (mobile) lastMobile = clean(filled.mobile) || mobile;
     if (project) lastProject = project;
     if (source) lastSource = source;
     if (telecaller) lastTelecaller = telecaller;
-    if (telecallingStatus) lastTelecallingStatus = telecallingStatus;
     if (!leadMobile(filled) && lastMobile) filled.mobile = lastMobile;
     if (!clean(filled.project) && lastProject) filled.project = lastProject;
     if (!clean(filled.source) && lastSource) filled.source = lastSource;
     if (!clean(filled.telecaller) && lastTelecaller) filled.telecaller = lastTelecaller;
-    if (!clean(filled.telecallingStatus) && lastTelecallingStatus) filled.telecallingStatus = lastTelecallingStatus;
     if (!clean(filled.telecaller)) filled.telecaller = "Unknown";
     if (leadMobile(filled)) out.push(filled);
   }
@@ -576,19 +682,19 @@ function matchesSentToEnquiry(status) {
   return s === "sent to enquiry" || s === "send to enquiry";
 }
 
-/** Match History Telecalling Status column (visit statuses — parallel to STE using History Status). */
-function matchesTelecallingStatus(row, target) {
-  return norm(row.telecallingStatus) === norm(target);
+/** Match History Status on any row (visit statuses — parallel to STE). */
+function matchesHistoryStatus(row, target) {
+  return norm(row.status) === norm(target);
 }
 
 /**
- * Count when ANY History row matches Telecalling Status, once per Mobile+TeleCaller+Project.
+ * Count when ANY History row matches Status, once per Mobile+TeleCaller+Project.
  * Credits each matching row to all dimension bucket maps.
  */
-function accumulateTelecallingStatusMetric(historyFilled, target, bucketMaps, resolvers, field) {
+function accumulateAnyRowStatusMetric(historyFilled, target, bucketMaps, resolvers, field) {
   const best = new Map();
   for (const row of historyFilled) {
-    if (!matchesTelecallingStatus(row, target)) continue;
+    if (!matchesHistoryStatus(row, target)) continue;
     const key = steIdentityKey(row);
     if (!key) continue;
     const lud = ludMs(row);
@@ -597,7 +703,9 @@ function accumulateTelecallingStatusMetric(historyFilled, target, bucketMaps, re
   }
   for (const {row} of best.values()) {
     for (const {map, resolve} of resolvers) {
-      map[resolve(row)][field] += 1;
+      const bucket = map[resolve(row)];
+      bucket[field] += 1;
+      pushBucketDetailOnce(bucket, field, row, steIdentityKey(row));
     }
   }
   return best.size;
@@ -690,7 +798,7 @@ function compoundBucketsToNested(map) {
  * Lead = Mobile + TeleCaller.
  * STE = any History Status Send/Sent to Enquiry, once per Mobile+TeleCaller+Project.
  * SVS = latest History Status per Mobile+TeleCaller+Project (Site Visit Scheduled).
- * SVP/SVC = any Telecalling Status match, once per Mobile+TeleCaller+Project.
+ * SVP/SVC = any History Status match, once per Mobile+TeleCaller+Project.
  * NI = latest History Status (max LUD), once per lead.
  * Total Calls = History row count (after forward-fill).
  * Avg Calls per Day = Total Calls ÷ inclusive days between min/max History LUD.
@@ -729,29 +837,42 @@ export function reconcilePerf(masterRows, historyRows) {
     const key = leadIdentityKey(row);
     if (!key) continue;
     for (const {map, resolve} of resolvers) {
-      map[resolve(row)]._masterKeys.add(key);
+      const bucket = map[resolve(row)];
+      bucket._masterKeys.add(key);
+      bucket._leadMasterRow[key] = row;
     }
     allMasterKeys.add(key);
     if (norm(row.status) === "draft") {
       for (const {map, resolve} of resolvers) {
-        map[resolve(row)]._draftKeys.add(key);
+        const bucket = map[resolve(row)];
+        bucket._draftKeys.add(key);
+        pushBucketDetailOnce(bucket, "draftLeads", row, key);
       }
     }
     if (!allHistoryLeadKeys.has(key) && norm(row.status) !== "draft") {
       for (const {map, resolve} of resolvers) {
-        map[resolve(row)]._notFollowupKeys.add(key);
+        const bucket = map[resolve(row)];
+        bucket._notFollowupKeys.add(key);
+        pushBucketDetailOnce(bucket, "notFollowupLeads", row, key);
       }
     }
     if (row.nextDate && row.nextDate < today) {
       for (const {map, resolve} of resolvers) {
-        map[resolve(row)]._overdueKeys.add(key);
+        const bucket = map[resolve(row)];
+        bucket._overdueKeys.add(key);
+        pushBucketDetailOnce(bucket, "overdue", row, key);
       }
+    }
+    for (const {map, resolve} of resolvers) {
+      pushBucketDetailOnce(map[resolve(row)], "activeLeads", row, key);
     }
   }
 
   for (const row of historyFilled) {
     for (const {map, resolve} of resolvers) {
-      map[resolve(row)].totalCalls += 1;
+      const bucket = map[resolve(row)];
+      bucket.totalCalls += 1;
+      pushBucketDetail(bucket, "totalCalls", row);
     }
   }
 
@@ -769,7 +890,9 @@ export function reconcilePerf(masterRows, historyRows) {
   }
   for (const {row} of steBest.values()) {
     for (const {map, resolve} of resolvers) {
-      map[resolve(row)].siteVisited += 1;
+      const bucket = map[resolve(row)];
+      bucket.siteVisited += 1;
+      pushBucketDetailOnce(bucket, "siteVisited", row, steIdentityKey(row));
     }
   }
 
@@ -777,24 +900,30 @@ export function reconcilePerf(masterRows, historyRows) {
   for (const row of latestRowPerSteKey(historyFilled)) {
     if (!matchesSiteVisitScheduled(row.status)) continue;
     for (const {map, resolve} of resolvers) {
-      map[resolve(row)].siteVisitScheduled += 1;
+      const bucket = map[resolve(row)];
+      bucket.siteVisitScheduled += 1;
+      pushBucketDetailOnce(bucket, "siteVisitScheduled", row, steIdentityKey(row));
     }
   }
 
-  accumulateTelecallingStatusMetric(historyFilled, "site visit pending", maps, resolvers, "siteVisitPending");
-  accumulateTelecallingStatusMetric(historyFilled, "site visit cancelled", maps, resolvers, "siteVisitCancelled");
+  accumulateAnyRowStatusMetric(historyFilled, "site visit pending", maps, resolvers, "siteVisitPending");
+  accumulateAnyRowStatusMetric(historyFilled, "site visit cancelled", maps, resolvers, "siteVisitCancelled");
 
   for (const row of historyLeads) {
     const key = leadIdentityKey(row);
     if (!key) continue;
     for (const {map, resolve} of resolvers) {
-      map[resolve(row)]._historyKeys.add(key);
+      const bucket = map[resolve(row)];
+      bucket._historyKeys.add(key);
+      bucket._leadHistoryRow[key] = row;
     }
     allHistoryKeys.add(key);
 
     if (norm(row.status) === "not interested") {
       for (const {map, resolve} of resolvers) {
-        map[resolve(row)].notInterested += 1;
+        const bucket = map[resolve(row)];
+        bucket.notInterested += 1;
+        pushBucketDetailOnce(bucket, "notInterested", row, key);
       }
     }
   }
@@ -1015,7 +1144,218 @@ function dimensionNames(data, dimension) {
   return Object.keys(buckets).sort((a, b) => a.localeCompare(b, undefined, {sensitivity: "base"}));
 }
 
-function renderTotalsBlock(mount, summary, title = "Totals", reportDays = 0) {
+let perfDetailModalState = null;
+
+function perfDetailLabel(metricKey, col) {
+  if (col?.label) return col.label;
+  return METRIC_LABELS[metricKey] || AVG_LABELS[metricKey] || PCT_LABELS[metricKey] || metricKey;
+}
+
+function filterPerfDetailRows(rows, search) {
+  const q = norm(search);
+  if (!q) return rows;
+  return rows.filter(row => Object.values(row).some(value => norm(value).includes(q)));
+}
+
+function ensurePerfDetailModal() {
+  let modal = document.getElementById("perf-detail-modal");
+  if (modal) return modal;
+
+  modal = document.createElement("div");
+  modal.id = "perf-detail-modal";
+  modal.className = "dashboard-lead-modal hidden";
+  modal.setAttribute("role", "dialog");
+  modal.setAttribute("aria-modal", "true");
+  modal.setAttribute("aria-labelledby", "perf-detail-modal-title");
+  modal.setAttribute("aria-hidden", "true");
+
+  const backdrop = document.createElement("div");
+  backdrop.className = "dashboard-lead-modal-backdrop";
+  backdrop.addEventListener("click", closePerfDetailModal);
+
+  const card = document.createElement("div");
+  card.className = "dashboard-lead-modal-card dashboard-chart-report-card";
+  card.setAttribute("role", "document");
+  card.addEventListener("click", e => e.stopPropagation());
+
+  const head = document.createElement("div");
+  head.className = "dashboard-lead-modal-head";
+  const titleWrap = document.createElement("div");
+  titleWrap.className = "dashboard-chart-report-title-wrap";
+  const title = document.createElement("h2");
+  title.id = "perf-detail-modal-title";
+  const note = document.createElement("p");
+  note.className = "dashboard-chart-report-subtitle";
+  note.id = "perf-detail-modal-subtitle";
+  titleWrap.append(title, note);
+  const closeBtn = document.createElement("button");
+  closeBtn.type = "button";
+  closeBtn.className = "dashboard-lead-modal-close";
+  closeBtn.textContent = "×";
+  closeBtn.setAttribute("aria-label", "Close lead details");
+  closeBtn.addEventListener("click", closePerfDetailModal);
+  head.append(titleWrap, closeBtn);
+
+  const searchWrap = document.createElement("div");
+  searchWrap.className = "dashboard-main-search dashboard-chart-report-search";
+  const searchHead = document.createElement("div");
+  searchHead.className = "dashboard-main-search-head";
+  searchHead.append(Object.assign(document.createElement("span"), {className: "dashboard-filter-label", textContent: "Search all"}));
+  const clearSearch = document.createElement("button");
+  clearSearch.type = "button";
+  clearSearch.className = "dashboard-filter-action dashboard-chart-report-search-clear";
+  clearSearch.textContent = "Clear";
+  clearSearch.setAttribute("aria-label", "Clear search");
+  searchHead.append(clearSearch);
+  const searchInput = document.createElement("input");
+  searchInput.type = "search";
+  searchInput.name = "perf-detail-search";
+  searchInput.className = "dashboard-filter-search-input dashboard-main-search-input";
+  searchInput.placeholder = "Search all fields…";
+  searchInput.autocomplete = "off";
+  searchInput.spellcheck = false;
+  searchInput.setAttribute("aria-label", "Search all fields in this report");
+  searchWrap.append(searchHead, searchInput);
+
+  const body = document.createElement("div");
+  body.className = "dashboard-lead-modal-body dashboard-chart-report-body";
+  body.id = "perf-detail-modal-body";
+
+  card.append(head, searchWrap, body);
+  modal.append(backdrop, card);
+  document.body.append(modal);
+
+  searchInput.addEventListener("input", () => {
+    if (!perfDetailModalState) return;
+    perfDetailModalState.search = searchInput.value;
+    renderPerfDetailModalBody();
+  });
+  clearSearch.addEventListener("click", () => {
+    if (!perfDetailModalState) return;
+    searchInput.value = "";
+    perfDetailModalState.search = "";
+    renderPerfDetailModalBody();
+    searchInput.focus();
+  });
+
+  return modal;
+}
+
+function renderPerfDetailTable(rows) {
+  const wrap = document.createElement("div");
+  wrap.className = "perf-table-wrap";
+  if (!rows.length) {
+    wrap.append(Object.assign(document.createElement("p"), {
+      className: "dashboard-lead-detail-empty",
+      textContent: "No rows match your search.",
+    }));
+    return wrap;
+  }
+  const table = document.createElement("table");
+  table.className = "perf-scorecard perf-detail-table";
+  const thead = document.createElement("thead");
+  const headRow = document.createElement("tr");
+  for (const [label] of PERF_DETAIL_COLUMNS) {
+    const th = document.createElement("th");
+    th.textContent = label;
+    headRow.append(th);
+  }
+  thead.append(headRow);
+  table.append(thead);
+  const tbody = document.createElement("tbody");
+  for (const row of rows) {
+    const tr = document.createElement("tr");
+    for (const [, key] of PERF_DETAIL_COLUMNS) {
+      const td = document.createElement("td");
+      td.textContent = row[key] || "—";
+      tr.append(td);
+    }
+    tbody.append(tr);
+  }
+  table.append(tbody);
+  wrap.append(table);
+  return wrap;
+}
+
+function renderPerfDetailModalBody() {
+  if (!perfDetailModalState) return;
+  const modal = document.getElementById("perf-detail-modal");
+  const body = modal?.querySelector("#perf-detail-modal-body");
+  const note = modal?.querySelector("#perf-detail-modal-subtitle");
+  if (!body) return;
+  const filtered = filterPerfDetailRows(perfDetailModalState.rows, perfDetailModalState.search);
+  if (note) {
+    const countLabel = `${filtered.length} row${filtered.length === 1 ? "" : "s"}`;
+    note.textContent = perfDetailModalState.subtitle
+      ? `${perfDetailModalState.subtitle} · ${countLabel}`
+      : countLabel;
+  }
+  body.replaceChildren();
+  body.append(renderPerfDetailTable(filtered));
+}
+
+function onPerfDetailModalKeydown(e) {
+  if (e.key === "Escape") {
+    e.preventDefault();
+    closePerfDetailModal();
+  }
+}
+
+function openPerfDetailModal({metricKey, metricLabel, rows, subtitle = ""}) {
+  if (!rows?.length) {
+    window.alert("Lead details are not available for this metric. Re-upload the performance workbook to include detail rows.");
+    return;
+  }
+  perfDetailModalState = {metricKey, metricLabel, rows, subtitle, search: ""};
+  const modal = ensurePerfDetailModal();
+  const title = modal.querySelector("#perf-detail-modal-title");
+  const searchInput = modal.querySelector('input[name="perf-detail-search"]');
+  if (title) title.textContent = metricLabel || perfDetailLabel(metricKey);
+  if (searchInput) searchInput.value = "";
+  renderPerfDetailModalBody();
+  modal.classList.remove("hidden");
+  modal.setAttribute("aria-hidden", "false");
+  document.removeEventListener("keydown", onPerfDetailModalKeydown);
+  document.addEventListener("keydown", onPerfDetailModalKeydown);
+  searchInput?.focus();
+}
+
+function closePerfDetailModal() {
+  const modal = document.getElementById("perf-detail-modal");
+  if (!modal) return;
+  modal.classList.add("hidden");
+  modal.setAttribute("aria-hidden", "true");
+  document.removeEventListener("keydown", onPerfDetailModalKeydown);
+  perfDetailModalState = null;
+}
+
+function wirePerfMetricCell(cell, {col, bucket, reportDays, getRows, subtitle}) {
+  if (!metricCellIsClickable(bucket, col, reportDays)) return;
+  const metricKey = detailMetricKey(col);
+  if (!metricKey || !getRows(metricKey).length) return;
+  cell.classList.add("perf-metric-clickable");
+  cell.setAttribute("role", "button");
+  cell.tabIndex = 0;
+  cell.title = `View ${perfDetailLabel(metricKey, col)} details`;
+  const open = () => {
+    const rows = getRows(metricKey);
+    openPerfDetailModal({
+      metricKey,
+      metricLabel: perfDetailLabel(metricKey, col),
+      rows,
+      subtitle,
+    });
+  };
+  cell.addEventListener("click", open);
+  cell.addEventListener("keydown", e => {
+    if (e.key === "Enter" || e.key === " ") {
+      e.preventDefault();
+      open();
+    }
+  });
+}
+
+function renderTotalsBlock(mount, summary, title = "Totals", reportDays = 0, detailContext = null) {
   const block = document.createElement("div");
   block.className = "perf-totals-block";
   const heading = document.createElement("h3");
@@ -1030,6 +1370,15 @@ function renderTotalsBlock(mount, summary, title = "Totals", reportDays = 0) {
     dt.textContent = col.label;
     const dd = document.createElement("dd");
     dd.textContent = scorecardCellValue(summary, col, reportDays);
+    if (detailContext) {
+      wirePerfMetricCell(dd, {
+        col,
+        bucket: summary,
+        reportDays,
+        subtitle: title,
+        getRows: metricKey => mergeMetricDetails(detailContext.buckets, detailContext.names, metricKey),
+      });
+    }
     row.append(dt, dd);
     list.append(row);
   }
@@ -1076,6 +1425,13 @@ function renderBreakdownTable(mount, data, dimension, {showTotalRow = true} = {}
     for (const col of SCORECARD_COLUMNS) {
       const td = document.createElement("td");
       td.textContent = scorecardCellValue(bucket, col, reportDays);
+      wirePerfMetricCell(td, {
+        col,
+        bucket,
+        reportDays,
+        subtitle: name,
+        getRows: metricKey => getMetricDetails(bucket, metricKey),
+      });
       tr.append(td);
     }
     tbody.append(tr);
@@ -1092,6 +1448,13 @@ function renderBreakdownTable(mount, data, dimension, {showTotalRow = true} = {}
     for (const col of SCORECARD_COLUMNS) {
       const td = document.createElement("td");
       td.textContent = scorecardCellValue(totals, col, reportDays);
+      wirePerfMetricCell(td, {
+        col,
+        bucket: totals,
+        reportDays,
+        subtitle: "Total",
+        getRows: metricKey => mergeMetricDetails(buckets, names, metricKey),
+      });
       totalTr.append(td);
     }
     tbody.append(totalTr);
@@ -1114,7 +1477,9 @@ function renderPerfSummaryView(mount, data) {
   renderSummaryHeader(mount, data);
   const filtered = filterPerfData(data, "telecaller", perfFilters);
   const title = data.view_all ? "All TeleCallers · totals" : "Totals";
-  renderTotalsBlock(mount, filtered.summary, title, getReportDays(data));
+  const buckets = getBucketMap(filtered, "telecaller");
+  const names = dimensionNames(filtered, "telecaller");
+  renderTotalsBlock(mount, filtered.summary, title, getReportDays(data), {buckets, names});
 }
 
 function renderPerfTableView(mount, data, dimension) {

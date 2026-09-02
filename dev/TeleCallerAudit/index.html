@@ -232,7 +232,7 @@
           </div>
           <div id="perf-history-drop" class="drop-zone" role="button" tabindex="0" aria-label="Upload History Excel">
             <input id="perf-history-input" type="file" accept=".xlsx,.xls,.xlsm" hidden>
-            <div class="upload-icon">H</div><h3>History Data (H)</h3><p>Call history · includes Lead Update Date &amp; Telecalling Status</p>
+            <div class="upload-icon">H</div><h3>History Data (H)</h3><p>Call history · includes Lead Update Date</p>
           </div>
         </div>
         <div id="perf-file-list" class="file-list hidden"></div>
@@ -294,14 +294,13 @@
             <li>Source</li>
             <li>Lead Registration Date</li>
             <li>Lead Update Date (LUD) — min/max across H sets the report date range</li>
-            <li>Status — Not Interested, Sent to Enquiry</li>
-            <li>Telecalling Status — Site Visit Scheduled / Pending / Cancelled</li>
+            <li>Status — Not Interested, Sent to Enquiry, Site Visit Scheduled / Pending / Cancelled</li>
             <li>Telecaller Name</li>
           </ul>
           <h3>Scorecard columns</h3>
           <ul class="perf-help-list">
             <li><strong>Total Leads</strong> — unique leads (Mobile + TeleCaller) in Master ∪ History</li>
-            <li><strong>History rows</strong> — Mobile/Project/Source/Telecaller forward-filled; STE uses any History <strong>Status</strong> row; SVS uses latest History <strong>Status</strong> per Mobile+TeleCaller+Project; SVP/SVC use any <strong>Telecalling Status</strong> row (once per Mobile+TeleCaller+Project); NI uses latest Status per Mobile+TeleCaller</li>
+            <li><strong>History rows</strong> — Mobile/Project/Source/Telecaller forward-filled; STE uses any History <strong>Status</strong> row; SVS uses latest History <strong>Status</strong> per Mobile+TeleCaller+Project; SVP/SVC use any History <strong>Status</strong> row (once per Mobile+TeleCaller+Project); NI uses latest Status per Mobile+TeleCaller</li>
             <li><strong>Active Leads</strong> — unique Master leads (Mobile + TeleCaller)</li>
             <li><strong>Total Calls</strong> — History row count (each call row after forward-fill)</li>
             <li><strong>Avg Calls per Day</strong> — Total Calls ÷ inclusive calendar days between min and max History Lead Update Date</li>
@@ -309,16 +308,16 @@
             <li><strong>Not Follow-up Leads</strong> — Master leads not present in History, Status ≠ Draft</li>
             <li><strong>Site Visited</strong> — any History Status = Sent/Send to Enquiry (once per Mobile+TeleCaller+Project)</li>
             <li><strong>Site Visit Scheduled</strong> — latest History Status = Site Visit Scheduled (once per Mobile+TeleCaller+Project)</li>
-            <li><strong>Site Visit Pending</strong> — any Telecalling Status = Site Visit Pending</li>
+            <li><strong>Site Visit Pending</strong> — any History Status = Site Visit Pending</li>
             <li><strong>Total Leads vs Site Visited</strong> — Site Visited ÷ Total Leads</li>
-            <li><strong>Site Visit Cancelled</strong> — any Telecalling Status = Site Visit Cancelled</li>
+            <li><strong>Site Visit Cancelled</strong> — any History Status = Site Visit Cancelled</li>
             <li><strong>Not Interested</strong> — latest History Status</li>
             <li><strong>Overdue Leads</strong> — Master Next Followup Date before today (once per lead)</li>
           </ul>
           <h3>Status matching (case-insensitive)</h3>
           <ul class="perf-help-list">
             <li><strong>Not Interested</strong> — History Status on latest row</li>
-            <li><strong>Site Visit Scheduled / Pending / Cancelled</strong> — SVS from latest History Status; SVP/SVC from Telecalling Status on any row (once per Mobile+TeleCaller+Project)</li>
+            <li><strong>Site Visit Scheduled / Pending / Cancelled</strong> — SVS from latest History Status; SVP/SVC from any History Status row (once per Mobile+TeleCaller+Project)</li>
             <li><strong>Sent to Enquiry / Site Visited</strong> — History Status on any row (<code>sent to enquiry</code> or <code>send to enquiry</code>)</li>
           </ul>
           <p class="muted">Status stacks are independent tallies (a lead may appear in STE and a latest-status bucket). Overdue counts Master rows where Next Followup Date is before today (calendar day). No History filter is applied to overdue.</p>
