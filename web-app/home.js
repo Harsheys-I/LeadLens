@@ -49,6 +49,8 @@ function renderTiles(user){
     }
     mount.append(btn);
   }
+  window.llMotion?.enterHomeTiles?.(mount);
+  window.llMotion?.homeTilesEnter?.(mount);
 }
 
 function openPasswordModal(user){
