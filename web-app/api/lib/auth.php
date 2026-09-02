@@ -4,7 +4,18 @@ declare(strict_types=1);
 
 function ll_cookie_name(): string
 {
+  if (function_exists('ll_is_dev_request') && ll_is_dev_request()) {
+    return 'leadlens_session_dev';
+  }
   return (string) ($GLOBALS['LL_CONFIG']['session']['cookie_name'] ?? 'leadlens_session');
+}
+
+function ll_cookie_path(): string
+{
+  if (function_exists('ll_is_dev_request') && ll_is_dev_request()) {
+    return '/dev/';
+  }
+  return '/';
 }
 
 function ll_session_ttl(): int
@@ -67,7 +78,7 @@ function ll_set_session_cookie(string $token, int $expiresAt): void
   $secure = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off');
   setcookie(ll_cookie_name(), $token, [
     'expires' => $expiresAt,
-    'path' => '/',
+    'path' => ll_cookie_path(),
     'secure' => $secure,
     'httponly' => true,
     'samesite' => 'Lax',
@@ -79,7 +90,7 @@ function ll_clear_session_cookie(): void
   $secure = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off');
   setcookie(ll_cookie_name(), '', [
     'expires' => time() - 3600,
-    'path' => '/',
+    'path' => ll_cookie_path(),
     'secure' => $secure,
     'httponly' => true,
     'samesite' => 'Lax',

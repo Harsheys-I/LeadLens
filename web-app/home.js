@@ -1,6 +1,7 @@
-import {login, logout, loadSession, changePassword, updateProfile, moduleTilesForUser, hasSessionHint, getUser} from './auth.js?v=5.2.1';
-import {AuthApi} from './api-client.js?v=5.2.1';
-import {mountNotifications} from './notifications-ui.js?v=5.2.1';
+import {login, logout, loadSession, changePassword, updateProfile, moduleTilesForUser, hasSessionHint, getUser} from './auth.js?v=5.7';
+import {AuthApi} from './api-client.js?v=5.7';
+import {mountNotifications} from './notifications-ui.js?v=5.7';
+import {appUrl} from './app-base.js?v=5.7';
 import {initTheme} from './theme.js?v=5.6';
 
 const $ = id => document.getElementById(id);
@@ -99,8 +100,9 @@ async function enterHome(user){
   notifCtl?.destroy?.();
   notifCtl = mountNotifications({
     variant: 'chrome',
-    onOpenAccessRequests: () => { location.href = '/admin/'; },
-    onDashboardUpdate: () => { location.href = '/TeleCallerAudit/#published'; },
+    onOpenAccessRequests: () => { location.href = appUrl('/admin/'); },
+    onDashboardUpdate: () => { location.href = appUrl('/TeleCallerAudit/#published'); },
+    onPerfDashboardUpdate: () => { location.href = appUrl('/TeleCallerAudit/#perf-dashboard'); },
   });
   if (user.must_change_password) openPasswordModal(user);
 

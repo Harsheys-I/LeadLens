@@ -581,6 +581,10 @@ body .perf-summary-row{display:grid;grid-template-columns:1fr auto;gap:16px;padd
 body .perf-summary-row:last-child{border-bottom:0}
 body .perf-summary-row dt{margin:0;font-size:14px;font-weight:600;color:var(--ink)}
 body .perf-summary-row dd{margin:0;font-size:20px;font-weight:800;color:var(--green-2);font-variant-numeric:tabular-nums}
+body .perf-metric-clickable{cursor:pointer;text-decoration:underline dotted;text-underline-offset:3px}
+body .perf-metric-clickable:hover{color:var(--green-2);opacity:.92}
+body .perf-scorecard td.perf-metric-clickable,body .perf-scorecard tbody th.perf-metric-clickable{text-decoration:underline dotted;text-underline-offset:2px}
+body .perf-detail-table tbody td{text-align:left;white-space:normal;max-width:220px}
 body .perf-date-range{margin:0 0 8px;color:var(--muted);font-size:13px}
 body .perf-view-tabs{display:flex;gap:8px;margin:8px 0 18px;border-bottom:1px solid var(--line);padding-bottom:10px}
 body .perf-main-tabs{display:flex;flex-wrap:wrap;gap:8px;margin:0 0 12px;border-bottom:1px solid var(--line);padding-bottom:10px}
@@ -714,3 +718,34 @@ body.home-mode .auth-theme-bar{display:none}
 :root[data-theme="dark"] .dashboard-lead-modal-head,:root[data-theme="dark"] .notif-drawer-head{background:linear-gradient(180deg,#0f2d22 0%,#16382b 100%)}
 :root[data-theme="dark"] body .perf-scorecard tbody th{background:var(--panel)}
 :root[data-theme="dark"] .notif-count{border-color:#0f2d22}
+
+/* Staging chrome + subtle motion (additive; keep forest-green ops look) */
+.ll-preview-banner{position:fixed;top:0;left:0;right:0;z-index:500;height:28px;display:flex;align-items:center;justify-content:center;background:#c57924;color:#fff;font-size:11px;font-weight:800;letter-spacing:.12em;text-transform:uppercase;pointer-events:none}
+html.ll-dev-preview body{padding-top:28px}
+html.ll-dev-preview body.auth-body{padding-top:56px}
+html.ll-dev-preview body.auth-body.home-mode{padding-top:28px}
+.primary-button,.secondary-button,.danger-button{border-radius:12px;box-shadow:0 2px 8px rgba(18,55,42,.14);transition:transform .18s ease,box-shadow .18s ease,background .18s ease,filter .18s ease}
+.primary-button:hover,.secondary-button:hover,.danger-button:hover{transform:translateY(-2px);box-shadow:0 6px 16px rgba(18,55,42,.2),0 0 0 3px rgba(63,140,104,.22)}
+.primary-button:active,.secondary-button:active,.danger-button:active{transform:translateY(0) scale(.97);box-shadow:0 1px 4px rgba(18,55,42,.12)}
+.icon-button{border-radius:12px;box-shadow:0 2px 6px rgba(18,55,42,.1);transition:transform .18s ease,box-shadow .18s ease,background .18s ease}
+.icon-button:hover{transform:translateY(-2px);box-shadow:0 6px 14px rgba(18,55,42,.16),0 0 0 3px rgba(63,140,104,.16)}
+.icon-button:active{transform:scale(.96)}
+.primary-button:disabled,.secondary-button:disabled,.danger-button:disabled,.icon-button:disabled,
+.primary-button:disabled:hover,.secondary-button:disabled:hover,.danger-button:disabled:hover,.icon-button:disabled:hover{transform:none;box-shadow:none}
+.sidebar .nav-item{transition:background .18s ease,color .18s ease}
+.sidebar .nav-item:hover{background:rgba(255,255,255,.22);color:#fff}
+.sidebar .nav-item.active{background:rgba(255,255,255,.16);color:#fff}
+@keyframes ll-hub-tile-float{0%,100%{transform:translateY(0)}50%{transform:translateY(-5px)}}
+body.home-mode .home-tiles .home-tile:not(.is-soon){animation:ll-hub-tile-float 4s ease-in-out infinite}
+body.home-mode .home-tiles .home-tile:nth-child(2){animation-delay:.45s}
+body.home-mode .home-tiles .home-tile:nth-child(3){animation-delay:.9s}
+body.home-mode .home-tiles .home-tile:nth-child(4){animation-delay:1.35s}
+body.home-mode .home-tiles .home-tile:hover,body.home-mode .home-tiles .home-tile:focus-visible{animation-play-state:paused}
+@media (prefers-reduced-motion:reduce){
+  .primary-button,.secondary-button,.danger-button,.icon-button,.sidebar .nav-item,.home-tile{transition:none}
+  .primary-button:hover,.secondary-button:hover,.danger-button:hover,.icon-button:hover,
+  .primary-button:active,.secondary-button:active,.danger-button:active,.icon-button:active{transform:none;box-shadow:0 2px 8px rgba(18,55,42,.14)}
+  .home-tile:hover{transform:none}
+  body.home-mode .home-tiles .home-tile{animation:none}
+}
+

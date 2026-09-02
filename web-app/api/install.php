@@ -209,7 +209,7 @@ try {
   echo '<h1>GPP AI install OK</h1>';
   echo '<p>Tables created/verified. Seed Super User: <code>super user</code> / <code>12345</code> (change password on first login).</p>';
   echo '<p>Recommended: set <code>app.install_locked</code> to <code>true</code> in <code>config.local.php</code>, or delete/rename this file.</p>';
-  echo '<p><a href="/">Go to login</a></p>';
+  echo '<p><a href="../">Go to login</a></p>';
 } catch (Throwable $e) {
   http_response_code(500);
   echo '<h1>Install failed</h1><pre>' . htmlspecialchars($e->getMessage(), ENT_QUOTES, 'UTF-8') . '</pre>';

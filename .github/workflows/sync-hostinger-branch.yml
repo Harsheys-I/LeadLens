@@ -7,6 +7,11 @@ on:
       - "web-app/**"
       - ".github/workflows/sync-hostinger-branch.yml"
   workflow_dispatch:
+    inputs:
+      promote:
+        description: "Promote /dev to live"
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -16,7 +21,8 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  sync:
+  sync-dev:
+    if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.event.inputs.promote != 'true')
     runs-on: ubuntu-latest
     steps:
       - name: Checkout main
@@ -25,7 +31,7 @@ jobs:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build flat hostinger branch from web-app/
+      - name: Sync web-app/ to hostinger/dev/
         env:
           BRANCH: hostinger
         run: |
@@ -36,12 +42,11 @@ jobs:
             exit 1
           fi
 
-          WORKDIR="$(mktemp -d)"
-          # Site files only — never copy .github from web-app
+          STAGING="$(mktemp -d)"
           rsync -a \
             --exclude='.github' \
             --exclude='.git' \
-            web-app/ "$WORKDIR/"
+            web-app/ "$STAGING/"
 
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
@@ -53,20 +58,63 @@ jobs:
           else
             git checkout --orphan "$BRANCH"
             git rm -rf . >/dev/null 2>&1 || true
+            # First-time: seed live root from current web-app as well
+            rsync -a "$STAGING"/ ./
           fi
 
-          # Replace branch tree with flat web-app contents
-          find . -mindepth 1 -maxdepth 1 \
-            ! -name '.git' \
-            -exec rm -rf {} +
-
-          rsync -a "$WORKDIR"/ ./
+          mkdir -p dev
+          rsync -a --delete \
+            --exclude='.github' \
+            --exclude='.git' \
+            "$STAGING"/ ./dev/
 
           git add -A
           if git diff --cached --quiet; then
-            echo "No changes for $BRANCH; skipping push"
+            echo "No changes for $BRANCH/dev; skipping push"
             exit 0
           fi
 
-          git commit -m "Sync site root from web-app/ for Hostinger deploy"
-          git push --force-with-lease origin "HEAD:$BRANCH"
+          git commit -m "Sync /dev from web-app/"
+          git push origin "HEAD:$BRANCH"
+
+  promote:
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.promote == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout hostinger
+        uses: actions/checkout@v4
+        with:
+          ref: hostinger
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Promote dev/ to site root
+        env:
+          BRANCH: hostinger
+        run: |
+          set -euo pipefail
+
+          if [ ! -d dev ]; then
+            echo "dev/ missing on hostinger branch; aborting"
+            exit 1
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          # Copy staging over live root. Excluded dest names are not deleted
+          # (no --delete-excluded), so /dev stays as the next preview and .git is kept.
+          rsync -a --delete \
+            --exclude='/.git' \
+            --exclude='/.github' \
+            --exclude='/dev' \
+            ./dev/ ./
+
+          git add -A
+          if git diff --cached --quiet; then
+            echo "Live root already matches /dev; skipping push"
+            exit 0
+          fi
+
+          git commit -m "Promote /dev to live site root"
+          git push origin "HEAD:$BRANCH"

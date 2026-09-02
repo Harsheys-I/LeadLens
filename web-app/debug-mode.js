@@ -16,11 +16,12 @@ import {
   sortResults,
   validateApiKey,
   SERVER_API_KEY,
-} from "./audit.js?v=5.2.23";
+} from "./audit.js?v=5.7";
 import {getApiKey,apiKeyIsRemembered,saveApiKey,forgetApiKey,setStorageUserId,storageKey} from "./db.js?v=5.2.19";
-import {requireAuth,logout,getUser,changePassword,updateProfile} from "./auth.js?v=5.2.19";
-import {SettingsApi} from "./api-client.js?v=5.2.19";
-import {mountNotifications} from "./notifications-ui.js?v=5.2.19";
+import {requireAuth,logout,getUser,changePassword,updateProfile} from "./auth.js?v=5.7";
+import {SettingsApi} from "./api-client.js?v=5.7";
+import {mountNotifications} from "./notifications-ui.js?v=5.7";
+import {appUrl, homePath} from "./app-base.js?v=5.7";
 import {initTheme} from "./theme.js?v=5.6";
 import {
   debugAuditBatch,
@@ -28,7 +29,7 @@ import {
   compareDebugVsTelecaller,
   activePromptsReady,
   normalizeActiveErrorTypes,
-} from "./debug-engine.js?v=5.2.23";
+} from "./debug-engine.js?v=5.7";
 import {
   LAB_ERROR_TYPES,
   STATUS_HISTORY_PROMPT,
@@ -1981,7 +1982,7 @@ els["mobile-menu"]?.addEventListener("click",()=>{
 els["shell-logout"]?.addEventListener("click",async()=>{
   await logout();
   setStorageUserId(null);
-  location.href="/";
+  location.href=homePath();
 });
 els["shell-account"]?.addEventListener("click",()=>{
   const user=getUser();
@@ -2163,9 +2164,9 @@ els["reload-app"]?.addEventListener("click",()=>location.reload());
 
 async function bootDeBugMode(){
   initTheme();
-  const user=await requireAuth({loginPath:"/"});
+  const user=await requireAuth({loginPath:homePath()});
   if(!user?.is_super){
-    location.href="/";
+    location.href=homePath();
     return;
   }
   setStorageUserId(user.id);
@@ -2180,7 +2181,7 @@ async function bootDeBugMode(){
   openKeyModal();
   mountNotifications({
     variant:"chrome",
-    onOpenAccessRequests:()=>{location.href="/admin/";},
+    onOpenAccessRequests:()=>{location.href=appUrl("/admin/");},
   });
   setInterval(()=>{
     if(currentJob?.status==="running")renderProgress(currentJob);

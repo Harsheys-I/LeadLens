@@ -1,6 +1,7 @@
 import {buildTelecallerDashboardBlob} from "./dashboard-export.js?v=5.4";
 import {buildDashboardModel} from "./dashboard-metrics.js?v=5.4";
 import {STATUS_HISTORY_PROMPT} from "./debug-prompts.js?v=5.4";
+import {apiBase} from "./app-base.js?v=5.7";
 
 export const APP_VERSION = "5.4";
 /** Sentinel: use server OpenAI proxy (no raw key in the browser). */
@@ -743,7 +744,7 @@ export async function validateApiKey(key,signal){
   const useProxy=trimmed===SERVER_API_KEY;
   if(!useProxy&&!/^sk-[A-Za-z0-9_-]{20,}$/.test(trimmed))return{ok:false,reason:"format",message:"That does not look like an OpenAI API key (it should start with \"sk-\")."};
   try{
-    const response=await fetch(useProxy?"/api/openai/models":"https://api.openai.com/v1/models",{
+    const response=await fetch(useProxy?`${apiBase()}openai/models`:"https://api.openai.com/v1/models",{
       method:"GET",
       credentials:useProxy?"same-origin":"omit",
       headers:useProxy?{Accept:"application/json"}:{"Authorization":`Bearer ${trimmed}`},
@@ -1704,7 +1705,7 @@ async function requestAudit(apiKey,settings,leads,signal,log,onUsage){
       response_format:{type:"json_schema",json_schema:{name:"ll_audit",strict:true,schema:responseSchema}}
     });
   const useProxy=!apiKey||apiKey===SERVER_API_KEY;
-  const response=await fetch(useProxy?"/api/openai/chat/completions":"https://api.openai.com/v1/chat/completions",{
+  const response=await fetch(useProxy?`${apiBase()}openai/chat/completions`:"https://api.openai.com/v1/chat/completions",{
     method:"POST",signal,
     credentials:useProxy?"same-origin":"omit",
     headers:useProxy

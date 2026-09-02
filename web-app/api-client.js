@@ -1,8 +1,10 @@
 /**
  * Thin fetch wrapper for LeadLens PHP API (same-origin, session cookie).
  */
+import {apiBase} from './app-base.js?v=5.7';
+
 function resolveApiBase(){
-  return '/api/';
+  return apiBase();
 }
 
 export async function api(path, {method = 'GET', body, signal} = {}){

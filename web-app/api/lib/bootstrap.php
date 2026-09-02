@@ -4,8 +4,30 @@ declare(strict_types=1);
 
 header('X-Content-Type-Options: nosniff');
 
+function ll_is_dev_request(): bool
+{
+  static $cached = null;
+  if ($cached !== null) {
+    return $cached;
+  }
+  $script = str_replace('\\', '/', (string) ($_SERVER['SCRIPT_NAME'] ?? ''));
+  if (preg_match('#(?:^|/)dev/api(?:/|$)#', $script)) {
+    return $cached = true;
+  }
+  $uri = (string) (parse_url((string) ($_SERVER['REQUEST_URI'] ?? ''), PHP_URL_PATH) ?: '');
+  return $cached = (bool) preg_match('#^/dev(?:/|$)#', $uri);
+}
+
 $configLocal = __DIR__ . '/../config.local.php';
 $configExample = __DIR__ . '/../config.example.php';
+
+// Staging copy at /dev/api has no gitignored config; reuse production api/config.local.php.
+if (!is_file($configLocal) && ll_is_dev_request()) {
+  $prodConfig = __DIR__ . '/../../../api/config.local.php';
+  if (is_file($prodConfig)) {
+    $configLocal = $prodConfig;
+  }
+}
 
 if (is_file($configLocal)) {
   $GLOBALS['LL_CONFIG'] = require $configLocal;
