@@ -1,0 +1,172 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" media="(prefers-color-scheme: light)" content="#12372a">
+  <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#0f2d22">
+  <meta name="description" content="GPP AI — AI telecalling audit platform">
+  <title>GPP AI</title>
+  <script src="theme-boot.js?v=5.7"></script>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="stylesheet" href="styles.css?v=5.7">
+  <script type="module" src="home.js?v=5.7"></script>
+</head>
+<body class="auth-body auth-loading">
+  <div class="auth-bg" aria-hidden="true"></div>
+
+  <section id="panel-loading" class="auth-panel auth-loading-panel">
+    <div class="auth-brand">
+      <img class="brand-mark" src="assets/gpp-ai-logo.png" alt="" width="64" height="36">
+      <div>
+        <strong>GPP AI</strong>
+        <p>Checking your session…</p>
+      </div>
+    </div>
+    <div class="auth-spinner" aria-hidden="true"></div>
+  </section>
+
+  <section id="panel-login" class="auth-panel hidden">
+    <div class="auth-brand">
+      <img class="brand-mark" src="assets/gpp-ai-logo.png" alt="" width="64" height="36">
+      <div>
+        <strong>GPP AI</strong>
+        <p>AI telecalling QA</p>
+      </div>
+    </div>
+    <h1>Sign in</h1>
+    <p class="auth-lead">Use your GPP AI account to open LeadLens, Admin, and more.</p>
+    <form id="login-form" class="auth-form" autocomplete="on">
+      <label>Username<input id="login-username" name="username" type="text" required autocomplete="username"></label>
+      <label>Password<input id="login-password" name="password" type="password" required autocomplete="current-password"></label>
+      <div id="login-message" class="form-message" role="status"></div>
+      <button type="submit" class="primary-button auth-submit">Sign in</button>
+    </form>
+    <p class="auth-footer">Need access? <button type="button" id="show-request" class="text-button">Request access</button></p>
+  </section>
+
+  <section id="panel-request" class="auth-panel hidden">
+    <div class="auth-brand">
+      <img class="brand-mark" src="assets/gpp-ai-logo.png" alt="" width="64" height="36">
+      <div>
+        <strong>GPP AI</strong>
+        <p>Access request</p>
+      </div>
+    </div>
+    <h1>Request access</h1>
+    <p class="auth-lead">An admin will review your request. No email is sent in this phase — check back with your manager.</p>
+    <form id="request-form" class="auth-form">
+      <label>Full name<input id="req-name" type="text" required></label>
+      <label>Preferred username<input id="req-username" type="text"></label>
+      <label>Preferred module
+        <select id="req-module">
+          <option value="TeleCaller">LeadLens</option>
+          <option value="Admin">Admin</option>
+          <option value="Other">Other</option>
+        </select>
+      </label>
+      <label>Reason<textarea id="req-reason" rows="3" placeholder="Why do you need access?"></textarea></label>
+      <div id="request-message" class="form-message" role="status"></div>
+      <div class="inline-actions">
+        <button type="submit" class="primary-button">Submit request</button>
+        <button type="button" id="back-login" class="text-button">Back to sign in</button>
+      </div>
+    </form>
+  </section>
+
+  <section id="panel-home" class="home-shell hidden">
+    <header class="home-topbar">
+      <a class="brand" href="./"><img class="brand-mark" src="assets/gpp-ai-logo.png" alt="" width="48" height="28"><span>GPP AI</span></a>
+      <div class="home-user">
+        <span id="home-user-label"></span>
+        <button type="button" id="notif-bell" class="notif-bell notif-bell-chrome" title="Notifications" aria-label="Notifications">
+          <span id="notif-count" class="notif-count hidden">0</span>
+        </button>
+        <button type="button" id="home-account" class="secondary-button">Account</button>
+        <button type="button" id="home-logout" class="secondary-button">Sign out</button>
+      </div>
+    </header>
+    <main class="home-main">
+      <p class="eyebrow">YOUR WORKSPACE</p>
+      <h1>Where do you want to work?</h1>
+      <p class="home-sub">Pick a module your role can open. Admins manage people and access; auditors run LeadLens QA.</p>
+      <div id="home-tiles" class="home-tiles"></div>
+    </main>
+  </section>
+
+  <div id="password-modal" class="key-modal hidden" role="dialog" aria-modal="true" aria-labelledby="pw-title">
+    <div class="key-modal-card">
+      <p class="eyebrow" id="pw-eyebrow">SECURITY</p>
+      <h2 id="pw-title">Change your password</h2>
+      <p class="key-modal-copy" id="pw-copy">You’re using a temporary password. Choose a new password before continuing.</p>
+      <label>Current password<input id="pw-current" type="password" autocomplete="current-password"></label>
+      <label>New password<input id="pw-new" type="password" autocomplete="new-password"></label>
+      <label>Confirm new password<input id="pw-confirm" type="password" autocomplete="new-password"></label>
+      <div id="pw-message" class="form-message" role="status"></div>
+      <div class="inline-actions">
+        <button id="pw-save" type="button" class="primary-button">Save password</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="account-modal" class="key-modal hidden" role="dialog" aria-modal="true" aria-labelledby="account-title">
+    <div class="key-modal-card">
+      <p class="eyebrow">ACCOUNT</p>
+      <h2 id="account-title">Your profile</h2>
+      <p class="key-modal-copy">Update your username or password. Linked TeleCaller name is managed by an Admin.</p>
+      <label>Username<input id="account-username" type="text" autocomplete="username"></label>
+      <label>Display name<input id="account-display" type="text" autocomplete="nickname"></label>
+      <label>Linked TeleCaller<input id="account-telecaller" type="text" disabled></label>
+      <label>Appearance
+        <select data-theme-select aria-label="Theme">
+          <option value="system">System</option>
+          <option value="light">Light</option>
+          <option value="dark">Dark</option>
+        </select>
+      </label>
+      <hr class="account-divider">
+      <p class="muted">Change password (optional)</p>
+      <label>Current password<input id="account-pw-current" type="password" autocomplete="current-password"></label>
+      <label>New password<input id="account-pw-new" type="password" autocomplete="new-password"></label>
+      <label>Confirm new password<input id="account-pw-confirm" type="password" autocomplete="new-password"></label>
+      <div id="account-message" class="form-message" role="status"></div>
+      <div class="inline-actions">
+        <button id="account-save" type="button" class="primary-button">Save</button>
+        <button id="account-cancel" type="button" class="text-button">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+  <div id="notif-drawer" class="notif-drawer hidden" aria-live="polite" role="dialog" aria-label="Notifications">
+    <div class="notif-drawer-head">
+      <div class="notif-drawer-title">
+        <span class="notif-drawer-mark" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M15 17h5l-1.4-1.4A2 2 0 0 1 18 14.2V11a6 6 0 1 0-12 0v3.2c0 .5-.2 1-.6 1.4L4 17h5"/><path d="M9.5 17a2.5 2.5 0 0 0 5 0"/></svg>
+        </span>
+        <div>
+          <strong>Notifications</strong>
+          <p class="notif-drawer-sub" id="notif-unread-label">Loading…</p>
+        </div>
+      </div>
+      <div class="notif-drawer-actions">
+        <button type="button" id="notif-mark-all" class="notif-action-btn">Mark all read</button>
+        <button type="button" id="notif-clear-all" class="notif-action-btn">Clear all</button>
+        <button type="button" id="notif-close" class="notif-close-btn" aria-label="Close">×</button>
+      </div>
+    </div>
+    <div id="notif-list" class="notif-list"></div>
+  </div>
+
+  <div id="auth-theme-bar" class="auth-theme-bar">
+    <label>Appearance
+      <select data-theme-select aria-label="Theme">
+        <option value="system">System</option>
+        <option value="light">Light</option>
+        <option value="dark">Dark</option>
+      </select>
+    </label>
+  </div>
+</body>
+</html>

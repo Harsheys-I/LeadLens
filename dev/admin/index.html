@@ -1,0 +1,181 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" media="(prefers-color-scheme: light)" content="#12372a">
+  <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#0f2d22">
+  <title>GPP AI · Admin</title>
+  <script src="../theme-boot.js?v=5.7"></script>
+  <link rel="stylesheet" href="../styles.css?v=5.7">
+  <script type="module" src="admin.js?v=5.7"></script>
+</head>
+<body>
+  <div class="shell">
+    <aside class="sidebar">
+      <a class="brand" href="../"><img class="brand-mark" src="../assets/gpp-ai-logo.png" alt="" width="48" height="28"><span>GPP AI</span></a>
+      <nav aria-label="Admin navigation">
+        <button class="nav-item active" data-view="users" data-perm="admin.users"><span>◎</span>User creation</button>
+        <button class="nav-item" data-view="roles" data-perm="admin.roles"><span>⌁</span>Roles</button>
+      </nav>
+      <div class="privacy-note"><strong>Admin</strong><span>Users, roles, and access requests.</span></div>
+    </aside>
+
+    <main>
+      <header class="topbar">
+        <button id="mobile-menu" class="icon-button" aria-label="Toggle navigation">☰</button>
+        <div><p class="eyebrow">ADMIN</p><h1 id="page-title">User creation</h1></div>
+        <div class="topbar-actions">
+          <span id="shell-user-label" class="topbar-user-label"></span>
+          <button type="button" id="notif-bell" class="notif-bell notif-bell-chrome" title="Notifications" aria-label="Notifications">
+            <span id="notif-count" class="notif-count hidden">0</span>
+          </button>
+          <button type="button" id="shell-account" class="secondary-button">Account</button>
+          <button type="button" id="shell-logout" class="secondary-button">Sign out</button>
+        </div>
+      </header>
+
+      <section id="view-users" class="view active">
+        <div class="section-head">
+          <div><h2>Users</h2><p>Create and edit accounts. Pending access requests appear below.</p></div>
+          <button id="btn-new-user" type="button" class="primary-button">New user</button>
+        </div>
+        <div id="access-queue" class="access-queue"></div>
+        <div id="users-table" class="admin-table-wrap"></div>
+      </section>
+
+      <section id="view-roles" class="view">
+        <div class="section-head">
+          <div><h2>Roles</h2><p>Permission matrix. Grant Run console and module access here.</p></div>
+          <button id="btn-new-role" type="button" class="primary-button">New role</button>
+        </div>
+        <div id="roles-panel" class="roles-panel"></div>
+      </section>
+    </main>
+  </div>
+
+  <div id="notif-drawer" class="notif-drawer hidden" aria-live="polite" role="dialog" aria-label="Notifications">
+    <div class="notif-drawer-head">
+      <div class="notif-drawer-title">
+        <span class="notif-drawer-mark" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M15 17h5l-1.4-1.4A2 2 0 0 1 18 14.2V11a6 6 0 1 0-12 0v3.2c0 .5-.2 1-.6 1.4L4 17h5"/><path d="M9.5 17a2.5 2.5 0 0 0 5 0"/></svg>
+        </span>
+        <div>
+          <strong>Notifications</strong>
+          <p class="notif-drawer-sub" id="notif-unread-label">Loading…</p>
+        </div>
+      </div>
+      <div class="notif-drawer-actions">
+        <button type="button" id="notif-mark-all" class="notif-action-btn">Mark all read</button>
+        <button type="button" id="notif-clear-all" class="notif-action-btn">Clear all</button>
+        <button type="button" id="notif-close" class="notif-close-btn" aria-label="Close">×</button>
+      </div>
+    </div>
+    <div id="notif-list" class="notif-list"></div>
+  </div>
+
+  <div id="user-modal" class="key-modal hidden" role="dialog" aria-modal="true">
+    <div class="key-modal-card admin-modal-card">
+      <h2 id="user-modal-title">New user</h2>
+      <form id="user-form" class="auth-form" autocomplete="off" data-bwignore="true" data-1p-ignore data-lpignore="true">
+        <input type="hidden" id="user-id">
+        <label>Username<input id="user-username" name="ll_user_name" required autocomplete="off" data-bwignore="true" data-1p-ignore data-lpignore="true"></label>
+        <label>Display name<input id="user-display" name="ll_display_name" autocomplete="off" data-bwignore="true" data-1p-ignore data-lpignore="true"></label>
+        <label>Password<input id="user-password" name="ll_user_password" type="password" autocomplete="new-password" data-bwignore="true" data-1p-ignore data-lpignore="true"><small class="hint-copy">Leave blank when editing to keep current password.</small></label>
+        <label>Role<select id="user-role" required></select></label>
+        <label id="user-telecaller-wrap" class="telecaller-combobox-label">Linked TeleCaller name
+          <div class="telecaller-combobox">
+            <input id="user-telecaller" name="ll_telecaller_name" type="text" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="user-telecaller-list" autocomplete="off" placeholder="Type to search or enter a name" data-bwignore="true" data-1p-ignore data-lpignore="true">
+            <ul id="user-telecaller-list" class="telecaller-combobox-list hidden" role="listbox"></ul>
+          </div>
+          <small class="hint-copy">Suggestions from Bucket 1 + TeleCalling Performance. You can type a custom name.</small>
+        </label>
+        <label>Notes<textarea id="user-notes" rows="2"></textarea></label>
+        <label class="check-row"><input id="user-active" type="checkbox" checked><span>Active</span></label>
+        <label class="check-row"><input id="user-must-pw" type="checkbox"><span>Must change password on next login</span></label>
+        <div id="user-form-message" class="form-message"></div>
+        <div class="inline-actions">
+          <button type="submit" class="primary-button">Save</button>
+          <button type="button" id="user-cancel" class="text-button">Cancel</button>
+          <button type="button" id="user-delete" class="danger-button hidden">Delete</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div id="approve-modal" class="key-modal hidden" role="dialog" aria-modal="true">
+    <div class="key-modal-card admin-modal-card">
+      <h2>Approve access request</h2>
+      <p id="approve-summary" class="key-modal-copy"></p>
+      <form id="approve-form" class="auth-form" autocomplete="off" data-bwignore="true" data-1p-ignore data-lpignore="true">
+        <input type="hidden" id="approve-id">
+        <label>Username<input id="approve-username" name="ll_approve_user_name" required autocomplete="off" data-bwignore="true" data-1p-ignore data-lpignore="true"></label>
+        <label>Display name<input id="approve-display" name="ll_approve_display_name" autocomplete="off" data-bwignore="true" data-1p-ignore data-lpignore="true"></label>
+        <label>Password<input id="approve-password" name="ll_approve_password" type="password" required autocomplete="new-password" data-bwignore="true" data-1p-ignore data-lpignore="true"></label>
+        <label>Role<select id="approve-role" required></select></label>
+        <label id="approve-telecaller-wrap" class="telecaller-combobox-label">Linked TeleCaller name
+          <div class="telecaller-combobox">
+            <input id="approve-telecaller" name="ll_approve_telecaller" type="text" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="approve-telecaller-list" autocomplete="off" placeholder="Type to search or enter a name" data-bwignore="true" data-1p-ignore data-lpignore="true">
+            <ul id="approve-telecaller-list" class="telecaller-combobox-list hidden" role="listbox"></ul>
+          </div>
+          <small class="hint-copy">Suggestions from Bucket 1 + TeleCalling Performance. You can type a custom name.</small>
+        </label>
+        <label>Note<textarea id="approve-note" rows="2"></textarea></label>
+        <div id="approve-message" class="form-message"></div>
+        <div class="inline-actions">
+          <button type="submit" class="primary-button">Create user &amp; approve</button>
+          <button type="button" id="approve-cancel" class="text-button">Cancel</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div id="role-modal" class="key-modal hidden" role="dialog" aria-modal="true">
+    <div class="key-modal-card admin-modal-card role-modal-card">
+      <h2 id="role-modal-title">Edit role</h2>
+      <form id="role-form" class="auth-form">
+        <input type="hidden" id="role-id">
+        <label>Name<input id="role-name" required></label>
+        <label>Rank <small>(higher = more authority; Super = 100)</small><input id="role-rank" type="number" min="1" max="99" value="10"></label>
+        <div id="role-perms" class="role-perms"></div>
+        <div id="role-form-message" class="form-message"></div>
+        <div class="inline-actions">
+          <button type="submit" class="primary-button">Save role</button>
+          <button type="button" id="role-cancel" class="text-button">Cancel</button>
+          <button type="button" id="role-delete" class="danger-button hidden">Delete</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+  <div id="account-modal" class="key-modal hidden" role="dialog" aria-modal="true">
+    <div class="key-modal-card">
+      <p class="eyebrow">ACCOUNT</p>
+      <h2>Your profile</h2>
+      <p class="key-modal-copy">Update username or password. Linked TeleCaller is Admin-managed.</p>
+      <label>Username<input id="account-username" type="text"></label>
+      <label>Display name<input id="account-display" type="text"></label>
+      <label>Linked TeleCaller<input id="account-telecaller" type="text" disabled></label>
+      <label>Appearance
+        <select data-theme-select aria-label="Theme">
+          <option value="system">System</option>
+          <option value="light">Light</option>
+          <option value="dark">Dark</option>
+        </select>
+      </label>
+      <hr class="account-divider">
+      <p class="muted">Change password (optional)</p>
+      <label>Current password<input id="account-pw-current" type="password"></label>
+      <label>New password<input id="account-pw-new" type="password"></label>
+      <label>Confirm new password<input id="account-pw-confirm" type="password"></label>
+      <div id="account-message" class="form-message"></div>
+      <div class="inline-actions">
+        <button id="account-save" type="button" class="primary-button">Save</button>
+        <button id="account-cancel" type="button" class="text-button">Cancel</button>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

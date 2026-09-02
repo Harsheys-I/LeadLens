@@ -1,0 +1,28 @@
+# LeadLens — Apache (Hostinger)
+Options -Indexes
+
+# Deny raw config / library files
+<FilesMatch "^(config\.local\.php|config\.example\.php)$">
+  Require all denied
+</FilesMatch>
+
+<IfModule mod_rewrite.c>
+  RewriteEngine On
+
+  # Route /api/* (except install.php and existing files) through front controller
+  RewriteCond %{REQUEST_URI} ^.*/api/(.*)$ [NC]
+  RewriteCond %{REQUEST_FILENAME} !-f
+  RewriteRule ^api/(.*)$ api/index.php?r=$1 [QSA,L]
+
+  # Pretty module paths → directory index
+  RewriteCond %{REQUEST_FILENAME} !-f
+  RewriteCond %{REQUEST_FILENAME} !-d
+  RewriteRule ^TeleCallerAudit/?$ TeleCallerAudit/index.html [L]
+  RewriteRule ^DeBugMode/?$ DeBugMode/index.html [L]
+  RewriteRule ^admin/?$ admin/index.html [L]
+</IfModule>
+
+# Prefer PHP for API
+<IfModule mod_mime.c>
+  AddType application/x-httpd-php .php
+</IfModule>
