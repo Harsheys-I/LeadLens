@@ -225,6 +225,8 @@ function showView(name){
     return;
   }
   document.querySelectorAll(".view").forEach(view=>view.classList.toggle("active",view.id===`view-${name}`));
+  const activeView=document.getElementById(`view-${name}`);
+  window.llMotion?.viewEnter(activeView);
   document.querySelectorAll(".nav-item").forEach(button=>{
     const match=button.dataset.view===name;
     const visible=!button.classList.contains("hidden")&&!button.closest(".hidden");

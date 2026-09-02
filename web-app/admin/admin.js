@@ -22,6 +22,7 @@ function toast(msg){
 
 function showView(name){
   document.querySelectorAll('.view').forEach(v => v.classList.toggle('active', v.id === `view-${name}`));
+  window.llMotion?.viewEnter(document.getElementById(`view-${name}`));
   document.querySelectorAll('.nav-item').forEach(b => b.classList.toggle('active', b.dataset.view === name));
   $('page-title').textContent = titles[name] || name;
   document.querySelector('.shell').classList.remove('menu-open');
