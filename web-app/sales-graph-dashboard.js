@@ -17,6 +17,7 @@ const COLOR_VISITS = "#c4a35a";
 const COLOR_BOOKED = "#5b7c99";
 const COLOR_BOOKED_DL = "#5b7c99";
 const COLOR_BOOKED_CANCEL = "#a65d57";
+const COLOR_BOOKED_DECL = "#2a6f7a";
 
 const STATUS_DEMAND = "Demand Letter";
 const STATUS_CANCEL = "Cancel";
@@ -24,8 +25,8 @@ const STATUS_CANCEL = "Cancel";
 const TOP_N = 10;
 /** Viewport-friendly hero height (~55–70vh / 480–640px); CSS also clamps with vh. */
 const HERO_CHART_HEIGHT = 560;
-/** Fixed px width per category group (4 series) so hero bars + value labels stay readable. */
-const CATEGORY_WIDTH_PX = 68;
+/** Fixed px width per category group (5 series) so hero bars + value labels stay readable. */
+const CATEGORY_WIDTH_PX = 82;
 
 function requireChart() {
   const Chart = window.Chart;
@@ -343,6 +344,15 @@ function renderKpis(mount, payload) {
   const leads = sheetTotals(payload.leads);
   const visits = sheetTotals(payload.visits);
   const booked = sheetTotals(payload.booked);
+  const byStatus = payload.booked?.byStatus || {};
+  const demandKey = findStatusKey(byStatus, STATUS_DEMAND);
+  const cancelKey = findStatusKey(byStatus, STATUS_CANCEL);
+  const demandTotal = bucketTotal(byStatus[demandKey]);
+  const cancelTotal = bucketTotal(byStatus[cancelKey]);
+  const leadDecl =
+    payload.booked?.leadDeclaration?.total != null
+      ? Number(payload.booked.leadDeclaration.total) || 0
+      : demandTotal + cancelTotal;
   const visitRate = leads.grand > 0 ? visits.grand / leads.grand : null;
   const bookedVisitRate = visits.grand > 0 ? booked.grand / visits.grand : null;
   const bookedLeadRate = leads.grand > 0 ? booked.grand / leads.grand : null;
@@ -351,6 +361,9 @@ function renderKpis(mount, payload) {
     ["Total Leads", num(leads.grand)],
     ["Total Visits", num(visits.grand)],
     ["Total Booked", num(booked.grand)],
+    ["Demand Letter", num(demandTotal)],
+    ["Cancel", num(cancelTotal)],
+    ["Lead Declaration", num(leadDecl)],
     ["Visits / Leads", visitRate == null ? "—" : pct(visitRate)],
     ["Booked / Visits", bookedVisitRate == null ? "—" : pct(bookedVisitRate)],
     ["Booked / Leads", bookedLeadRate == null ? "—" : pct(bookedLeadRate)],
@@ -408,12 +421,23 @@ function findStatusKey(byStatus, wanted) {
   return keys.find(k => String(k).toLowerCase() === lower) || wanted;
 }
 
-function lvbSplitBarDatasets(leadsData, visitsData, demandData, cancelData) {
+/** Element-wise sum of parallel series (e.g. Demand Letter + Cancel → Lead Declaration). */
+function zipSum(...seriesList) {
+  const len = Math.max(0, ...seriesList.map(s => (s || []).length));
+  const out = new Array(len).fill(0);
+  for (const series of seriesList) {
+    for (let i = 0; i < len; i++) out[i] += Number(series?.[i]) || 0;
+  }
+  return out;
+}
+
+function lvbSplitBarDatasets(leadsData, visitsData, demandData, cancelData, declarationData) {
   return [
     {label: "Leads", data: leadsData, backgroundColor: COLOR_LEADS, borderRadius: 4, maxBarThickness: 28, yAxisID: "y"},
     {label: "Visits", data: visitsData, backgroundColor: COLOR_VISITS, borderRadius: 4, maxBarThickness: 28, yAxisID: "y"},
     {label: "Booked · Demand Letter", data: demandData, backgroundColor: COLOR_BOOKED_DL, borderRadius: 4, maxBarThickness: 28, yAxisID: "y1"},
     {label: "Booked · Cancel", data: cancelData, backgroundColor: COLOR_BOOKED_CANCEL, borderRadius: 4, maxBarThickness: 28, yAxisID: "y1"},
+    {label: "Booked · Lead Declaration", data: declarationData, backgroundColor: COLOR_BOOKED_DECL, borderRadius: 4, maxBarThickness: 28, yAxisID: "y1"},
   ];
 }
 
@@ -896,13 +920,16 @@ function renderChartsGallery(mount, payload) {
     "Leads vs Visits vs Booked by month",
     (state) => {
       const ms = filteredMonths(months, state);
+      const demand = bookedStatusByMonths(booked, STATUS_DEMAND, ms, state);
+      const cancel = bookedStatusByMonths(booked, STATUS_CANCEL, ms, state);
       return {
         labels: ms.map(formatMonth),
         datasets: lvbSplitBarDatasets(
           sumSheetByMonths(leads, ms, state),
           sumSheetByMonths(visits, ms, state),
-          bookedStatusByMonths(booked, STATUS_DEMAND, ms, state),
-          bookedStatusByMonths(booked, STATUS_CANCEL, ms, state)
+          demand,
+          cancel,
+          zipSum(demand, cancel)
         ),
       };
     },
@@ -920,13 +947,16 @@ function renderChartsGallery(mount, payload) {
     (state) => {
       const ms = filteredMonths(months, state);
       const names = filterDimNames(projectKeys, state, "project");
+      const demand = bookedStatusByDim(booked, STATUS_DEMAND, names, "project", ms, state);
+      const cancel = bookedStatusByDim(booked, STATUS_CANCEL, names, "project", ms, state);
       return {
         labels: names,
         datasets: lvbSplitBarDatasets(
           sumSheetByDim(leads, names, "project", ms, state),
           sumSheetByDim(visits, names, "project", ms, state),
-          bookedStatusByDim(booked, STATUS_DEMAND, names, "project", ms, state),
-          bookedStatusByDim(booked, STATUS_CANCEL, names, "project", ms, state)
+          demand,
+          cancel,
+          zipSum(demand, cancel)
         ),
       };
     },
@@ -977,13 +1007,16 @@ function renderChartsGallery(mount, payload) {
     (state) => {
       const ms = filteredMonths(months, state);
       const names = filterDimNames(sourceKeys, state, "source");
+      const demand = bookedStatusByDim(booked, STATUS_DEMAND, names, "source", ms, state);
+      const cancel = bookedStatusByDim(booked, STATUS_CANCEL, names, "source", ms, state);
       return {
         labels: names,
         datasets: lvbSplitBarDatasets(
           sumSheetByDim(leads, names, "source", ms, state),
           sumSheetByDim(visits, names, "source", ms, state),
-          bookedStatusByDim(booked, STATUS_DEMAND, names, "source", ms, state),
-          bookedStatusByDim(booked, STATUS_CANCEL, names, "source", ms, state)
+          demand,
+          cancel,
+          zipSum(demand, cancel)
         ),
       };
     },
@@ -1025,7 +1058,7 @@ function renderChartsGallery(mount, payload) {
   // —— Booked status ——
   if (booked.byStatus && Object.keys(booked.byStatus).length) {
     const statusKeys = sortedKeysByTotal(booked.byStatus);
-    const statusSec = makeSection("Booked by status", "Demand Letter vs Cancel (and other statuses)");
+    const statusSec = makeSection("Booked by status", "Demand Letter, Cancel, Lead Declaration (= DL + Cancel)");
     const statusGrid = el("div", "dashboard-charts sg-chart-grid");
     mountDoughnut(
       statusGrid, "sg-pie-booked-status",
@@ -1196,6 +1229,35 @@ function monthVal(sheet, m) {
   return Number(sheet?.byMonth?.[m] || sheet?.totals?.byMonth?.[m] || 0);
 }
 
+function statusMonthVal(booked, statusLabel, m) {
+  const key = findStatusKey(booked?.byStatus, statusLabel);
+  return Number(booked?.byStatus?.[key]?.byMonth?.[m] || 0);
+}
+
+function statusDimTotal(booked, statusLabel, dimKind, name) {
+  const key = findStatusKey(booked?.byStatus, statusLabel);
+  const nested = dimKind === "project"
+    ? booked?.byStatus?.[key]?.byProject
+    : booked?.byStatus?.[key]?.bySource;
+  return bucketTotal(nested?.[name]);
+}
+
+function leadDeclarationMonthVal(booked, m) {
+  if (booked?.leadDeclaration?.byMonth?.[m] != null) {
+    return Number(booked.leadDeclaration.byMonth[m]) || 0;
+  }
+  return statusMonthVal(booked, STATUS_DEMAND, m) + statusMonthVal(booked, STATUS_CANCEL, m);
+}
+
+function leadDeclarationDimTotal(booked, dimKind, name) {
+  const nested = dimKind === "project"
+    ? booked?.leadDeclaration?.byProject
+    : booked?.leadDeclaration?.bySource;
+  if (nested?.[name]) return bucketTotal(nested[name]);
+  return statusDimTotal(booked, STATUS_DEMAND, dimKind, name)
+    + statusDimTotal(booked, STATUS_CANCEL, dimKind, name);
+}
+
 function renderTables(mount, payload) {
   const section = makeSection("Tables", "Sortable breakdowns by month, project, source, and status");
   const tabs = el("div", "sg-table-tabs", null);
@@ -1214,18 +1276,21 @@ function renderTables(mount, payload) {
           const L = monthVal(leads, m);
           const V = monthVal(visits, m);
           const B = monthVal(booked, m);
+          const DL = statusMonthVal(booked, STATUS_DEMAND, m);
+          const CX = statusMonthVal(booked, STATUS_CANCEL, m);
+          const LD = leadDeclarationMonthVal(booked, m);
           return [
             formatMonth(m),
-            L, V, B,
+            L, V, B, DL, CX, LD,
             Number(((L > 0 ? V / L : 0) * 100).toFixed(2)),
             Number(((V > 0 ? B / V : 0) * 100).toFixed(2)),
             Number(((L > 0 ? B / L : 0) * 100).toFixed(2)),
           ];
         });
         return sortableTable(
-          ["Month", "Leads", "Visits", "Booked", "V/L %", "B/V %", "B/L %"],
+          ["Month", "Leads", "Visits", "Booked", "Demand Letter", "Cancel", "Lead Declaration", "V/L %", "B/V %", "B/L %"],
           rows,
-          {numericCols: new Set([1, 2, 3, 4, 5, 6])}
+          {numericCols: new Set([1, 2, 3, 4, 5, 6, 7, 8, 9])}
         );
       },
     },
@@ -1243,11 +1308,14 @@ function renderTables(mount, payload) {
           bucketTotal(leads.byProject?.[n]),
           bucketTotal(visits.byProject?.[n]),
           bucketTotal(booked.byProject?.[n]),
+          statusDimTotal(booked, STATUS_DEMAND, "project", n),
+          statusDimTotal(booked, STATUS_CANCEL, "project", n),
+          leadDeclarationDimTotal(booked, "project", n),
         ]);
         return sortableTable(
-          ["Project", "Leads", "Visits", "Booked"],
+          ["Project", "Leads", "Visits", "Booked", "Demand Letter", "Cancel", "Lead Declaration"],
           rows,
-          {numericCols: new Set([1, 2, 3])}
+          {numericCols: new Set([1, 2, 3, 4, 5, 6])}
         );
       },
     },
@@ -1265,11 +1333,14 @@ function renderTables(mount, payload) {
           bucketTotal(leads.bySource?.[n]),
           bucketTotal(visits.bySource?.[n]),
           bucketTotal(booked.bySource?.[n]),
+          statusDimTotal(booked, STATUS_DEMAND, "source", n),
+          statusDimTotal(booked, STATUS_CANCEL, "source", n),
+          leadDeclarationDimTotal(booked, "source", n),
         ]);
         return sortableTable(
-          ["Source", "Leads", "Visits", "Booked"],
+          ["Source", "Leads", "Visits", "Booked", "Demand Letter", "Cancel", "Lead Declaration"],
           rows,
-          {numericCols: new Set([1, 2, 3])}
+          {numericCols: new Set([1, 2, 3, 4, 5, 6])}
         );
       },
     },
@@ -1279,6 +1350,12 @@ function renderTables(mount, payload) {
       build() {
         const names = Object.keys(booked.byStatus || {}).sort();
         const rows = names.map(n => [n, bucketTotal(booked.byStatus?.[n])]);
+        const leadDecl =
+          booked.leadDeclaration?.total != null
+            ? Number(booked.leadDeclaration.total) || 0
+            : bucketTotal(booked.byStatus?.[findStatusKey(booked.byStatus, STATUS_DEMAND)])
+              + bucketTotal(booked.byStatus?.[findStatusKey(booked.byStatus, STATUS_CANCEL)]);
+        rows.push(["Lead Declaration (Demand Letter + Cancel)", leadDecl]);
         return sortableTable(
           ["Status", "Booked"],
           rows,

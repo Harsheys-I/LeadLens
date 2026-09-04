@@ -1,5 +1,5 @@
 {
-  "version": "6.0.8.dev",
+  "version": "6.0.9.dev",
   "name": "GPP AI",
-  "notes": "v6.0.8.dev: Fix Hostinger /dev sync skipping same-size version bumps; harden Hard reload cache nuke."
+  "notes": "v6.0.9.dev: Sales Graph Lead Declaration (= Demand Letter + Cancel) in KPIs, hero charts, and tables."
 }

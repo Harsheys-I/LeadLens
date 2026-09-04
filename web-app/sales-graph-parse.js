@@ -9,10 +9,14 @@
  * - Data from row index 2; forward-fill Project Name + Source + Source Name;
  *   blank→0; skip Project Name === "Totals"; Meta-normalize Source Name.
  * - Booked adds Status (per-row; not forward-filled) and byStatus aggregates.
+ * - Booked also exposes leadDeclaration = Demand Letter + Cancel
+ *   ({ total, byMonth, byProject, bySource }).
  */
 
 const MONTH_RE = /^\d{6}$/;
 const DIM_LABELS = new Set(["project name", "source", "source name", "status"]);
+const STATUS_DEMAND = "Demand Letter";
+const STATUS_CANCEL = "Cancel";
 
 export function normalizeSourceName(raw) {
   const name = String(raw ?? "").trim();
@@ -128,6 +132,62 @@ function bumpBucket(map, key, monthsObj, monthKeys) {
   }
   map[name].total += rowSum;
   return rowSum;
+}
+
+function findStatusBucket(byStatus, wanted) {
+  const keys = Object.keys(byStatus || {});
+  const lower = String(wanted || "").toLowerCase();
+  const key = keys.find(k => String(k).toLowerCase() === lower);
+  return key ? byStatus[key] : null;
+}
+
+function ensureDimEntry(map, name, months) {
+  if (!map[name]) {
+    map[name] = {total: 0, byMonth: {}};
+    for (const m of months) map[name].byMonth[m] = 0;
+  }
+  return map[name];
+}
+
+/**
+ * Lead Declaration = Demand Letter + Cancel (sum of the two Booked statuses).
+ * Shape mirrors a status bucket: { total, byMonth, byProject, bySource }.
+ */
+export function computeLeadDeclaration(byStatus, months = []) {
+  const monthKeys = months.length
+    ? months
+    : [...new Set([
+        ...Object.keys(findStatusBucket(byStatus, STATUS_DEMAND)?.byMonth || {}),
+        ...Object.keys(findStatusBucket(byStatus, STATUS_CANCEL)?.byMonth || {}),
+      ])].sort((a, b) => a.localeCompare(b));
+
+  const out = {
+    total: 0,
+    byMonth: {},
+    byProject: {},
+    bySource: {},
+  };
+  for (const m of monthKeys) out.byMonth[m] = 0;
+
+  for (const wanted of [STATUS_DEMAND, STATUS_CANCEL]) {
+    const bucket = findStatusBucket(byStatus, wanted);
+    if (!bucket) continue;
+    out.total += Number(bucket.total) || 0;
+    for (const m of monthKeys) {
+      out.byMonth[m] += Number(bucket.byMonth?.[m] || 0);
+    }
+    for (const kind of ["byProject", "bySource"]) {
+      const src = bucket[kind] || {};
+      for (const [name, entry] of Object.entries(src)) {
+        const dest = ensureDimEntry(out[kind], name, monthKeys);
+        dest.total += Number(entry.total) || 0;
+        for (const m of monthKeys) {
+          dest.byMonth[m] += Number(entry.byMonth?.[m] || 0);
+        }
+      }
+    }
+  }
+  return out;
 }
 
 /**
@@ -306,7 +366,10 @@ export function parseSalesGraphSheet(buffer, opts = {}) {
     byProject: agg.byProject,
     bySource: agg.bySource,
   };
-  if (hasStatus) result.byStatus = agg.byStatus;
+  if (hasStatus) {
+    result.byStatus = agg.byStatus;
+    result.leadDeclaration = computeLeadDeclaration(agg.byStatus, monthsOrdered);
+  }
   return result;
 }
 
@@ -320,6 +383,7 @@ function sheetPayload(parsed) {
     rows: parsed.rows,
   };
   if (parsed.byStatus) out.byStatus = parsed.byStatus;
+  if (parsed.leadDeclaration) out.leadDeclaration = parsed.leadDeclaration;
   return out;
 }
 
