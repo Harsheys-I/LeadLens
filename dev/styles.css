@@ -638,6 +638,50 @@ body .perf-chart-block h4{margin:0;font-size:14px;color:var(--ink)}
   body .perf-upload-grid{grid-template-columns:1fr}
   body .perf-chart-wrap{height:200px}
 }
+
+/* —— Sales Graph —— */
+body .sg-upload-grid{grid-template-columns:repeat(3,minmax(0,1fr))}
+body .drop-zone-disabled,body .drop-zone[aria-disabled="true"]{
+  opacity:.55;cursor:not-allowed;pointer-events:auto;background:var(--soft-2)
+}
+body .drop-zone-disabled:hover,body .drop-zone[aria-disabled="true"]:hover{border-color:var(--line)}
+body .drop-zone-disabled.dragover{border-color:var(--line);background:var(--soft-2)}
+body .sg-kpis{margin:8px 0 12px}
+body .sg-kpi-disabled{opacity:.55}
+body .sg-booked-callout{
+  margin:0 0 18px;padding:10px 14px;border:1px dashed var(--line);border-radius:10px;
+  color:var(--muted);font-size:13px;background:var(--soft-2)
+}
+body .sg-preview-banner,body .sg-meta-line{margin:0 0 12px;color:var(--muted);font-size:13px}
+body .sg-section{display:grid;gap:14px;margin:22px 0 0}
+body .sg-section-head h3{margin:0;font-size:16px;color:var(--green-2)}
+body .sg-section-sub{margin:4px 0 0;color:var(--muted);font-size:13px}
+body .sg-chart-grid{margin-top:4px}
+body .sg-heatmap-block{display:grid;gap:10px;margin-top:8px}
+body .sg-heatmap-block h4{margin:0;font-size:14px;color:var(--ink)}
+body .sg-heatmap-wrap{overflow:auto;border:1px solid var(--line);border-radius:12px;background:var(--soft-2)}
+body .sg-heatmap{width:100%;border-collapse:collapse;font-size:12px;font-variant-numeric:tabular-nums}
+body .sg-heatmap th,body .sg-heatmap td{padding:8px 10px;border-bottom:1px solid var(--line);text-align:right;white-space:nowrap}
+body .sg-heatmap thead th{background:var(--soft-4);color:var(--green-2);font-size:11px;font-weight:700}
+body .sg-heatmap tbody th{text-align:left;font-weight:650;position:sticky;left:0;background:var(--input-bg);color:var(--ink)}
+body .sg-heatmap-legend{display:flex;align-items:center;gap:10px;font-size:12px;color:var(--muted)}
+body .sg-heatmap-scale{
+  flex:1;max-width:180px;height:10px;border-radius:999px;
+  background:linear-gradient(90deg,rgb(232,240,228),rgb(52,150,88))
+}
+body .sg-table-tabs{display:flex;flex-wrap:wrap;gap:8px;margin:4px 0 12px;border-bottom:1px solid var(--line);padding-bottom:10px}
+body .sg-table-tab{border:0;background:transparent;color:var(--muted);padding:8px 14px;border-radius:8px;font-weight:650;cursor:pointer}
+body .sg-table-tab:hover{background:var(--soft-4);color:var(--green-2)}
+body .sg-table-tab.active{background:var(--mint);color:var(--green-2)}
+body .sg-sortable{cursor:pointer;user-select:none}
+body .sg-sortable:hover{color:var(--green-2)}
+@media(max-width:1100px){
+  body .sg-upload-grid{grid-template-columns:1fr 1fr}
+}
+@media(max-width:850px){
+  body .sg-upload-grid{grid-template-columns:1fr}
+}
+
 .auth-theme-bar{position:fixed;bottom:16px;right:16px;z-index:5;font-size:13px;color:var(--muted)}
 .auth-theme-bar label{display:inline-flex;align-items:center;gap:8px}
 .auth-theme-bar select{min-width:7.5rem}

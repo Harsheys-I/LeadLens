@@ -161,6 +161,18 @@ function ll_install_run(): void
     CONSTRAINT fk_perf_pub_user FOREIGN KEY (uploaded_by) REFERENCES users(id) ON DELETE SET NULL
   ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
 
+  $pdo->exec("CREATE TABLE IF NOT EXISTS sales_graph_published (
+    id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    title VARCHAR(200) NOT NULL DEFAULT '',
+    payload LONGTEXT NOT NULL,
+    meta JSON NULL,
+    uploaded_by INT UNSIGNED NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    KEY idx_sg_pub_uploaded (uploaded_by),
+    CONSTRAINT fk_sg_pub_user FOREIGN KEY (uploaded_by) REFERENCES users(id) ON DELETE SET NULL
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+
   $roles = [
     ['Super User', 'super', 100, ll_default_role_permissions('super'), 1],
     ['Admin', 'admin', 50, ll_default_role_permissions('admin'), 1],

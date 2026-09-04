@@ -7,6 +7,7 @@ function ll_permission_catalog(): array
 {
   return [
     ['id' => 'module.telecaller_audit', 'label' => 'Module · LeadLens', 'group' => 'Modules'],
+    ['id' => 'module.sales_graph', 'label' => 'Module · Sales Graph', 'group' => 'Modules'],
     ['id' => 'module.admin', 'label' => 'Module · Admin', 'group' => 'Modules'],
     ['id' => 'module.crm', 'label' => 'Module · CRM (coming soon)', 'group' => 'Modules'],
     ['id' => 'module.hr', 'label' => 'Module · HR (coming soon)', 'group' => 'Modules'],
@@ -23,6 +24,9 @@ function ll_permission_catalog(): array
     ['id' => 'telecaller.perf_dashboard', 'label' => 'LeadLens · Performance Dashboard', 'group' => 'LeadLens'],
     ['id' => 'telecaller.perf_upload', 'label' => 'LeadLens · Upload Performance Dashboard', 'group' => 'LeadLens'],
     ['id' => 'telecaller.perf_settings', 'label' => 'LeadLens · Performance Settings', 'group' => 'LeadLens'],
+    ['id' => 'sales_graph.upload', 'label' => 'Sales Graph · Upload / create preview', 'group' => 'Sales Graph'],
+    ['id' => 'sales_graph.publish', 'label' => 'Sales Graph · Publish to MySQL', 'group' => 'Sales Graph'],
+    ['id' => 'sales_graph.dashboard', 'label' => 'Sales Graph · View published dashboard', 'group' => 'Sales Graph'],
     ['id' => 'dashboards.view_all', 'label' => 'Dashboards · View all TeleCallers', 'group' => 'Dashboards'],
   ];
 }

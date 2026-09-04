@@ -1,13 +1,13 @@
-import {APP_VERSION,DEFAULT_SETTINGS,DEFAULT_OUTPUT_FIELDS,SETTINGS_SEED,MAX_BATCH_SIZE,MAX_CONCURRENCY,normalizeSettings,normalizeInputFields,slugFieldId,parseWorkbook,parseAuditedWorkbook,auditBatch,downloadWorkbook,downloadReviewPack,downloadReviewPdf,splitLeadsByTelecaller,splitResultsByTelecaller,validateApiKey,HIGH_SEVERITY_ERRORS,SERVER_API_KEY} from "./audit.js?v=5.7";
-import {getJob,getJobs,loadSettings,saveSettings,getApiKey,apiKeyIsRemembered,saveApiKey,forgetApiKey,setStorageUserId,storageKey} from "./db.js?v=5.4";
-import {renderReviewDashboard,destroyReviewDashboard} from "./dashboard-view.js?v=5.5";
-import {requireAuth,logout,hasPermission,getUser,changePassword,updateProfile} from "./auth.js?v=5.7";
-import {DashboardApi,SettingsApi} from "./api-client.js?v=5.7";
-import {mountNotifications} from "./notifications-ui.js?v=5.7";
-import {persistJob,removeJobSynced,clearJobsSynced,pullJobsFromServer} from "./jobs-sync.js?v=5.7";
-import {mountPerfReportUpload,mountPerfPublishedDashboard,refreshPerfPublished} from "./perf-dashboard.js?v=5.8";
-import {appUrl, homePath} from "./app-base.js?v=5.7";
-import {initTheme} from "./theme.js?v=5.6";
+import {APP_VERSION,DEFAULT_SETTINGS,DEFAULT_OUTPUT_FIELDS,SETTINGS_SEED,MAX_BATCH_SIZE,MAX_CONCURRENCY,normalizeSettings,normalizeInputFields,slugFieldId,parseWorkbook,parseAuditedWorkbook,auditBatch,downloadWorkbook,downloadReviewPack,downloadReviewPdf,splitLeadsByTelecaller,splitResultsByTelecaller,validateApiKey,HIGH_SEVERITY_ERRORS,SERVER_API_KEY} from "./audit.js?v=6.0.0.dev";
+import {getJob,getJobs,loadSettings,saveSettings,getApiKey,apiKeyIsRemembered,saveApiKey,forgetApiKey,setStorageUserId,storageKey} from "./db.js?v=6.0.0.dev";
+import {renderReviewDashboard,destroyReviewDashboard} from "./dashboard-view.js?v=6.0.0.dev";
+import {requireAuth,logout,hasPermission,getUser,changePassword,updateProfile} from "./auth.js?v=6.0.0.dev";
+import {DashboardApi,SettingsApi} from "./api-client.js?v=6.0.0.dev";
+import {mountNotifications} from "./notifications-ui.js?v=6.0.0.dev";
+import {persistJob,removeJobSynced,clearJobsSynced,pullJobsFromServer} from "./jobs-sync.js?v=6.0.0.dev";
+import {mountPerfReportUpload,mountPerfPublishedDashboard,refreshPerfPublished} from "./perf-dashboard.js?v=6.0.0.dev";
+import {appUrl, homePath} from "./app-base.js?v=6.0.0.dev";
+import {initTheme} from "./theme.js?v=6.0.0.dev";
 
 const $=id=>document.getElementById(id);
 const ids=["page-title","key-state","run-name","pause-run","download-result","progress-label","progress-percent","progress-bar","metric-leads","metric-excel-rows","metric-calls","metric-batch","metric-completed","metric-status","metric-input-tokens","metric-cached-tokens","metric-output-tokens","metric-duration","metric-cost","live-log","clear-console","history-list","clear-history","api-key","remember-key","toggle-key","save-key","forget-key","key-message","batch-size","concurrency","model","input-field-config","add-input-field","ai-field-config","output-field-config","yes-values","no-values","input-price","cached-price","output-price","save-settings","reset-settings","settings-message","toast","mobile-menu","active-job-switch","sort-field","sort-direction","app-version","export-settings","import-settings","import-settings-file","update-banner","update-banner-text","reload-app","key-modal","onboard-key","onboard-toggle","onboard-remember","onboard-message","onboard-save","onboard-skip","sidebar-version","sidebar-notes","review-drop-zone","review-file-input","review-drop-hint","review-file-list","review-validation","start-review","review-run-panel","review-aggregate","review-cards","review-dashboard-panel","review-dashboard-mount","download-review-excel","review-open-console","review-precounts","review-live-progress","review-progress-label","review-progress-percent","review-progress-bar","review-post-actions","create-review-dashboard","export-dashboard-pdf","upload-dashboard-btn","upload-dashboard-modal","upload-telecaller-list","upload-dash-message","upload-dash-confirm","upload-dash-cancel","published-list","refresh-published","published-dashboard-panel","published-dash-title","published-dash-meta","published-dash-actions","published-dashboard-mount","shell-user-label","shell-logout","shell-account"];
