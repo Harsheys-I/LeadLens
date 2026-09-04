@@ -27,6 +27,14 @@
         <button class="nav-item" data-view="settings"><span>⚙</span>Settings</button>
       </nav>
       <div class="privacy-note"><strong id="sidebar-version">v5.2.10</strong><span id="sidebar-notes">DeBug Mode — Error Focus Lab. Per-error prompts + CSV batches + Structured Outputs.</span></div>
+      <!-- #region agent log -->
+      <script>
+      (function(){
+        var el=document.getElementById("sidebar-version");
+        fetch("http://127.0.0.1:7564/ingest/5981bb77-f08e-4f6c-995e-18d8279225fc",{method:"POST",headers:{"Content-Type":"application/json","X-Debug-Session-Id":"7f7e03"},body:JSON.stringify({sessionId:"7f7e03",runId:"pre-fix",hypothesisId:"A",location:"DeBugMode/index.html:sidebar",message:"HTML paint: DeBug sidebar version before JS",data:{sidebarVersion:el&&el.textContent,t:performance.now()},timestamp:Date.now()})}).catch(function(){});
+      })();
+      </script>
+      <!-- #endregion -->
     </aside>
 
     <main>
