@@ -656,28 +656,38 @@ body .sg-preview-banner,body .sg-meta-line{margin:0 0 12px;color:var(--muted);fo
 body .sg-section{display:grid;gap:14px;margin:22px 0 0}
 body .sg-section-head h3{margin:0;font-size:16px;color:var(--green-2)}
 body .sg-section-sub{margin:4px 0 0;color:var(--muted);font-size:13px}
-body .sg-chart-grid{margin-top:4px}
-body .sg-chart-card--hero{grid-column:1/-1}
-body .sg-chart-card.dashboard-chart-card{overflow:visible}
-body .sg-chart-scroll{
-  width:100%;max-width:100%;overflow-x:auto;overflow-y:hidden;
-  -webkit-overflow-scrolling:touch;border-radius:8px
+body .sg-chart-grid{margin-top:4px;min-width:0;max-width:100%}
+body .sg-chart-card--hero{
+  grid-column:1/-1;min-width:0;max-width:100%;width:100%;
+  /* visible so slicer dropdowns escape; scrollport below clips chart width */
+  overflow:visible
 }
+body .sg-chart-card:not(.sg-chart-card--hero){overflow:hidden}
+/* Slicers stay outside the scrollport (no horizontal page growth). */
+body .sg-chart-slicers,body .sg-slicer-bar{
+  display:flex;flex-wrap:wrap;gap:8px;align-items:flex-start;
+  margin:0 0 4px;padding:0;max-width:100%;min-width:0;overflow:visible
+}
+/* Inner scrollport only — width constrained to card content box. */
+body .sg-chart-scroll{
+  display:block;box-sizing:border-box;
+  width:100%;max-width:100%;min-width:0;
+  overflow-x:auto;overflow-y:hidden;
+  overscroll-behavior-x:contain;overscroll-behavior-y:contain;
+  -webkit-overflow-scrolling:touch;
+  border-radius:8px
+}
+body .sg-chart-card--hero .sg-chart-scroll{height:1200px}
 body .sg-chart-scroll .dashboard-chart-canvas{
-  height:1200px;max-width:none;overflow:visible
+  height:100%;width:100%;max-width:none;min-width:0;overflow:hidden
 }
 body .sg-chart-scroll .dashboard-chart-canvas canvas{
-  max-width:none!important;width:100%!important;height:100%!important
+  max-width:none!important;width:100%!important;height:100%!important;display:block
 }
-body .sg-chart-card--hero .sg-chart-scroll .dashboard-chart-canvas{height:1200px}
-body .sg-chart-card:not(.sg-chart-card--hero) .sg-chart-scroll .dashboard-chart-canvas{height:300px}
 @media(max-width:850px){
+  body .sg-chart-card--hero .sg-chart-scroll{height:720px}
   body .sg-chart-card--hero .sg-chart-scroll .dashboard-chart-canvas,
   body .sg-chart-card--hero .dashboard-chart-canvas{height:720px}
-}
-body .sg-slicer-bar{
-  display:flex;flex-wrap:wrap;gap:8px;align-items:flex-start;
-  margin:0 0 4px;padding:0
 }
 body .sg-slicer{position:relative;font-size:12px}
 body .sg-slicer-summary{
@@ -712,7 +722,8 @@ body .sg-slicer-month select{
   border:1px solid var(--line);border-radius:8px;background:var(--input-bg);color:var(--ink);
   padding:5px 8px;font-size:12px;font-weight:600;max-width:140px
 }
-body .sg-heatmap-block .sg-slicer-bar{margin:4px 0 8px}
+body .sg-heatmap-block .sg-slicer-bar,
+body .sg-heatmap-block .sg-chart-slicers{margin:4px 0 8px}
 body .sg-heatmap-block{display:grid;gap:10px;margin-top:8px}
 body .sg-heatmap-block h4{margin:0;font-size:14px;color:var(--ink)}
 body .sg-heatmap-wrap{overflow:auto;border:1px solid var(--line);border-radius:12px;background:var(--soft-2)}
