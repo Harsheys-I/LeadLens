@@ -1,5 +1,5 @@
 {
-  "version": "6.0.1.dev",
+  "version": "6.0.2.dev",
   "name": "GPP AI",
-  "notes": "v6.0.1.dev: Sales Graph Booked Excel — Status dimension, Meta normalize, funnel KPIs/charts (Booked/Visits, Booked/Leads), Leads+Visits+Booked required to publish."
+  "notes": "v6.0.2.dev: Sales Graph heatmap contrast — luminance-based cell text + dark-mode green scale."
 }

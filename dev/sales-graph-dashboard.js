@@ -311,12 +311,37 @@ function addHorizontalBar(grid, id, title, labels, values, color = COLOR_LEADS) 
   });
 }
 
-function heatmapColor(t) {
-  // t 0..1 → soft mint → deep green
-  const r = Math.round(232 - t * 180);
-  const g = Math.round(240 - t * 90);
-  const b = Math.round(228 - t * 140);
-  return `rgb(${r},${g},${b})`;
+function isDarkTheme() {
+  return document.documentElement.getAttribute("data-theme") === "dark";
+}
+
+/** @returns {{r:number,g:number,b:number}} */
+function heatmapRgb(t) {
+  t = Math.max(0, Math.min(1, Number(t) || 0));
+  if (isDarkTheme()) {
+    // Deep forest → bright green (never near-white; stays readable on dark UI)
+    return {
+      r: Math.round(14 + t * 58),
+      g: Math.round(42 + t * 158),
+      b: Math.round(32 + t * 88),
+    };
+  }
+  // Soft mint → deep green
+  return {
+    r: Math.round(232 - t * 180),
+    g: Math.round(240 - t * 90),
+    b: Math.round(228 - t * 140),
+  };
+}
+
+/** Dark text on light cells, light text on dark — independent of theme --ink. */
+function contrastOnRgb(r, g, b) {
+  const lin = (c) => {
+    const s = c / 255;
+    return s <= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4;
+  };
+  const L = 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b);
+  return L > 0.42 ? "#17211d" : "#ffffff";
 }
 
 function renderHeatmap(mount, title, projects, months, matrix, maxVal) {
@@ -343,9 +368,9 @@ function renderHeatmap(mount, title, projects, months, matrix, maxVal) {
     for (let j = 0; j < months.length; j++) {
       const v = matrix[i][j] || 0;
       const td = el("td", null, num(v));
-      const t = v / denom;
-      td.style.background = heatmapColor(t);
-      td.style.color = t > 0.55 ? "#fff" : inkColor();
+      const rgb = heatmapRgb(v / denom);
+      td.style.background = `rgb(${rgb.r},${rgb.g},${rgb.b})`;
+      td.style.color = contrastOnRgb(rgb.r, rgb.g, rgb.b);
       td.title = `${projects[i]} · ${formatMonth(months[j])}: ${num(v)}`;
       tr.append(td);
     }
