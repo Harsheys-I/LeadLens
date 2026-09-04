@@ -57,8 +57,9 @@ function ll_route_sales_graph(string $action, ?int $id): void
     }
     $leads = is_array($payloadIn['leads'] ?? null) ? $payloadIn['leads'] : null;
     $visits = is_array($payloadIn['visits'] ?? null) ? $payloadIn['visits'] : null;
-    if (!$leads || !$visits) {
-      ll_error('payload.leads and payload.visits are required');
+    $booked = is_array($payloadIn['booked'] ?? null) ? $payloadIn['booked'] : null;
+    if (!$leads || !$visits || !$booked) {
+      ll_error('payload.leads, payload.visits, and payload.booked are required');
     }
 
     $title = trim((string) ($body['title'] ?? $payloadIn['title'] ?? 'Sales Graph'));
@@ -72,7 +73,7 @@ function ll_route_sales_graph(string $action, ?int $id): void
       'months' => is_array($payloadIn['months'] ?? null) ? array_values($payloadIn['months']) : [],
       'leads' => $leads,
       'visits' => $visits,
-      'booked' => $payloadIn['booked'] ?? null,
+      'booked' => $booked,
     ];
     $payloadJson = json_encode($payload, JSON_UNESCAPED_UNICODE);
     if ($payloadJson === false) {
@@ -85,6 +86,7 @@ function ll_route_sales_graph(string $action, ?int $id): void
       'replaced' => true,
       'leads_file' => (string) ($leads['fileName'] ?? ''),
       'visits_file' => (string) ($visits['fileName'] ?? ''),
+      'booked_file' => (string) ($booked['fileName'] ?? ''),
     ];
     if (isset($body['meta']) && is_array($body['meta'])) {
       $meta = array_merge($meta, $body['meta']);

@@ -7,13 +7,13 @@
   <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#0f2d22">
   <meta name="description" content="GPP AI Sales Graph">
   <title>GPP AI · Sales Graph</title>
-  <script src="../theme-boot.js?v=6.0.0.dev"></script>
-  <script src="../motion.js?v=6.0.0.dev"></script>
+  <script src="../theme-boot.js?v=6.0.1.dev"></script>
+  <script src="../motion.js?v=6.0.1.dev"></script>
   <link rel="manifest" href="../manifest.webmanifest">
-  <link rel="stylesheet" href="../styles.css?v=6.0.0.dev">
+  <link rel="stylesheet" href="../styles.css?v=6.0.1.dev">
   <script defer src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
-  <script type="module" src="../sales-graph.js?v=6.0.0.dev"></script>
+  <script type="module" src="../sales-graph.js?v=6.0.1.dev"></script>
 </head>
 <body>
   <div id="update-banner" class="update-banner hidden" role="status">
@@ -27,7 +27,7 @@
         <button class="nav-item active" data-view="upload" data-perm="sales_graph.upload"><span>⇧</span>Upload</button>
         <button class="nav-item" data-view="dashboard" data-perm="sales_graph.dashboard"><span>▦</span>Dashboard</button>
       </nav>
-      <div class="privacy-note"><strong id="sidebar-version">v6.0.0.dev</strong><span id="sidebar-notes">v6.0.0.dev: Sales Graph module — Leads/Visits Excel upload, MySQL publish, multi-chart gallery.</span></div>
+      <div class="privacy-note"><strong id="sidebar-version">v6.0.1.dev</strong><span id="sidebar-notes">v6.0.1.dev: Sales Graph Booked Excel — Status dim, funnel KPIs/charts, all three sheets required to publish.</span></div>
     </aside>
 
     <main>
@@ -46,8 +46,8 @@
 
       <section id="view-upload" class="view active">
         <div class="intro">
-          <h2>Upload Leads &amp; Visits</h2>
-          <p>Drop Leads and Visits workbooks (same column shape), preview charts locally, then publish one org-wide Sales Graph snapshot.</p>
+          <h2>Upload Leads, Visits &amp; Booked</h2>
+          <p>Drop all three workbooks, preview the funnel charts locally, then publish one org-wide Sales Graph snapshot.</p>
         </div>
         <div class="perf-upload-grid sg-upload-grid">
           <div id="sg-leads-drop" class="drop-zone" role="button" tabindex="0" aria-label="Upload Leads Excel">
@@ -62,11 +62,11 @@
             <h3>Visits</h3>
             <p>Same shape as Leads · monthly visit counts</p>
           </div>
-          <div id="sg-booked-drop" class="drop-zone drop-zone-disabled" aria-disabled="true" tabindex="-1" aria-label="Booked upload coming soon">
-            <input id="sg-booked-input" type="file" accept=".xlsx,.xls,.xlsm" hidden disabled>
+          <div id="sg-booked-drop" class="drop-zone" role="button" tabindex="0" aria-label="Upload Booked Excel">
+            <input id="sg-booked-input" type="file" accept=".xlsx,.xls,.xlsm" hidden>
             <div class="upload-icon">B</div>
             <h3>Booked</h3>
-            <p>Coming soon · format pending</p>
+            <p>Project · Source · Source Name · Status · YYYYMM</p>
           </div>
         </div>
         <div id="sg-file-list" class="file-list hidden"></div>
@@ -90,7 +90,7 @@
         <div class="section-head">
           <div>
             <h2>Sales Graph Dashboard</h2>
-            <p id="sg-published-meta">Published Leads &amp; Visits from the latest upload.</p>
+            <p id="sg-published-meta">Published Leads, Visits &amp; Booked from the latest upload.</p>
           </div>
           <div class="inline-actions">
             <button id="sg-refresh-dashboard" type="button" class="secondary-button">Refresh</button>
