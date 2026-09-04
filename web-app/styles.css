@@ -657,6 +657,11 @@ body .sg-section{display:grid;gap:14px;margin:22px 0 0}
 body .sg-section-head h3{margin:0;font-size:16px;color:var(--green-2)}
 body .sg-section-sub{margin:4px 0 0;color:var(--muted);font-size:13px}
 body .sg-chart-grid{margin-top:4px}
+body .sg-chart-card--hero{grid-column:1/-1}
+body .sg-chart-card--hero .dashboard-chart-canvas{height:1200px}
+@media(max-width:850px){
+  body .sg-chart-card--hero .dashboard-chart-canvas{height:720px}
+}
 body .sg-heatmap-block{display:grid;gap:10px;margin-top:8px}
 body .sg-heatmap-block h4{margin:0;font-size:14px;color:var(--ink)}
 body .sg-heatmap-wrap{overflow:auto;border:1px solid var(--line);border-radius:12px;background:var(--soft-2)}

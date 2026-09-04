@@ -277,7 +277,14 @@ export function parseSalesGraphSheet(buffer, opts = {}) {
   for (const row of rows) {
     const rowSum = bumpBucket(agg.byProject, row.project, row.months, monthsOrdered);
     bumpBucket(agg.bySource, row.sourceNormalized, row.months, monthsOrdered);
-    if (hasStatus) bumpBucket(agg.byStatus, row.status, row.months, monthsOrdered);
+    if (hasStatus) {
+      bumpBucket(agg.byStatus, row.status, row.months, monthsOrdered);
+      const st = agg.byStatus[row.status || "(blank)"];
+      if (!st.byProject) st.byProject = {};
+      if (!st.bySource) st.bySource = {};
+      bumpBucket(st.byProject, row.project, row.months, monthsOrdered);
+      bumpBucket(st.bySource, row.sourceNormalized, row.months, monthsOrdered);
+    }
     for (const m of monthsOrdered) {
       const v = Number(row.months[m] || 0);
       agg.byMonth[m] += v;
