@@ -15,7 +15,7 @@
   <script defer src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js"></script>
-  <script type="module" src="../app.js?v=5.4.1"></script>
+  <script type="module" src="../app.js?v=5.4.2"></script>
 </head>
 <body>
   <div id="update-banner" class="update-banner hidden" role="status">
@@ -60,15 +60,6 @@
         </div>
       </nav>
       <div class="privacy-note"><strong id="sidebar-version">v5.4</strong><span id="sidebar-notes">v5.4: Perf scorecard adds total calls, avg calls/day, draft leads, and not follow-up leads across all dimensions.</span></div>
-      <!-- #region agent log -->
-      <script>
-      (function(){
-        var el=document.getElementById("sidebar-version");
-        var notes=document.getElementById("sidebar-notes");
-        fetch("http://127.0.0.1:7564/ingest/5981bb77-f08e-4f6c-995e-18d8279225fc",{method:"POST",headers:{"Content-Type":"application/json","X-Debug-Session-Id":"7f7e03"},body:JSON.stringify({sessionId:"7f7e03",runId:"post-fix",hypothesisId:"A",location:"TeleCallerAudit/index.html:sidebar",message:"HTML paint: sidebar version before JS modules",data:{sidebarVersion:el&&el.textContent,notesPreview:notes&&String(notes.textContent||"").slice(0,40),t:performance.now()},timestamp:Date.now()})}).catch(function(){});
-      })();
-      </script>
-      <!-- #endregion -->
     </aside>
 
     <main>
