@@ -129,11 +129,18 @@ function sizeScrollableCanvas(scrollEl, canvasWrap, categoryCount, categoryWidth
   if (!scrollEl || !canvasWrap) return;
   const count = Math.max(1, Number(categoryCount) || 1);
   const minW = count * categoryWidth;
-  const containerW = scrollEl.clientWidth || 0;
-  const width = Math.max(containerW, minW);
+  // Prefer measured scrollport; fall back to card/parent if not laid out yet.
+  let containerW = scrollEl.clientWidth || 0;
+  if (!containerW) {
+    const parent = scrollEl.parentElement;
+    containerW = parent?.clientWidth || 0;
+  }
+  const width = Math.max(containerW || minW, minW);
+  // Only the inner wrap is wider than the scrollport — never stretch the card/page.
   canvasWrap.style.width = `${width}px`;
   canvasWrap.style.minWidth = `${width}px`;
   canvasWrap.style.maxWidth = "none";
+  canvasWrap.style.flexShrink = "0";
 }
 
 /** Keep horizontal wheel/trackpad/touch scroll inside the chart scrollport. */
@@ -144,12 +151,27 @@ function bindScrollContainment(scrollEl) {
     e.stopPropagation();
   };
   scrollEl.addEventListener("wheel", (e) => {
-    const horizontal = Math.abs(e.deltaX) > Math.abs(e.deltaY) || e.shiftKey;
+    const dx = e.deltaX;
+    const dy = e.deltaY;
+    const horizontal = Math.abs(dx) > Math.abs(dy) || e.shiftKey;
     if (!horizontal) return;
+    const maxScroll = scrollEl.scrollWidth - scrollEl.clientWidth;
+    if (maxScroll <= 0) {
+      e.preventDefault();
+      e.stopPropagation();
+      return;
+    }
+    const delta = e.shiftKey && !dx ? dy : dx;
+    const next = Math.max(0, Math.min(maxScroll, scrollEl.scrollLeft + delta));
+    if (next !== scrollEl.scrollLeft) scrollEl.scrollLeft = next;
+    // Always kill document/shell horizontal pan while gesturing on the chart.
+    e.preventDefault();
+    e.stopPropagation();
+  }, {passive: false});
+  scrollEl.addEventListener("touchstart", stopBubble, {passive: true});
+  scrollEl.addEventListener("touchmove", (e) => {
     e.stopPropagation();
   }, {passive: true});
-  scrollEl.addEventListener("touchstart", stopBubble, {passive: true});
-  scrollEl.addEventListener("touchmove", stopBubble, {passive: true});
   scrollEl.addEventListener("scroll", stopBubble, {passive: true});
 }
 
@@ -660,12 +682,14 @@ function mountHeroDualAxis(grid, id, title, getData, slicerOpts) {
     onChange: paint,
   });
   paint();
-  // Re-measure after layout
+  // Re-measure after layout so scrollport.clientWidth is definite before sizing inner wrap.
   requestAnimationFrame(() => {
-    const {labels} = getData(state);
-    setCategoryCount(labels.length);
-    const chart = chartRegistry.get(id);
-    try { chart?.resize(); } catch { /* ignore */ }
+    requestAnimationFrame(() => {
+      const {labels} = getData(state);
+      setCategoryCount(labels.length);
+      const chart = chartRegistry.get(id);
+      try { chart?.resize(); } catch { /* ignore */ }
+    });
   });
 }
 

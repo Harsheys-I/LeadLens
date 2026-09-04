@@ -1,5 +1,5 @@
 {
-  "version": "6.0.5.dev",
+  "version": "6.0.6.dev",
   "name": "GPP AI",
-  "notes": "v6.0.5.dev: Sales Graph hero-only chart scroll containment — page/shell no longer pans with the chart."
+  "notes": "v6.0.6.dev: Hero chart horizontal scrollbar stays inside the card; wide canvas no longer expands the page."
 }
