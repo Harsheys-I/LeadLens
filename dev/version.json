@@ -1,5 +1,5 @@
 {
-  "version": "6.0.2.dev",
+  "version": "6.0.3.dev",
   "name": "GPP AI",
-  "notes": "v6.0.2.dev: Sales Graph heatmap contrast — luminance-based cell text + dark-mode green scale."
+  "notes": "v6.0.3.dev: Sales Graph hero L/V/B charts with dual-axis Booked Demand Letter/Cancel split; trim unused trend/stacked/detail UI."
 }

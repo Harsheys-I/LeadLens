@@ -15,8 +15,14 @@ const PALETTE = [
 const COLOR_LEADS = "#1f5d45";
 const COLOR_VISITS = "#c4a35a";
 const COLOR_BOOKED = "#5b7c99";
+const COLOR_BOOKED_DL = "#5b7c99";
+const COLOR_BOOKED_CANCEL = "#a65d57";
+
+const STATUS_DEMAND = "Demand Letter";
+const STATUS_CANCEL = "Cancel";
 
 const TOP_N = 10;
+const HERO_CHART_HEIGHT = 1200;
 
 function requireChart() {
   const Chart = window.Chart;
@@ -95,21 +101,6 @@ function monthSeries(sheet, months) {
   return months.map(m => Number(byMonth[m] || 0));
 }
 
-function conversionSeries(numSheet, denSheet, months) {
-  const N = monthSeries(numSheet, months);
-  const D = monthSeries(denSheet, months);
-  return months.map((_, i) => (D[i] > 0 ? N[i] / D[i] : 0));
-}
-
-function momChange(series) {
-  return series.map((v, i) => {
-    if (i === 0) return null;
-    const prev = series[i - 1];
-    if (!prev) return null;
-    return (v - prev) / prev;
-  });
-}
-
 function makeSection(title, subtitle) {
   const section = el("section", "sg-section");
   const head = el("div", "sg-section-head");
@@ -119,8 +110,8 @@ function makeSection(title, subtitle) {
   return section;
 }
 
-function chartCard(title, canvasHeight = 260) {
-  const card = el("div", "dashboard-chart-card sg-chart-card");
+function chartCard(title, canvasHeight = 260, extraClass = "") {
+  const card = el("div", `dashboard-chart-card sg-chart-card${extraClass ? ` ${extraClass}` : ""}`);
   card.append(el("h3", null, title));
   const wrap = el("div", "dashboard-chart-canvas");
   wrap.style.height = `${canvasHeight}px`;
@@ -226,33 +217,94 @@ function renderKpis(mount, payload) {
   mount.append(strip);
 }
 
-function addGroupedBar(grid, id, title, labels, datasets) {
-  const {card, canvas} = chartCard(title);
+function dualAxisOptions() {
+  const ink = inkColor();
+  const muted = mutedColor();
+  return {
+    responsive: true,
+    maintainAspectRatio: false,
+    interaction: {mode: "index", intersect: false},
+    plugins: {
+      legend: {
+        labels: {color: ink, boxWidth: 12, font: {size: 11}},
+      },
+      tooltip: {mode: "index", intersect: false},
+    },
+    scales: {
+      x: {
+        ticks: {color: muted, maxRotation: 45, font: {size: 10}},
+        grid: {color: "transparent"},
+      },
+      y: {
+        type: "linear",
+        position: "left",
+        beginAtZero: true,
+        title: {display: true, text: "Leads / Visits", color: muted, font: {size: 11}},
+        ticks: {color: muted, font: {size: 10}},
+        grid: {color: "rgba(0,0,0,0.06)"},
+      },
+      y1: {
+        type: "linear",
+        position: "right",
+        beginAtZero: true,
+        title: {display: true, text: "Booked (right axis)", color: COLOR_BOOKED, font: {size: 11}},
+        ticks: {color: COLOR_BOOKED, font: {size: 10}},
+        grid: {drawOnChartArea: false},
+      },
+    },
+  };
+}
+
+function findStatusKey(byStatus, wanted) {
+  const keys = Object.keys(byStatus || {});
+  const lower = String(wanted || "").toLowerCase();
+  return keys.find(k => String(k).toLowerCase() === lower) || wanted;
+}
+
+function bookedStatusMonthSeries(booked, statusLabel, months) {
+  const key = findStatusKey(booked?.byStatus, statusLabel);
+  const byMonth = booked?.byStatus?.[key]?.byMonth || {};
+  return months.map(m => Number(byMonth[m] || 0));
+}
+
+function bookedStatusDimTotals(booked, statusLabel, dimNames, dimKind) {
+  const key = findStatusKey(booked?.byStatus, statusLabel);
+  const nested = dimKind === "project"
+    ? booked?.byStatus?.[key]?.byProject
+    : booked?.byStatus?.[key]?.bySource;
+  if (nested) return dimNames.map(n => bucketTotal(nested[n]));
+
+  const statusLower = String(statusLabel || "").toLowerCase();
+  const rows = booked?.rows || [];
+  return dimNames.map(name => {
+    let sum = 0;
+    for (const row of rows) {
+      if (String(row.status || "").toLowerCase() !== statusLower) continue;
+      const dim = dimKind === "project" ? row.project : row.sourceNormalized;
+      if ((dim || "") !== name) continue;
+      for (const v of Object.values(row.months || {})) sum += Number(v) || 0;
+    }
+    return sum;
+  });
+}
+
+function lvbSplitBarDatasets(leadsData, visitsData, demandData, cancelData) {
+  return [
+    {label: "Leads", data: leadsData, backgroundColor: COLOR_LEADS, borderRadius: 4, maxBarThickness: 36, yAxisID: "y"},
+    {label: "Visits", data: visitsData, backgroundColor: COLOR_VISITS, borderRadius: 4, maxBarThickness: 36, yAxisID: "y"},
+    {label: "Booked · Demand Letter (right)", data: demandData, backgroundColor: COLOR_BOOKED_DL, borderRadius: 4, maxBarThickness: 36, yAxisID: "y1"},
+    {label: "Booked · Cancel (right)", data: cancelData, backgroundColor: COLOR_BOOKED_CANCEL, borderRadius: 4, maxBarThickness: 36, yAxisID: "y1"},
+  ];
+}
+
+function addHeroDualAxisBar(grid, id, title, labels, datasets) {
+  const {card, canvas} = chartCard(title, HERO_CHART_HEIGHT, "sg-chart-card--hero");
   grid.append(card);
   registerChart(id, {
     canvas,
     type: "bar",
     data: {labels, datasets},
-    options: baseOptions(),
-  });
-}
-
-function lvbBarDatasets(leadsData, visitsData, bookedData) {
-  return [
-    {label: "Leads", data: leadsData, backgroundColor: COLOR_LEADS, borderRadius: 4, maxBarThickness: 36},
-    {label: "Visits", data: visitsData, backgroundColor: COLOR_VISITS, borderRadius: 4, maxBarThickness: 36},
-    {label: "Booked", data: bookedData, backgroundColor: COLOR_BOOKED, borderRadius: 4, maxBarThickness: 36},
-  ];
-}
-
-function addLineChart(grid, id, title, labels, datasets, opts = {}) {
-  const {card, canvas} = chartCard(title);
-  grid.append(card);
-  registerChart(id, {
-    canvas,
-    type: "line",
-    data: {labels, datasets},
-    options: baseOptions(opts),
+    options: dualAxisOptions(),
   });
 }
 
@@ -282,32 +334,6 @@ function addStackedBar(grid, id, title, labels, datasets) {
     type: "bar",
     data: {labels, datasets},
     options: baseOptions({stacked: true}),
-  });
-}
-
-function addHorizontalBar(grid, id, title, labels, values, color = COLOR_LEADS) {
-  const {card, canvas} = chartCard(title);
-  grid.append(card);
-  registerChart(id, {
-    canvas,
-    type: "bar",
-    data: {
-      labels,
-      datasets: [{
-        label: title,
-        data: values,
-        backgroundColor: color,
-        borderRadius: 4,
-        maxBarThickness: 28,
-      }],
-    },
-    options: {
-      ...baseOptions({indexAxis: "y"}),
-      plugins: {
-        ...baseOptions().plugins,
-        legend: {display: false},
-      },
-    },
   });
 }
 
@@ -400,21 +426,6 @@ function projectMonthMatrix(sheet, projects, months) {
   return {matrix, maxVal};
 }
 
-function stackedSourceDatasets(sheet, months, topSources) {
-  const bySource = sheet?.bySource || {};
-  return topSources.map((name, i) => {
-    const bucket = bySource[name] || {};
-    const byMonth = bucket.byMonth || {};
-    return {
-      label: name,
-      data: months.map(m => Number(byMonth[m] || 0)),
-      backgroundColor: PALETTE[i % PALETTE.length],
-      borderWidth: 0,
-      maxBarThickness: 40,
-    };
-  });
-}
-
 function renderChartsGallery(mount, payload) {
   const months = payload.months || [];
   const monthLabels = months.map(formatMonth);
@@ -423,110 +434,19 @@ function renderChartsGallery(mount, payload) {
   const booked = payload.booked || {};
 
   // —— Trends ——
-  const trends = makeSection("Trends", "Monthly volume and conversion (Leads → Visits → Booked)");
+  const trends = makeSection("Trends", "Monthly volume (Leads → Visits → Booked by status)");
   const trendsGrid = el("div", "dashboard-charts sg-chart-grid");
-  addGroupedBar(
+  addHeroDualAxisBar(
     trendsGrid, "sg-bar-month",
     "Leads vs Visits vs Booked by month",
     monthLabels,
-    lvbBarDatasets(
+    lvbSplitBarDatasets(
       monthSeries(leads, months),
       monthSeries(visits, months),
-      monthSeries(booked, months)
+      bookedStatusMonthSeries(booked, STATUS_DEMAND, months),
+      bookedStatusMonthSeries(booked, STATUS_CANCEL, months)
     )
   );
-  addLineChart(trendsGrid, "sg-line-volume", "Monthly Leads, Visits & Booked", monthLabels, [
-    {
-      label: "Leads",
-      data: monthSeries(leads, months),
-      borderColor: COLOR_LEADS,
-      backgroundColor: "rgba(31,93,69,0.12)",
-      fill: true,
-      tension: 0.25,
-      pointRadius: 3,
-    },
-    {
-      label: "Visits",
-      data: monthSeries(visits, months),
-      borderColor: COLOR_VISITS,
-      backgroundColor: "rgba(196,163,90,0.12)",
-      fill: true,
-      tension: 0.25,
-      pointRadius: 3,
-    },
-    {
-      label: "Booked",
-      data: monthSeries(booked, months),
-      borderColor: COLOR_BOOKED,
-      backgroundColor: "rgba(91,124,153,0.12)",
-      fill: true,
-      tension: 0.25,
-      pointRadius: 3,
-    },
-  ]);
-  const convVL = conversionSeries(visits, leads, months);
-  const convBV = conversionSeries(booked, visits, months);
-  const convBL = conversionSeries(booked, leads, months);
-  addLineChart(trendsGrid, "sg-line-conv", "Conversion rates %", monthLabels, [
-    {
-      label: "Visits/Leads",
-      data: convVL.map(v => +(v * 100).toFixed(2)),
-      borderColor: COLOR_VISITS,
-      backgroundColor: "rgba(196,163,90,0.12)",
-      fill: false,
-      tension: 0.25,
-      pointRadius: 3,
-    },
-    {
-      label: "Booked/Visits",
-      data: convBV.map(v => +(v * 100).toFixed(2)),
-      borderColor: COLOR_BOOKED,
-      backgroundColor: "rgba(91,124,153,0.12)",
-      fill: false,
-      tension: 0.25,
-      pointRadius: 3,
-    },
-    {
-      label: "Booked/Leads",
-      data: convBL.map(v => +(v * 100).toFixed(2)),
-      borderColor: "#8b5a3c",
-      backgroundColor: "rgba(139,90,60,0.1)",
-      fill: false,
-      tension: 0.25,
-      pointRadius: 3,
-    },
-  ], {
-    yTickCallback: v => `${v}%`,
-  });
-  const leadsMom = momChange(monthSeries(leads, months));
-  const visitsMom = momChange(monthSeries(visits, months));
-  const bookedMom = momChange(monthSeries(booked, months));
-  addLineChart(trendsGrid, "sg-line-mom", "Month-over-month change %", monthLabels, [
-    {
-      label: "Leads MoM %",
-      data: leadsMom.map(v => (v == null ? null : +(v * 100).toFixed(1))),
-      borderColor: COLOR_LEADS,
-      tension: 0.2,
-      spanGaps: false,
-      pointRadius: 3,
-    },
-    {
-      label: "Visits MoM %",
-      data: visitsMom.map(v => (v == null ? null : +(v * 100).toFixed(1))),
-      borderColor: COLOR_VISITS,
-      tension: 0.2,
-      spanGaps: false,
-      pointRadius: 3,
-    },
-    {
-      label: "Booked MoM %",
-      data: bookedMom.map(v => (v == null ? null : +(v * 100).toFixed(1))),
-      borderColor: COLOR_BOOKED,
-      tension: 0.2,
-      spanGaps: false,
-      pointRadius: 3,
-    },
-  ], {yTickCallback: v => `${v}%`});
   trends.append(trendsGrid);
   mount.append(trends);
 
@@ -541,16 +461,17 @@ function renderChartsGallery(mount, payload) {
     return lb - la || a.localeCompare(b);
   });
   const topProjects = projectKeys.slice(0, TOP_N);
-  const projects = makeSection("By project", "Grouped bars and share of volume");
+  const projects = makeSection("By project", "Grouped bars (all projects) and share of volume");
   const projGrid = el("div", "dashboard-charts sg-chart-grid");
-  addGroupedBar(
+  addHeroDualAxisBar(
     projGrid, "sg-bar-project",
-    `Leads vs Visits vs Booked by project (top ${topProjects.length})`,
-    topProjects,
-    lvbBarDatasets(
-      topProjects.map(p => bucketTotal(leads.byProject?.[p])),
-      topProjects.map(p => bucketTotal(visits.byProject?.[p])),
-      topProjects.map(p => bucketTotal(booked.byProject?.[p]))
+    "Leads vs Visits vs Booked by project",
+    projectKeys,
+    lvbSplitBarDatasets(
+      projectKeys.map(p => bucketTotal(leads.byProject?.[p])),
+      projectKeys.map(p => bucketTotal(visits.byProject?.[p])),
+      bookedStatusDimTotals(booked, STATUS_DEMAND, projectKeys, "project"),
+      bookedStatusDimTotals(booked, STATUS_CANCEL, projectKeys, "project")
     )
   );
   addDoughnut(
@@ -585,16 +506,17 @@ function renderChartsGallery(mount, payload) {
     return lb - la || a.localeCompare(b);
   });
   const topSources = sourceKeys.slice(0, TOP_N);
-  const sources = makeSection("By source", "Normalized Meta sources · top N");
+  const sources = makeSection("By source", "Normalized Meta sources · all sources");
   const srcGrid = el("div", "dashboard-charts sg-chart-grid");
-  addGroupedBar(
+  addHeroDualAxisBar(
     srcGrid, "sg-bar-source",
-    `Leads vs Visits vs Booked by source (top ${topSources.length})`,
-    topSources,
-    lvbBarDatasets(
-      topSources.map(s => bucketTotal(leads.bySource?.[s])),
-      topSources.map(s => bucketTotal(visits.bySource?.[s])),
-      topSources.map(s => bucketTotal(booked.bySource?.[s]))
+    "Leads vs Visits vs Booked by source",
+    sourceKeys,
+    lvbSplitBarDatasets(
+      sourceKeys.map(s => bucketTotal(leads.bySource?.[s])),
+      sourceKeys.map(s => bucketTotal(visits.bySource?.[s])),
+      bookedStatusDimTotals(booked, STATUS_DEMAND, sourceKeys, "source"),
+      bookedStatusDimTotals(booked, STATUS_CANCEL, sourceKeys, "source")
     )
   );
   addDoughnut(
@@ -614,13 +536,6 @@ function renderChartsGallery(mount, payload) {
     "Booked share by source",
     topSources,
     topSources.map(s => bucketTotal(booked.bySource?.[s]))
-  );
-  addHorizontalBar(
-    srcGrid, "sg-top-booked-source",
-    "Top sources · Booked",
-    topSources,
-    topSources.map(s => bucketTotal(booked.bySource?.[s])),
-    COLOR_BOOKED
   );
   sources.append(srcGrid);
   mount.append(sources);
@@ -652,77 +567,6 @@ function renderChartsGallery(mount, payload) {
     mount.append(statusSec);
   }
 
-  // —— Stacked ——
-  const stacked = makeSection("Stacked composition", "Sources stacked by month; funnel stacked");
-  const stackGrid = el("div", "dashboard-charts sg-chart-grid");
-  const stackSources = sortedKeysByTotal(leads.bySource, 8);
-  addStackedBar(
-    stackGrid, "sg-stack-leads-src-month",
-    "Leads · sources stacked by month",
-    monthLabels,
-    stackedSourceDatasets(leads, months, stackSources)
-  );
-  const stackVisitSources = sortedKeysByTotal(visits.bySource, 8);
-  addStackedBar(
-    stackGrid, "sg-stack-visits-src-month",
-    "Visits · sources stacked by month",
-    monthLabels,
-    stackedSourceDatasets(visits, months, stackVisitSources)
-  );
-  const stackBookedSources = sortedKeysByTotal(booked.bySource, 8);
-  addStackedBar(
-    stackGrid, "sg-stack-booked-src-month",
-    "Booked · sources stacked by month",
-    monthLabels,
-    stackedSourceDatasets(booked, months, stackBookedSources)
-  );
-  addStackedBar(
-    stackGrid, "sg-stack-lvb-month",
-    "Leads + Visits + Booked stacked by month",
-    monthLabels,
-    [
-      {
-        label: "Leads",
-        data: monthSeries(leads, months),
-        backgroundColor: COLOR_LEADS,
-        borderWidth: 0,
-        maxBarThickness: 40,
-      },
-      {
-        label: "Visits",
-        data: monthSeries(visits, months),
-        backgroundColor: COLOR_VISITS,
-        borderWidth: 0,
-        maxBarThickness: 40,
-      },
-      {
-        label: "Booked",
-        data: monthSeries(booked, months),
-        backgroundColor: COLOR_BOOKED,
-        borderWidth: 0,
-        maxBarThickness: 40,
-      },
-    ]
-  );
-  // Sources stacked by project (top projects × top sources) for Booked
-  const stackProj = topProjects.slice(0, 8);
-  const stackSrcForProj = stackBookedSources.slice(0, 6);
-  const projStackDatasets = stackSrcForProj.map((src, i) => ({
-    label: src,
-    data: stackProj.map(p => sumRowsFor(payload.booked?.rows, p, src)),
-    backgroundColor: PALETTE[i % PALETTE.length],
-    borderWidth: 0,
-    maxBarThickness: 36,
-  }));
-  addStackedBar(
-    stackGrid, "sg-stack-booked-src-project",
-    "Booked · sources stacked by project",
-    stackProj,
-    projStackDatasets
-  );
-  stacked.append(stackGrid);
-  mount.append(stacked);
-
   // —— Heatmaps ——
   const heat = makeSection("Heatmaps", "Project × Month intensity (Leads, Visits, Booked)");
   const heatProjects = projectKeys.slice(0, 20);
@@ -733,17 +577,6 @@ function renderChartsGallery(mount, payload) {
   renderHeatmap(heat, "Visits · Project × Month", heatProjects, months, visitsHm.matrix, visitsHm.maxVal);
   renderHeatmap(heat, "Booked · Project × Month", heatProjects, months, bookedHm.matrix, bookedHm.maxVal);
   mount.append(heat);
-}
-
-function sumRowsFor(rows, project, sourceNormalized) {
-  if (!Array.isArray(rows)) return 0;
-  let sum = 0;
-  for (const row of rows) {
-    if ((row.project || "") !== project) continue;
-    if ((row.sourceNormalized || "") !== sourceNormalized) continue;
-    for (const v of Object.values(row.months || {})) sum += Number(v) || 0;
-  }
-  return sum;
 }
 
 function sortableTable(headers, rows, {numericCols = new Set()} = {}) {
@@ -804,7 +637,7 @@ function monthVal(sheet, m) {
 }
 
 function renderTables(mount, payload) {
-  const section = makeSection("Tables", "Sortable breakdowns and detail rows");
+  const section = makeSection("Tables", "Sortable breakdowns by month, project, source, and status");
   const tabs = el("div", "sg-table-tabs", null);
   const panels = el("div", "sg-table-panels");
   const months = payload.months || [];
@@ -890,35 +723,6 @@ function renderTables(mount, payload) {
           ["Status", "Booked"],
           rows,
           {numericCols: new Set([1])}
-        );
-      },
-    },
-    {
-      id: "detail",
-      label: "Detail",
-      build() {
-        const rows = [];
-        for (const kind of ["leads", "visits", "booked"]) {
-          const sheet = payload[kind];
-          const label = kind === "leads" ? "Leads" : kind === "visits" ? "Visits" : "Booked";
-          for (const row of sheet?.rows || []) {
-            let total = 0;
-            for (const v of Object.values(row.months || {})) total += Number(v) || 0;
-            rows.push([
-              label,
-              row.project || "",
-              row.source || "",
-              row.sourceNormalized || "",
-              row.sourceNameRaw || "",
-              row.status || "",
-              total,
-            ]);
-          }
-        }
-        return sortableTable(
-          ["Sheet", "Project", "Source", "Source (norm)", "Source Name", "Status", "Total"],
-          rows,
-          {numericCols: new Set([6])}
         );
       },
     },
