@@ -1,5 +1,5 @@
 {
-  "version": "6.0.7.dev",
+  "version": "6.0.8.dev",
   "name": "GPP AI",
-  "notes": "v6.0.7.dev: Shorter hero Sales Graph charts; bar values labeled above each series (skip zeros when dense)."
+  "notes": "v6.0.8.dev: Fix Hostinger /dev sync skipping same-size version bumps; harden Hard reload cache nuke."
 }

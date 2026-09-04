@@ -43,7 +43,10 @@ jobs:
           fi
 
           STAGING="$(mktemp -d)"
-          rsync -a \
+          # --checksum: same-length version bumps (6.0.6→6.0.7) keep identical byte
+          # sizes; after checking out hostinger, dest mtimes are newer than STAGING,
+          # so plain -a (size+mtime) silently skips audit.js / version.json / etc.
+          rsync -a --checksum \
             --exclude='.github' \
             --exclude='.git' \
             web-app/ "$STAGING/"
@@ -59,11 +62,11 @@ jobs:
             git checkout --orphan "$BRANCH"
             git rm -rf . >/dev/null 2>&1 || true
             # First-time: seed live root from current web-app as well
-            rsync -a "$STAGING"/ ./
+            rsync -a --checksum "$STAGING"/ ./
           fi
 
           mkdir -p dev
-          rsync -a --delete \
+          rsync -a --checksum --delete \
             --exclude='.github' \
             --exclude='.git' \
             "$STAGING"/ ./dev/
@@ -104,7 +107,7 @@ jobs:
 
           # Copy staging over live root. Excluded dest names are not deleted
           # (no --delete-excluded), so /dev stays as the next preview and .git is kept.
-          rsync -a --delete \
+          rsync -a --checksum --delete \
             --exclude='/.git' \
             --exclude='/.github' \
             --exclude='/dev' \
