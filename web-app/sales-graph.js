@@ -1,15 +1,15 @@
 /**
  * Sales Graph module — Upload (Leads + Visits + Booked) + published Dashboard.
  */
-import {APP_VERSION} from "./audit.js?v=6.0.5.dev";
-import {requireAuth, logout, hasPermission, getUser, changePassword, updateProfile} from "./auth.js?v=6.0.5.dev";
-import {SalesGraphApi} from "./api-client.js?v=6.0.5.dev";
-import {mountNotifications} from "./notifications-ui.js?v=6.0.5.dev";
-import {appUrl, homePath} from "./app-base.js?v=6.0.5.dev";
-import {initTheme} from "./theme.js?v=6.0.5.dev";
-import {setStorageUserId, storageKey} from "./db.js?v=6.0.5.dev";
-import {parseSalesGraphSheet, buildSalesGraphPayload} from "./sales-graph-parse.js?v=6.0.5.dev";
-import {renderSalesGraphDashboard, destroySalesGraphCharts} from "./sales-graph-dashboard.js?v=6.0.5.dev";
+import {APP_VERSION} from "./audit.js?v=6.0.6.dev";
+import {requireAuth, logout, hasPermission, getUser, changePassword, updateProfile} from "./auth.js?v=6.0.6.dev";
+import {SalesGraphApi} from "./api-client.js?v=6.0.6.dev";
+import {mountNotifications} from "./notifications-ui.js?v=6.0.6.dev";
+import {appUrl, homePath} from "./app-base.js?v=6.0.6.dev";
+import {initTheme} from "./theme.js?v=6.0.6.dev";
+import {setStorageUserId, storageKey} from "./db.js?v=6.0.6.dev";
+import {parseSalesGraphSheet, buildSalesGraphPayload} from "./sales-graph-parse.js?v=6.0.6.dev";
+import {renderSalesGraphDashboard, destroySalesGraphCharts} from "./sales-graph-dashboard.js?v=6.0.6.dev";
 
 const $ = id => document.getElementById(id);
 const ids = [
@@ -27,7 +27,7 @@ const els = Object.fromEntries(ids.map(id => [id, $(id)]));
 if (els["sidebar-version"]) els["sidebar-version"].textContent = `v${APP_VERSION}`;
 
 const titles = {upload: "Upload", dashboard: "Dashboard"};
-const RELEASE_NOTES = "v6.0.5.dev: Sales Graph hero-only chart scroll containment — page/shell no longer pans with the chart.";
+const RELEASE_NOTES = "v6.0.6.dev: Hero chart horizontal scrollbar stays inside the card; wide canvas no longer expands the page.";
 
 let leadsParsed = null;
 let visitsParsed = null;

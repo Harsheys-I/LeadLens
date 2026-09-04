@@ -653,12 +653,34 @@ body .sg-booked-callout{
   color:var(--muted);font-size:13px;background:var(--soft-2)
 }
 body .sg-preview-banner,body .sg-meta-line{margin:0 0 12px;color:var(--muted);font-size:13px}
-body .sg-section{display:grid;gap:14px;margin:22px 0 0}
+/* Contain wide hero canvases: ancestors must not size to max-content. */
+body .shell{max-width:100%;overflow-x:hidden}
+body .shell:not(.sidebar-collapsed){grid-template-columns:248px minmax(0,1fr)}
+body .shell.sidebar-collapsed{grid-template-columns:minmax(0,1fr)}
+@media(max-width:850px){
+  body .shell,
+  body .shell:not(.sidebar-collapsed){grid-template-columns:minmax(0,1fr)}
+}
+body .shell > main{min-width:0;max-width:100%;overflow-x:hidden}
+#view-dashboard.view.view-wide,
+body #sg-dashboard-mount,
+body #sg-preview-mount{
+  min-width:0;max-width:100%;width:100%;box-sizing:border-box;overflow-x:hidden
+}
+body .sg-section{
+  display:grid;gap:14px;margin:22px 0 0;
+  grid-template-columns:minmax(0,1fr);
+  min-width:0;max-width:100%;width:100%;box-sizing:border-box;overflow-x:hidden
+}
 body .sg-section-head h3{margin:0;font-size:16px;color:var(--green-2)}
 body .sg-section-sub{margin:4px 0 0;color:var(--muted);font-size:13px}
-body .sg-chart-grid{margin-top:4px;min-width:0;max-width:100%}
+body .sg-chart-grid{
+  margin-top:4px;min-width:0;max-width:100%;width:100%;
+  box-sizing:border-box;overflow-x:hidden
+}
 body .sg-chart-card--hero{
   grid-column:1/-1;min-width:0;max-width:100%;width:100%;
+  box-sizing:border-box;
   /* visible so slicer dropdowns escape; scrollport below clips chart width */
   overflow:visible
 }
@@ -668,18 +690,19 @@ body .sg-chart-slicers,body .sg-slicer-bar{
   display:flex;flex-wrap:wrap;gap:8px;align-items:flex-start;
   margin:0 0 4px;padding:0;max-width:100%;min-width:0;overflow:visible
 }
-/* Inner scrollport only — width constrained to card content box. */
+/* Scrollport = card content width only; only the inner canvas wrap is wider. */
 body .sg-chart-scroll{
   display:block;box-sizing:border-box;
   width:100%;max-width:100%;min-width:0;
-  overflow-x:auto;overflow-y:hidden;
-  overscroll-behavior-x:contain;overscroll-behavior-y:contain;
+  overflow-x:scroll;overflow-y:hidden;
+  overscroll-behavior:contain;
   -webkit-overflow-scrolling:touch;
+  touch-action:pan-x;
   border-radius:8px
 }
 body .sg-chart-card--hero .sg-chart-scroll{height:1200px}
 body .sg-chart-scroll .dashboard-chart-canvas{
-  height:100%;width:100%;max-width:none;min-width:0;overflow:hidden
+  height:100%;max-width:none;min-width:0;overflow:hidden;box-sizing:border-box
 }
 body .sg-chart-scroll .dashboard-chart-canvas canvas{
   max-width:none!important;width:100%!important;height:100%!important;display:block
