@@ -1,5 +1,5 @@
 {
-  "version": "6.0.4.dev",
+  "version": "6.0.5.dev",
   "name": "GPP AI",
-  "notes": "v6.0.4.dev: Sales Graph scrollable hero bars, per-card slicers, legend (right) cleanup, version-banner false-positive fix."
+  "notes": "v6.0.5.dev: Sales Graph hero-only chart scroll containment — page/shell no longer pans with the chart."
 }

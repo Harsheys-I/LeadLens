@@ -23,9 +23,8 @@ const STATUS_CANCEL = "Cancel";
 
 const TOP_N = 10;
 const HERO_CHART_HEIGHT = 1200;
-/** Fixed px width per category group (4 series) so bars stay readable. */
+/** Fixed px width per category group (4 series) so hero bars stay readable. */
 const CATEGORY_WIDTH_PX = 56;
-const CATEGORY_WIDTH_STACKED_PX = 48;
 
 function requireChart() {
   const Chart = window.Chart;
@@ -134,10 +133,28 @@ function sizeScrollableCanvas(scrollEl, canvasWrap, categoryCount, categoryWidth
   const width = Math.max(containerW, minW);
   canvasWrap.style.width = `${width}px`;
   canvasWrap.style.minWidth = `${width}px`;
+  canvasWrap.style.maxWidth = "none";
+}
+
+/** Keep horizontal wheel/trackpad/touch scroll inside the chart scrollport. */
+function bindScrollContainment(scrollEl) {
+  if (!scrollEl || scrollEl.dataset.sgScrollBound === "1") return;
+  scrollEl.dataset.sgScrollBound = "1";
+  const stopBubble = (e) => {
+    e.stopPropagation();
+  };
+  scrollEl.addEventListener("wheel", (e) => {
+    const horizontal = Math.abs(e.deltaX) > Math.abs(e.deltaY) || e.shiftKey;
+    if (!horizontal) return;
+    e.stopPropagation();
+  }, {passive: true});
+  scrollEl.addEventListener("touchstart", stopBubble, {passive: true});
+  scrollEl.addEventListener("touchmove", stopBubble, {passive: true});
+  scrollEl.addEventListener("scroll", stopBubble, {passive: true});
 }
 
 /**
- * Chart card with optional horizontal scroll for multi-category bar charts.
+ * Chart card. Only hero grouped-bars use horizontal scroll + fixed category width.
  * @returns {{card: HTMLElement, canvas: HTMLCanvasElement, scrollEl: HTMLElement|null, canvasWrap: HTMLElement, setCategoryCount: Function}}
  */
 function chartCard(title, canvasHeight = 260, {
@@ -155,8 +172,10 @@ function chartCard(title, canvasHeight = 260, {
   let scrollEl = null;
   if (scrollable) {
     scrollEl = el("div", "sg-chart-scroll");
+    scrollEl.style.height = `${canvasHeight}px`;
     scrollEl.append(canvasWrap);
     card.append(scrollEl);
+    bindScrollContainment(scrollEl);
   } else {
     card.append(canvasWrap);
   }
@@ -496,7 +515,7 @@ function filterDimNames(names, selected, kind) {
  * @param {{project?:boolean,source?:boolean,month?:boolean,status?:boolean}} opts.show
  */
 function attachSlicers(card, {months, dims, state, onChange, show = {}}) {
-  const bar = el("div", "sg-slicer-bar");
+  const bar = el("div", "sg-chart-slicers sg-slicer-bar");
   const flags = {
     project: show.project !== false,
     source: show.source !== false,
@@ -681,15 +700,11 @@ function mountDoughnut(grid, id, title, getData, slicerOpts) {
 }
 
 function mountStackedBar(grid, id, title, getData, slicerOpts) {
-  const {card, canvas, setCategoryCount} = chartCard(title, 300, {
-    scrollable: true,
-    categoryWidth: CATEGORY_WIDTH_STACKED_PX,
-  });
+  const {card, canvas} = chartCard(title, 300);
   grid.append(card);
   const state = cloneFilterState(slicerOpts.baseState);
   const paint = () => {
     const {labels, datasets} = getData(state);
-    setCategoryCount(labels.length);
     registerChart(id, {
       canvas,
       type: "bar",
@@ -705,11 +720,6 @@ function mountStackedBar(grid, id, title, getData, slicerOpts) {
     onChange: paint,
   });
   paint();
-  requestAnimationFrame(() => {
-    const {labels} = getData(state);
-    setCategoryCount(labels.length);
-    try { chartRegistry.get(id)?.resize(); } catch { /* ignore */ }
-  });
 }
 
 function isDarkTheme() {
