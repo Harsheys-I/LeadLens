@@ -669,6 +669,9 @@ body .sg-heatmap-scale{
   flex:1;max-width:180px;height:10px;border-radius:999px;
   background:linear-gradient(90deg,rgb(232,240,228),rgb(52,150,88))
 }
+:root[data-theme="dark"] body .sg-heatmap-scale{
+  background:linear-gradient(90deg,rgb(14,42,32),rgb(72,200,120))
+}
 body .sg-table-tabs{display:flex;flex-wrap:wrap;gap:8px;margin:4px 0 12px;border-bottom:1px solid var(--line);padding-bottom:10px}
 body .sg-table-tab{border:0;background:transparent;color:var(--muted);padding:8px 14px;border-radius:8px;font-weight:650;cursor:pointer}
 body .sg-table-tab:hover{background:var(--soft-4);color:var(--green-2)}
