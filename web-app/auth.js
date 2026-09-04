@@ -1,8 +1,8 @@
 /**
  * Session helpers + permission checks for LeadLens shells.
  */
-import {AuthApi} from './api-client.js?v=5.7';
-import {appUrl, homePath, isHomePath} from './app-base.js?v=5.7';
+import {AuthApi} from './api-client.js?v=6.0.0.dev';
+import {appUrl, homePath, isHomePath} from './app-base.js?v=6.0.0.dev';
 
 let currentUser = null;
 
@@ -120,6 +120,22 @@ export function moduleTilesForUser(user = currentUser){
         <rect x="18" y="22" width="60" height="52" rx="8" stroke="currentColor" stroke-width="3.5"/>
         <path d="M30 40h36M30 52h24M30 64h16" stroke="currentColor" stroke-width="3" stroke-linecap="round"/>
         <path d="M58 58l8 8M66 58l-8 8" stroke="currentColor" stroke-width="3.5" stroke-linecap="round"/>
+      </svg>`
+    },
+    {
+      id: 'sales-graph',
+      title: 'Sales Graph',
+      href: appUrl('/SalesGraph/'),
+      perm: 'module.sales_graph',
+      soon: false,
+      desc: 'Leads & Visits Excel upload, published charts and tables',
+      icon: `<svg viewBox="0 0 96 96" fill="none" aria-hidden="true">
+        <path d="M18 72V28M18 72h60" stroke="currentColor" stroke-width="3.5" stroke-linecap="round"/>
+        <path d="M30 58l14-16 12 10 18-24" stroke="currentColor" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"/>
+        <circle cx="30" cy="58" r="3.5" fill="currentColor"/>
+        <circle cx="44" cy="42" r="3.5" fill="currentColor"/>
+        <circle cx="56" cy="52" r="3.5" fill="currentColor"/>
+        <circle cx="74" cy="28" r="3.5" fill="currentColor"/>
       </svg>`
     },
     {

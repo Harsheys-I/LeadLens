@@ -1,5 +1,5 @@
 {
-  "version": "5.4",
+  "version": "6.0.0.dev",
   "name": "GPP AI",
-  "notes": "v5.4: Perf scorecard adds total calls, avg calls/day, draft leads, and not follow-up leads across all dimensions."
+  "notes": "v6.0.0.dev: Sales Graph module — Leads/Visits Excel upload, MySQL publish, multi-chart gallery (bar, line, doughnut, stacked, heatmaps, MoM)."
 }
