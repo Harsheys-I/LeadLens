@@ -56,6 +56,8 @@ const ids=[
   "shell-user-label","shell-logout","shell-account"
 ];
 const els=Object.fromEntries(ids.map(id=>[id,$(id)]));
+if(els["sidebar-version"])els["sidebar-version"].textContent=`v${APP_VERSION}`;
+if(els["app-version"])els["app-version"].textContent=APP_VERSION;
 const titles={run:"Run",settings:"Settings"};
 const ENGINE_VERSION="debug-csv-v3";
 const MULTI_RUN_COUNT=10;
