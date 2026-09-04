@@ -1,5 +1,5 @@
 {
-  "version": "6.0.3.dev",
+  "version": "6.0.4.dev",
   "name": "GPP AI",
-  "notes": "v6.0.3.dev: Sales Graph hero L/V/B charts with dual-axis Booked Demand Letter/Cancel split; trim unused trend/stacked/detail UI."
+  "notes": "v6.0.4.dev: Sales Graph scrollable hero bars, per-card slicers, legend (right) cleanup, version-banner false-positive fix."
 }

@@ -1,15 +1,15 @@
 /**
  * Sales Graph module — Upload (Leads + Visits + Booked) + published Dashboard.
  */
-import {APP_VERSION} from "./audit.js?v=6.0.3.dev";
-import {requireAuth, logout, hasPermission, getUser, changePassword, updateProfile} from "./auth.js?v=6.0.3.dev";
-import {SalesGraphApi} from "./api-client.js?v=6.0.3.dev";
-import {mountNotifications} from "./notifications-ui.js?v=6.0.3.dev";
-import {appUrl, homePath} from "./app-base.js?v=6.0.3.dev";
-import {initTheme} from "./theme.js?v=6.0.3.dev";
-import {setStorageUserId, storageKey} from "./db.js?v=6.0.3.dev";
-import {parseSalesGraphSheet, buildSalesGraphPayload} from "./sales-graph-parse.js?v=6.0.3.dev";
-import {renderSalesGraphDashboard, destroySalesGraphCharts} from "./sales-graph-dashboard.js?v=6.0.3.dev";
+import {APP_VERSION} from "./audit.js?v=6.0.4.dev";
+import {requireAuth, logout, hasPermission, getUser, changePassword, updateProfile} from "./auth.js?v=6.0.4.dev";
+import {SalesGraphApi} from "./api-client.js?v=6.0.4.dev";
+import {mountNotifications} from "./notifications-ui.js?v=6.0.4.dev";
+import {appUrl, homePath} from "./app-base.js?v=6.0.4.dev";
+import {initTheme} from "./theme.js?v=6.0.4.dev";
+import {setStorageUserId, storageKey} from "./db.js?v=6.0.4.dev";
+import {parseSalesGraphSheet, buildSalesGraphPayload} from "./sales-graph-parse.js?v=6.0.4.dev";
+import {renderSalesGraphDashboard, destroySalesGraphCharts} from "./sales-graph-dashboard.js?v=6.0.4.dev";
 
 const $ = id => document.getElementById(id);
 const ids = [
@@ -27,7 +27,7 @@ const els = Object.fromEntries(ids.map(id => [id, $(id)]));
 if (els["sidebar-version"]) els["sidebar-version"].textContent = `v${APP_VERSION}`;
 
 const titles = {upload: "Upload", dashboard: "Dashboard"};
-const RELEASE_NOTES = "v6.0.3.dev: Sales Graph hero L/V/B charts with dual-axis Booked Demand Letter/Cancel split; trim unused trend/stacked/detail UI.";
+const RELEASE_NOTES = "v6.0.4.dev: Sales Graph scrollable hero bars, per-card slicers, legend (right) cleanup, version-banner false-positive fix.";
 
 let leadsParsed = null;
 let visitsParsed = null;
@@ -299,9 +299,21 @@ function renderSidebarRelease(version = APP_VERSION, notes = "") {
   if (els["sidebar-notes"] && notes) els["sidebar-notes"].textContent = notes;
 }
 
+function normalizeVersion(v) {
+  return String(v || "").trim().replace(/^v/i, "");
+}
+
+function pageShellVersion() {
+  const meta = document.querySelector('meta[name="app-version"]');
+  if (meta?.content) return normalizeVersion(meta.content);
+  const mod = document.querySelector('script[type="module"][src*="sales-graph"]');
+  const m = mod?.getAttribute("src")?.match(/[?&]v=([^&]+)/);
+  return m ? normalizeVersion(decodeURIComponent(m[1])) : "";
+}
+
 function isNewerVersion(candidate, current) {
   const parse = v => {
-    const m = String(v || "").trim().match(/^(\d+)\.(\d+)\.(\d+)/);
+    const m = normalizeVersion(v).match(/^(\d+)\.(\d+)\.(\d+)/);
     return m ? [Number(m[1]), Number(m[2]), Number(m[3])] : null;
   };
   const a = parse(candidate);
@@ -323,16 +335,24 @@ function showUpdateBanner(latest) {
   box.append(`GPP AI v${latest} is available (you are on v${APP_VERSION}). Hard-reload to update.`);
 }
 
+/**
+ * Prompt only when version.json is strictly newer than the running build.
+ * Suppress when remote already matches APP_VERSION or the page shell cache-bust
+ * (avoids false positives when one lagged ESM import still exports an older APP_VERSION).
+ */
 async function checkForUpdate() {
   renderSidebarRelease(APP_VERSION, RELEASE_NOTES);
   try {
     const response = await fetch(`../version.json?t=${Date.now()}`, {cache: "no-store"});
     if (!response.ok) return;
     const data = await response.json();
-    const latest = String(data.version || "").trim();
+    const latest = normalizeVersion(data.version);
     const notes = String(data.notes || "").trim();
-    const newer = isNewerVersion(latest, APP_VERSION);
-    if (newer || latest === APP_VERSION) renderSidebarRelease(APP_VERSION, notes || RELEASE_NOTES);
+    const appV = normalizeVersion(APP_VERSION);
+    const shellV = pageShellVersion();
+    const alreadyCurrent = Boolean(latest) && (latest === appV || (shellV && latest === shellV));
+    const newer = Boolean(latest) && isNewerVersion(latest, appV) && !alreadyCurrent;
+    if (newer || alreadyCurrent) renderSidebarRelease(APP_VERSION, notes || RELEASE_NOTES);
     if (newer) showUpdateBanner(latest);
     else els["update-banner"]?.classList.add("hidden");
   } catch { /* offline */ }
@@ -417,7 +437,22 @@ els["sg-create-dashboard"]?.addEventListener("click", createPreview);
 els["sg-upload-dashboard-btn"]?.addEventListener("click", publishDashboard);
 els["sg-refresh-dashboard"]?.addEventListener("click", () => refreshPublishedDashboard());
 els["sg-clear-dashboard"]?.addEventListener("click", clearPublishedBoard);
-els["reload-app"]?.addEventListener("click", () => location.reload());
+els["reload-app"]?.addEventListener("click", async () => {
+  try {
+    if ("serviceWorker" in navigator) {
+      const regs = await navigator.serviceWorker.getRegistrations();
+      await Promise.all(regs.map(reg => reg.unregister()));
+    }
+    if (window.caches) {
+      const keys = await caches.keys();
+      await Promise.all(keys.filter(key => key.startsWith("leadlens-")).map(key => caches.delete(key)));
+    }
+  } catch { /* continue */ }
+  const url = new URL(location.href);
+  url.searchParams.set("v", APP_VERSION);
+  url.searchParams.set("_", String(Date.now()));
+  location.replace(url.toString());
+});
 
 async function bootSalesGraph() {
   initTheme();
