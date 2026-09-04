@@ -22,9 +22,10 @@ const STATUS_DEMAND = "Demand Letter";
 const STATUS_CANCEL = "Cancel";
 
 const TOP_N = 10;
-const HERO_CHART_HEIGHT = 1200;
-/** Fixed px width per category group (4 series) so hero bars stay readable. */
-const CATEGORY_WIDTH_PX = 56;
+/** Viewport-friendly hero height (~55–70vh / 480–640px); CSS also clamps with vh. */
+const HERO_CHART_HEIGHT = 560;
+/** Fixed px width per category group (4 series) so hero bars + value labels stay readable. */
+const CATEGORY_WIDTH_PX = 68;
 
 function requireChart() {
   const Chart = window.Chart;
@@ -221,10 +222,70 @@ function registerChart(id, config) {
     type: config.type,
     data: config.data,
     options: config.options,
+    plugins: config.plugins,
   });
   chartRegistry.set(id, chart);
   return chart;
 }
+
+/**
+ * Paint locale-formatted values above each hero grouped bar.
+ * Skips zeros when the chart is dense; shows zeros when sparse (few categories).
+ */
+const heroBarValueLabels = {
+  id: "sgHeroBarValueLabels",
+  afterDatasetsDraw(chart) {
+    const {ctx, data} = chart;
+    const labels = data.labels || [];
+    const datasets = data.datasets || [];
+    let totalPts = 0;
+    let nonZero = 0;
+    for (let di = 0; di < datasets.length; di++) {
+      const meta = chart.getDatasetMeta(di);
+      if (!meta || meta.hidden) continue;
+      const vals = datasets[di].data || [];
+      for (let i = 0; i < vals.length; i++) {
+        totalPts += 1;
+        if ((Number(vals[i]) || 0) !== 0) nonZero += 1;
+      }
+    }
+    // Sparse: few categories or few points overall → show 0s; else skip zeros.
+    const sparse = labels.length <= 10 || totalPts <= 32 || nonZero <= 8;
+    const skipZeros = !sparse;
+    const ink = inkColor();
+    const dark = document.documentElement.getAttribute("data-theme") === "dark";
+    const fill = dark ? "#e8f2ec" : ink;
+    const halo = dark ? "rgba(8,18,14,0.85)" : "rgba(255,255,255,0.92)";
+
+    ctx.save();
+    ctx.font = "600 9px ui-sans-serif, system-ui, sans-serif";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "bottom";
+    ctx.lineWidth = 3;
+    ctx.lineJoin = "round";
+
+    for (let di = 0; di < datasets.length; di++) {
+      const meta = chart.getDatasetMeta(di);
+      if (!meta || meta.hidden || !meta.data) continue;
+      const vals = datasets[di].data || [];
+      for (let i = 0; i < meta.data.length; i++) {
+        const raw = Number(vals[i]);
+        const value = Number.isFinite(raw) ? raw : 0;
+        if (skipZeros && value === 0) continue;
+        const el = meta.data[i];
+        if (!el || typeof el.x !== "number" || typeof el.y !== "number") continue;
+        const text = value.toLocaleString(undefined, {maximumFractionDigits: 1});
+        const x = el.x;
+        const y = Math.min(el.y, el.base ?? el.y) - 3;
+        ctx.strokeStyle = halo;
+        ctx.fillStyle = fill;
+        ctx.strokeText(text, x, y);
+        ctx.fillText(text, x, y);
+      }
+    }
+    ctx.restore();
+  },
+};
 
 function baseOptions({stacked = false, indexAxis = "x", yTickCallback} = {}) {
   const Chart = requireChart();
@@ -311,6 +372,7 @@ function dualAxisOptions() {
     responsive: true,
     maintainAspectRatio: false,
     interaction: {mode: "index", intersect: false},
+    layout: {padding: {top: 16}},
     plugins: {
       legend: {labels: legendLabelsWithoutRight(Chart)},
       tooltip: {mode: "index", intersect: false},
@@ -672,6 +734,7 @@ function mountHeroDualAxis(grid, id, title, getData, slicerOpts) {
       type: "bar",
       data: {labels, datasets},
       options: dualAxisOptions(),
+      plugins: [heroBarValueLabels],
     });
   };
   attachSlicers(card, {
