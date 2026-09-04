@@ -2139,12 +2139,20 @@ els["reload-app"]?.addEventListener("click",async()=>{
     }
     if(window.caches){
       const keys=await caches.keys();
-      await Promise.all(keys.filter(key=>key.startsWith("leadlens-")).map(key=>caches.delete(key)));
+      await Promise.all(keys.map(key=>caches.delete(key)));
     }
   }catch{/* continue to forced navigation */}
-  // Bust HTML + module cache; plain reload often reuses stale app.js/audit.js.
   const url=new URL(location.href);
-  url.searchParams.set("v",APP_VERSION);
+  let bust=String(Date.now());
+  try{
+    const response=await fetch(`../version.json?t=${Date.now()}`,{cache:"no-store"});
+    if(response.ok){
+      const data=await response.json();
+      const remote=normalizeVersion(data.version);
+      if(remote)bust=remote;
+    }
+  }catch{/* use timestamp */}
+  url.searchParams.set("v",bust);
   url.searchParams.set("_",String(Date.now()));
   location.replace(url.toString());
 });
