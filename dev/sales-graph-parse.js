@@ -1,17 +1,18 @@
 /**
- * Sales Graph Excel parse — Leads / Visits sheets (same verified shape).
+ * Sales Graph Excel parse — Leads / Visits / Booked sheets.
  *
- * Layout (sheet1):
- * - Row 0: [blank, blank, blank, axis-label spacer, YYYYMM…, Totals]
- * - Row 1: [Project Name, Source, Source Name] (dims only; months are on row 0)
- * - Merge: per column prefer non-empty; YYYYMM from row 0, dims from row 1;
+ * Shared layout (sheet1):
+ * - Row 0: [blank…, axis-label spacer, YYYYMM…, Totals]
+ * - Row 1: [Project Name, Source, Source Name, (Status on Booked)]
+ * - Merge headers: prefer YYYYMM from row 0, dims from row 1;
  *   drop empty / null / axis-label / Totals.
- * - Data from row index 2; forward-fill Project Name + Source; blank→0;
- *   skip Project Name === "Totals"; Meta-normalize Source Name.
+ * - Data from row index 2; forward-fill Project Name + Source + Source Name;
+ *   blank→0; skip Project Name === "Totals"; Meta-normalize Source Name.
+ * - Booked adds Status (per-row; not forward-filled) and byStatus aggregates.
  */
 
 const MONTH_RE = /^\d{6}$/;
-const DIM_LABELS = new Set(["project name", "source", "source name"]);
+const DIM_LABELS = new Set(["project name", "source", "source name", "status"]);
 
 export function normalizeSourceName(raw) {
   const name = String(raw ?? "").trim();
@@ -109,6 +110,7 @@ function emptyAggregates(months) {
     byMonth: {...byMonth},
     byProject: {},
     bySource: {},
+    byStatus: {},
   };
 }
 
@@ -129,7 +131,7 @@ function bumpBucket(map, key, monthsObj, monthKeys) {
 }
 
 /**
- * Parse a Leads or Visits ArrayBuffer / workbook bytes into normalized sheet data.
+ * Parse a Leads, Visits, or Booked ArrayBuffer into normalized sheet data.
  * @param {ArrayBuffer} buffer
  * @param {{fileName?: string, kind?: string}} opts
  */
@@ -149,11 +151,12 @@ export function parseSalesGraphSheet(buffer, opts = {}) {
   const mergedHeaders = mergeHeaderRows(matrix[0] || [], matrix[1] || []);
   const dataRows = matrix.slice(2);
 
-  const colMap = []; // {index, kind: 'project'|'source'|'sourceName'|'month', month?}
+  const colMap = []; // {index, kind: 'project'|'source'|'sourceName'|'status'|'month', month?}
   const months = [];
   let projectIdx = -1;
   let sourceIdx = -1;
   let sourceNameIdx = -1;
+  let statusIdx = -1;
 
   for (let i = 0; i < mergedHeaders.length; i++) {
     const label = mergedHeaders[i];
@@ -177,12 +180,17 @@ export function parseSalesGraphSheet(buffer, opts = {}) {
       colMap.push({index: i, kind: "sourceName"});
       continue;
     }
+    if (lower === "status") {
+      statusIdx = i;
+      colMap.push({index: i, kind: "status"});
+      continue;
+    }
     if (isYyyymm(label)) {
       months.push(label);
       colMap.push({index: i, kind: "month", month: label});
       continue;
     }
-    // Axis spacer (e.g. "Lead Registration Year + Month") and any other junk — drop
+    // Axis spacer (e.g. "Year+Month" / "Lead Registration Year + Month") — drop
   }
 
   const missing = [];
@@ -190,6 +198,8 @@ export function parseSalesGraphSheet(buffer, opts = {}) {
   if (sourceIdx < 0) missing.push("Source");
   if (sourceNameIdx < 0) missing.push("Source Name");
   if (!months.length) missing.push("YYYYMM month column(s)");
+  // Status is required for Booked; optional for Leads/Visits
+  if (opts.kind === "booked" && statusIdx < 0) missing.push("Status");
   if (missing.length) {
     return {
       ok: false,
@@ -202,6 +212,7 @@ export function parseSalesGraphSheet(buffer, opts = {}) {
       byMonth: {},
       byProject: {},
       bySource: {},
+      byStatus: {},
     };
   }
 
@@ -210,6 +221,7 @@ export function parseSalesGraphSheet(buffer, opts = {}) {
 
   let fillProject = "";
   let fillSource = "";
+  let fillSourceName = "";
   const rows = [];
 
   for (const row of dataRows) {
@@ -217,6 +229,7 @@ export function parseSalesGraphSheet(buffer, opts = {}) {
     const projectCell = cellText(row[projectIdx]);
     const sourceCell = cellText(row[sourceIdx]);
     const sourceNameRaw = cellText(row[sourceNameIdx]);
+    const statusCell = statusIdx >= 0 ? cellText(row[statusIdx]) : "";
 
     // Skip summary Totals rows (before fill so we don't poison forward-fill)
     if (projectCell.toLowerCase() === "totals" || projectCell.toLowerCase() === "total") {
@@ -225,9 +238,12 @@ export function parseSalesGraphSheet(buffer, opts = {}) {
 
     if (projectCell) fillProject = projectCell;
     if (sourceCell) fillSource = sourceCell;
+    if (sourceNameRaw) fillSourceName = sourceNameRaw;
 
     const project = fillProject;
     const source = fillSource;
+    const sourceNameFilled = fillSourceName;
+    const status = statusCell;
 
     // Skip if filled project is still a totals sentinel
     if (project.toLowerCase() === "totals" || project.toLowerCase() === "total") continue;
@@ -242,22 +258,26 @@ export function parseSalesGraphSheet(buffer, opts = {}) {
       if (v !== 0) anyMonth = true;
     }
 
-    if (!project && !source && !sourceNameRaw && !anyMonth) continue;
+    if (!project && !source && !sourceNameFilled && !status && !anyMonth) continue;
 
-    const sourceNormalized = normalizeSourceName(sourceNameRaw);
-    rows.push({
+    const sourceNormalized = normalizeSourceName(sourceNameFilled);
+    const out = {
       project,
       source,
-      sourceNameRaw,
-      sourceNormalized: sourceNormalized || sourceNameRaw || "(blank)",
+      sourceNameRaw: sourceNameFilled,
+      sourceNormalized: sourceNormalized || sourceNameFilled || "(blank)",
       months: monthValues,
-    });
+    };
+    if (statusIdx >= 0) out.status = status || "(blank)";
+    rows.push(out);
   }
 
   const agg = emptyAggregates(monthsOrdered);
+  const hasStatus = statusIdx >= 0;
   for (const row of rows) {
     const rowSum = bumpBucket(agg.byProject, row.project, row.months, monthsOrdered);
     bumpBucket(agg.bySource, row.sourceNormalized, row.months, monthsOrdered);
+    if (hasStatus) bumpBucket(agg.byStatus, row.status, row.months, monthsOrdered);
     for (const m of monthsOrdered) {
       const v = Number(row.months[m] || 0);
       agg.byMonth[m] += v;
@@ -266,7 +286,7 @@ export function parseSalesGraphSheet(buffer, opts = {}) {
     agg.totals.grand += rowSum;
   }
 
-  return {
+  const result = {
     ok: true,
     error: "",
     fileName: opts.fileName || "",
@@ -279,16 +299,36 @@ export function parseSalesGraphSheet(buffer, opts = {}) {
     byProject: agg.byProject,
     bySource: agg.bySource,
   };
+  if (hasStatus) result.byStatus = agg.byStatus;
+  return result;
+}
+
+function sheetPayload(parsed) {
+  const out = {
+    fileName: parsed.fileName || "",
+    totals: parsed.totals,
+    byMonth: parsed.byMonth,
+    byProject: parsed.byProject,
+    bySource: parsed.bySource,
+    rows: parsed.rows,
+  };
+  if (parsed.byStatus) out.byStatus = parsed.byStatus;
+  return out;
 }
 
 /**
- * Build the publish/preview payload from parsed Leads + Visits sheets.
+ * Build the publish/preview payload from parsed Leads + Visits + Booked sheets.
  */
-export function buildSalesGraphPayload(leadsParsed, visitsParsed, {title} = {}) {
+export function buildSalesGraphPayload(leadsParsed, visitsParsed, bookedParsed, {title} = {}) {
   if (!leadsParsed?.ok) throw new Error(leadsParsed?.error || "Leads file is invalid.");
   if (!visitsParsed?.ok) throw new Error(visitsParsed?.error || "Visits file is invalid.");
+  if (!bookedParsed?.ok) throw new Error(bookedParsed?.error || "Booked file is invalid.");
 
-  const monthSet = new Set([...(leadsParsed.months || []), ...(visitsParsed.months || [])]);
+  const monthSet = new Set([
+    ...(leadsParsed.months || []),
+    ...(visitsParsed.months || []),
+    ...(bookedParsed.months || []),
+  ]);
   const months = [...monthSet].sort((a, b) => a.localeCompare(b));
 
   const uploadedAt = new Date().toISOString();
@@ -296,23 +336,9 @@ export function buildSalesGraphPayload(leadsParsed, visitsParsed, {title} = {}) 
     title: title || "Sales Graph",
     uploaded_at: uploadedAt,
     months,
-    leads: {
-      fileName: leadsParsed.fileName || "",
-      totals: leadsParsed.totals,
-      byMonth: leadsParsed.byMonth,
-      byProject: leadsParsed.byProject,
-      bySource: leadsParsed.bySource,
-      rows: leadsParsed.rows,
-    },
-    visits: {
-      fileName: visitsParsed.fileName || "",
-      totals: visitsParsed.totals,
-      byMonth: visitsParsed.byMonth,
-      byProject: visitsParsed.byProject,
-      bySource: visitsParsed.bySource,
-      rows: visitsParsed.rows,
-    },
-    booked: null,
+    leads: sheetPayload(leadsParsed),
+    visits: sheetPayload(visitsParsed),
+    booked: sheetPayload(bookedParsed),
   };
 }
 

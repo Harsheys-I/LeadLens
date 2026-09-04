@@ -1,15 +1,15 @@
 /**
- * Sales Graph module — Upload (Leads + Visits) + published Dashboard.
+ * Sales Graph module — Upload (Leads + Visits + Booked) + published Dashboard.
  */
-import {APP_VERSION} from "./audit.js?v=6.0.0.dev";
-import {requireAuth, logout, hasPermission, getUser, changePassword, updateProfile} from "./auth.js?v=6.0.0.dev";
-import {SalesGraphApi} from "./api-client.js?v=6.0.0.dev";
-import {mountNotifications} from "./notifications-ui.js?v=6.0.0.dev";
-import {appUrl, homePath} from "./app-base.js?v=6.0.0.dev";
-import {initTheme} from "./theme.js?v=6.0.0.dev";
-import {setStorageUserId, storageKey} from "./db.js?v=6.0.0.dev";
-import {parseSalesGraphSheet, buildSalesGraphPayload} from "./sales-graph-parse.js?v=6.0.0.dev";
-import {renderSalesGraphDashboard, destroySalesGraphCharts} from "./sales-graph-dashboard.js?v=6.0.0.dev";
+import {APP_VERSION} from "./audit.js?v=6.0.1.dev";
+import {requireAuth, logout, hasPermission, getUser, changePassword, updateProfile} from "./auth.js?v=6.0.1.dev";
+import {SalesGraphApi} from "./api-client.js?v=6.0.1.dev";
+import {mountNotifications} from "./notifications-ui.js?v=6.0.1.dev";
+import {appUrl, homePath} from "./app-base.js?v=6.0.1.dev";
+import {initTheme} from "./theme.js?v=6.0.1.dev";
+import {setStorageUserId, storageKey} from "./db.js?v=6.0.1.dev";
+import {parseSalesGraphSheet, buildSalesGraphPayload} from "./sales-graph-parse.js?v=6.0.1.dev";
+import {renderSalesGraphDashboard, destroySalesGraphCharts} from "./sales-graph-dashboard.js?v=6.0.1.dev";
 
 const $ = id => document.getElementById(id);
 const ids = [
@@ -27,10 +27,11 @@ const els = Object.fromEntries(ids.map(id => [id, $(id)]));
 if (els["sidebar-version"]) els["sidebar-version"].textContent = `v${APP_VERSION}`;
 
 const titles = {upload: "Upload", dashboard: "Dashboard"};
-const RELEASE_NOTES = "v6.0.0.dev: Sales Graph module — Leads/Visits upload, publish, multi-chart gallery.";
+const RELEASE_NOTES = "v6.0.1.dev: Sales Graph Booked Excel — Status dim, funnel KPIs/charts, all three sheets required to publish.";
 
 let leadsParsed = null;
 let visitsParsed = null;
+let bookedParsed = null;
 let previewPayload = null;
 
 function toast(message) {
@@ -61,14 +62,12 @@ function showView(name) {
   if (name === "dashboard") refreshPublishedDashboard();
 }
 
-function wireDropZone(zone, input, onFiles, {disabled = false} = {}) {
+function wireDropZone(zone, input, onFiles) {
   if (!zone || !input) return;
-  if (disabled) {
-    zone.classList.add("drop-zone-disabled");
-    zone.setAttribute("aria-disabled", "true");
-    zone.onclick = e => { e.preventDefault(); toast("Booked upload coming soon."); };
-    return;
-  }
+  zone.classList.remove("drop-zone-disabled");
+  zone.removeAttribute("aria-disabled");
+  input.disabled = false;
+  zone.tabIndex = 0;
   zone.onclick = () => input.click();
   zone.onkeydown = e => { if (["Enter", " "].includes(e.key)) input.click(); };
   for (const ev of ["dragenter", "dragover"]) {
@@ -106,6 +105,9 @@ function renderFileList() {
   if (visitsParsed) {
     items.push(`Visits: ${visitsParsed.fileName || "workbook"}${visitsParsed.ok ? ` · ${visitsParsed.rows?.length || 0} rows` : " · error"}`);
   }
+  if (bookedParsed) {
+    items.push(`Booked: ${bookedParsed.fileName || "workbook"}${bookedParsed.ok ? ` · ${bookedParsed.rows?.length || 0} rows` : " · error"}`);
+  }
   if (!items.length) {
     list.classList.add("hidden");
     return;
@@ -120,17 +122,24 @@ function renderFileList() {
 }
 
 function syncCreateState() {
-  const ready = Boolean(leadsParsed?.ok && visitsParsed?.ok);
+  const ready = Boolean(leadsParsed?.ok && visitsParsed?.ok && bookedParsed?.ok);
   if (els["sg-create-dashboard"]) {
     els["sg-create-dashboard"].disabled = !ready || !hasPermission("sales_graph.upload");
   }
   const msgs = [];
   if (leadsParsed && !leadsParsed.ok) msgs.push(`Leads: ${leadsParsed.error}`);
   if (visitsParsed && !visitsParsed.ok) msgs.push(`Visits: ${visitsParsed.error}`);
+  if (bookedParsed && !bookedParsed.ok) msgs.push(`Booked: ${bookedParsed.error}`);
   if (!leadsParsed) msgs.push("Leads Excel required");
   if (!visitsParsed) msgs.push("Visits Excel required");
+  if (!bookedParsed) msgs.push("Booked Excel required");
+  const hasError = Boolean(
+    (leadsParsed && !leadsParsed.ok) ||
+    (visitsParsed && !visitsParsed.ok) ||
+    (bookedParsed && !bookedParsed.ok)
+  );
   if (ready) setValidation(["Ready — Create Dashboard for a local preview."], false);
-  else setValidation(msgs, Boolean((leadsParsed && !leadsParsed.ok) || (visitsParsed && !visitsParsed.ok)));
+  else setValidation(msgs, hasError);
 }
 
 async function loadFile(kind, file) {
@@ -139,14 +148,16 @@ async function loadFile(kind, file) {
     const buffer = await file.arrayBuffer();
     const parsed = parseSalesGraphSheet(buffer, {fileName: file.name, kind});
     if (kind === "leads") leadsParsed = parsed;
-    else visitsParsed = parsed;
+    else if (kind === "visits") visitsParsed = parsed;
+    else bookedParsed = parsed;
     previewPayload = null;
     els["sg-preview-panel"]?.classList.add("hidden");
     if (els["sg-upload-dashboard-btn"]) els["sg-upload-dashboard-btn"].disabled = true;
   } catch (err) {
     const fail = {ok: false, error: err.message || "Could not read workbook.", fileName: file.name, rows: []};
     if (kind === "leads") leadsParsed = fail;
-    else visitsParsed = fail;
+    else if (kind === "visits") visitsParsed = fail;
+    else bookedParsed = fail;
   }
   renderFileList();
   syncCreateState();
@@ -157,9 +168,9 @@ function createPreview() {
     toast("Upload not permitted for your role.");
     return;
   }
-  if (!leadsParsed?.ok || !visitsParsed?.ok) return;
+  if (!leadsParsed?.ok || !visitsParsed?.ok || !bookedParsed?.ok) return;
   try {
-    previewPayload = buildSalesGraphPayload(leadsParsed, visitsParsed, {title: "Sales Graph"});
+    previewPayload = buildSalesGraphPayload(leadsParsed, visitsParsed, bookedParsed, {title: "Sales Graph"});
   } catch (err) {
     setValidation([err.message || "Could not build dashboard"], true);
     toast(err.message || "Could not build dashboard");
@@ -226,7 +237,7 @@ async function refreshPublishedDashboard() {
       mount.replaceChildren();
       empty?.classList.remove("hidden");
       if (empty) empty.textContent = "No Sales Graph has been published yet.";
-      if (metaEl) metaEl.textContent = "Published Leads & Visits from the latest upload.";
+      if (metaEl) metaEl.textContent = "Published Leads, Visits & Booked from the latest upload.";
       return;
     }
     empty?.classList.add("hidden");
@@ -398,7 +409,9 @@ wireDropZone(els["sg-leads-drop"], els["sg-leads-input"], files => {
 wireDropZone(els["sg-visits-drop"], els["sg-visits-input"], files => {
   if (files?.[0]) loadFile("visits", files[0]);
 });
-wireDropZone(els["sg-booked-drop"], els["sg-booked-input"], () => {}, {disabled: true});
+wireDropZone(els["sg-booked-drop"], els["sg-booked-input"], files => {
+  if (files?.[0]) loadFile("booked", files[0]);
+});
 
 els["sg-create-dashboard"]?.addEventListener("click", createPreview);
 els["sg-upload-dashboard-btn"]?.addEventListener("click", publishDashboard);

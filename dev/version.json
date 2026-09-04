@@ -1,5 +1,5 @@
 {
-  "version": "6.0.0.dev",
+  "version": "6.0.1.dev",
   "name": "GPP AI",
-  "notes": "v6.0.0.dev: Sales Graph module — Leads/Visits Excel upload, MySQL publish, multi-chart gallery (bar, line, doughnut, stacked, heatmaps, MoM)."
+  "notes": "v6.0.1.dev: Sales Graph Booked Excel — Status dimension, Meta normalize, funnel KPIs/charts (Booked/Visits, Booked/Leads), Leads+Visits+Booked required to publish."
 }
