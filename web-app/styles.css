@@ -700,7 +700,8 @@ body .sg-chart-scroll{
   touch-action:pan-x;
   border-radius:8px
 }
-body .sg-chart-card--hero .sg-chart-scroll{height:1200px}
+/* Hero L/V/B: viewport-friendly height; doughnuts/heatmaps keep their own card heights. */
+body .sg-chart-card--hero .sg-chart-scroll{height:min(560px,62vh)}
 body .sg-chart-scroll .dashboard-chart-canvas{
   height:100%;max-width:none;min-width:0;overflow:hidden;box-sizing:border-box
 }
@@ -708,9 +709,9 @@ body .sg-chart-scroll .dashboard-chart-canvas canvas{
   max-width:none!important;width:100%!important;height:100%!important;display:block
 }
 @media(max-width:850px){
-  body .sg-chart-card--hero .sg-chart-scroll{height:720px}
+  body .sg-chart-card--hero .sg-chart-scroll{height:min(420px,55vh)}
   body .sg-chart-card--hero .sg-chart-scroll .dashboard-chart-canvas,
-  body .sg-chart-card--hero .dashboard-chart-canvas{height:720px}
+  body .sg-chart-card--hero .dashboard-chart-canvas{height:min(420px,55vh)}
 }
 body .sg-slicer{position:relative;font-size:12px}
 body .sg-slicer-summary{

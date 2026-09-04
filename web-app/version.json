@@ -1,5 +1,5 @@
 {
-  "version": "6.0.6.dev",
+  "version": "6.0.7.dev",
   "name": "GPP AI",
-  "notes": "v6.0.6.dev: Hero chart horizontal scrollbar stays inside the card; wide canvas no longer expands the page."
+  "notes": "v6.0.7.dev: Shorter hero Sales Graph charts; bar values labeled above each series (skip zeros when dense)."
 }
