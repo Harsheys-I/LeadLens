@@ -1909,9 +1909,19 @@ function renderSidebarRelease(version=APP_VERSION,notes=""){
   if(els["sidebar-version"])els["sidebar-version"].textContent=`v${version}`;
   if(els["sidebar-notes"]&&notes)els["sidebar-notes"].textContent=notes;
 }
+function normalizeVersion(v){
+  return String(v||"").trim().replace(/^v/i,"");
+}
+function pageShellVersion(){
+  const meta=document.querySelector('meta[name="app-version"]');
+  if(meta?.content)return normalizeVersion(meta.content);
+  const mod=document.querySelector('script[type="module"][src*="debug-mode"]');
+  const m=mod?.getAttribute("src")?.match(/[?&]v=([^&]+)/);
+  return m?normalizeVersion(decodeURIComponent(m[1])):"";
+}
 function isNewerVersion(candidate,current){
   const parse=v=>{
-    const m=String(v||"").trim().match(/^(\d+)\.(\d+)\.(\d+)/);
+    const m=normalizeVersion(v).match(/^(\d+)\.(\d+)\.(\d+)/);
     return m?[Number(m[1]),Number(m[2]),Number(m[3])]:null;
   };
   const a=parse(candidate),b=parse(current);
@@ -1937,10 +1947,13 @@ async function checkForUpdate(){
     const response=await fetch(`../version.json?t=${Date.now()}`,{cache:"no-store"});
     if(!response.ok)return;
     const data=await response.json();
-    const latest=String(data.version||"").trim();
+    const latest=normalizeVersion(data.version);
     const notes=String(data.notes||"").trim();
-    const newer=isNewerVersion(latest,APP_VERSION);
-    if(newer||latest===APP_VERSION)renderSidebarRelease(APP_VERSION,notes||els["sidebar-notes"]?.textContent||"");
+    const appV=normalizeVersion(APP_VERSION);
+    const shellV=pageShellVersion();
+    const alreadyCurrent=Boolean(latest)&&(latest===appV||(shellV&&latest===shellV));
+    const newer=Boolean(latest)&&isNewerVersion(latest,appV)&&!alreadyCurrent;
+    if(newer||alreadyCurrent)renderSidebarRelease(APP_VERSION,notes||els["sidebar-notes"]?.textContent||"");
     if(newer)showUpdateBanner(latest);
     else els["update-banner"]?.classList.add("hidden");
   }catch{/* offline */}
