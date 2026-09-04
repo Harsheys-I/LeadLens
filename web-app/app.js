@@ -8,9 +8,6 @@ import {persistJob,removeJobSynced,clearJobsSynced,pullJobsFromServer} from "./j
 import {mountPerfReportUpload,mountPerfPublishedDashboard,refreshPerfPublished} from "./perf-dashboard.js?v=5.8";
 import {appUrl, homePath} from "./app-base.js?v=5.7";
 import {initTheme} from "./theme.js?v=5.6";
-// #region agent log
-fetch("http://127.0.0.1:7564/ingest/5981bb77-f08e-4f6c-995e-18d8279225fc",{method:"POST",headers:{"Content-Type":"application/json","X-Debug-Session-Id":"7f7e03"},body:JSON.stringify({sessionId:"7f7e03",runId:"post-fix",hypothesisId:"A",location:"app.js:module-load",message:"JS module loaded; DOM version before early paint",data:{APP_VERSION,domSidebar:document.getElementById("sidebar-version")?.textContent||null,t:performance.now()},timestamp:Date.now()})}).catch(()=>{});
-// #endregion
 
 const $=id=>document.getElementById(id);
 const ids=["page-title","key-state","run-name","pause-run","download-result","progress-label","progress-percent","progress-bar","metric-leads","metric-excel-rows","metric-calls","metric-batch","metric-completed","metric-status","metric-input-tokens","metric-cached-tokens","metric-output-tokens","metric-duration","metric-cost","live-log","clear-console","history-list","clear-history","api-key","remember-key","toggle-key","save-key","forget-key","key-message","batch-size","concurrency","model","input-field-config","add-input-field","ai-field-config","output-field-config","yes-values","no-values","input-price","cached-price","output-price","save-settings","reset-settings","settings-message","toast","mobile-menu","active-job-switch","sort-field","sort-direction","app-version","export-settings","import-settings","import-settings-file","update-banner","update-banner-text","reload-app","key-modal","onboard-key","onboard-toggle","onboard-remember","onboard-message","onboard-save","onboard-skip","sidebar-version","sidebar-notes","review-drop-zone","review-file-input","review-drop-hint","review-file-list","review-validation","start-review","review-run-panel","review-aggregate","review-cards","review-dashboard-panel","review-dashboard-mount","download-review-excel","review-open-console","review-precounts","review-live-progress","review-progress-label","review-progress-percent","review-progress-bar","review-post-actions","create-review-dashboard","export-dashboard-pdf","upload-dashboard-btn","upload-dashboard-modal","upload-telecaller-list","upload-dash-message","upload-dash-confirm","upload-dash-cancel","published-list","refresh-published","published-dashboard-panel","published-dash-title","published-dash-meta","published-dash-actions","published-dashboard-mount","shell-user-label","shell-logout","shell-account"];
@@ -18,9 +15,6 @@ const els=Object.fromEntries(ids.map(id=>[id,$(id)]));
 // Paint running build immediately so stale HTML never flashes for seconds during auth/boot.
 if(els["sidebar-version"])els["sidebar-version"].textContent=`v${APP_VERSION}`;
 if(els["app-version"])els["app-version"].textContent=APP_VERSION;
-// #region agent log
-fetch("http://127.0.0.1:7564/ingest/5981bb77-f08e-4f6c-995e-18d8279225fc",{method:"POST",headers:{"Content-Type":"application/json","X-Debug-Session-Id":"7f7e03"},body:JSON.stringify({sessionId:"7f7e03",runId:"post-fix",hypothesisId:"B",location:"app.js:early-sidebar-paint",message:"Early APP_VERSION paint applied",data:{APP_VERSION,domSidebar:els["sidebar-version"]?.textContent||null,t:performance.now()},timestamp:Date.now()})}).catch(()=>{});
-// #endregion
 const titles={review:"Bucket 1 Followup Review",console:"Run console",published:"Dashboard",history:"History",settings:"Settings","perf-report":"TeleCalling Performance","perf-dashboard":"Performance Dashboard","perf-settings":"Performance Settings"};
 /** When false, completed audits do not auto-render charts until Create Dashboard. */
 let reviewDashboardRequested=false;
@@ -1888,10 +1882,6 @@ function isNewerVersion(candidate,current){
   return false;
 }
 async function checkForUpdate(){
-  // #region agent log
-  const beforeDom=els["sidebar-version"]?.textContent||null;
-  fetch("http://127.0.0.1:7564/ingest/5981bb77-f08e-4f6c-995e-18d8279225fc",{method:"POST",headers:{"Content-Type":"application/json","X-Debug-Session-Id":"7f7e03"},body:JSON.stringify({sessionId:"7f7e03",runId:"post-fix",hypothesisId:"B",location:"app.js:checkForUpdate:entry",message:"checkForUpdate entry; expect already vAPP_VERSION",data:{beforeDom,APP_VERSION,t:performance.now()},timestamp:Date.now()})}).catch(()=>{});
-  // #endregion
   if(els["app-version"])els["app-version"].textContent=APP_VERSION;
   renderSidebarRelease(APP_VERSION);
   try{
@@ -1905,9 +1895,6 @@ async function checkForUpdate(){
     // Sidebar always reflects the running build. Only adopt remote notes when remote >= current.
     if(newer||same)renderSidebarRelease(APP_VERSION,notes);
     else renderSidebarRelease(APP_VERSION);
-    // #region agent log
-    fetch("http://127.0.0.1:7564/ingest/5981bb77-f08e-4f6c-995e-18d8279225fc",{method:"POST",headers:{"Content-Type":"application/json","X-Debug-Session-Id":"7f7e03"},body:JSON.stringify({sessionId:"7f7e03",runId:"post-fix",hypothesisId:"C",location:"app.js:checkForUpdate:after-fetch",message:"version.json applied to sidebar",data:{beforeDom,afterDom:els["sidebar-version"]?.textContent||null,latest,notesPreview:notes.slice(0,60),newer,same,APP_VERSION,t:performance.now()},timestamp:Date.now()})}).catch(()=>{});
-    // #endregion
     if(newer)showUpdateBanner(latest);
     else if(els["update-banner"])els["update-banner"].classList.add("hidden");
   }catch{/* offline or first local open */}
@@ -2160,9 +2147,6 @@ window.addEventListener("beforeunload",event=>{
 setReviewFormat("raw");
 
 async function bootTeleCallerAudit(){
-  // #region agent log
-  fetch("http://127.0.0.1:7564/ingest/5981bb77-f08e-4f6c-995e-18d8279225fc",{method:"POST",headers:{"Content-Type":"application/json","X-Debug-Session-Id":"7f7e03"},body:JSON.stringify({sessionId:"7f7e03",runId:"post-fix",hypothesisId:"B",location:"app.js:bootTeleCallerAudit:start",message:"boot start; sidebar should already be APP_VERSION",data:{domSidebar:document.getElementById("sidebar-version")?.textContent||null,APP_VERSION,t:performance.now()},timestamp:Date.now()})}).catch(()=>{});
-  // #endregion
   initTheme();
   const user=await requireAuth({loginPath:homePath()});
   if(!user)return;
