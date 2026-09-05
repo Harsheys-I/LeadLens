@@ -11,6 +11,8 @@
  * - Booked adds Status (per-row; not forward-filled) and byStatus aggregates.
  * - Booked also exposes leadDeclaration = Demand Letter + Cancel
  *   ({ total, byMonth, byProject, bySource }).
+ *   UI label for that sum is "Sales Declaration"; Demand Letter → "Booked",
+ *   Cancel → "Canceled" (display only; Excel status keys unchanged).
  */
 
 const MONTH_RE = /^\d{6}$/;
@@ -150,7 +152,7 @@ function ensureDimEntry(map, name, months) {
 }
 
 /**
- * Lead Declaration = Demand Letter + Cancel (sum of the two Booked statuses).
+ * Sales Declaration (UI) = Demand Letter + Cancel (Excel status keys).
  * Shape mirrors a status bucket: { total, byMonth, byProject, bySource }.
  */
 export function computeLeadDeclaration(byStatus, months = []) {

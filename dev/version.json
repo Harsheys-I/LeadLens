@@ -1,5 +1,5 @@
 {
-  "version": "6.0.9.dev",
+  "version": "6.1.0.stable",
   "name": "GPP AI",
-  "notes": "v6.0.9.dev: Sales Graph Lead Declaration (= Demand Letter + Cancel) in KPIs, hero charts, and tables."
+  "notes": "v6.1.0.stable: Sales Graph Booked series rename (Sales Declaration / Booked / Canceled) + UI glyph fixes."
 }
