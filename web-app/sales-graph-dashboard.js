@@ -19,14 +19,41 @@ const COLOR_BOOKED_DL = "#5b7c99";
 const COLOR_BOOKED_CANCEL = "#a65d57";
 const COLOR_BOOKED_DECL = "#2a6f7a";
 
+/** Excel / internal status keys — keep compatible with sheet parsing. */
 const STATUS_DEMAND = "Demand Letter";
 const STATUS_CANCEL = "Cancel";
+
+/** User-facing labels (UI only; data keys stay Demand Letter / Cancel). */
+const LABEL_SALES_DECLARATION = "Sales Declaration";
+const LABEL_BOOKED = "Booked";
+const LABEL_CANCELED = "Canceled";
+
+const STATUS_DISPLAY_ORDER = [STATUS_DEMAND, STATUS_CANCEL];
 
 const TOP_N = 10;
 /** Viewport-friendly hero height (~55–70vh / 480–640px); CSS also clamps with vh. */
 const HERO_CHART_HEIGHT = 560;
 /** Fixed px width per category group (5 series) so hero bars + value labels stay readable. */
 const CATEGORY_WIDTH_PX = 82;
+
+/** Map internal Excel status → UI label. */
+function statusDisplayLabel(statusKey) {
+  const lower = String(statusKey || "").toLowerCase();
+  if (lower === STATUS_DEMAND.toLowerCase()) return LABEL_BOOKED;
+  if (lower === STATUS_CANCEL.toLowerCase()) return LABEL_CANCELED;
+  return statusKey || "(blank)";
+}
+
+/** Stable display order for Demand Letter then Cancel (Booked → Canceled). */
+function orderStatusKeys(keys) {
+  const list = [...(keys || [])];
+  const rank = (k) => {
+    const lower = String(k || "").toLowerCase();
+    const idx = STATUS_DISPLAY_ORDER.findIndex(s => s.toLowerCase() === lower);
+    return idx >= 0 ? idx : STATUS_DISPLAY_ORDER.length;
+  };
+  return list.sort((a, b) => rank(a) - rank(b) || String(a).localeCompare(String(b)));
+}
 
 function requireChart() {
   const Chart = window.Chart;
@@ -361,9 +388,9 @@ function renderKpis(mount, payload) {
     ["Total Leads", num(leads.grand)],
     ["Total Visits", num(visits.grand)],
     ["Total Booked", num(booked.grand)],
-    ["Demand Letter", num(demandTotal)],
-    ["Cancel", num(cancelTotal)],
-    ["Lead Declaration", num(leadDecl)],
+    [LABEL_SALES_DECLARATION, num(leadDecl)],
+    [LABEL_BOOKED, num(demandTotal)],
+    [LABEL_CANCELED, num(cancelTotal)],
     ["Visits / Leads", visitRate == null ? "—" : pct(visitRate)],
     ["Booked / Visits", bookedVisitRate == null ? "—" : pct(bookedVisitRate)],
     ["Booked / Leads", bookedLeadRate == null ? "—" : pct(bookedLeadRate)],
@@ -421,7 +448,7 @@ function findStatusKey(byStatus, wanted) {
   return keys.find(k => String(k).toLowerCase() === lower) || wanted;
 }
 
-/** Element-wise sum of parallel series (e.g. Demand Letter + Cancel → Lead Declaration). */
+/** Element-wise sum of parallel series (e.g. Demand Letter + Cancel → Sales Declaration). */
 function zipSum(...seriesList) {
   const len = Math.max(0, ...seriesList.map(s => (s || []).length));
   const out = new Array(len).fill(0);
@@ -431,13 +458,14 @@ function zipSum(...seriesList) {
   return out;
 }
 
+/** Hero datasets: Sales Declaration → Booked → Canceled (UI labels; data keys unchanged). */
 function lvbSplitBarDatasets(leadsData, visitsData, demandData, cancelData, declarationData) {
   return [
     {label: "Leads", data: leadsData, backgroundColor: COLOR_LEADS, borderRadius: 4, maxBarThickness: 28, yAxisID: "y"},
     {label: "Visits", data: visitsData, backgroundColor: COLOR_VISITS, borderRadius: 4, maxBarThickness: 28, yAxisID: "y"},
-    {label: "Booked · Demand Letter", data: demandData, backgroundColor: COLOR_BOOKED_DL, borderRadius: 4, maxBarThickness: 28, yAxisID: "y1"},
-    {label: "Booked · Cancel", data: cancelData, backgroundColor: COLOR_BOOKED_CANCEL, borderRadius: 4, maxBarThickness: 28, yAxisID: "y1"},
-    {label: "Booked · Lead Declaration", data: declarationData, backgroundColor: COLOR_BOOKED_DECL, borderRadius: 4, maxBarThickness: 28, yAxisID: "y1"},
+    {label: LABEL_SALES_DECLARATION, data: declarationData, backgroundColor: COLOR_BOOKED_DECL, borderRadius: 4, maxBarThickness: 28, yAxisID: "y1"},
+    {label: LABEL_BOOKED, data: demandData, backgroundColor: COLOR_BOOKED_DL, borderRadius: 4, maxBarThickness: 28, yAxisID: "y1"},
+    {label: LABEL_CANCELED, data: cancelData, backgroundColor: COLOR_BOOKED_CANCEL, borderRadius: 4, maxBarThickness: 28, yAxisID: "y1"},
   ];
 }
 
@@ -457,7 +485,7 @@ function collectDimKeys(payload) {
     ...Object.keys(visits.bySource || {}),
     ...Object.keys(booked.bySource || {}),
   ])].sort((a, b) => a.localeCompare(b));
-  const statuses = Object.keys(booked.byStatus || {}).sort((a, b) => a.localeCompare(b));
+  const statuses = orderStatusKeys(Object.keys(booked.byStatus || {}));
   return {projects, sources, statuses};
 }
 
@@ -631,7 +659,7 @@ function attachSlicers(card, {months, dims, state, onChange, show = {}}) {
     status: show.status !== false && dims.statuses.length > 0,
   };
 
-  function multiSlicer(label, allValues, selectedSet) {
+  function multiSlicer(label, allValues, selectedSet, displayFn = null) {
     const details = el("details", "sg-slicer");
     const summary = el("summary", "sg-slicer-summary");
     const updateSummary = () => {
@@ -674,7 +702,8 @@ function attachSlicers(card, {months, dims, state, onChange, show = {}}) {
         updateSummary();
         onChange();
       });
-      row.append(cb, document.createTextNode(value || "(blank)"));
+      const shown = displayFn ? displayFn(value) : value;
+      row.append(cb, document.createTextNode(shown || "(blank)"));
       panel.append(row);
     }
     details.append(panel);
@@ -688,7 +717,7 @@ function attachSlicers(card, {months, dims, state, onChange, show = {}}) {
     bar.append(multiSlicer("Source", dims.sources, state.sources));
   }
   if (flags.status && dims.statuses.length) {
-    bar.append(multiSlicer("Booked status", dims.statuses, state.statuses));
+    bar.append(multiSlicer("Booked status", dims.statuses, state.statuses, statusDisplayLabel));
   }
   if (flags.month && months.length) {
     const monthWrap = el("div", "sg-slicer-months");
@@ -1057,8 +1086,11 @@ function renderChartsGallery(mount, payload) {
 
   // —— Booked status ——
   if (booked.byStatus && Object.keys(booked.byStatus).length) {
-    const statusKeys = sortedKeysByTotal(booked.byStatus);
-    const statusSec = makeSection("Booked by status", "Demand Letter, Cancel, Lead Declaration (= DL + Cancel)");
+    const statusKeys = orderStatusKeys(Object.keys(booked.byStatus));
+    const statusSec = makeSection(
+      "Booked by status",
+      `${LABEL_SALES_DECLARATION} (= ${LABEL_BOOKED} + ${LABEL_CANCELED}), ${LABEL_BOOKED}, ${LABEL_CANCELED}`
+    );
     const statusGrid = el("div", "dashboard-charts sg-chart-grid");
     mountDoughnut(
       statusGrid, "sg-pie-booked-status",
@@ -1072,7 +1104,7 @@ function renderChartsGallery(mount, payload) {
           const series = sumSheetByMonths(booked, ms, local);
           return series.reduce((a, b) => a + b, 0);
         });
-        return {labels: names, values};
+        return {labels: names.map(statusDisplayLabel), values};
       },
       {...slicerBase, show: {project: true, source: true, month: true, status: true}}
     );
@@ -1088,7 +1120,7 @@ function renderChartsGallery(mount, payload) {
             const local = cloneFilterState(state);
             local.statuses = new Set([name]);
             return {
-              label: name,
+              label: statusDisplayLabel(name),
               data: sumSheetByMonths(booked, ms, local),
               backgroundColor: PALETTE[i % PALETTE.length],
               borderWidth: 0,
@@ -1281,14 +1313,14 @@ function renderTables(mount, payload) {
           const LD = leadDeclarationMonthVal(booked, m);
           return [
             formatMonth(m),
-            L, V, B, DL, CX, LD,
+            L, V, B, LD, DL, CX,
             Number(((L > 0 ? V / L : 0) * 100).toFixed(2)),
             Number(((V > 0 ? B / V : 0) * 100).toFixed(2)),
             Number(((L > 0 ? B / L : 0) * 100).toFixed(2)),
           ];
         });
         return sortableTable(
-          ["Month", "Leads", "Visits", "Booked", "Demand Letter", "Cancel", "Lead Declaration", "V/L %", "B/V %", "B/L %"],
+          ["Month", "Leads", "Visits", "Booked", LABEL_SALES_DECLARATION, LABEL_BOOKED, LABEL_CANCELED, "V/L %", "B/V %", "B/L %"],
           rows,
           {numericCols: new Set([1, 2, 3, 4, 5, 6, 7, 8, 9])}
         );
@@ -1308,12 +1340,12 @@ function renderTables(mount, payload) {
           bucketTotal(leads.byProject?.[n]),
           bucketTotal(visits.byProject?.[n]),
           bucketTotal(booked.byProject?.[n]),
+          leadDeclarationDimTotal(booked, "project", n),
           statusDimTotal(booked, STATUS_DEMAND, "project", n),
           statusDimTotal(booked, STATUS_CANCEL, "project", n),
-          leadDeclarationDimTotal(booked, "project", n),
         ]);
         return sortableTable(
-          ["Project", "Leads", "Visits", "Booked", "Demand Letter", "Cancel", "Lead Declaration"],
+          ["Project", "Leads", "Visits", "Booked", LABEL_SALES_DECLARATION, LABEL_BOOKED, LABEL_CANCELED],
           rows,
           {numericCols: new Set([1, 2, 3, 4, 5, 6])}
         );
@@ -1333,12 +1365,12 @@ function renderTables(mount, payload) {
           bucketTotal(leads.bySource?.[n]),
           bucketTotal(visits.bySource?.[n]),
           bucketTotal(booked.bySource?.[n]),
+          leadDeclarationDimTotal(booked, "source", n),
           statusDimTotal(booked, STATUS_DEMAND, "source", n),
           statusDimTotal(booked, STATUS_CANCEL, "source", n),
-          leadDeclarationDimTotal(booked, "source", n),
         ]);
         return sortableTable(
-          ["Source", "Leads", "Visits", "Booked", "Demand Letter", "Cancel", "Lead Declaration"],
+          ["Source", "Leads", "Visits", "Booked", LABEL_SALES_DECLARATION, LABEL_BOOKED, LABEL_CANCELED],
           rows,
           {numericCols: new Set([1, 2, 3, 4, 5, 6])}
         );
@@ -1348,14 +1380,16 @@ function renderTables(mount, payload) {
       id: "status",
       label: "By Status",
       build() {
-        const names = Object.keys(booked.byStatus || {}).sort();
-        const rows = names.map(n => [n, bucketTotal(booked.byStatus?.[n])]);
+        const names = orderStatusKeys(Object.keys(booked.byStatus || {}));
         const leadDecl =
           booked.leadDeclaration?.total != null
             ? Number(booked.leadDeclaration.total) || 0
             : bucketTotal(booked.byStatus?.[findStatusKey(booked.byStatus, STATUS_DEMAND)])
               + bucketTotal(booked.byStatus?.[findStatusKey(booked.byStatus, STATUS_CANCEL)]);
-        rows.push(["Lead Declaration (Demand Letter + Cancel)", leadDecl]);
+        const rows = [
+          [LABEL_SALES_DECLARATION, leadDecl],
+          ...names.map(n => [statusDisplayLabel(n), bucketTotal(booked.byStatus?.[n])]),
+        ];
         return sortableTable(
           ["Status", "Booked"],
           rows,
