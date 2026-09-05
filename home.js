@@ -1,8 +1,8 @@
-import {login, logout, loadSession, changePassword, updateProfile, moduleTilesForUser, hasSessionHint, getUser} from './auth.js?v=5.7';
-import {AuthApi} from './api-client.js?v=5.7';
-import {mountNotifications} from './notifications-ui.js?v=5.7';
-import {appUrl} from './app-base.js?v=5.7';
-import {initTheme} from './theme.js?v=5.6';
+import {login, logout, loadSession, changePassword, updateProfile, moduleTilesForUser, hasSessionHint, getUser} from './auth.js?v=6.0.0.dev';
+import {AuthApi} from './api-client.js?v=6.0.0.dev';
+import {mountNotifications} from './notifications-ui.js?v=6.0.0.dev';
+import {appUrl} from './app-base.js?v=6.0.0.dev';
+import {initTheme} from './theme.js?v=6.0.0.dev';
 
 const $ = id => document.getElementById(id);
 let notifCtl = null;
@@ -49,6 +49,8 @@ function renderTiles(user){
     }
     mount.append(btn);
   }
+  window.llMotion?.enterHomeTiles?.(mount);
+  window.llMotion?.homeTilesEnter?.(mount);
 }
 
 function openPasswordModal(user){

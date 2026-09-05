@@ -1,17 +1,20 @@
-import {APP_VERSION,DEFAULT_SETTINGS,DEFAULT_OUTPUT_FIELDS,SETTINGS_SEED,MAX_BATCH_SIZE,MAX_CONCURRENCY,normalizeSettings,normalizeInputFields,slugFieldId,parseWorkbook,parseAuditedWorkbook,auditBatch,downloadWorkbook,downloadReviewPack,downloadReviewPdf,splitLeadsByTelecaller,splitResultsByTelecaller,validateApiKey,HIGH_SEVERITY_ERRORS,SERVER_API_KEY} from "./audit.js?v=5.7";
-import {getJob,getJobs,loadSettings,saveSettings,getApiKey,apiKeyIsRemembered,saveApiKey,forgetApiKey,setStorageUserId,storageKey} from "./db.js?v=5.4";
-import {renderReviewDashboard,destroyReviewDashboard} from "./dashboard-view.js?v=5.5";
-import {requireAuth,logout,hasPermission,getUser,changePassword,updateProfile} from "./auth.js?v=5.7";
-import {DashboardApi,SettingsApi} from "./api-client.js?v=5.7";
-import {mountNotifications} from "./notifications-ui.js?v=5.7";
-import {persistJob,removeJobSynced,clearJobsSynced,pullJobsFromServer} from "./jobs-sync.js?v=5.7";
-import {mountPerfReportUpload,mountPerfPublishedDashboard,refreshPerfPublished} from "./perf-dashboard.js?v=5.8";
-import {appUrl, homePath} from "./app-base.js?v=5.7";
-import {initTheme} from "./theme.js?v=5.6";
+import {APP_VERSION,DEFAULT_SETTINGS,DEFAULT_OUTPUT_FIELDS,SETTINGS_SEED,MAX_BATCH_SIZE,MAX_CONCURRENCY,normalizeSettings,normalizeInputFields,slugFieldId,parseWorkbook,parseAuditedWorkbook,auditBatch,downloadWorkbook,downloadReviewPack,downloadReviewPdf,splitLeadsByTelecaller,splitResultsByTelecaller,validateApiKey,HIGH_SEVERITY_ERRORS,SERVER_API_KEY} from "./audit.js?v=6.0.0.dev";
+import {getJob,getJobs,loadSettings,saveSettings,getApiKey,apiKeyIsRemembered,saveApiKey,forgetApiKey,setStorageUserId,storageKey} from "./db.js?v=6.0.0.dev";
+import {renderReviewDashboard,destroyReviewDashboard} from "./dashboard-view.js?v=6.0.0.dev";
+import {requireAuth,logout,hasPermission,getUser,changePassword,updateProfile} from "./auth.js?v=6.0.0.dev";
+import {DashboardApi,SettingsApi} from "./api-client.js?v=6.0.0.dev";
+import {mountNotifications} from "./notifications-ui.js?v=6.0.0.dev";
+import {persistJob,removeJobSynced,clearJobsSynced,pullJobsFromServer} from "./jobs-sync.js?v=6.0.0.dev";
+import {mountPerfReportUpload,mountPerfPublishedDashboard,refreshPerfPublished} from "./perf-dashboard.js?v=6.0.0.dev";
+import {appUrl, homePath} from "./app-base.js?v=6.0.0.dev";
+import {initTheme} from "./theme.js?v=6.0.0.dev";
 
 const $=id=>document.getElementById(id);
 const ids=["page-title","key-state","run-name","pause-run","download-result","progress-label","progress-percent","progress-bar","metric-leads","metric-excel-rows","metric-calls","metric-batch","metric-completed","metric-status","metric-input-tokens","metric-cached-tokens","metric-output-tokens","metric-duration","metric-cost","live-log","clear-console","history-list","clear-history","api-key","remember-key","toggle-key","save-key","forget-key","key-message","batch-size","concurrency","model","input-field-config","add-input-field","ai-field-config","output-field-config","yes-values","no-values","input-price","cached-price","output-price","save-settings","reset-settings","settings-message","toast","mobile-menu","active-job-switch","sort-field","sort-direction","app-version","export-settings","import-settings","import-settings-file","update-banner","update-banner-text","reload-app","key-modal","onboard-key","onboard-toggle","onboard-remember","onboard-message","onboard-save","onboard-skip","sidebar-version","sidebar-notes","review-drop-zone","review-file-input","review-drop-hint","review-file-list","review-validation","start-review","review-run-panel","review-aggregate","review-cards","review-dashboard-panel","review-dashboard-mount","download-review-excel","review-open-console","review-precounts","review-live-progress","review-progress-label","review-progress-percent","review-progress-bar","review-post-actions","create-review-dashboard","export-dashboard-pdf","upload-dashboard-btn","upload-dashboard-modal","upload-telecaller-list","upload-dash-message","upload-dash-confirm","upload-dash-cancel","published-list","refresh-published","published-dashboard-panel","published-dash-title","published-dash-meta","published-dash-actions","published-dashboard-mount","shell-user-label","shell-logout","shell-account"];
 const els=Object.fromEntries(ids.map(id=>[id,$(id)]));
+// Paint running build immediately so stale HTML never flashes for seconds during auth/boot.
+if(els["sidebar-version"])els["sidebar-version"].textContent=`v${APP_VERSION}`;
+if(els["app-version"])els["app-version"].textContent=APP_VERSION;
 const titles={review:"Bucket 1 Followup Review",console:"Run console",published:"Dashboard",history:"History",settings:"Settings","perf-report":"TeleCalling Performance","perf-dashboard":"Performance Dashboard","perf-settings":"Performance Settings"};
 /** When false, completed audits do not auto-render charts until Create Dashboard. */
 let reviewDashboardRequested=false;
@@ -225,6 +228,8 @@ function showView(name){
     return;
   }
   document.querySelectorAll(".view").forEach(view=>view.classList.toggle("active",view.id===`view-${name}`));
+  const activeView=document.getElementById(`view-${name}`);
+  window.llMotion?.viewEnter(activeView);
   document.querySelectorAll(".nav-item").forEach(button=>{
     const match=button.dataset.view===name;
     const visible=!button.classList.contains("hidden")&&!button.closest(".hidden");
@@ -1862,10 +1867,20 @@ function renderSidebarRelease(version=APP_VERSION,notes=""){
   if(els["sidebar-version"])els["sidebar-version"].textContent=`v${version}`;
   if(els["sidebar-notes"]&&notes)els["sidebar-notes"].textContent=notes;
 }
+function normalizeVersion(v){
+  return String(v||"").trim().replace(/^v/i,"");
+}
+function pageShellVersion(){
+  const meta=document.querySelector('meta[name="app-version"]');
+  if(meta?.content)return normalizeVersion(meta.content);
+  const mod=document.querySelector('script[type="module"][src*="app.js"],script[type="module"][src*="debug-mode"]');
+  const m=mod?.getAttribute("src")?.match(/[?&]v=([^&]+)/);
+  return m?normalizeVersion(decodeURIComponent(m[1])):"";
+}
 /** True when candidate is a higher semver than current (major.minor.patch). */
 function isNewerVersion(candidate,current){
   const parse=v=>{
-    const m=String(v||"").trim().match(/^(\d+)\.(\d+)\.(\d+)/);
+    const m=normalizeVersion(v).match(/^(\d+)\.(\d+)\.(\d+)/);
     return m?[Number(m[1]),Number(m[2]),Number(m[3])]:null;
   };
   const a=parse(candidate),b=parse(current);
@@ -1883,12 +1898,13 @@ async function checkForUpdate(){
     const response=await fetch(`../version.json?t=${Date.now()}`,{cache:"no-store"});
     if(!response.ok)return;
     const data=await response.json();
-    const latest=String(data.version||"").trim();
+    const latest=normalizeVersion(data.version);
     const notes=String(data.notes||"").trim();
-    const newer=isNewerVersion(latest,APP_VERSION);
-    const same=latest===APP_VERSION;
-    // Sidebar always reflects the running build. Only adopt remote notes when remote >= current.
-    if(newer||same)renderSidebarRelease(APP_VERSION,notes);
+    const appV=normalizeVersion(APP_VERSION);
+    const shellV=pageShellVersion();
+    const alreadyCurrent=Boolean(latest)&&(latest===appV||(shellV&&latest===shellV));
+    const newer=Boolean(latest)&&isNewerVersion(latest,appV)&&!alreadyCurrent;
+    if(newer||alreadyCurrent)renderSidebarRelease(APP_VERSION,notes);
     else renderSidebarRelease(APP_VERSION);
     if(newer)showUpdateBanner(latest);
     else if(els["update-banner"])els["update-banner"].classList.add("hidden");
@@ -2123,12 +2139,20 @@ els["reload-app"]?.addEventListener("click",async()=>{
     }
     if(window.caches){
       const keys=await caches.keys();
-      await Promise.all(keys.filter(key=>key.startsWith("leadlens-")).map(key=>caches.delete(key)));
+      await Promise.all(keys.map(key=>caches.delete(key)));
     }
   }catch{/* continue to forced navigation */}
-  // Bust HTML + module cache; plain reload often reuses stale app.js/audit.js.
   const url=new URL(location.href);
-  url.searchParams.set("v",APP_VERSION);
+  let bust=String(Date.now());
+  try{
+    const response=await fetch(`../version.json?t=${Date.now()}`,{cache:"no-store"});
+    if(response.ok){
+      const data=await response.json();
+      const remote=normalizeVersion(data.version);
+      if(remote)bust=remote;
+    }
+  }catch{/* use timestamp */}
+  url.searchParams.set("v",bust);
   url.searchParams.set("_",String(Date.now()));
   location.replace(url.toString());
 });

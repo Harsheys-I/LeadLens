@@ -1,7 +1,7 @@
 /**
  * Thin fetch wrapper for LeadLens PHP API (same-origin, session cookie).
  */
-import {apiBase} from './app-base.js?v=5.7';
+import {apiBase} from './app-base.js?v=6.0.0.dev';
 
 function resolveApiBase(){
   return apiBase();
@@ -83,6 +83,13 @@ export const PerfDashboardApi = {
   combined: () => api('perf-dashboards/combined'),
   publish: (dashboards) => api('perf-dashboards/publish', {method: 'POST', body: {dashboards}}),
   removeAll: () => api('perf-dashboards/all', {method: 'DELETE'}),
+};
+
+export const SalesGraphApi = {
+  latest: () => api('sales-graph/latest'),
+  publish: (payload, {title, meta} = {}) =>
+    api('sales-graph/publish', {method: 'POST', body: {payload, title, meta}}),
+  removeAll: () => api('sales-graph/all', {method: 'DELETE'}),
 };
 
 export const SettingsApi = {

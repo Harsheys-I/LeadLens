@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" media="(prefers-color-scheme: light)" content="#12372a">
+  <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#0f2d22">
+  <meta name="description" content="GPP AI Sales Graph">
+  <title>GPP AI · Sales Graph</title>
+  <meta name="app-version" content="6.1.0.stable">
+  <script src="../theme-boot.js?v=6.1.0.stable"></script>
+  <script src="../motion.js?v=6.1.0.stable"></script>
+  <link rel="manifest" href="../manifest.webmanifest">
+  <link rel="stylesheet" href="../styles.css?v=6.1.0.stable">
+  <script defer src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  <script type="module" src="../sales-graph.js?v=6.1.0.stable"></script>
+</head>
+<body>
+  <div id="update-banner" class="update-banner hidden" role="status">
+    <div id="update-banner-text"></div>
+    <button id="reload-app" type="button" class="primary-button">Hard reload now</button>
+  </div>
+  <div class="shell">
+    <aside class="sidebar">
+      <a class="brand" href="../"><img class="brand-mark" src="../assets/gpp-ai-logo.png" alt="" width="48" height="28"><span>GPP AI</span></a>
+      <nav aria-label="Sales Graph navigation">
+        <button class="nav-item active" data-view="upload" data-perm="sales_graph.upload"><span>◎</span>Upload</button>
+        <button class="nav-item" data-view="dashboard" data-perm="sales_graph.dashboard"><span>▦</span>Dashboard</button>
+      </nav>
+      <div class="privacy-note"><strong id="sidebar-version">v6.1.0.stable</strong><span id="sidebar-notes">v6.1.0.stable: Sales Graph Booked series rename (Sales Declaration / Booked / Canceled) + UI glyph fixes.</span></div>
+    </aside>
+
+    <main>
+      <header class="topbar">
+        <button id="mobile-menu" class="icon-button" aria-label="Hide left panel" title="Hide left panel" aria-expanded="true">☰</button>
+        <div><p class="eyebrow">SALES GRAPH</p><h1 id="page-title">Upload</h1></div>
+        <div class="topbar-actions">
+          <span id="shell-user-label" class="topbar-user-label"></span>
+          <button type="button" id="notif-bell" class="notif-bell notif-bell-chrome" title="Notifications" aria-label="Notifications">
+            <span id="notif-count" class="notif-count hidden">0</span>
+          </button>
+          <button type="button" id="shell-account" class="secondary-button">Account</button>
+          <button type="button" id="shell-logout" class="secondary-button">Sign out</button>
+        </div>
+      </header>
+
+      <section id="view-upload" class="view active">
+        <div class="intro">
+          <h2>Upload Leads, Visits &amp; Booked</h2>
+          <p>Drop all three workbooks, preview the funnel charts locally, then publish one org-wide Sales Graph snapshot.</p>
+        </div>
+        <div class="perf-upload-grid sg-upload-grid">
+          <div id="sg-leads-drop" class="drop-zone" role="button" tabindex="0" aria-label="Upload Leads Excel">
+            <input id="sg-leads-input" type="file" accept=".xlsx,.xls,.xlsm" hidden>
+            <div class="upload-icon">L</div>
+            <h3>Leads</h3>
+            <p>Project Name · Source · Source Name · YYYYMM months</p>
+          </div>
+          <div id="sg-visits-drop" class="drop-zone" role="button" tabindex="0" aria-label="Upload Visits Excel">
+            <input id="sg-visits-input" type="file" accept=".xlsx,.xls,.xlsm" hidden>
+            <div class="upload-icon">V</div>
+            <h3>Visits</h3>
+            <p>Same shape as Leads · monthly visit counts</p>
+          </div>
+          <div id="sg-booked-drop" class="drop-zone" role="button" tabindex="0" aria-label="Upload Booked Excel">
+            <input id="sg-booked-input" type="file" accept=".xlsx,.xls,.xlsm" hidden>
+            <div class="upload-icon">B</div>
+            <h3>Booked</h3>
+            <p>Project · Source · Source Name · Status · YYYYMM</p>
+          </div>
+        </div>
+        <div id="sg-file-list" class="file-list hidden"></div>
+        <div id="sg-validation" class="validation hidden" role="status"></div>
+        <div class="action-row">
+          <button id="sg-create-dashboard" type="button" class="primary-button" disabled>Create Dashboard <span>→</span></button>
+        </div>
+        <div id="sg-preview-panel" class="review-dashboard-panel hidden">
+          <div class="card-title">
+            <h2>Preview</h2>
+            <p>Local preview from this upload. Publish replaces the previous org-wide Sales Graph board.</p>
+          </div>
+          <div id="sg-preview-mount"></div>
+          <div class="inline-actions review-download-actions dashboard-footer-actions">
+            <button id="sg-upload-dashboard-btn" type="button" class="primary-button" disabled>Upload Dashboard</button>
+          </div>
+        </div>
+      </section>
+
+      <section id="view-dashboard" class="view view-wide">
+        <div class="section-head">
+          <div>
+            <h2>Sales Graph Dashboard</h2>
+            <p id="sg-published-meta">Published Leads, Visits &amp; Booked from the latest upload.</p>
+          </div>
+          <div class="inline-actions">
+            <button id="sg-refresh-dashboard" type="button" class="secondary-button">Refresh</button>
+            <button id="sg-clear-dashboard" type="button" class="text-button hidden">Clear board</button>
+          </div>
+        </div>
+        <div id="sg-dashboard-empty" class="dashboard-empty-state hidden">No Sales Graph has been published yet.</div>
+        <div id="sg-dashboard-mount"></div>
+      </section>
+    </main>
+  </div>
+
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+  <div id="account-modal" class="key-modal hidden" role="dialog" aria-modal="true">
+    <div class="key-modal-card">
+      <p class="eyebrow">ACCOUNT</p>
+      <h2>Your profile</h2>
+      <p class="key-modal-copy">Update username or password. Linked TeleCaller is Admin-managed.</p>
+      <label>Username<input id="account-username" type="text"></label>
+      <label>Display name<input id="account-display" type="text"></label>
+      <label>Linked TeleCaller<input id="account-telecaller" type="text" disabled></label>
+      <label>Appearance
+        <select data-theme-select aria-label="Theme">
+          <option value="system">System</option>
+          <option value="light">Light</option>
+          <option value="dark">Dark</option>
+        </select>
+      </label>
+      <hr class="account-divider">
+      <p class="muted">Change password (optional)</p>
+      <label>Current password<input id="account-pw-current" type="password"></label>
+      <label>New password<input id="account-pw-new" type="password"></label>
+      <label>Confirm new password<input id="account-pw-confirm" type="password"></label>
+      <div id="account-message" class="form-message"></div>
+      <div class="inline-actions">
+        <button id="account-save" type="button" class="primary-button">Save</button>
+        <button id="account-cancel" type="button" class="text-button">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="notif-drawer" class="notif-drawer hidden" aria-live="polite" role="dialog" aria-label="Notifications">
+    <div class="notif-drawer-head">
+      <div class="notif-drawer-title">
+        <span class="notif-drawer-mark" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M15 17h5l-1.4-1.4A2 2 0 0 1 18 14.2V11a6 6 0 1 0-12 0v3.2c0 .5-.2 1-.6 1.4L4 17h5"/><path d="M9.5 17a2.5 2.5 0 0 0 5 0"/></svg>
+        </span>
+        <div>
+          <strong>Notifications</strong>
+          <p class="notif-drawer-sub" id="notif-unread-label">Loading…</p>
+        </div>
+      </div>
+      <div class="notif-drawer-actions">
+        <button type="button" id="notif-mark-all" class="notif-action-btn">Mark all read</button>
+        <button type="button" id="notif-clear-all" class="notif-action-btn">Clear all</button>
+        <button type="button" id="notif-close" class="notif-close-btn" aria-label="Close">×</button>
+      </div>
+    </div>
+    <div id="notif-list" class="notif-list"></div>
+  </div>
+</body>
+</html>

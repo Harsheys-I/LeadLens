@@ -1,5 +1,5 @@
 {
-  "version": "5.4",
+  "version": "6.1.0.stable",
   "name": "GPP AI",
-  "notes": "v5.4: Perf scorecard adds total calls, avg calls/day, draft leads, and not follow-up leads across all dimensions."
+  "notes": "v6.1.0.stable: Sales Graph Booked series rename (Sales Declaration / Booked / Canceled) + UI glyph fixes."
 }

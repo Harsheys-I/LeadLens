@@ -16,25 +16,25 @@ import {
   sortResults,
   validateApiKey,
   SERVER_API_KEY,
-} from "./audit.js?v=5.7";
-import {getApiKey,apiKeyIsRemembered,saveApiKey,forgetApiKey,setStorageUserId,storageKey} from "./db.js?v=5.2.19";
-import {requireAuth,logout,getUser,changePassword,updateProfile} from "./auth.js?v=5.7";
-import {SettingsApi} from "./api-client.js?v=5.7";
-import {mountNotifications} from "./notifications-ui.js?v=5.7";
-import {appUrl, homePath} from "./app-base.js?v=5.7";
-import {initTheme} from "./theme.js?v=5.6";
+} from "./audit.js?v=6.0.0.dev";
+import {getApiKey,apiKeyIsRemembered,saveApiKey,forgetApiKey,setStorageUserId,storageKey} from "./db.js?v=6.0.0.dev";
+import {requireAuth,logout,getUser,changePassword,updateProfile} from "./auth.js?v=6.0.0.dev";
+import {SettingsApi} from "./api-client.js?v=6.0.0.dev";
+import {mountNotifications} from "./notifications-ui.js?v=6.0.0.dev";
+import {appUrl, homePath} from "./app-base.js?v=6.0.0.dev";
+import {initTheme} from "./theme.js?v=6.0.0.dev";
 import {
   debugAuditBatch,
   telecallerAuditBatch,
   compareDebugVsTelecaller,
   activePromptsReady,
   normalizeActiveErrorTypes,
-} from "./debug-engine.js?v=5.7";
+} from "./debug-engine.js?v=6.0.0.dev";
 import {
   LAB_ERROR_TYPES,
   STATUS_HISTORY_PROMPT,
   emptyErrorPrompts,
-} from "./debug-prompts.js?v=5.2.23";
+} from "./debug-prompts.js?v=6.0.0.dev";
 
 const $=id=>document.getElementById(id);
 const ids=[
@@ -56,6 +56,8 @@ const ids=[
   "shell-user-label","shell-logout","shell-account"
 ];
 const els=Object.fromEntries(ids.map(id=>[id,$(id)]));
+if(els["sidebar-version"])els["sidebar-version"].textContent=`v${APP_VERSION}`;
+if(els["app-version"])els["app-version"].textContent=APP_VERSION;
 const titles={run:"Run",settings:"Settings"};
 const ENGINE_VERSION="debug-csv-v3";
 const MULTI_RUN_COUNT=10;
@@ -1907,9 +1909,19 @@ function renderSidebarRelease(version=APP_VERSION,notes=""){
   if(els["sidebar-version"])els["sidebar-version"].textContent=`v${version}`;
   if(els["sidebar-notes"]&&notes)els["sidebar-notes"].textContent=notes;
 }
+function normalizeVersion(v){
+  return String(v||"").trim().replace(/^v/i,"");
+}
+function pageShellVersion(){
+  const meta=document.querySelector('meta[name="app-version"]');
+  if(meta?.content)return normalizeVersion(meta.content);
+  const mod=document.querySelector('script[type="module"][src*="debug-mode"]');
+  const m=mod?.getAttribute("src")?.match(/[?&]v=([^&]+)/);
+  return m?normalizeVersion(decodeURIComponent(m[1])):"";
+}
 function isNewerVersion(candidate,current){
   const parse=v=>{
-    const m=String(v||"").trim().match(/^(\d+)\.(\d+)\.(\d+)/);
+    const m=normalizeVersion(v).match(/^(\d+)\.(\d+)\.(\d+)/);
     return m?[Number(m[1]),Number(m[2]),Number(m[3])]:null;
   };
   const a=parse(candidate),b=parse(current);
@@ -1935,10 +1947,13 @@ async function checkForUpdate(){
     const response=await fetch(`../version.json?t=${Date.now()}`,{cache:"no-store"});
     if(!response.ok)return;
     const data=await response.json();
-    const latest=String(data.version||"").trim();
+    const latest=normalizeVersion(data.version);
     const notes=String(data.notes||"").trim();
-    const newer=isNewerVersion(latest,APP_VERSION);
-    if(newer||latest===APP_VERSION)renderSidebarRelease(APP_VERSION,notes||els["sidebar-notes"]?.textContent||"");
+    const appV=normalizeVersion(APP_VERSION);
+    const shellV=pageShellVersion();
+    const alreadyCurrent=Boolean(latest)&&(latest===appV||(shellV&&latest===shellV));
+    const newer=Boolean(latest)&&isNewerVersion(latest,appV)&&!alreadyCurrent;
+    if(newer||alreadyCurrent)renderSidebarRelease(APP_VERSION,notes||els["sidebar-notes"]?.textContent||"");
     if(newer)showUpdateBanner(latest);
     else els["update-banner"]?.classList.add("hidden");
   }catch{/* offline */}

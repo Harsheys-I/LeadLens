@@ -13,13 +13,13 @@ import {
   auditBatch,
   resolveAuditResultId,
   promptCacheKey,
-} from "./audit.js?v=5.7";
-import {apiBase} from "./app-base.js?v=5.7";
+} from "./audit.js?v=6.0.0.dev";
+import {apiBase} from "./app-base.js?v=6.0.0.dev";
 import {
   LAB_ERROR_TYPES,
   SHARED_PREAMBLE,
   DEFAULT_ERROR_PROMPTS,
-} from "./debug-prompts.js?v=5.2.23";
+} from "./debug-prompts.js?v=6.0.0.dev";
 
 /** App-local labels — never shown in DeBug focus-lab results / Excel. */
 const LOCAL_OWNED_ERRORS = new Set([

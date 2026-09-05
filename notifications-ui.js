@@ -1,8 +1,8 @@
 /**
  * Shared notifications bell + drawer for LeadLens shells (home, Admin, TeleCaller Audit).
  */
-import {NotifApi} from './api-client.js?v=5.7';
-import {appUrl, isHomePath} from './app-base.js?v=5.7';
+import {NotifApi} from './api-client.js?v=6.0.0.dev';
+import {appUrl, isHomePath} from './app-base.js?v=6.0.0.dev';
 
 const BELL_SVG = `<svg class="notif-bell-icon" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
   <path d="M15 17h5l-1.4-1.4A2 2 0 0 1 18 14.2V11a6 6 0 1 0-12 0v3.2c0 .5-.2 1-.6 1.4L4 17h5"/>
