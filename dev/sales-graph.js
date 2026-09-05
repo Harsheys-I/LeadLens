@@ -1,15 +1,15 @@
 /**
  * Sales Graph module — Upload (Leads + Visits + Booked) + published Dashboard.
  */
-import {APP_VERSION} from "./audit.js?v=6.1.0.stable";
-import {requireAuth, logout, hasPermission, getUser, changePassword, updateProfile} from "./auth.js?v=6.1.0.stable";
-import {SalesGraphApi} from "./api-client.js?v=6.1.0.stable";
-import {mountNotifications} from "./notifications-ui.js?v=6.1.0.stable";
-import {appUrl, homePath} from "./app-base.js?v=6.1.0.stable";
-import {initTheme} from "./theme.js?v=6.1.0.stable";
-import {setStorageUserId, storageKey} from "./db.js?v=6.1.0.stable";
-import {parseSalesGraphSheet, buildSalesGraphPayload} from "./sales-graph-parse.js?v=6.1.0.stable";
-import {renderSalesGraphDashboard, destroySalesGraphCharts} from "./sales-graph-dashboard.js?v=6.1.0.stable";
+import {APP_VERSION} from "./audit.js?v=6.1.1.stable";
+import {requireAuth, logout, hasPermission, getUser, changePassword, updateProfile} from "./auth.js?v=6.1.1.stable";
+import {SalesGraphApi} from "./api-client.js?v=6.1.1.stable";
+import {mountNotifications} from "./notifications-ui.js?v=6.1.1.stable";
+import {appUrl, homePath} from "./app-base.js?v=6.1.1.stable";
+import {initTheme} from "./theme.js?v=6.1.1.stable";
+import {setStorageUserId, storageKey} from "./db.js?v=6.1.1.stable";
+import {parseSalesGraphSheet, buildSalesGraphPayload} from "./sales-graph-parse.js?v=6.1.1.stable";
+import {renderSalesGraphDashboard, destroySalesGraphCharts} from "./sales-graph-dashboard.js?v=6.1.1.stable";
 
 const $ = id => document.getElementById(id);
 const ids = [
@@ -27,7 +27,7 @@ const els = Object.fromEntries(ids.map(id => [id, $(id)]));
 if (els["sidebar-version"]) els["sidebar-version"].textContent = `v${APP_VERSION}`;
 
 const titles = {upload: "Upload", dashboard: "Dashboard"};
-const RELEASE_NOTES = "v6.1.0.stable: Sales Graph Booked series rename (Sales Declaration / Booked / Canceled) + UI glyph fixes.";
+const RELEASE_NOTES = "v6.1.1.stable: Sales Graph global filters (Project, Source Name, Year, Month, Metrics).";
 
 let leadsParsed = null;
 let visitsParsed = null;
