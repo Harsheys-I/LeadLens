@@ -28,6 +28,27 @@ const LABEL_SALES_DECLARATION = "Sales Declaration";
 const LABEL_BOOKED = "Booked";
 const LABEL_CANCELED = "Canceled";
 
+/** Global Metrics filter keys (series / KPI visibility). */
+const METRIC_LEADS = "leads";
+const METRIC_VISITS = "visits";
+const METRIC_SALES_DECLARATION = "salesDeclaration";
+const METRIC_BOOKED = "booked";
+const METRIC_CANCELED = "canceled";
+const ALL_METRICS = [
+  METRIC_LEADS,
+  METRIC_VISITS,
+  METRIC_SALES_DECLARATION,
+  METRIC_BOOKED,
+  METRIC_CANCELED,
+];
+const METRIC_LABELS = {
+  [METRIC_LEADS]: "Leads",
+  [METRIC_VISITS]: "Visits",
+  [METRIC_SALES_DECLARATION]: LABEL_SALES_DECLARATION,
+  [METRIC_BOOKED]: LABEL_BOOKED,
+  [METRIC_CANCELED]: LABEL_CANCELED,
+};
+
 const STATUS_DISPLAY_ORDER = [STATUS_DEMAND, STATUS_CANCEL];
 
 const TOP_N = 10;
@@ -85,13 +106,29 @@ function pct(n) {
   return `${(n * 100).toFixed(1)}%`;
 }
 
+const MONTH_SHORT = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+const ALL_MONTH_KEYS = ["01","02","03","04","05","06","07","08","09","10","11","12"];
+
 function formatMonth(ym) {
   const s = String(ym || "");
   if (!/^\d{6}$/.test(s)) return s;
   const y = s.slice(0, 4);
   const m = Number(s.slice(4, 6));
-  const names = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
-  return `${names[m - 1] || s.slice(4)} ${y}`;
+  return `${MONTH_SHORT[m - 1] || s.slice(4)} ${y}`;
+}
+
+function monthKeyLabel(mm) {
+  const n = Number(mm);
+  return MONTH_SHORT[n - 1] || String(mm);
+}
+
+function yearsFromMonths(months) {
+  const years = new Set();
+  for (const m of months || []) {
+    const s = String(m || "");
+    if (/^\d{6}$/.test(s)) years.add(s.slice(0, 4));
+  }
+  return [...years].sort((a, b) => a.localeCompare(b));
 }
 
 function inkColor() {
@@ -367,40 +404,61 @@ function colorsFor(n) {
   return out;
 }
 
-function renderKpis(mount, payload) {
-  const leads = sheetTotals(payload.leads);
-  const visits = sheetTotals(payload.visits);
-  const booked = sheetTotals(payload.booked);
-  const byStatus = payload.booked?.byStatus || {};
-  const demandKey = findStatusKey(byStatus, STATUS_DEMAND);
-  const cancelKey = findStatusKey(byStatus, STATUS_CANCEL);
-  const demandTotal = bucketTotal(byStatus[demandKey]);
-  const cancelTotal = bucketTotal(byStatus[cancelKey]);
-  const leadDecl =
-    payload.booked?.leadDeclaration?.total != null
-      ? Number(payload.booked.leadDeclaration.total) || 0
-      : demandTotal + cancelTotal;
-  const visitRate = leads.grand > 0 ? visits.grand / leads.grand : null;
-  const bookedVisitRate = visits.grand > 0 ? booked.grand / visits.grand : null;
-  const bookedLeadRate = leads.grand > 0 ? booked.grand / leads.grand : null;
+function renderKpis(mount, payload, state) {
+  mount.replaceChildren();
+  const months = payload.months || [];
+  const ms = filteredMonths(months, state);
+  const leads = payload.leads || {};
+  const visits = payload.visits || {};
+  const booked = payload.booked || {};
+
+  const leadsTotal = sumSeries(sumSheetByMonths(leads, ms, state));
+  const visitsTotal = sumSeries(sumSheetByMonths(visits, ms, state));
+  const bookedTotal = sumSeries(sumSheetByMonths(booked, ms, state));
+  const demandTotal = sumSeries(bookedStatusByMonths(booked, STATUS_DEMAND, ms, state));
+  const cancelTotal = sumSeries(bookedStatusByMonths(booked, STATUS_CANCEL, ms, state));
+  const leadDecl = demandTotal + cancelTotal;
+
+  const showL = metricOn(state, METRIC_LEADS);
+  const showV = metricOn(state, METRIC_VISITS);
+  const showSD = metricOn(state, METRIC_SALES_DECLARATION);
+  const showB = metricOn(state, METRIC_BOOKED);
+  const showC = metricOn(state, METRIC_CANCELED);
+  const showBookedFamily = showSD || showB || showC;
+
+  const items = [];
+  if (showL) items.push(["Total Leads", num(leadsTotal)]);
+  if (showV) items.push(["Total Visits", num(visitsTotal)]);
+  if (showBookedFamily) items.push(["Total Booked", num(bookedTotal)]);
+  if (showSD) items.push([LABEL_SALES_DECLARATION, num(leadDecl)]);
+  if (showB) items.push([LABEL_BOOKED, num(demandTotal)]);
+  if (showC) items.push([LABEL_CANCELED, num(cancelTotal)]);
+  if (showL && showV) {
+    items.push(["Visits / Leads", leadsTotal > 0 ? pct(visitsTotal / leadsTotal) : "—"]);
+  }
+  if (showV && showBookedFamily) {
+    items.push(["Booked / Visits", visitsTotal > 0 ? pct(bookedTotal / visitsTotal) : "—"]);
+  }
+  if (showL && showBookedFamily) {
+    items.push(["Booked / Leads", leadsTotal > 0 ? pct(bookedTotal / leadsTotal) : "—"]);
+  }
+  items.push(["Months", String(ms.length)]);
+  const projNames = filterDimNames(
+    [...new Set(Object.keys(booked.byProject || {}))],
+    state,
+    "project"
+  );
+  items.push(["Projects (Booked)", String(projNames.length)]);
+
   const strip = el("div", "dashboard-kpis sg-kpis");
-  const items = [
-    ["Total Leads", num(leads.grand)],
-    ["Total Visits", num(visits.grand)],
-    ["Total Booked", num(booked.grand)],
-    [LABEL_SALES_DECLARATION, num(leadDecl)],
-    [LABEL_BOOKED, num(demandTotal)],
-    [LABEL_CANCELED, num(cancelTotal)],
-    ["Visits / Leads", visitRate == null ? "—" : pct(visitRate)],
-    ["Booked / Visits", bookedVisitRate == null ? "—" : pct(bookedVisitRate)],
-    ["Booked / Leads", bookedLeadRate == null ? "—" : pct(bookedLeadRate)],
-    ["Months", String((payload.months || []).length)],
-    ["Projects (Booked)", String(Object.keys(payload.booked?.byProject || {}).length)],
-  ];
-  for (const [label, value] of items) {
-    const kpi = el("div", "dashboard-kpi");
-    kpi.append(el("span", null, label), el("strong", null, value));
-    strip.append(kpi);
+  if (!state.metrics.size) {
+    strip.append(el("p", "dashboard-empty-state", "Select at least one metric."));
+  } else {
+    for (const [label, value] of items) {
+      const kpi = el("div", "dashboard-kpi");
+      kpi.append(el("span", null, label), el("strong", null, value));
+      strip.append(kpi);
+    }
   }
   mount.append(strip);
 }
@@ -494,8 +552,9 @@ function cloneFilterState(state) {
     projects: new Set(state.projects),
     sources: new Set(state.sources),
     statuses: new Set(state.statuses),
-    monthFrom: state.monthFrom,
-    monthTo: state.monthTo,
+    years: new Set(state.years),
+    monthsOfYear: new Set(state.monthsOfYear),
+    metrics: new Set(state.metrics),
   };
 }
 
@@ -503,17 +562,51 @@ function makeFilterState(dims, months) {
   return {
     projects: new Set(dims.projects),
     sources: new Set(dims.sources),
+    // Booked/Canceled visibility is driven by Metrics; keep all statuses in data filters.
     statuses: new Set(dims.statuses.length ? dims.statuses : [STATUS_DEMAND, STATUS_CANCEL]),
-    monthFrom: months[0] || "",
-    monthTo: months[months.length - 1] || "",
+    years: new Set(yearsFromMonths(months)),
+    monthsOfYear: new Set(ALL_MONTH_KEYS),
+    metrics: new Set(ALL_METRICS),
   };
 }
 
+function metricOn(state, key) {
+  return !state.metrics.size || state.metrics.has(key);
+}
+
+function metricKeyForLabel(label) {
+  const s = String(label || "");
+  if (s === "Leads") return METRIC_LEADS;
+  if (s === "Visits") return METRIC_VISITS;
+  if (s === LABEL_SALES_DECLARATION) return METRIC_SALES_DECLARATION;
+  if (s === LABEL_BOOKED || s === STATUS_DEMAND) return METRIC_BOOKED;
+  if (s === LABEL_CANCELED || s === STATUS_CANCEL) return METRIC_CANCELED;
+  return null;
+}
+
+function filterDatasetsByMetrics(datasets, state) {
+  return (datasets || []).filter(ds => {
+    const key = metricKeyForLabel(ds.label);
+    return !key || metricOn(state, key);
+  });
+}
+
+function sumSeries(arr) {
+  return (arr || []).reduce((a, b) => a + (Number(b) || 0), 0);
+}
+
 function filteredMonths(months, state) {
-  return (months || []).filter(m =>
-    (!state.monthFrom || m >= state.monthFrom) &&
-    (!state.monthTo || m <= state.monthTo)
-  );
+  const years = state.years;
+  const mos = state.monthsOfYear;
+  return (months || []).filter(m => {
+    const s = String(m || "");
+    if (!/^\d{6}$/.test(s)) return true;
+    const y = s.slice(0, 4);
+    const mo = s.slice(4, 6);
+    const yearOk = !years.size || years.has(y);
+    const monthOk = !mos.size || mos.has(mo);
+    return yearOk && monthOk;
+  });
 }
 
 function statusAllowed(state, statusLabel, byStatus) {
@@ -636,141 +729,136 @@ function bookedStatusByDim(booked, statusLabel, dimNames, dimKind, months, state
 }
 
 function filterDimNames(names, selected, kind) {
-  if (kind === "project") return names.filter(n => selected.projects.has(n));
-  if (kind === "source") return names.filter(n => selected.sources.has(n));
+  if (kind === "project") {
+    if (!selected.projects.size) return names;
+    return names.filter(n => selected.projects.has(n));
+  }
+  if (kind === "source") {
+    if (!selected.sources.size) return names;
+    return names.filter(n => selected.sources.has(n));
+  }
   return names;
 }
 
 /**
- * Compact per-card slicer bar.
+ * Shared multi-checkbox slicer control.
  * @param {object} opts
- * @param {string[]} opts.months
- * @param {{projects:string[],sources:string[],statuses:string[]}} opts.dims
- * @param {object} opts.state
- * @param {Function} opts.onChange
- * @param {{project?:boolean,source?:boolean,month?:boolean,status?:boolean}} opts.show
+ * @param {number} [opts.minSelected=0] — refuse to clear below this many
  */
-function attachSlicers(card, {months, dims, state, onChange, show = {}}) {
-  const bar = el("div", "sg-chart-slicers sg-slicer-bar");
-  const flags = {
-    project: show.project !== false,
-    source: show.source !== false,
-    month: show.month !== false,
-    status: show.status !== false && dims.statuses.length > 0,
+function multiSlicer(label, allValues, selectedSet, {
+  displayFn = null,
+  onChange,
+  minSelected = 0,
+} = {}) {
+  const details = el("details", "sg-slicer");
+  const summary = el("summary", "sg-slicer-summary");
+  const updateSummary = () => {
+    const n = selectedSet.size;
+    const total = allValues.length;
+    summary.textContent = n >= total && total > 0 ? `${label}: All` : `${label}: ${n}/${total}`;
   };
-
-  function multiSlicer(label, allValues, selectedSet, displayFn = null) {
-    const details = el("details", "sg-slicer");
-    const summary = el("summary", "sg-slicer-summary");
-    const updateSummary = () => {
-      const n = selectedSet.size;
-      const total = allValues.length;
-      summary.textContent = n >= total ? `${label}: All` : `${label}: ${n}/${total}`;
-    };
+  updateSummary();
+  details.append(summary);
+  const panel = el("div", "sg-slicer-panel");
+  const actions = el("div", "sg-slicer-actions");
+  const btnAll = el("button", "sg-slicer-link", "All");
+  btnAll.type = "button";
+  const btnNone = el("button", "sg-slicer-link", "None");
+  btnNone.type = "button";
+  btnAll.addEventListener("click", e => {
+    e.preventDefault();
+    allValues.forEach(v => selectedSet.add(v));
+    panel.querySelectorAll("input[type=checkbox]").forEach(cb => { cb.checked = true; });
     updateSummary();
-    details.append(summary);
-    const panel = el("div", "sg-slicer-panel");
-    const actions = el("div", "sg-slicer-actions");
-    const btnAll = el("button", "sg-slicer-link", "All");
-    btnAll.type = "button";
-    const btnNone = el("button", "sg-slicer-link", "None");
-    btnNone.type = "button";
-    btnAll.addEventListener("click", e => {
-      e.preventDefault();
-      allValues.forEach(v => selectedSet.add(v));
-      panel.querySelectorAll("input[type=checkbox]").forEach(cb => { cb.checked = true; });
-      updateSummary();
-      onChange();
-    });
-    btnNone.addEventListener("click", e => {
-      e.preventDefault();
+    onChange();
+  });
+  btnNone.addEventListener("click", e => {
+    e.preventDefault();
+    if (minSelected > 0) {
+      const keep = allValues.slice(0, minSelected);
+      selectedSet.clear();
+      keep.forEach(v => selectedSet.add(v));
+      panel.querySelectorAll("input[type=checkbox]").forEach(cb => {
+        cb.checked = selectedSet.has(cb.dataset.value);
+      });
+    } else {
       selectedSet.clear();
       panel.querySelectorAll("input[type=checkbox]").forEach(cb => { cb.checked = false; });
+    }
+    updateSummary();
+    onChange();
+  });
+  actions.append(btnAll, btnNone);
+  panel.append(actions);
+  for (const value of allValues) {
+    const row = el("label", "sg-slicer-option");
+    const cb = document.createElement("input");
+    cb.type = "checkbox";
+    cb.dataset.value = String(value);
+    cb.checked = selectedSet.has(value);
+    cb.addEventListener("change", () => {
+      if (cb.checked) {
+        selectedSet.add(value);
+      } else {
+        if (minSelected && selectedSet.size <= minSelected) {
+          cb.checked = true;
+          return;
+        }
+        selectedSet.delete(value);
+      }
       updateSummary();
       onChange();
     });
-    actions.append(btnAll, btnNone);
-    panel.append(actions);
-    for (const value of allValues) {
-      const row = el("label", "sg-slicer-option");
-      const cb = document.createElement("input");
-      cb.type = "checkbox";
-      cb.checked = selectedSet.has(value);
-      cb.addEventListener("change", () => {
-        if (cb.checked) selectedSet.add(value);
-        else selectedSet.delete(value);
-        updateSummary();
-        onChange();
-      });
-      const shown = displayFn ? displayFn(value) : value;
-      row.append(cb, document.createTextNode(shown || "(blank)"));
-      panel.append(row);
-    }
-    details.append(panel);
-    return details;
+    const shown = displayFn ? displayFn(value) : value;
+    row.append(cb, document.createTextNode(shown || "(blank)"));
+    panel.append(row);
   }
+  details.append(panel);
+  return details;
+}
 
-  if (flags.project && dims.projects.length) {
-    bar.append(multiSlicer("Project", dims.projects, state.projects));
-  }
-  if (flags.source && dims.sources.length) {
-    bar.append(multiSlicer("Source", dims.sources, state.sources));
-  }
-  if (flags.status && dims.statuses.length) {
-    bar.append(multiSlicer("Booked status", dims.statuses, state.statuses, statusDisplayLabel));
-  }
-  if (flags.month && months.length) {
-    const monthWrap = el("div", "sg-slicer-months");
-    const fromLabel = el("label", "sg-slicer-month");
-    fromLabel.append(document.createTextNode("From"));
-    const fromSel = document.createElement("select");
-    fromSel.setAttribute("aria-label", "Month from");
-    const toLabel = el("label", "sg-slicer-month");
-    toLabel.append(document.createTextNode("To"));
-    const toSel = document.createElement("select");
-    toSel.setAttribute("aria-label", "Month to");
-    for (const m of months) {
-      const o1 = document.createElement("option");
-      o1.value = m;
-      o1.textContent = formatMonth(m);
-      if (m === state.monthFrom) o1.selected = true;
-      fromSel.append(o1);
-      const o2 = document.createElement("option");
-      o2.value = m;
-      o2.textContent = formatMonth(m);
-      if (m === state.monthTo) o2.selected = true;
-      toSel.append(o2);
-    }
-    fromSel.addEventListener("change", () => {
-      state.monthFrom = fromSel.value;
-      if (state.monthTo && state.monthFrom > state.monthTo) {
-        state.monthTo = state.monthFrom;
-        toSel.value = state.monthTo;
-      }
-      onChange();
-    });
-    toSel.addEventListener("change", () => {
-      state.monthTo = toSel.value;
-      if (state.monthFrom && state.monthTo < state.monthFrom) {
-        state.monthFrom = state.monthTo;
-        fromSel.value = state.monthFrom;
-      }
-      onChange();
-    });
-    fromLabel.append(fromSel);
-    toLabel.append(toSel);
-    monthWrap.append(fromLabel, toLabel);
-    bar.append(monthWrap);
-  }
+/**
+ * One sticky global filter bar for the whole dashboard / preview.
+ */
+function mountGlobalFilterBar(mount, {months, dims, state, onChange}) {
+  const bar = el("div", "sg-global-filters sg-slicer-bar");
+  const label = el("div", "sg-global-filters-label", "Filters");
+  bar.append(label);
 
-  const titleEl = card.querySelector("h3, h4");
-  if (titleEl?.nextSibling) card.insertBefore(bar, titleEl.nextSibling);
-  else if (titleEl) titleEl.after(bar);
-  else card.prepend(bar);
+  if (dims.projects.length) {
+    bar.append(multiSlicer("Project", dims.projects, state.projects, {onChange}));
+  }
+  if (dims.sources.length) {
+    bar.append(multiSlicer("Source Name", dims.sources, state.sources, {onChange}));
+  }
+  const yearOpts = yearsFromMonths(months);
+  if (yearOpts.length) {
+    bar.append(multiSlicer("Year", yearOpts, state.years, {onChange}));
+  }
+  bar.append(multiSlicer("Month", ALL_MONTH_KEYS, state.monthsOfYear, {
+    displayFn: monthKeyLabel,
+    onChange,
+  }));
+  bar.append(multiSlicer("Metrics", ALL_METRICS, state.metrics, {
+    displayFn: k => METRIC_LABELS[k] || k,
+    onChange,
+    minSelected: 1,
+  }));
+
+  // Close other open slicers when one opens (cleaner sticky bar).
+  bar.addEventListener("toggle", e => {
+    const t = e.target;
+    if (!(t instanceof HTMLDetailsElement) || !t.open) return;
+    bar.querySelectorAll("details.sg-slicer[open]").forEach(d => {
+      if (d !== t) d.open = false;
+    });
+  }, true);
+
+  mount.append(bar);
   return bar;
 }
 
-function mountHeroDualAxis(grid, id, title, getData, slicerOpts) {
+function mountHeroDualAxis(grid, id, title, getData, {state, register}) {
   const {card, canvas, setCategoryCount} = chartCard(title, HERO_CHART_HEIGHT, {
     extraClass: "sg-chart-card--hero",
     scrollable: true,
@@ -778,27 +866,29 @@ function mountHeroDualAxis(grid, id, title, getData, slicerOpts) {
   });
   grid.append(card);
 
-  const state = cloneFilterState(slicerOpts.baseState);
   const paint = () => {
     const {labels, datasets} = getData(state);
+    const visible = filterDatasetsByMetrics(datasets, state);
     setCategoryCount(labels.length);
+    if (!visible.length) {
+      registerChart(id, {
+        canvas,
+        type: "bar",
+        data: {labels, datasets: []},
+        options: dualAxisOptions(),
+      });
+      return;
+    }
     registerChart(id, {
       canvas,
       type: "bar",
-      data: {labels, datasets},
+      data: {labels, datasets: visible},
       options: dualAxisOptions(),
       plugins: [heroBarValueLabels],
     });
   };
-  attachSlicers(card, {
-    months: slicerOpts.months,
-    dims: slicerOpts.dims,
-    state,
-    show: slicerOpts.show,
-    onChange: paint,
-  });
+  register(paint);
   paint();
-  // Re-measure after layout so scrollport.clientWidth is definite before sizing inner wrap.
   requestAnimationFrame(() => {
     requestAnimationFrame(() => {
       const {labels} = getData(state);
@@ -809,11 +899,29 @@ function mountHeroDualAxis(grid, id, title, getData, slicerOpts) {
   });
 }
 
-function mountDoughnut(grid, id, title, getData, slicerOpts) {
+function mountDoughnut(grid, id, title, getData, {state, register, metricKey = null, requireAnyMetrics = null}) {
   const {card, canvas} = chartCard(title, 280);
   grid.append(card);
-  const state = cloneFilterState(slicerOpts.baseState);
   const paint = () => {
+    if (metricKey && !metricOn(state, metricKey)) {
+      card.classList.add("hidden");
+      const existing = chartRegistry.get(id);
+      if (existing) {
+        try { existing.destroy(); } catch { /* ignore */ }
+        chartRegistry.delete(id);
+      }
+      return;
+    }
+    if (requireAnyMetrics?.length && !requireAnyMetrics.some(k => metricOn(state, k))) {
+      card.classList.add("hidden");
+      const existing = chartRegistry.get(id);
+      if (existing) {
+        try { existing.destroy(); } catch { /* ignore */ }
+        chartRegistry.delete(id);
+      }
+      return;
+    }
+    card.classList.remove("hidden");
     const {labels, values} = getData(state);
     registerChart(id, {
       canvas,
@@ -829,21 +937,24 @@ function mountDoughnut(grid, id, title, getData, slicerOpts) {
       options: pieOptions(),
     });
   };
-  attachSlicers(card, {
-    months: slicerOpts.months,
-    dims: slicerOpts.dims,
-    state,
-    show: slicerOpts.show,
-    onChange: paint,
-  });
+  register(paint);
   paint();
 }
 
-function mountStackedBar(grid, id, title, getData, slicerOpts) {
+function mountStackedBar(grid, id, title, getData, {state, register, requireAnyMetrics = null}) {
   const {card, canvas} = chartCard(title, 300);
   grid.append(card);
-  const state = cloneFilterState(slicerOpts.baseState);
   const paint = () => {
+    if (requireAnyMetrics?.length && !requireAnyMetrics.some(k => metricOn(state, k))) {
+      card.classList.add("hidden");
+      const existing = chartRegistry.get(id);
+      if (existing) {
+        try { existing.destroy(); } catch { /* ignore */ }
+        chartRegistry.delete(id);
+      }
+      return;
+    }
+    card.classList.remove("hidden");
     const {labels, datasets} = getData(state);
     registerChart(id, {
       canvas,
@@ -852,13 +963,7 @@ function mountStackedBar(grid, id, title, getData, slicerOpts) {
       options: baseOptions({stacked: true}),
     });
   };
-  attachSlicers(card, {
-    months: slicerOpts.months,
-    dims: slicerOpts.dims,
-    state,
-    show: slicerOpts.show,
-    onChange: paint,
-  });
+  register(paint);
   paint();
 }
 
@@ -912,13 +1017,11 @@ function projectMonthMatrixFiltered(sheet, projects, months, state) {
   return {matrix, maxVal};
 }
 
-function renderChartsGallery(mount, payload) {
+function renderChartsGallery(mount, payload, state, register) {
   const months = payload.months || [];
   const leads = payload.leads || {};
   const visits = payload.visits || {};
   const booked = payload.booked || {};
-  const dims = collectDimKeys(payload);
-  const baseState = makeFilterState(dims, months);
 
   const projectKeys = [...new Set([
     ...sortedKeysByTotal(leads.byProject),
@@ -939,7 +1042,7 @@ function renderChartsGallery(mount, payload) {
     return lb - la || a.localeCompare(b);
   });
 
-  const slicerBase = {months, dims, baseState};
+  const chartOpts = {state, register};
 
   // —— Trends ——
   const trends = makeSection("Trends", "Monthly volume (Leads → Visits → Booked by status)");
@@ -947,22 +1050,22 @@ function renderChartsGallery(mount, payload) {
   mountHeroDualAxis(
     trendsGrid, "sg-bar-month",
     "Leads vs Visits vs Booked by month",
-    (state) => {
-      const ms = filteredMonths(months, state);
-      const demand = bookedStatusByMonths(booked, STATUS_DEMAND, ms, state);
-      const cancel = bookedStatusByMonths(booked, STATUS_CANCEL, ms, state);
+    (st) => {
+      const ms = filteredMonths(months, st);
+      const demand = bookedStatusByMonths(booked, STATUS_DEMAND, ms, st);
+      const cancel = bookedStatusByMonths(booked, STATUS_CANCEL, ms, st);
       return {
         labels: ms.map(formatMonth),
         datasets: lvbSplitBarDatasets(
-          sumSheetByMonths(leads, ms, state),
-          sumSheetByMonths(visits, ms, state),
+          sumSheetByMonths(leads, ms, st),
+          sumSheetByMonths(visits, ms, st),
           demand,
           cancel,
           zipSum(demand, cancel)
         ),
       };
     },
-    {...slicerBase, show: {project: true, source: true, month: true, status: true}}
+    chartOpts
   );
   trends.append(trendsGrid);
   mount.append(trends);
@@ -973,113 +1076,113 @@ function renderChartsGallery(mount, payload) {
   mountHeroDualAxis(
     projGrid, "sg-bar-project",
     "Leads vs Visits vs Booked by project",
-    (state) => {
-      const ms = filteredMonths(months, state);
-      const names = filterDimNames(projectKeys, state, "project");
-      const demand = bookedStatusByDim(booked, STATUS_DEMAND, names, "project", ms, state);
-      const cancel = bookedStatusByDim(booked, STATUS_CANCEL, names, "project", ms, state);
+    (st) => {
+      const ms = filteredMonths(months, st);
+      const names = filterDimNames(projectKeys, st, "project");
+      const demand = bookedStatusByDim(booked, STATUS_DEMAND, names, "project", ms, st);
+      const cancel = bookedStatusByDim(booked, STATUS_CANCEL, names, "project", ms, st);
       return {
         labels: names,
         datasets: lvbSplitBarDatasets(
-          sumSheetByDim(leads, names, "project", ms, state),
-          sumSheetByDim(visits, names, "project", ms, state),
+          sumSheetByDim(leads, names, "project", ms, st),
+          sumSheetByDim(visits, names, "project", ms, st),
           demand,
           cancel,
           zipSum(demand, cancel)
         ),
       };
     },
-    {...slicerBase, show: {project: true, source: true, month: true, status: true}}
+    chartOpts
   );
   mountDoughnut(
     projGrid, "sg-pie-leads-project",
     "Leads share by project",
-    (state) => {
-      const ms = filteredMonths(months, state);
-      const names = filterDimNames(projectKeys, state, "project").slice(0, TOP_N);
-      return {labels: names, values: sumSheetByDim(leads, names, "project", ms, state)};
+    (st) => {
+      const ms = filteredMonths(months, st);
+      const names = filterDimNames(projectKeys, st, "project").slice(0, TOP_N);
+      return {labels: names, values: sumSheetByDim(leads, names, "project", ms, st)};
     },
-    {...slicerBase, show: {project: true, source: true, month: true, status: false}}
+    {...chartOpts, metricKey: METRIC_LEADS}
   );
   mountDoughnut(
     projGrid, "sg-pie-visits-project",
     "Visits share by project",
-    (state) => {
-      const ms = filteredMonths(months, state);
-      const names = filterDimNames(projectKeys, state, "project").slice(0, TOP_N);
-      return {labels: names, values: sumSheetByDim(visits, names, "project", ms, state)};
+    (st) => {
+      const ms = filteredMonths(months, st);
+      const names = filterDimNames(projectKeys, st, "project").slice(0, TOP_N);
+      return {labels: names, values: sumSheetByDim(visits, names, "project", ms, st)};
     },
-    {...slicerBase, show: {project: true, source: true, month: true, status: false}}
+    {...chartOpts, metricKey: METRIC_VISITS}
   );
   mountDoughnut(
     projGrid, "sg-pie-booked-project",
     "Booked share by project",
-    (state) => {
-      const ms = filteredMonths(months, state);
-      const names = filterDimNames(projectKeys, state, "project").slice(0, TOP_N);
+    (st) => {
+      const ms = filteredMonths(months, st);
+      const names = filterDimNames(projectKeys, st, "project").slice(0, TOP_N);
       return {
         labels: names,
-        values: sumSheetByDim(booked, names, "project", ms, state, {ignoreStatus: false}),
+        values: sumSheetByDim(booked, names, "project", ms, st, {ignoreStatus: false}),
       };
     },
-    {...slicerBase, show: {project: true, source: true, month: true, status: true}}
+    {...chartOpts, metricKey: METRIC_BOOKED}
   );
   projects.append(projGrid);
   mount.append(projects);
 
-  // —— Source ——
-  const sources = makeSection("By source", "Normalized Meta sources · all sources");
+  // —— Source Name ——
+  const sources = makeSection("By source name", "Normalized Meta source names · all partners/campaigns");
   const srcGrid = el("div", "dashboard-charts sg-chart-grid");
   mountHeroDualAxis(
     srcGrid, "sg-bar-source",
-    "Leads vs Visits vs Booked by source",
-    (state) => {
-      const ms = filteredMonths(months, state);
-      const names = filterDimNames(sourceKeys, state, "source");
-      const demand = bookedStatusByDim(booked, STATUS_DEMAND, names, "source", ms, state);
-      const cancel = bookedStatusByDim(booked, STATUS_CANCEL, names, "source", ms, state);
+    "Leads vs Visits vs Booked by source name",
+    (st) => {
+      const ms = filteredMonths(months, st);
+      const names = filterDimNames(sourceKeys, st, "source");
+      const demand = bookedStatusByDim(booked, STATUS_DEMAND, names, "source", ms, st);
+      const cancel = bookedStatusByDim(booked, STATUS_CANCEL, names, "source", ms, st);
       return {
         labels: names,
         datasets: lvbSplitBarDatasets(
-          sumSheetByDim(leads, names, "source", ms, state),
-          sumSheetByDim(visits, names, "source", ms, state),
+          sumSheetByDim(leads, names, "source", ms, st),
+          sumSheetByDim(visits, names, "source", ms, st),
           demand,
           cancel,
           zipSum(demand, cancel)
         ),
       };
     },
-    {...slicerBase, show: {project: true, source: true, month: true, status: true}}
+    chartOpts
   );
   mountDoughnut(
     srcGrid, "sg-pie-leads-source",
-    "Leads share by source",
-    (state) => {
-      const ms = filteredMonths(months, state);
-      const names = filterDimNames(sourceKeys, state, "source").slice(0, TOP_N);
-      return {labels: names, values: sumSheetByDim(leads, names, "source", ms, state)};
+    "Leads share by source name",
+    (st) => {
+      const ms = filteredMonths(months, st);
+      const names = filterDimNames(sourceKeys, st, "source").slice(0, TOP_N);
+      return {labels: names, values: sumSheetByDim(leads, names, "source", ms, st)};
     },
-    {...slicerBase, show: {project: true, source: true, month: true, status: false}}
+    {...chartOpts, metricKey: METRIC_LEADS}
   );
   mountDoughnut(
     srcGrid, "sg-pie-visits-source",
-    "Visits share by source",
-    (state) => {
-      const ms = filteredMonths(months, state);
-      const names = filterDimNames(sourceKeys, state, "source").slice(0, TOP_N);
-      return {labels: names, values: sumSheetByDim(visits, names, "source", ms, state)};
+    "Visits share by source name",
+    (st) => {
+      const ms = filteredMonths(months, st);
+      const names = filterDimNames(sourceKeys, st, "source").slice(0, TOP_N);
+      return {labels: names, values: sumSheetByDim(visits, names, "source", ms, st)};
     },
-    {...slicerBase, show: {project: true, source: true, month: true, status: false}}
+    {...chartOpts, metricKey: METRIC_VISITS}
   );
   mountDoughnut(
     srcGrid, "sg-pie-booked-source",
-    "Booked share by source",
-    (state) => {
-      const ms = filteredMonths(months, state);
-      const names = filterDimNames(sourceKeys, state, "source").slice(0, TOP_N);
-      return {labels: names, values: sumSheetByDim(booked, names, "source", ms, state)};
+    "Booked share by source name",
+    (st) => {
+      const ms = filteredMonths(months, st);
+      const names = filterDimNames(sourceKeys, st, "source").slice(0, TOP_N);
+      return {labels: names, values: sumSheetByDim(booked, names, "source", ms, st)};
     },
-    {...slicerBase, show: {project: true, source: true, month: true, status: true}}
+    {...chartOpts, metricKey: METRIC_BOOKED}
   );
   sources.append(srcGrid);
   mount.append(sources);
@@ -1092,32 +1195,41 @@ function renderChartsGallery(mount, payload) {
       `${LABEL_SALES_DECLARATION} (= ${LABEL_BOOKED} + ${LABEL_CANCELED}), ${LABEL_BOOKED}, ${LABEL_CANCELED}`
     );
     const statusGrid = el("div", "dashboard-charts sg-chart-grid");
+    const statusMetricGate = [METRIC_BOOKED, METRIC_CANCELED, METRIC_SALES_DECLARATION];
+
+    function statusKeysForMetrics(st) {
+      return statusKeys.filter(s => {
+        const key = metricKeyForLabel(s) || metricKeyForLabel(statusDisplayLabel(s));
+        return !key || metricOn(st, key);
+      });
+    }
+
     mountDoughnut(
       statusGrid, "sg-pie-booked-status",
       "Booked share by status",
-      (state) => {
-        const ms = filteredMonths(months, state);
-        const names = statusKeys.filter(s => !state.statuses.size || state.statuses.has(s));
+      (st) => {
+        const ms = filteredMonths(months, st);
+        const names = statusKeysForMetrics(st);
         const values = names.map(name => {
-          const local = cloneFilterState(state);
+          const local = cloneFilterState(st);
           local.statuses = new Set([name]);
-          const series = sumSheetByMonths(booked, ms, local);
-          return series.reduce((a, b) => a + b, 0);
+          return sumSeries(sumSheetByMonths(booked, ms, local));
         });
         return {labels: names.map(statusDisplayLabel), values};
       },
-      {...slicerBase, show: {project: true, source: true, month: true, status: true}}
+      {...chartOpts, requireAnyMetrics: statusMetricGate}
     );
+
     mountStackedBar(
       statusGrid, "sg-stack-booked-status-month",
       "Booked · status stacked by month",
-      (state) => {
-        const ms = filteredMonths(months, state);
-        const names = statusKeys.filter(s => !state.statuses.size || state.statuses.has(s));
+      (st) => {
+        const ms = filteredMonths(months, st);
+        const names = statusKeysForMetrics(st);
         return {
           labels: ms.map(formatMonth),
           datasets: names.map((name, i) => {
-            const local = cloneFilterState(state);
+            const local = cloneFilterState(st);
             local.statuses = new Set([name]);
             return {
               label: statusDisplayLabel(name),
@@ -1129,25 +1241,33 @@ function renderChartsGallery(mount, payload) {
           }),
         };
       },
-      {...slicerBase, show: {project: true, source: true, month: true, status: true}}
+      {...chartOpts, requireAnyMetrics: statusMetricGate}
     );
     statusSec.append(statusGrid);
     mount.append(statusSec);
+    register(() => {
+      const on = statusMetricGate.some(k => metricOn(state, k));
+      statusSec.classList.toggle("hidden", !on);
+    });
   }
 
   // —— Heatmaps ——
   const heat = makeSection("Heatmaps", "Project × Month intensity (Leads, Visits, Booked)");
   const heatProjectsAll = projectKeys.slice(0, 20);
 
-  function mountFilteredHeatmap(sheetTitle, sheet) {
+  function mountFilteredHeatmap(sheetTitle, sheet, metricKey) {
     const block = el("div", "sg-heatmap-block");
     block.append(el("h4", null, sheetTitle));
-    const state = cloneFilterState(baseState);
     const body = el("div", "sg-heatmap-body");
 
     const paint = () => {
+      if (!metricOn(state, metricKey)) {
+        block.classList.add("hidden");
+        return;
+      }
+      block.classList.remove("hidden");
       const ms = filteredMonths(months, state);
-      const projs = heatProjectsAll.filter(p => state.projects.has(p));
+      const projs = heatProjectsAll.filter(p => !state.projects.size || state.projects.has(p));
       const {matrix, maxVal} = projectMonthMatrixFiltered(sheet, projs, ms, state);
       body.replaceChildren();
       if (!projs.length || !ms.length) {
@@ -1186,22 +1306,20 @@ function renderChartsGallery(mount, payload) {
       body.append(legend);
     };
 
-    attachSlicers(block, {
-      months,
-      dims,
-      state,
-      show: {project: true, source: true, month: true, status: false},
-      onChange: paint,
-    });
     block.append(body);
+    register(paint);
     paint();
     heat.append(block);
   }
 
-  mountFilteredHeatmap("Leads · Project × Month", leads);
-  mountFilteredHeatmap("Visits · Project × Month", visits);
-  mountFilteredHeatmap("Booked · Project × Month", booked);
+  mountFilteredHeatmap("Leads · Project × Month", leads, METRIC_LEADS);
+  mountFilteredHeatmap("Visits · Project × Month", visits, METRIC_VISITS);
+  mountFilteredHeatmap("Booked · Project × Month", booked, METRIC_BOOKED);
   mount.append(heat);
+  register(() => {
+    const any = [METRIC_LEADS, METRIC_VISITS, METRIC_BOOKED].some(k => metricOn(state, k));
+    heat.classList.toggle("hidden", !any);
+  });
 }
 
 function sortableTable(headers, rows, {numericCols = new Set()} = {}) {
@@ -1290,111 +1408,156 @@ function leadDeclarationDimTotal(booked, dimKind, name) {
     + statusDimTotal(booked, STATUS_CANCEL, dimKind, name);
 }
 
-function renderTables(mount, payload) {
-  const section = makeSection("Tables", "Sortable breakdowns by month, project, source, and status");
+function renderTables(mount, payload, state) {
+  mount.replaceChildren();
+  const section = makeSection("Tables", "Sortable breakdowns by month, project, source name, and status");
   const tabs = el("div", "sg-table-tabs", null);
   const panels = el("div", "sg-table-panels");
-  const months = payload.months || [];
+  const monthsAll = payload.months || [];
+  const months = filteredMonths(monthsAll, state);
   const leads = payload.leads || {};
   const visits = payload.visits || {};
   const booked = payload.booked || {};
+
+  const showL = metricOn(state, METRIC_LEADS);
+  const showV = metricOn(state, METRIC_VISITS);
+  const showSD = metricOn(state, METRIC_SALES_DECLARATION);
+  const showB = metricOn(state, METRIC_BOOKED);
+  const showC = metricOn(state, METRIC_CANCELED);
+  const showBookedFamily = showSD || showB || showC;
 
   const tabDefs = [
     {
       id: "month",
       label: "By Month",
       build() {
+        const headers = ["Month"];
+        const numericCols = new Set();
+        let col = 1;
+        if (showL) { headers.push("Leads"); numericCols.add(col++); }
+        if (showV) { headers.push("Visits"); numericCols.add(col++); }
+        if (showBookedFamily) { headers.push("Booked"); numericCols.add(col++); }
+        if (showSD) { headers.push(LABEL_SALES_DECLARATION); numericCols.add(col++); }
+        if (showB) { headers.push(LABEL_BOOKED); numericCols.add(col++); }
+        if (showC) { headers.push(LABEL_CANCELED); numericCols.add(col++); }
+        if (showL && showV) { headers.push("V/L %"); numericCols.add(col++); }
+        if (showV && showBookedFamily) { headers.push("B/V %"); numericCols.add(col++); }
+        if (showL && showBookedFamily) { headers.push("B/L %"); numericCols.add(col++); }
+
         const rows = months.map(m => {
-          const L = monthVal(leads, m);
-          const V = monthVal(visits, m);
-          const B = monthVal(booked, m);
-          const DL = statusMonthVal(booked, STATUS_DEMAND, m);
-          const CX = statusMonthVal(booked, STATUS_CANCEL, m);
-          const LD = leadDeclarationMonthVal(booked, m);
-          return [
-            formatMonth(m),
-            L, V, B, LD, DL, CX,
-            Number(((L > 0 ? V / L : 0) * 100).toFixed(2)),
-            Number(((V > 0 ? B / V : 0) * 100).toFixed(2)),
-            Number(((L > 0 ? B / L : 0) * 100).toFixed(2)),
-          ];
+          const L = sumSeries(sumSheetByMonths(leads, [m], state));
+          const V = sumSeries(sumSheetByMonths(visits, [m], state));
+          const B = sumSeries(sumSheetByMonths(booked, [m], state));
+          const DL = sumSeries(bookedStatusByMonths(booked, STATUS_DEMAND, [m], state));
+          const CX = sumSeries(bookedStatusByMonths(booked, STATUS_CANCEL, [m], state));
+          const LD = DL + CX;
+          const row = [formatMonth(m)];
+          if (showL) row.push(L);
+          if (showV) row.push(V);
+          if (showBookedFamily) row.push(B);
+          if (showSD) row.push(LD);
+          if (showB) row.push(DL);
+          if (showC) row.push(CX);
+          if (showL && showV) row.push(Number(((L > 0 ? V / L : 0) * 100).toFixed(2)));
+          if (showV && showBookedFamily) row.push(Number(((V > 0 ? B / V : 0) * 100).toFixed(2)));
+          if (showL && showBookedFamily) row.push(Number(((L > 0 ? B / L : 0) * 100).toFixed(2)));
+          return row;
         });
-        return sortableTable(
-          ["Month", "Leads", "Visits", "Booked", LABEL_SALES_DECLARATION, LABEL_BOOKED, LABEL_CANCELED, "V/L %", "B/V %", "B/L %"],
-          rows,
-          {numericCols: new Set([1, 2, 3, 4, 5, 6, 7, 8, 9])}
-        );
+        return sortableTable(headers, rows, {numericCols});
       },
     },
     {
       id: "project",
       label: "By Project",
       build() {
-        const names = [...new Set([
+        const names = filterDimNames([...new Set([
           ...Object.keys(leads.byProject || {}),
           ...Object.keys(visits.byProject || {}),
           ...Object.keys(booked.byProject || {}),
-        ])].sort();
-        const rows = names.map(n => [
-          n,
-          bucketTotal(leads.byProject?.[n]),
-          bucketTotal(visits.byProject?.[n]),
-          bucketTotal(booked.byProject?.[n]),
-          leadDeclarationDimTotal(booked, "project", n),
-          statusDimTotal(booked, STATUS_DEMAND, "project", n),
-          statusDimTotal(booked, STATUS_CANCEL, "project", n),
-        ]);
-        return sortableTable(
-          ["Project", "Leads", "Visits", "Booked", LABEL_SALES_DECLARATION, LABEL_BOOKED, LABEL_CANCELED],
-          rows,
-          {numericCols: new Set([1, 2, 3, 4, 5, 6])}
-        );
+        ])].sort(), state, "project");
+        const headers = ["Project"];
+        const numericCols = new Set();
+        let col = 1;
+        if (showL) { headers.push("Leads"); numericCols.add(col++); }
+        if (showV) { headers.push("Visits"); numericCols.add(col++); }
+        if (showBookedFamily) { headers.push("Booked"); numericCols.add(col++); }
+        if (showSD) { headers.push(LABEL_SALES_DECLARATION); numericCols.add(col++); }
+        if (showB) { headers.push(LABEL_BOOKED); numericCols.add(col++); }
+        if (showC) { headers.push(LABEL_CANCELED); numericCols.add(col++); }
+        const rows = names.map(n => {
+          const row = [n];
+          if (showL) row.push(sumSeries(sumSheetByDim(leads, [n], "project", months, state)));
+          if (showV) row.push(sumSeries(sumSheetByDim(visits, [n], "project", months, state)));
+          if (showBookedFamily) row.push(sumSeries(sumSheetByDim(booked, [n], "project", months, state)));
+          if (showSD) {
+            row.push(
+              sumSeries(bookedStatusByDim(booked, STATUS_DEMAND, [n], "project", months, state))
+              + sumSeries(bookedStatusByDim(booked, STATUS_CANCEL, [n], "project", months, state))
+            );
+          }
+          if (showB) row.push(sumSeries(bookedStatusByDim(booked, STATUS_DEMAND, [n], "project", months, state)));
+          if (showC) row.push(sumSeries(bookedStatusByDim(booked, STATUS_CANCEL, [n], "project", months, state)));
+          return row;
+        });
+        return sortableTable(headers, rows, {numericCols});
       },
     },
     {
       id: "source",
-      label: "By Source",
+      label: "By Source Name",
       build() {
-        const names = [...new Set([
+        const names = filterDimNames([...new Set([
           ...Object.keys(leads.bySource || {}),
           ...Object.keys(visits.bySource || {}),
           ...Object.keys(booked.bySource || {}),
-        ])].sort();
-        const rows = names.map(n => [
-          n,
-          bucketTotal(leads.bySource?.[n]),
-          bucketTotal(visits.bySource?.[n]),
-          bucketTotal(booked.bySource?.[n]),
-          leadDeclarationDimTotal(booked, "source", n),
-          statusDimTotal(booked, STATUS_DEMAND, "source", n),
-          statusDimTotal(booked, STATUS_CANCEL, "source", n),
-        ]);
-        return sortableTable(
-          ["Source", "Leads", "Visits", "Booked", LABEL_SALES_DECLARATION, LABEL_BOOKED, LABEL_CANCELED],
-          rows,
-          {numericCols: new Set([1, 2, 3, 4, 5, 6])}
-        );
+        ])].sort(), state, "source");
+        const headers = ["Source Name"];
+        const numericCols = new Set();
+        let col = 1;
+        if (showL) { headers.push("Leads"); numericCols.add(col++); }
+        if (showV) { headers.push("Visits"); numericCols.add(col++); }
+        if (showBookedFamily) { headers.push("Booked"); numericCols.add(col++); }
+        if (showSD) { headers.push(LABEL_SALES_DECLARATION); numericCols.add(col++); }
+        if (showB) { headers.push(LABEL_BOOKED); numericCols.add(col++); }
+        if (showC) { headers.push(LABEL_CANCELED); numericCols.add(col++); }
+        const rows = names.map(n => {
+          const row = [n];
+          if (showL) row.push(sumSeries(sumSheetByDim(leads, [n], "source", months, state)));
+          if (showV) row.push(sumSeries(sumSheetByDim(visits, [n], "source", months, state)));
+          if (showBookedFamily) row.push(sumSeries(sumSheetByDim(booked, [n], "source", months, state)));
+          if (showSD) {
+            row.push(
+              sumSeries(bookedStatusByDim(booked, STATUS_DEMAND, [n], "source", months, state))
+              + sumSeries(bookedStatusByDim(booked, STATUS_CANCEL, [n], "source", months, state))
+            );
+          }
+          if (showB) row.push(sumSeries(bookedStatusByDim(booked, STATUS_DEMAND, [n], "source", months, state)));
+          if (showC) row.push(sumSeries(bookedStatusByDim(booked, STATUS_CANCEL, [n], "source", months, state)));
+          return row;
+        });
+        return sortableTable(headers, rows, {numericCols});
       },
     },
     {
       id: "status",
       label: "By Status",
       build() {
-        const names = orderStatusKeys(Object.keys(booked.byStatus || {}));
-        const leadDecl =
-          booked.leadDeclaration?.total != null
-            ? Number(booked.leadDeclaration.total) || 0
-            : bucketTotal(booked.byStatus?.[findStatusKey(booked.byStatus, STATUS_DEMAND)])
-              + bucketTotal(booked.byStatus?.[findStatusKey(booked.byStatus, STATUS_CANCEL)]);
-        const rows = [
-          [LABEL_SALES_DECLARATION, leadDecl],
-          ...names.map(n => [statusDisplayLabel(n), bucketTotal(booked.byStatus?.[n])]),
-        ];
-        return sortableTable(
-          ["Status", "Booked"],
-          rows,
-          {numericCols: new Set([1])}
-        );
+        const names = orderStatusKeys(Object.keys(booked.byStatus || {})).filter(s => {
+          const key = metricKeyForLabel(s) || metricKeyForLabel(statusDisplayLabel(s));
+          return !key || metricOn(state, key);
+        });
+        const rows = [];
+        if (showSD) {
+          const ld = sumSeries(bookedStatusByMonths(booked, STATUS_DEMAND, months, state))
+            + sumSeries(bookedStatusByMonths(booked, STATUS_CANCEL, months, state));
+          rows.push([LABEL_SALES_DECLARATION, ld]);
+        }
+        for (const n of names) {
+          const local = cloneFilterState(state);
+          local.statuses = new Set([n]);
+          rows.push([statusDisplayLabel(n), sumSeries(sumSheetByMonths(booked, months, local))]);
+        }
+        return sortableTable(["Status", "Booked"], rows, {numericCols: new Set([1])});
       },
     },
   ];
@@ -1475,11 +1638,34 @@ export function renderSalesGraphDashboard(mount, payload, opts = {}) {
     if (bits.length) mount.append(el("p", "sg-meta-line", bits.join(" · ")));
   }
 
-  renderKpis(mount, payload);
+  const months = payload.months || [];
+  const dims = collectDimKeys(payload);
+  const state = makeFilterState(dims, months);
+  const painters = [];
+  const register = (fn) => { painters.push(fn); };
+  const onChange = () => {
+    for (const paint of painters) {
+      try { paint(); } catch { /* keep other painters alive */ }
+    }
+  };
+
+  mountGlobalFilterBar(mount, {months, dims, state, onChange});
+
+  const kpiHost = el("div", "sg-kpi-host");
+  mount.append(kpiHost);
+  register(() => renderKpis(kpiHost, payload, state));
+
+  const galleryHost = el("div", "sg-gallery-host");
+  mount.append(galleryHost);
   try {
-    renderChartsGallery(mount, payload);
+    renderChartsGallery(galleryHost, payload, state, register);
   } catch (err) {
-    mount.append(el("div", "validation error", err.message || "Chart render failed."));
+    galleryHost.append(el("div", "validation error", err.message || "Chart render failed."));
   }
-  renderTables(mount, payload);
+
+  const tablesHost = el("div", "sg-tables-host");
+  mount.append(tablesHost);
+  register(() => renderTables(tablesHost, payload, state));
+
+  onChange();
 }

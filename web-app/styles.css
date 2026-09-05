@@ -647,6 +647,20 @@ body .drop-zone-disabled,body .drop-zone[aria-disabled="true"]{
 body .drop-zone-disabled:hover,body .drop-zone[aria-disabled="true"]:hover{border-color:var(--line)}
 body .drop-zone-disabled.dragover{border-color:var(--line);background:var(--soft-2)}
 body .sg-kpis{margin:8px 0 12px}
+body .sg-global-filters{
+  position:sticky;top:0;z-index:14;
+  display:flex;flex-wrap:wrap;gap:8px;align-items:center;
+  margin:0 0 12px;padding:10px 12px;
+  border:1px solid var(--line);border-radius:12px;
+  background:var(--panel);box-shadow:var(--shadow);
+  backdrop-filter:blur(10px)
+}
+body .sg-global-filters-label{
+  font-size:11px;font-weight:750;letter-spacing:.04em;text-transform:uppercase;
+  color:var(--muted);margin-right:4px
+}
+body .sg-global-filters .sg-slicer-panel{z-index:16;max-height:280px}
+body .sg-kpi-host,body .sg-gallery-host,body .sg-tables-host{min-width:0}
 body .sg-kpi-disabled{opacity:.55}
 body .sg-booked-callout{
   margin:0 0 18px;padding:10px 14px;border:1px dashed var(--line);border-radius:10px;
@@ -738,14 +752,6 @@ body .sg-slicer-option{
   font-size:12px;font-weight:500;cursor:pointer;line-height:1.35
 }
 body .sg-slicer-option input{margin-top:2px;flex-shrink:0}
-body .sg-slicer-months{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
-body .sg-slicer-month{
-  display:flex;align-items:center;gap:6px;font-size:12px;font-weight:650;color:var(--muted)
-}
-body .sg-slicer-month select{
-  border:1px solid var(--line);border-radius:8px;background:var(--input-bg);color:var(--ink);
-  padding:5px 8px;font-size:12px;font-weight:600;max-width:140px
-}
 body .sg-heatmap-block .sg-slicer-bar,
 body .sg-heatmap-block .sg-chart-slicers{margin:4px 0 8px}
 body .sg-heatmap-block{display:grid;gap:10px;margin-top:8px}
