@@ -1,5 +1,5 @@
 {
-  "version": "6.1.1.stable",
+  "version": "6.1.2.dev",
   "name": "GPP AI",
-  "notes": "v6.1.1.stable: Sales Graph global filters (Project, Source Name, Year, Month, Metrics)."
+  "notes": "v6.1.2.dev: Sales Graph filter drawer, KPI averages, Year+Month, Relative/Absolute scale, wheel scroll fix."
 }

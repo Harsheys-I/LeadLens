@@ -87,6 +87,13 @@ export function destroySalesGraphCharts() {
     try { chart.destroy(); } catch { /* ignore */ }
   }
   chartRegistry.clear();
+  document.querySelectorAll(".sg-filters-rail").forEach(rail => {
+    if (typeof rail._sgFiltersKeyHandler === "function") {
+      document.removeEventListener("keydown", rail._sgFiltersKeyHandler);
+    }
+  });
+  document.querySelectorAll(".sg-filters-rail, .sg-filters-backdrop").forEach(n => n.remove());
+  document.body.classList.remove("sg-filters-open");
 }
 
 function el(tag, className, text) {
@@ -107,7 +114,6 @@ function pct(n) {
 }
 
 const MONTH_SHORT = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
-const ALL_MONTH_KEYS = ["01","02","03","04","05","06","07","08","09","10","11","12"];
 
 function formatMonth(ym) {
   const s = String(ym || "");
@@ -115,11 +121,6 @@ function formatMonth(ym) {
   const y = s.slice(0, 4);
   const m = Number(s.slice(4, 6));
   return `${MONTH_SHORT[m - 1] || s.slice(4)} ${y}`;
-}
-
-function monthKeyLabel(mm) {
-  const n = Number(mm);
-  return MONTH_SHORT[n - 1] || String(mm);
 }
 
 function yearsFromMonths(months) {
@@ -209,36 +210,33 @@ function sizeScrollableCanvas(scrollEl, canvasWrap, categoryCount, categoryWidth
   canvasWrap.style.flexShrink = "0";
 }
 
-/** Keep horizontal wheel/trackpad/touch scroll inside the chart scrollport. */
+/**
+ * Horizontal-only chart scroll: only intercept primarily-horizontal wheel
+ * (|deltaX| > |deltaY|) or Shift+wheel. Primarily vertical wheel must NOT
+ * preventDefault — let the page scroll normally.
+ */
 function bindScrollContainment(scrollEl) {
   if (!scrollEl || scrollEl.dataset.sgScrollBound === "1") return;
   scrollEl.dataset.sgScrollBound = "1";
-  const stopBubble = (e) => {
-    e.stopPropagation();
-  };
   scrollEl.addEventListener("wheel", (e) => {
-    const dx = e.deltaX;
-    const dy = e.deltaY;
-    const horizontal = Math.abs(dx) > Math.abs(dy) || e.shiftKey;
-    if (!horizontal) return;
-    const maxScroll = scrollEl.scrollWidth - scrollEl.clientWidth;
-    if (maxScroll <= 0) {
-      e.preventDefault();
-      e.stopPropagation();
+    const dx = Number(e.deltaX) || 0;
+    const dy = Number(e.deltaY) || 0;
+    const shiftHorizontal = e.shiftKey && Math.abs(dy) > 0;
+    const primarilyHorizontal = Math.abs(dx) > Math.abs(dy);
+    if (!primarilyHorizontal && !shiftHorizontal) {
+      // Vertical (or diagonal-vertical) — do not trap; page scrolls.
       return;
     }
-    const delta = e.shiftKey && !dx ? dy : dx;
+    const maxScroll = scrollEl.scrollWidth - scrollEl.clientWidth;
+    if (maxScroll <= 0) return;
+    const delta = shiftHorizontal && !dx ? dy : dx;
+    if (!delta) return;
     const next = Math.max(0, Math.min(maxScroll, scrollEl.scrollLeft + delta));
-    if (next !== scrollEl.scrollLeft) scrollEl.scrollLeft = next;
-    // Always kill document/shell horizontal pan while gesturing on the chart.
+    if (next === scrollEl.scrollLeft) return;
+    scrollEl.scrollLeft = next;
     e.preventDefault();
     e.stopPropagation();
   }, {passive: false});
-  scrollEl.addEventListener("touchstart", stopBubble, {passive: true});
-  scrollEl.addEventListener("touchmove", (e) => {
-    e.stopPropagation();
-  }, {passive: true});
-  scrollEl.addEventListener("scroll", stopBubble, {passive: true});
 }
 
 /**
@@ -414,10 +412,11 @@ function renderKpis(mount, payload, state) {
 
   const leadsTotal = sumSeries(sumSheetByMonths(leads, ms, state));
   const visitsTotal = sumSeries(sumSheetByMonths(visits, ms, state));
-  const bookedTotal = sumSeries(sumSheetByMonths(booked, ms, state));
   const demandTotal = sumSeries(bookedStatusByMonths(booked, STATUS_DEMAND, ms, state));
   const cancelTotal = sumSeries(bookedStatusByMonths(booked, STATUS_CANCEL, ms, state));
   const leadDecl = demandTotal + cancelTotal;
+  // Denominator = filtered months remaining (at least 1 to avoid ÷0).
+  const monthCount = Math.max(1, ms.length);
 
   const showL = metricOn(state, METRIC_LEADS);
   const showV = metricOn(state, METRIC_VISITS);
@@ -429,18 +428,24 @@ function renderKpis(mount, payload, state) {
   const items = [];
   if (showL) items.push(["Total Leads", num(leadsTotal)]);
   if (showV) items.push(["Total Visits", num(visitsTotal)]);
-  if (showBookedFamily) items.push(["Total Booked", num(bookedTotal)]);
+  // No Total Booked KPI — same value as Sales Declaration (Demand Letter + Cancel).
   if (showSD) items.push([LABEL_SALES_DECLARATION, num(leadDecl)]);
   if (showB) items.push([LABEL_BOOKED, num(demandTotal)]);
   if (showC) items.push([LABEL_CANCELED, num(cancelTotal)]);
+  if (showL) items.push(["Avg Leads / Month", num(leadsTotal / monthCount)]);
+  if (showV) items.push(["Avg Visits / Month", num(visitsTotal / monthCount)]);
+  if (showSD) items.push(["Avg Sales Declaration / Month", num(leadDecl / monthCount)]);
+  // Avg Booked = status Booked (Demand Letter) only — not Sales Declaration total.
+  if (showB) items.push(["Avg Booked / Month", num(demandTotal / monthCount)]);
+  if (showC) items.push(["Avg Canceled / Month", num(cancelTotal / monthCount)]);
   if (showL && showV) {
     items.push(["Visits / Leads", leadsTotal > 0 ? pct(visitsTotal / leadsTotal) : "—"]);
   }
   if (showV && showBookedFamily) {
-    items.push(["Booked / Visits", visitsTotal > 0 ? pct(bookedTotal / visitsTotal) : "—"]);
+    items.push(["Booked / Visits", visitsTotal > 0 ? pct(leadDecl / visitsTotal) : "—"]);
   }
   if (showL && showBookedFamily) {
-    items.push(["Booked / Leads", leadsTotal > 0 ? pct(bookedTotal / leadsTotal) : "—"]);
+    items.push(["Booked / Leads", leadsTotal > 0 ? pct(leadDecl / leadsTotal) : "—"]);
   }
   items.push(["Months", String(ms.length)]);
   const projNames = filterDimNames(
@@ -463,9 +468,40 @@ function renderKpis(mount, payload, state) {
   mount.append(strip);
 }
 
-function dualAxisOptions() {
+/** Relative = dual Y-axis; Absolute = one shared Y-axis for all series. */
+function dualAxisOptions(scaleMode = "relative") {
   const Chart = requireChart();
   const muted = mutedColor();
+  const absolute = scaleMode === "absolute";
+  const scales = {
+    x: {
+      ticks: {color: muted, maxRotation: 45, font: {size: 10}},
+      grid: {color: "transparent"},
+    },
+    y: {
+      type: "linear",
+      position: "left",
+      beginAtZero: true,
+      title: {
+        display: true,
+        text: absolute ? "Count" : "Leads / Visits",
+        color: muted,
+        font: {size: 11},
+      },
+      ticks: {color: muted, font: {size: 10}},
+      grid: {color: "rgba(0,0,0,0.06)"},
+    },
+  };
+  if (!absolute) {
+    scales.y1 = {
+      type: "linear",
+      position: "right",
+      beginAtZero: true,
+      title: {display: true, text: "Booked", color: COLOR_BOOKED, font: {size: 11}},
+      ticks: {color: COLOR_BOOKED, font: {size: 10}},
+      grid: {drawOnChartArea: false},
+    };
+  }
   return {
     responsive: true,
     maintainAspectRatio: false,
@@ -475,28 +511,7 @@ function dualAxisOptions() {
       legend: {labels: legendLabelsWithoutRight(Chart)},
       tooltip: {mode: "index", intersect: false},
     },
-    scales: {
-      x: {
-        ticks: {color: muted, maxRotation: 45, font: {size: 10}},
-        grid: {color: "transparent"},
-      },
-      y: {
-        type: "linear",
-        position: "left",
-        beginAtZero: true,
-        title: {display: true, text: "Leads / Visits", color: muted, font: {size: 11}},
-        ticks: {color: muted, font: {size: 10}},
-        grid: {color: "rgba(0,0,0,0.06)"},
-      },
-      y1: {
-        type: "linear",
-        position: "right",
-        beginAtZero: true,
-        title: {display: true, text: "Booked", color: COLOR_BOOKED, font: {size: 11}},
-        ticks: {color: COLOR_BOOKED, font: {size: 10}},
-        grid: {drawOnChartArea: false},
-      },
-    },
+    scales,
   };
 }
 
@@ -517,13 +532,14 @@ function zipSum(...seriesList) {
 }
 
 /** Hero datasets: Sales Declaration → Booked → Canceled (UI labels; data keys unchanged). */
-function lvbSplitBarDatasets(leadsData, visitsData, demandData, cancelData, declarationData) {
+function lvbSplitBarDatasets(leadsData, visitsData, demandData, cancelData, declarationData, scaleMode = "relative") {
+  const bookedAxis = scaleMode === "absolute" ? "y" : "y1";
   return [
     {label: "Leads", data: leadsData, backgroundColor: COLOR_LEADS, borderRadius: 4, maxBarThickness: 28, yAxisID: "y"},
     {label: "Visits", data: visitsData, backgroundColor: COLOR_VISITS, borderRadius: 4, maxBarThickness: 28, yAxisID: "y"},
-    {label: LABEL_SALES_DECLARATION, data: declarationData, backgroundColor: COLOR_BOOKED_DECL, borderRadius: 4, maxBarThickness: 28, yAxisID: "y1"},
-    {label: LABEL_BOOKED, data: demandData, backgroundColor: COLOR_BOOKED_DL, borderRadius: 4, maxBarThickness: 28, yAxisID: "y1"},
-    {label: LABEL_CANCELED, data: cancelData, backgroundColor: COLOR_BOOKED_CANCEL, borderRadius: 4, maxBarThickness: 28, yAxisID: "y1"},
+    {label: LABEL_SALES_DECLARATION, data: declarationData, backgroundColor: COLOR_BOOKED_DECL, borderRadius: 4, maxBarThickness: 28, yAxisID: bookedAxis},
+    {label: LABEL_BOOKED, data: demandData, backgroundColor: COLOR_BOOKED_DL, borderRadius: 4, maxBarThickness: 28, yAxisID: bookedAxis},
+    {label: LABEL_CANCELED, data: cancelData, backgroundColor: COLOR_BOOKED_CANCEL, borderRadius: 4, maxBarThickness: 28, yAxisID: bookedAxis},
   ];
 }
 
@@ -553,9 +569,14 @@ function cloneFilterState(state) {
     sources: new Set(state.sources),
     statuses: new Set(state.statuses),
     years: new Set(state.years),
-    monthsOfYear: new Set(state.monthsOfYear),
+    yearMonths: new Set(state.yearMonths),
     metrics: new Set(state.metrics),
+    scaleMode: state.scaleMode === "absolute" ? "absolute" : "relative",
   };
+}
+
+function availableYearMonths(months) {
+  return (months || []).filter(m => /^\d{6}$/.test(String(m || "")));
 }
 
 function makeFilterState(dims, months) {
@@ -565,8 +586,10 @@ function makeFilterState(dims, months) {
     // Booked/Canceled visibility is driven by Metrics; keep all statuses in data filters.
     statuses: new Set(dims.statuses.length ? dims.statuses : [STATUS_DEMAND, STATUS_CANCEL]),
     years: new Set(yearsFromMonths(months)),
-    monthsOfYear: new Set(ALL_MONTH_KEYS),
+    // Year+Month periods (YYYYMM), not month-name-only.
+    yearMonths: new Set(availableYearMonths(months)),
     metrics: new Set(ALL_METRICS),
+    scaleMode: "relative",
   };
 }
 
@@ -595,17 +618,22 @@ function sumSeries(arr) {
   return (arr || []).reduce((a, b) => a + (Number(b) || 0), 0);
 }
 
+/**
+ * Year ∧ Year+Month period filter:
+ * - Include a period when its year is selected AND its Year+Month is selected.
+ * - Empty/all Year+Month → all months in the selected years.
+ * - Empty/all Year → all years, then Year+Month applies alone.
+ */
 function filteredMonths(months, state) {
   const years = state.years;
-  const mos = state.monthsOfYear;
+  const yms = state.yearMonths;
   return (months || []).filter(m => {
     const s = String(m || "");
     if (!/^\d{6}$/.test(s)) return true;
     const y = s.slice(0, 4);
-    const mo = s.slice(4, 6);
     const yearOk = !years.size || years.has(y);
-    const monthOk = !mos.size || mos.has(mo);
-    return yearOk && monthOk;
+    const ymOk = !yms.size || yms.has(s);
+    return yearOk && ymOk;
   });
 }
 
@@ -817,45 +845,140 @@ function multiSlicer(label, allValues, selectedSet, {
   return details;
 }
 
+function syncSgFiltersOpen(aside) {
+  const open = aside && !aside.classList.contains("is-collapsed") && document.body.contains(aside);
+  document.body.classList.toggle("sg-filters-open", Boolean(open));
+  const backdrop = aside?.parentElement?.querySelector?.(":scope > .sg-filters-backdrop");
+  if (backdrop) backdrop.classList.toggle("hidden", !open);
+}
+
+function cleanupSgFilterRails(scopeEl) {
+  const view = scopeEl?.closest?.(".view") || null;
+  const roots = view ? [view] : [...document.querySelectorAll(".view"), document.body];
+  for (const root of roots) {
+    root.querySelectorAll?.(".sg-filters-rail, .sg-filters-backdrop").forEach(n => n.remove());
+  }
+  if (!document.querySelector(".sg-filters-rail:not(.is-collapsed)")) {
+    document.body.classList.remove("sg-filters-open");
+  }
+}
+
+function mountScaleModeControl(state, onChange) {
+  const wrap = el("div", "sg-scale-mode");
+  wrap.append(el("span", "dashboard-filter-label", "Scale"));
+  const row = el("div", "sg-scale-mode-row");
+  for (const [value, label] of [["relative", "Relative"], ["absolute", "Absolute"]]) {
+    const opt = el("label", "sg-scale-mode-option");
+    const radio = document.createElement("input");
+    radio.type = "radio";
+    radio.name = "sg-scale-mode";
+    radio.value = value;
+    radio.checked = (state.scaleMode || "relative") === value;
+    radio.addEventListener("change", () => {
+      if (!radio.checked) return;
+      state.scaleMode = value;
+      onChange();
+    });
+    opt.append(radio, document.createTextNode(label));
+    row.append(opt);
+  }
+  wrap.append(row);
+  const hint = el("p", "filters-panel-hint", "Relative: dual Y-axis. Absolute: shared Y-axis.");
+  wrap.append(hint);
+  return wrap;
+}
+
 /**
- * One sticky global filter bar for the whole dashboard / preview.
+ * Right-side Filters drawer (LeadLens filters-rail pattern) for dashboard + preview.
+ * Overlays content; closes on backdrop click / Escape.
  */
 function mountGlobalFilterBar(mount, {months, dims, state, onChange}) {
-  const bar = el("div", "sg-global-filters sg-slicer-bar");
-  const label = el("div", "sg-global-filters-label", "Filters");
-  bar.append(label);
+  cleanupSgFilterRails(mount);
+  const host = mount.closest(".view") || mount.parentElement || document.body;
 
+  const backdrop = el("div", "sg-filters-backdrop hidden");
+  backdrop.setAttribute("aria-hidden", "true");
+
+  const aside = el("aside", "dashboard-filters-rail sg-filters-rail is-collapsed");
+  aside.id = mount.id === "sg-preview-mount" ? "sg-filters-rail-preview" : "sg-filters-rail";
+  const toggle = el("button", "filters-tab-toggle", "Filters");
+  toggle.type = "button";
+  toggle.setAttribute("aria-expanded", "false");
+
+  const panel = el("div", "dashboard-filters-panel");
+  const form = el("div", "dashboard-filters sg-filters-form");
+  const head = el("div", "filters-panel-head");
+  head.append(el("h3", null, "Filters"));
+  head.append(el("p", "filters-panel-hint", "Global filters for KPIs and charts"));
+  form.append(head);
+
+  const slicers = el("div", "sg-filters-slicers");
   if (dims.projects.length) {
-    bar.append(multiSlicer("Project", dims.projects, state.projects, {onChange}));
+    slicers.append(multiSlicer("Project", dims.projects, state.projects, {onChange}));
   }
   if (dims.sources.length) {
-    bar.append(multiSlicer("Source Name", dims.sources, state.sources, {onChange}));
+    slicers.append(multiSlicer("Source Name", dims.sources, state.sources, {onChange}));
+  }
+  if (dims.statuses.length) {
+    slicers.append(multiSlicer("Status", dims.statuses, state.statuses, {
+      displayFn: statusDisplayLabel,
+      onChange,
+    }));
   }
   const yearOpts = yearsFromMonths(months);
   if (yearOpts.length) {
-    bar.append(multiSlicer("Year", yearOpts, state.years, {onChange}));
+    slicers.append(multiSlicer("Year", yearOpts, state.years, {onChange}));
   }
-  bar.append(multiSlicer("Month", ALL_MONTH_KEYS, state.monthsOfYear, {
-    displayFn: monthKeyLabel,
-    onChange,
-  }));
-  bar.append(multiSlicer("Metrics", ALL_METRICS, state.metrics, {
+  const ymOpts = availableYearMonths(months);
+  if (ymOpts.length) {
+    slicers.append(multiSlicer("Year+Month", ymOpts, state.yearMonths, {
+      displayFn: formatMonth,
+      onChange,
+    }));
+  }
+  slicers.append(multiSlicer("Metrics", ALL_METRICS, state.metrics, {
     displayFn: k => METRIC_LABELS[k] || k,
     onChange,
     minSelected: 1,
   }));
+  form.append(slicers);
+  form.append(mountScaleModeControl(state, onChange));
 
-  // Close other open slicers when one opens (cleaner sticky bar).
-  bar.addEventListener("toggle", e => {
+  // Close other open slicers when one opens.
+  form.addEventListener("toggle", e => {
     const t = e.target;
     if (!(t instanceof HTMLDetailsElement) || !t.open) return;
-    bar.querySelectorAll("details.sg-slicer[open]").forEach(d => {
+    form.querySelectorAll("details.sg-slicer[open]").forEach(d => {
       if (d !== t) d.open = false;
     });
   }, true);
 
-  mount.append(bar);
-  return bar;
+  panel.append(form);
+  aside.append(toggle, panel);
+
+  const setCollapsed = (collapsed) => {
+    aside.classList.toggle("is-collapsed", collapsed);
+    toggle.setAttribute("aria-expanded", collapsed ? "false" : "true");
+    syncSgFiltersOpen(aside);
+  };
+
+  toggle.addEventListener("click", (e) => {
+    e.stopPropagation();
+    setCollapsed(!aside.classList.contains("is-collapsed") ? true : false);
+  });
+  backdrop.addEventListener("click", () => setCollapsed(true));
+
+  const onKey = (e) => {
+    if (e.key !== "Escape") return;
+    if (aside.classList.contains("is-collapsed")) return;
+    setCollapsed(true);
+  };
+  document.addEventListener("keydown", onKey);
+  aside._sgFiltersKeyHandler = onKey;
+
+  host.append(backdrop, aside);
+  syncSgFiltersOpen(aside);
+  return aside;
 }
 
 function mountHeroDualAxis(grid, id, title, getData, {state, register}) {
@@ -870,12 +993,13 @@ function mountHeroDualAxis(grid, id, title, getData, {state, register}) {
     const {labels, datasets} = getData(state);
     const visible = filterDatasetsByMetrics(datasets, state);
     setCategoryCount(labels.length);
+    const opts = dualAxisOptions(state.scaleMode || "relative");
     if (!visible.length) {
       registerChart(id, {
         canvas,
         type: "bar",
         data: {labels, datasets: []},
-        options: dualAxisOptions(),
+        options: opts,
       });
       return;
     }
@@ -883,7 +1007,7 @@ function mountHeroDualAxis(grid, id, title, getData, {state, register}) {
       canvas,
       type: "bar",
       data: {labels, datasets: visible},
-      options: dualAxisOptions(),
+      options: opts,
       plugins: [heroBarValueLabels],
     });
   };
@@ -1061,7 +1185,8 @@ function renderChartsGallery(mount, payload, state, register) {
           sumSheetByMonths(visits, ms, st),
           demand,
           cancel,
-          zipSum(demand, cancel)
+          zipSum(demand, cancel),
+          st.scaleMode || "relative"
         ),
       };
     },
@@ -1088,7 +1213,8 @@ function renderChartsGallery(mount, payload, state, register) {
           sumSheetByDim(visits, names, "project", ms, st),
           demand,
           cancel,
-          zipSum(demand, cancel)
+          zipSum(demand, cancel),
+          st.scaleMode || "relative"
         ),
       };
     },
@@ -1148,7 +1274,8 @@ function renderChartsGallery(mount, payload, state, register) {
           sumSheetByDim(visits, names, "source", ms, st),
           demand,
           cancel,
-          zipSum(demand, cancel)
+          zipSum(demand, cancel),
+          st.scaleMode || "relative"
         ),
       };
     },

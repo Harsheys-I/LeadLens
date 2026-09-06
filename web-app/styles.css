@@ -647,19 +647,27 @@ body .drop-zone-disabled,body .drop-zone[aria-disabled="true"]{
 body .drop-zone-disabled:hover,body .drop-zone[aria-disabled="true"]:hover{border-color:var(--line)}
 body .drop-zone-disabled.dragover{border-color:var(--line);background:var(--soft-2)}
 body .sg-kpis{margin:8px 0 12px}
-body .sg-global-filters{
-  position:sticky;top:0;z-index:14;
-  display:flex;flex-wrap:wrap;gap:8px;align-items:center;
-  margin:0 0 12px;padding:10px 12px;
-  border:1px solid var(--line);border-radius:12px;
-  background:var(--panel);box-shadow:var(--shadow);
-  backdrop-filter:blur(10px)
+/* Sales Graph Filters: right-side overlay drawer (reuses dashboard-filters-rail). */
+body .sg-filters-rail{z-index:40}
+body .sg-filters-backdrop{
+  position:fixed;inset:0;z-index:39;background:rgba(18,55,42,.18);pointer-events:auto
 }
-body .sg-global-filters-label{
-  font-size:11px;font-weight:750;letter-spacing:.04em;text-transform:uppercase;
-  color:var(--muted);margin-right:4px
+body .sg-filters-backdrop.hidden{display:none!important}
+body .sg-filters-form{display:flex;flex-direction:column;gap:14px;height:100%;min-height:0}
+body .sg-filters-slicers{
+  display:flex;flex-direction:column;gap:10px;flex:1;min-height:0;overflow:auto
 }
-body .sg-global-filters .sg-slicer-panel{z-index:16;max-height:280px}
+body .sg-filters-rail .sg-slicer{width:100%}
+body .sg-filters-rail .sg-slicer-summary{display:block;width:100%;box-sizing:border-box}
+body .sg-filters-rail .sg-slicer-panel{
+  position:static;margin-top:6px;max-height:180px;width:100%;min-width:0;
+  box-shadow:none;border:1px solid var(--line)
+}
+body .sg-scale-mode{display:grid;gap:8px;padding-top:8px;border-top:1px solid var(--line)}
+body .sg-scale-mode-row{display:flex;gap:12px;flex-wrap:wrap}
+body .sg-scale-mode-option{
+  display:inline-flex;align-items:center;gap:6px;font-size:13px;font-weight:650;color:var(--ink);cursor:pointer
+}
 body .sg-kpi-host,body .sg-gallery-host,body .sg-tables-host{min-width:0}
 body .sg-kpi-disabled{opacity:.55}
 body .sg-booked-callout{
@@ -709,9 +717,11 @@ body .sg-chart-scroll{
   display:block;box-sizing:border-box;
   width:100%;max-width:100%;min-width:0;
   overflow-x:scroll;overflow-y:hidden;
-  overscroll-behavior:contain;
+  /* Contain horizontal overscroll only — vertical page scroll must pass through. */
+  overscroll-behavior-x:contain;
+  overscroll-behavior-y:auto;
   -webkit-overflow-scrolling:touch;
-  touch-action:pan-x;
+  touch-action:pan-x pan-y;
   border-radius:8px
 }
 /* Hero L/V/B: viewport-friendly height; doughnuts/heatmaps keep their own card heights. */
