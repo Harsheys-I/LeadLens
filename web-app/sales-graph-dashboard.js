@@ -132,6 +132,15 @@ function yearsFromMonths(months) {
   return [...years].sort((a, b) => a.localeCompare(b));
 }
 
+/** Year+Month options visible for the current Year selection. */
+function yearMonthsMatchingYears(allYm, yearsSet, allYearOpts) {
+  const allYearsOn = !yearsSet?.size || (
+    allYearOpts.length > 0 && yearsSet.size >= allYearOpts.length
+  );
+  if (allYearsOn) return (allYm || []).slice();
+  return (allYm || []).filter(ym => yearsSet.has(String(ym).slice(0, 4)));
+}
+
 function inkColor() {
   return getComputedStyle(document.documentElement).getPropertyValue("--ink").trim() || "#1a2e24";
 }
@@ -770,6 +779,7 @@ function filterDimNames(names, selected, kind) {
 
 /**
  * Shared multi-checkbox slicer control.
+ * Exposes `details.sgSetValues(next)` to refresh the option list (e.g. Year→Year+Month).
  * @param {object} opts
  * @param {number} [opts.minSelected=0] — refuse to clear below this many
  */
@@ -778,24 +788,53 @@ function multiSlicer(label, allValues, selectedSet, {
   onChange,
   minSelected = 0,
 } = {}) {
+  let values = [...(allValues || [])];
   const details = el("details", "sg-slicer");
   const summary = el("summary", "sg-slicer-summary");
-  const updateSummary = () => {
-    const n = selectedSet.size;
-    const total = allValues.length;
-    summary.textContent = n >= total && total > 0 ? `${label}: All` : `${label}: ${n}/${total}`;
-  };
-  updateSummary();
-  details.append(summary);
   const panel = el("div", "sg-slicer-panel");
   const actions = el("div", "sg-slicer-actions");
+
+  const updateSummary = () => {
+    const n = selectedSet.size;
+    const total = values.length;
+    summary.textContent = n >= total && total > 0 ? `${label}: All` : `${label}: ${n}/${total}`;
+  };
+
+  const renderOptions = () => {
+    panel.querySelectorAll(".sg-slicer-option").forEach(n => n.remove());
+    for (const value of values) {
+      const row = el("label", "sg-slicer-option");
+      const cb = document.createElement("input");
+      cb.type = "checkbox";
+      cb.dataset.value = String(value);
+      cb.checked = selectedSet.has(value);
+      cb.addEventListener("change", () => {
+        if (cb.checked) {
+          selectedSet.add(value);
+        } else {
+          if (minSelected && selectedSet.size <= minSelected) {
+            cb.checked = true;
+            return;
+          }
+          selectedSet.delete(value);
+        }
+        updateSummary();
+        onChange();
+      });
+      const shown = displayFn ? displayFn(value) : value;
+      row.append(cb, document.createTextNode(shown || "(blank)"));
+      panel.append(row);
+    }
+    updateSummary();
+  };
+
   const btnAll = el("button", "sg-slicer-link", "All");
   btnAll.type = "button";
   const btnNone = el("button", "sg-slicer-link", "None");
   btnNone.type = "button";
   btnAll.addEventListener("click", e => {
     e.preventDefault();
-    allValues.forEach(v => selectedSet.add(v));
+    values.forEach(v => selectedSet.add(v));
     panel.querySelectorAll("input[type=checkbox]").forEach(cb => { cb.checked = true; });
     updateSummary();
     onChange();
@@ -803,7 +842,7 @@ function multiSlicer(label, allValues, selectedSet, {
   btnNone.addEventListener("click", e => {
     e.preventDefault();
     if (minSelected > 0) {
-      const keep = allValues.slice(0, minSelected);
+      const keep = values.slice(0, minSelected);
       selectedSet.clear();
       keep.forEach(v => selectedSet.add(v));
       panel.querySelectorAll("input[type=checkbox]").forEach(cb => {
@@ -818,30 +857,19 @@ function multiSlicer(label, allValues, selectedSet, {
   });
   actions.append(btnAll, btnNone);
   panel.append(actions);
-  for (const value of allValues) {
-    const row = el("label", "sg-slicer-option");
-    const cb = document.createElement("input");
-    cb.type = "checkbox";
-    cb.dataset.value = String(value);
-    cb.checked = selectedSet.has(value);
-    cb.addEventListener("change", () => {
-      if (cb.checked) {
-        selectedSet.add(value);
-      } else {
-        if (minSelected && selectedSet.size <= minSelected) {
-          cb.checked = true;
-          return;
-        }
-        selectedSet.delete(value);
-      }
-      updateSummary();
-      onChange();
-    });
-    const shown = displayFn ? displayFn(value) : value;
-    row.append(cb, document.createTextNode(shown || "(blank)"));
-    panel.append(row);
-  }
-  details.append(panel);
+  details.append(summary, panel);
+  renderOptions();
+
+  /** Replace option list; drop selections that are no longer valid. */
+  details.sgSetValues = (next) => {
+    values = [...(next || [])];
+    const allowed = new Set(values.map(String));
+    for (const v of [...selectedSet]) {
+      if (!allowed.has(String(v))) selectedSet.delete(v);
+    }
+    renderOptions();
+  };
+
   return details;
 }
 
@@ -866,25 +894,34 @@ function cleanupSgFilterRails(scopeEl) {
 function mountScaleModeControl(state, onChange) {
   const wrap = el("div", "sg-scale-mode");
   wrap.append(el("span", "dashboard-filter-label", "Scale"));
-  const row = el("div", "sg-scale-mode-row");
+  const row = el("div", "sg-scale-mode-seg");
+  row.setAttribute("role", "group");
+  row.setAttribute("aria-label", "Chart scale");
+  const buttons = [];
+  const syncActive = () => {
+    const mode = state.scaleMode === "absolute" ? "absolute" : "relative";
+    for (const btn of buttons) {
+      const on = btn.dataset.value === mode;
+      btn.classList.toggle("is-active", on);
+      btn.setAttribute("aria-pressed", on ? "true" : "false");
+    }
+  };
   for (const [value, label] of [["relative", "Relative"], ["absolute", "Absolute"]]) {
-    const opt = el("label", "sg-scale-mode-option");
-    const radio = document.createElement("input");
-    radio.type = "radio";
-    radio.name = "sg-scale-mode";
-    radio.value = value;
-    radio.checked = (state.scaleMode || "relative") === value;
-    radio.addEventListener("change", () => {
-      if (!radio.checked) return;
+    const btn = el("button", "sg-scale-mode-btn", label);
+    btn.type = "button";
+    btn.dataset.value = value;
+    btn.addEventListener("click", () => {
+      if (state.scaleMode === value) return;
       state.scaleMode = value;
+      syncActive();
       onChange();
     });
-    opt.append(radio, document.createTextNode(label));
-    row.append(opt);
+    buttons.push(btn);
+    row.append(btn);
   }
+  syncActive();
   wrap.append(row);
-  const hint = el("p", "filters-panel-hint", "Relative: dual Y-axis. Absolute: shared Y-axis.");
-  wrap.append(hint);
+  wrap.append(el("p", "filters-panel-hint", "Relative: dual Y-axis. Absolute: shared Y-axis."));
   return wrap;
 }
 
@@ -905,12 +942,15 @@ function mountGlobalFilterBar(mount, {months, dims, state, onChange}) {
   toggle.type = "button";
   toggle.setAttribute("aria-expanded", "false");
 
-  const panel = el("div", "dashboard-filters-panel");
+  const panel = el("div", "dashboard-filters-panel sg-filters-panel");
   const form = el("div", "dashboard-filters sg-filters-form");
   const head = el("div", "filters-panel-head");
   head.append(el("h3", null, "Filters"));
   head.append(el("p", "filters-panel-hint", "Global filters for KPIs and charts"));
   form.append(head);
+
+  // Scale pinned under the header so it stays visible (not buried under slicers).
+  form.append(mountScaleModeControl(state, onChange));
 
   const slicers = el("div", "sg-filters-slicers");
   if (dims.projects.length) {
@@ -925,16 +965,32 @@ function mountGlobalFilterBar(mount, {months, dims, state, onChange}) {
       onChange,
     }));
   }
+
   const yearOpts = yearsFromMonths(months);
+  const allYmOpts = availableYearMonths(months);
+  let ymSlicer = null;
+
+  const syncYearMonthOptions = () => {
+    if (!ymSlicer || typeof ymSlicer.sgSetValues !== "function") return;
+    ymSlicer.sgSetValues(yearMonthsMatchingYears(allYmOpts, state.years, yearOpts));
+  };
+
   if (yearOpts.length) {
-    slicers.append(multiSlicer("Year", yearOpts, state.years, {onChange}));
-  }
-  const ymOpts = availableYearMonths(months);
-  if (ymOpts.length) {
-    slicers.append(multiSlicer("Year+Month", ymOpts, state.yearMonths, {
-      displayFn: formatMonth,
-      onChange,
+    slicers.append(multiSlicer("Year", yearOpts, state.years, {
+      onChange: () => {
+        syncYearMonthOptions();
+        onChange();
+      },
     }));
+  }
+  if (allYmOpts.length) {
+    ymSlicer = multiSlicer(
+      "Year+Month",
+      yearMonthsMatchingYears(allYmOpts, state.years, yearOpts),
+      state.yearMonths,
+      {displayFn: formatMonth, onChange}
+    );
+    slicers.append(ymSlicer);
   }
   slicers.append(multiSlicer("Metrics", ALL_METRICS, state.metrics, {
     displayFn: k => METRIC_LABELS[k] || k,
@@ -942,7 +998,6 @@ function mountGlobalFilterBar(mount, {months, dims, state, onChange}) {
     minSelected: 1,
   }));
   form.append(slicers);
-  form.append(mountScaleModeControl(state, onChange));
 
   // Close other open slicers when one opens.
   form.addEventListener("toggle", e => {

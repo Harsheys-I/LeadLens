@@ -518,6 +518,10 @@ body .dashboard-filter-reset{width:100%;justify-self:stretch;margin-top:4px}
     border:1px solid var(--line);border-bottom:0;width:100%;margin:0;align-self:stretch
   }
   body .dashboard-filters-panel{width:100%;border-radius:0;border-right:1px solid var(--line);max-height:none;height:auto}
+  body .sg-filters-rail .dashboard-filters-panel,
+  body .sg-filters-rail .sg-filters-panel{
+    max-height:calc(70vh - 44px);overflow:hidden
+  }
   body.dashboard-filters-open .shell main,
   body.dashboard-filters-open .view.active{padding-right:20px;padding-bottom:48px}
   .review-precounts{grid-template-columns:1fr}
@@ -653,7 +657,15 @@ body .sg-filters-backdrop{
   position:fixed;inset:0;z-index:39;background:rgba(18,55,42,.18);pointer-events:auto
 }
 body .sg-filters-backdrop.hidden{display:none!important}
-body .sg-filters-form{display:flex;flex-direction:column;gap:14px;height:100%;min-height:0}
+body .sg-filters-rail .sg-filters-panel,
+body .sg-filters-rail .dashboard-filters-panel{
+  display:flex;flex-direction:column;overflow:hidden
+}
+body .sg-filters-form{
+  display:flex;flex-direction:column;gap:14px;flex:1;min-height:0;height:100%
+}
+body .sg-filters-form > .filters-panel-head,
+body .sg-filters-form > .sg-scale-mode{flex-shrink:0}
 body .sg-filters-slicers{
   display:flex;flex-direction:column;gap:10px;flex:1;min-height:0;overflow:auto
 }
@@ -663,11 +675,20 @@ body .sg-filters-rail .sg-slicer-panel{
   position:static;margin-top:6px;max-height:180px;width:100%;min-width:0;
   box-shadow:none;border:1px solid var(--line)
 }
-body .sg-scale-mode{display:grid;gap:8px;padding-top:8px;border-top:1px solid var(--line)}
-body .sg-scale-mode-row{display:flex;gap:12px;flex-wrap:wrap}
-body .sg-scale-mode-option{
-  display:inline-flex;align-items:center;gap:6px;font-size:13px;font-weight:650;color:var(--ink);cursor:pointer
+body .sg-scale-mode{display:grid;gap:8px;padding-bottom:8px;border-bottom:1px solid var(--line)}
+body .sg-scale-mode-seg{
+  display:grid;grid-template-columns:1fr 1fr;gap:0;border:1px solid var(--line);
+  border-radius:10px;overflow:hidden;background:var(--input-bg)
 }
+body .sg-scale-mode-btn{
+  border:0;background:transparent;color:var(--ink);font-size:13px;font-weight:700;
+  padding:9px 10px;cursor:pointer;line-height:1.2
+}
+body .sg-scale-mode-btn + .sg-scale-mode-btn{border-left:1px solid var(--line)}
+body .sg-scale-mode-btn.is-active{
+  background:var(--green);color:#fff
+}
+body .sg-scale-mode-btn:focus-visible{outline:2px solid var(--focus-ring);outline-offset:-2px;z-index:1}
 body .sg-kpi-host,body .sg-gallery-host,body .sg-tables-host{min-width:0}
 body .sg-kpi-disabled{opacity:.55}
 body .sg-booked-callout{
