@@ -518,6 +518,10 @@ body .dashboard-filter-reset{width:100%;justify-self:stretch;margin-top:4px}
     border:1px solid var(--line);border-bottom:0;width:100%;margin:0;align-self:stretch
   }
   body .dashboard-filters-panel{width:100%;border-radius:0;border-right:1px solid var(--line);max-height:none;height:auto}
+  body .sg-filters-rail .dashboard-filters-panel,
+  body .sg-filters-rail .sg-filters-panel{
+    max-height:calc(70vh - 44px);overflow:hidden
+  }
   body.dashboard-filters-open .shell main,
   body.dashboard-filters-open .view.active{padding-right:20px;padding-bottom:48px}
   .review-precounts{grid-template-columns:1fr}
@@ -647,6 +651,45 @@ body .drop-zone-disabled,body .drop-zone[aria-disabled="true"]{
 body .drop-zone-disabled:hover,body .drop-zone[aria-disabled="true"]:hover{border-color:var(--line)}
 body .drop-zone-disabled.dragover{border-color:var(--line);background:var(--soft-2)}
 body .sg-kpis{margin:8px 0 12px}
+/* Sales Graph Filters: right-side overlay drawer (reuses dashboard-filters-rail). */
+body .sg-filters-rail{z-index:40}
+body .sg-filters-backdrop{
+  position:fixed;inset:0;z-index:39;background:rgba(18,55,42,.18);pointer-events:auto
+}
+body .sg-filters-backdrop.hidden{display:none!important}
+body .sg-filters-rail .sg-filters-panel,
+body .sg-filters-rail .dashboard-filters-panel{
+  display:flex;flex-direction:column;overflow:hidden
+}
+body .sg-filters-form{
+  display:flex;flex-direction:column;gap:14px;flex:1;min-height:0;height:100%
+}
+body .sg-filters-form > .filters-panel-head,
+body .sg-filters-form > .sg-scale-mode{flex-shrink:0}
+body .sg-filters-slicers{
+  display:flex;flex-direction:column;gap:10px;flex:1;min-height:0;overflow:auto
+}
+body .sg-filters-rail .sg-slicer{width:100%}
+body .sg-filters-rail .sg-slicer-summary{display:block;width:100%;box-sizing:border-box}
+body .sg-filters-rail .sg-slicer-panel{
+  position:static;margin-top:6px;max-height:180px;width:100%;min-width:0;
+  box-shadow:none;border:1px solid var(--line)
+}
+body .sg-scale-mode{display:grid;gap:8px;padding-bottom:8px;border-bottom:1px solid var(--line)}
+body .sg-scale-mode-seg{
+  display:grid;grid-template-columns:1fr 1fr;gap:0;border:1px solid var(--line);
+  border-radius:10px;overflow:hidden;background:var(--input-bg)
+}
+body .sg-scale-mode-btn{
+  border:0;background:transparent;color:var(--ink);font-size:13px;font-weight:700;
+  padding:9px 10px;cursor:pointer;line-height:1.2
+}
+body .sg-scale-mode-btn + .sg-scale-mode-btn{border-left:1px solid var(--line)}
+body .sg-scale-mode-btn.is-active{
+  background:var(--green);color:#fff
+}
+body .sg-scale-mode-btn:focus-visible{outline:2px solid var(--focus-ring);outline-offset:-2px;z-index:1}
+body .sg-kpi-host,body .sg-gallery-host,body .sg-tables-host{min-width:0}
 body .sg-kpi-disabled{opacity:.55}
 body .sg-booked-callout{
   margin:0 0 18px;padding:10px 14px;border:1px dashed var(--line);border-radius:10px;
@@ -695,9 +738,11 @@ body .sg-chart-scroll{
   display:block;box-sizing:border-box;
   width:100%;max-width:100%;min-width:0;
   overflow-x:scroll;overflow-y:hidden;
-  overscroll-behavior:contain;
+  /* Contain horizontal overscroll only — vertical page scroll must pass through. */
+  overscroll-behavior-x:contain;
+  overscroll-behavior-y:auto;
   -webkit-overflow-scrolling:touch;
-  touch-action:pan-x;
+  touch-action:pan-x pan-y;
   border-radius:8px
 }
 /* Hero L/V/B: viewport-friendly height; doughnuts/heatmaps keep their own card heights. */
@@ -738,14 +783,6 @@ body .sg-slicer-option{
   font-size:12px;font-weight:500;cursor:pointer;line-height:1.35
 }
 body .sg-slicer-option input{margin-top:2px;flex-shrink:0}
-body .sg-slicer-months{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
-body .sg-slicer-month{
-  display:flex;align-items:center;gap:6px;font-size:12px;font-weight:650;color:var(--muted)
-}
-body .sg-slicer-month select{
-  border:1px solid var(--line);border-radius:8px;background:var(--input-bg);color:var(--ink);
-  padding:5px 8px;font-size:12px;font-weight:600;max-width:140px
-}
 body .sg-heatmap-block .sg-slicer-bar,
 body .sg-heatmap-block .sg-chart-slicers{margin:4px 0 8px}
 body .sg-heatmap-block{display:grid;gap:10px;margin-top:8px}

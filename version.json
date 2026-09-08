@@ -1,5 +1,5 @@
 {
-  "version": "6.1.0.stable",
+  "version": "6.2.0.stable",
   "name": "GPP AI",
-  "notes": "v6.1.0.stable: Sales Graph Booked series rename (Sales Declaration / Booked / Canceled) + UI glyph fixes."
+  "notes": "v6.2.0.stable: Sales Graph filters drawer, Relative/Absolute scale, Year→Year+Month cascade, avg KPIs, chart scroll fix (stabilizes 6.1.2–6.1.3.dev)."
 }
