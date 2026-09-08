@@ -1,5 +1,5 @@
 {
-  "version": "6.1.2.dev",
+  "version": "6.1.3.dev",
   "name": "GPP AI",
-  "notes": "v6.1.2.dev: Sales Graph filter drawer, KPI averages, Year+Month, Relative/Absolute scale, wheel scroll fix."
+  "notes": "v6.1.3.dev: Sales Graph Scale Relative/Absolute visibility; Year filters Year+Month options."
 }
