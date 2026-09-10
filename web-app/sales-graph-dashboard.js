@@ -201,6 +201,19 @@ function legendLabelsWithoutRight(Chart) {
   };
 }
 
+/** Classic scrollbar thickness; overlay engines report 0 so we still reserve a floor. */
+let cachedOverlayGutterPx = null;
+function overlayScrollbarGutterPx() {
+  if (cachedOverlayGutterPx != null) return cachedOverlayGutterPx;
+  const probe = document.createElement("div");
+  probe.style.cssText = "position:absolute;left:-9999px;width:100px;height:100px;overflow:scroll;visibility:hidden";
+  document.body.appendChild(probe);
+  const size = Math.max(probe.offsetHeight - probe.clientHeight, probe.offsetWidth - probe.clientWidth);
+  probe.remove();
+  cachedOverlayGutterPx = Math.max(size, 16);
+  return cachedOverlayGutterPx;
+}
+
 function sizeScrollableCanvas(scrollEl, canvasWrap, categoryCount, categoryWidth) {
   if (!scrollEl || !canvasWrap) return;
   const count = Math.max(1, Number(categoryCount) || 1);
@@ -217,6 +230,16 @@ function sizeScrollableCanvas(scrollEl, canvasWrap, categoryCount, categoryWidth
   canvasWrap.style.minWidth = `${width}px`;
   canvasWrap.style.maxWidth = "none";
   canvasWrap.style.flexShrink = "0";
+
+  // Chromium (overflow-y:hidden) paints the X scrollbar over the canvas, covering
+  // Month+Year ticks. Firefox already subtracts the bar from clientHeight.
+  const overflowsX = width > (scrollEl.clientWidth || containerW || 0) + 1;
+  const barTakesSpace = (scrollEl.offsetHeight - scrollEl.clientHeight) >= 2;
+  const gutter = overflowsX && !barTakesSpace ? overlayScrollbarGutterPx() : 0;
+  const nextGutter = `${gutter}px`;
+  if (scrollEl.style.getPropertyValue("--sg-hscroll-gutter") !== nextGutter) {
+    scrollEl.style.setProperty("--sg-hscroll-gutter", nextGutter);
+  }
 }
 
 /**
@@ -260,24 +283,46 @@ function chartCard(title, canvasHeight = 260, {
   const card = el("div", `dashboard-chart-card sg-chart-card${extraClass ? ` ${extraClass}` : ""}`);
   card.append(el("h3", null, title));
   const canvasWrap = el("div", "dashboard-chart-canvas");
-  canvasWrap.style.height = `${canvasHeight}px`;
+  // Scrollable: fill the scrollport content box (padding-bottom reserves the X bar).
+  // Non-scrollable: explicit px height on the wrap.
+  canvasWrap.style.height = scrollable ? "100%" : `${canvasHeight}px`;
   const canvas = document.createElement("canvas");
   canvasWrap.append(canvas);
 
   let scrollEl = null;
+  let lastCategoryCount = 0;
   if (scrollable) {
     scrollEl = el("div", "sg-chart-scroll");
     scrollEl.style.height = `${canvasHeight}px`;
     scrollEl.append(canvasWrap);
     card.append(scrollEl);
     bindScrollContainment(scrollEl);
+    if (typeof ResizeObserver === "function") {
+      let lastRoKey = "";
+      const ro = new ResizeObserver(() => {
+        if (!lastCategoryCount) return;
+        sizeScrollableCanvas(scrollEl, canvasWrap, lastCategoryCount, categoryWidth);
+        const key = `${scrollEl.clientWidth}x${scrollEl.clientHeight}:${scrollEl.style.getPropertyValue("--sg-hscroll-gutter")}`;
+        if (key === lastRoKey) return;
+        lastRoKey = key;
+        const chartCanvas = canvasWrap.querySelector("canvas");
+        for (const chart of chartRegistry.values()) {
+          if (chart.canvas === chartCanvas) {
+            try { chart.resize(); } catch { /* ignore */ }
+            break;
+          }
+        }
+      });
+      ro.observe(scrollEl);
+    }
   } else {
     card.append(canvasWrap);
   }
 
   function setCategoryCount(n) {
     if (!scrollable || !scrollEl) return;
-    sizeScrollableCanvas(scrollEl, canvasWrap, n, categoryWidth);
+    lastCategoryCount = Math.max(1, Number(n) || 1);
+    sizeScrollableCanvas(scrollEl, canvasWrap, lastCategoryCount, categoryWidth);
   }
 
   return {card, canvas, scrollEl, canvasWrap, setCategoryCount};
@@ -484,7 +529,7 @@ function dualAxisOptions(scaleMode = "relative") {
   const absolute = scaleMode === "absolute";
   const scales = {
     x: {
-      ticks: {color: muted, maxRotation: 45, font: {size: 10}},
+      ticks: {color: muted, maxRotation: 45, font: {size: 10}, padding: 8},
       grid: {color: "transparent"},
     },
     y: {

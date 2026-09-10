@@ -1,5 +1,5 @@
 {
-  "version": "6.2.0.stable",
+  "version": "6.2.1.stable",
   "name": "GPP AI",
-  "notes": "v6.2.0.stable: Sales Graph filters drawer, Relative/Absolute scale, Year→Year+Month cascade, avg KPIs, chart scroll fix (stabilizes 6.1.2–6.1.3.dev)."
+  "notes": "v6.2.1.stable: Keep Sales Graph Month+Year axis labels clear of Chromium horizontal scrollbars."
 }

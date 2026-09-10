@@ -737,13 +737,20 @@ body .sg-chart-slicers,body .sg-slicer-bar{
 body .sg-chart-scroll{
   display:block;box-sizing:border-box;
   width:100%;max-width:100%;min-width:0;
-  overflow-x:scroll;overflow-y:hidden;
+  overflow-x:auto;overflow-y:hidden;
+  /* Chromium overlays the X bar on the canvas when overflow-y is hidden.
+     JS sets --sg-hscroll-gutter to the bar thickness only in that case. */
+  padding-bottom:var(--sg-hscroll-gutter,0px);
   /* Contain horizontal overscroll only — vertical page scroll must pass through. */
   overscroll-behavior-x:contain;
   overscroll-behavior-y:auto;
   -webkit-overflow-scrolling:touch;
   touch-action:pan-x pan-y;
   border-radius:8px
+}
+/* First paint on Blink/WebKit: reserve a gutter before JS measures overflow. */
+@supports selector(::-webkit-scrollbar){
+  body .sg-chart-scroll{--sg-hscroll-gutter:18px}
 }
 /* Hero L/V/B: viewport-friendly height; doughnuts/heatmaps keep their own card heights. */
 body .sg-chart-card--hero .sg-chart-scroll{height:min(560px,62vh)}
@@ -755,7 +762,6 @@ body .sg-chart-scroll .dashboard-chart-canvas canvas{
 }
 @media(max-width:850px){
   body .sg-chart-card--hero .sg-chart-scroll{height:min(420px,55vh)}
-  body .sg-chart-card--hero .sg-chart-scroll .dashboard-chart-canvas,
   body .sg-chart-card--hero .dashboard-chart-canvas{height:min(420px,55vh)}
 }
 body .sg-slicer{position:relative;font-size:12px}
