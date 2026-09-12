@@ -1,5 +1,5 @@
 {
-  "version": "6.2.1.stable",
+  "version": "6.2.2.stable",
   "name": "GPP AI",
-  "notes": "v6.2.1.stable: Keep Sales Graph Month+Year axis labels clear of Chromium horizontal scrollbars."
+  "notes": "v6.2.2.stable: Sales Graph filters/aggregates by Source; PDF export for KPIs, tables, and chart snapshots."
 }

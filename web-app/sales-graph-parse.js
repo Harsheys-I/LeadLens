@@ -3,11 +3,11 @@
  *
  * Shared layout (sheet1):
  * - Row 0: [blank…, axis-label spacer, YYYYMM…, Totals]
- * - Row 1: [Project Name, Source, Source Name, (Status on Booked)]
+ * - Row 1: [Project Name, Source, Source Name?, (Status on Booked)]
  * - Merge headers: prefer YYYYMM from row 0, dims from row 1;
  *   drop empty / null / axis-label / Totals.
- * - Data from row index 2; forward-fill Project Name + Source + Source Name;
- *   blank→0; skip Project Name === "Totals"; Meta-normalize Source Name.
+ * - Data from row index 2; forward-fill Project Name + Source (+ Source Name if present);
+ *   blank→0; skip Project Name === "Totals"; aggregate by Source (not Source Name).
  * - Booked adds Status (per-row; not forward-filled) and byStatus aggregates.
  * - Booked also exposes leadDeclaration = Demand Letter + Cancel
  *   ({ total, byMonth, byProject, bySource }).
@@ -258,7 +258,6 @@ export function parseSalesGraphSheet(buffer, opts = {}) {
   const missing = [];
   if (projectIdx < 0) missing.push("Project Name");
   if (sourceIdx < 0) missing.push("Source");
-  if (sourceNameIdx < 0) missing.push("Source Name");
   if (!months.length) missing.push("YYYYMM month column(s)");
   // Status is required for Booked; optional for Leads/Visits
   if (opts.kind === "booked" && statusIdx < 0) missing.push("Status");
@@ -290,7 +289,7 @@ export function parseSalesGraphSheet(buffer, opts = {}) {
     if (!Array.isArray(row)) continue;
     const projectCell = cellText(row[projectIdx]);
     const sourceCell = cellText(row[sourceIdx]);
-    const sourceNameRaw = cellText(row[sourceNameIdx]);
+    const sourceNameRaw = sourceNameIdx >= 0 ? cellText(row[sourceNameIdx]) : "";
     const statusCell = statusIdx >= 0 ? cellText(row[statusIdx]) : "";
 
     // Skip summary Totals rows (before fill so we don't poison forward-fill)
@@ -322,12 +321,13 @@ export function parseSalesGraphSheet(buffer, opts = {}) {
 
     if (!project && !source && !sourceNameFilled && !status && !anyMonth) continue;
 
-    const sourceNormalized = normalizeSourceName(sourceNameFilled);
+    const sourceKey = source || "(blank)";
     const out = {
       project,
-      source,
+      source: sourceKey,
       sourceNameRaw: sourceNameFilled,
-      sourceNormalized: sourceNormalized || sourceNameFilled || "(blank)",
+      // Kept for older consumers; dashboards filter/aggregate by Source.
+      sourceNormalized: sourceKey,
       months: monthValues,
     };
     if (statusIdx >= 0) out.status = status || "(blank)";
@@ -338,14 +338,14 @@ export function parseSalesGraphSheet(buffer, opts = {}) {
   const hasStatus = statusIdx >= 0;
   for (const row of rows) {
     const rowSum = bumpBucket(agg.byProject, row.project, row.months, monthsOrdered);
-    bumpBucket(agg.bySource, row.sourceNormalized, row.months, monthsOrdered);
+    bumpBucket(agg.bySource, row.source, row.months, monthsOrdered);
     if (hasStatus) {
       bumpBucket(agg.byStatus, row.status, row.months, monthsOrdered);
       const st = agg.byStatus[row.status || "(blank)"];
       if (!st.byProject) st.byProject = {};
       if (!st.bySource) st.bySource = {};
       bumpBucket(st.byProject, row.project, row.months, monthsOrdered);
-      bumpBucket(st.bySource, row.sourceNormalized, row.months, monthsOrdered);
+      bumpBucket(st.bySource, row.source, row.months, monthsOrdered);
     }
     for (const m of monthsOrdered) {
       const v = Number(row.months[m] || 0);

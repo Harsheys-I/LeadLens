@@ -696,6 +696,7 @@ body .sg-booked-callout{
   color:var(--muted);font-size:13px;background:var(--soft-2)
 }
 body .sg-preview-banner,body .sg-meta-line{margin:0 0 12px;color:var(--muted);font-size:13px}
+body .sg-export-bar{margin:0 0 12px;justify-content:flex-end}
 /* Contain wide hero canvases: ancestors must not size to max-content. */
 body .shell{max-width:100%;overflow-x:hidden}
 body .shell:not(.sidebar-collapsed){grid-template-columns:248px minmax(0,1fr)}
