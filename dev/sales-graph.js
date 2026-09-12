@@ -1,15 +1,15 @@
 /**
  * Sales Graph module — Upload (Leads + Visits + Booked) + published Dashboard.
  */
-import {APP_VERSION} from "./audit.js?v=6.2.1.stable";
-import {requireAuth, logout, hasPermission, getUser, changePassword, updateProfile} from "./auth.js?v=6.2.1.stable";
-import {SalesGraphApi} from "./api-client.js?v=6.2.1.stable";
-import {mountNotifications} from "./notifications-ui.js?v=6.2.1.stable";
-import {appUrl, homePath} from "./app-base.js?v=6.2.1.stable";
-import {initTheme} from "./theme.js?v=6.2.1.stable";
-import {setStorageUserId, storageKey} from "./db.js?v=6.2.1.stable";
-import {parseSalesGraphSheet, buildSalesGraphPayload} from "./sales-graph-parse.js?v=6.2.1.stable";
-import {renderSalesGraphDashboard, destroySalesGraphCharts} from "./sales-graph-dashboard.js?v=6.2.1.stable";
+import {APP_VERSION} from "./audit.js?v=6.2.2.stable";
+import {requireAuth, logout, hasPermission, getUser, changePassword, updateProfile} from "./auth.js?v=6.2.2.stable";
+import {SalesGraphApi} from "./api-client.js?v=6.2.2.stable";
+import {mountNotifications} from "./notifications-ui.js?v=6.2.2.stable";
+import {appUrl, homePath} from "./app-base.js?v=6.2.2.stable";
+import {initTheme} from "./theme.js?v=6.2.2.stable";
+import {setStorageUserId, storageKey} from "./db.js?v=6.2.2.stable";
+import {parseSalesGraphSheet, buildSalesGraphPayload} from "./sales-graph-parse.js?v=6.2.2.stable";
+import {renderSalesGraphDashboard, destroySalesGraphCharts} from "./sales-graph-dashboard.js?v=6.2.2.stable";
 
 const $ = id => document.getElementById(id);
 const ids = [
@@ -27,7 +27,7 @@ const els = Object.fromEntries(ids.map(id => [id, $(id)]));
 if (els["sidebar-version"]) els["sidebar-version"].textContent = `v${APP_VERSION}`;
 
 const titles = {upload: "Upload", dashboard: "Dashboard"};
-const RELEASE_NOTES = "v6.2.1.stable: Keep Sales Graph Month+Year axis labels clear of Chromium horizontal scrollbars.";
+const RELEASE_NOTES = "v6.2.2.stable: Sales Graph filters/aggregates by Source; PDF export for KPIs, tables, and chart snapshots.";
 
 let leadsParsed = null;
 let visitsParsed = null;

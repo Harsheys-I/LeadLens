@@ -599,6 +599,28 @@ function lvbSplitBarDatasets(leadsData, visitsData, demandData, cancelData, decl
 
 // —— Filter / slicer helpers ——
 
+/** Prefer Excel Source; fall back to legacy sourceNormalized for older payloads. */
+function sourceKey(row) {
+  const direct = String(row?.source ?? "").trim();
+  if (direct) return direct;
+  const legacy = String(row?.sourceNormalized ?? "").trim();
+  return legacy || "(blank)";
+}
+
+function collectSourceKeys(payload) {
+  const sheets = [payload?.leads, payload?.visits, payload?.booked];
+  const fromRows = new Set();
+  let anyRows = false;
+  for (const sheet of sheets) {
+    const rows = sheet?.rows;
+    if (!rows?.length) continue;
+    anyRows = true;
+    for (const row of rows) fromRows.add(sourceKey(row));
+  }
+  if (anyRows) return [...fromRows].sort((a, b) => a.localeCompare(b));
+  return [...new Set(sheets.flatMap(s => Object.keys(s?.bySource || {})))].sort((a, b) => a.localeCompare(b));
+}
+
 function collectDimKeys(payload) {
   const leads = payload.leads || {};
   const visits = payload.visits || {};
@@ -608,11 +630,7 @@ function collectDimKeys(payload) {
     ...Object.keys(visits.byProject || {}),
     ...Object.keys(booked.byProject || {}),
   ])].sort((a, b) => a.localeCompare(b));
-  const sources = [...new Set([
-    ...Object.keys(leads.bySource || {}),
-    ...Object.keys(visits.bySource || {}),
-    ...Object.keys(booked.bySource || {}),
-  ])].sort((a, b) => a.localeCompare(b));
+  const sources = collectSourceKeys(payload);
   const statuses = orderStatusKeys(Object.keys(booked.byStatus || {}));
   return {projects, sources, statuses};
 }
@@ -704,7 +722,7 @@ function statusAllowed(state, statusLabel, byStatus) {
 
 function rowMatches(row, state, {ignoreProject = false, ignoreSource = false, ignoreStatus = false} = {}) {
   if (!ignoreProject && state.projects.size && !state.projects.has(row.project)) return false;
-  if (!ignoreSource && state.sources.size && !state.sources.has(row.sourceNormalized)) return false;
+  if (!ignoreSource && state.sources.size && !state.sources.has(sourceKey(row))) return false;
   if (!ignoreStatus && row.status != null && state.statuses.size && !state.statuses.has(row.status)) return false;
   return true;
 }
@@ -736,7 +754,7 @@ function sumSheetByDim(sheet, dimNames, dimKind, months, state, opts = {}) {
       : {ignoreSource: true, ...opts};
     for (const row of rows) {
       if (!rowMatches(row, state, ignore)) continue;
-      const dim = dimKind === "project" ? row.project : row.sourceNormalized;
+      const dim = dimKind === "project" ? row.project : sourceKey(row);
       const idx = dimNames.indexOf(dim);
       if (idx < 0) continue;
       for (const m of months) out[idx] += Number(row.months?.[m] || 0);
@@ -787,7 +805,7 @@ function bookedStatusByDim(booked, statusLabel, dimNames, dimKind, months, state
     for (const row of rows) {
       if (String(row.status || "").toLowerCase() !== statusLower) continue;
       if (!rowMatches(row, state, ignore)) continue;
-      const dim = dimKind === "project" ? row.project : row.sourceNormalized;
+      const dim = dimKind === "project" ? row.project : sourceKey(row);
       const idx = dimNames.indexOf(dim);
       if (idx < 0) continue;
       for (const m of months) out[idx] += Number(row.months?.[m] || 0);
@@ -1002,7 +1020,7 @@ function mountGlobalFilterBar(mount, {months, dims, state, onChange}) {
     slicers.append(multiSlicer("Project", dims.projects, state.projects, {onChange}));
   }
   if (dims.sources.length) {
-    slicers.append(multiSlicer("Source Name", dims.sources, state.sources, {onChange}));
+    slicers.append(multiSlicer("Source", dims.sources, state.sources, {onChange}));
   }
   if (dims.statuses.length) {
     slicers.append(multiSlicer("Status", dims.statuses, state.statuses, {
@@ -1256,13 +1274,25 @@ function renderChartsGallery(mount, payload, state, register) {
     const lb = bucketTotal(leads.byProject?.[b]) + bucketTotal(booked.byProject?.[b]);
     return lb - la || a.localeCompare(b);
   });
-  const sourceKeys = [...new Set([
-    ...sortedKeysByTotal(leads.bySource),
-    ...sortedKeysByTotal(visits.bySource),
-    ...sortedKeysByTotal(booked.bySource),
-  ])].sort((a, b) => {
-    const la = bucketTotal(leads.bySource?.[a]) + bucketTotal(booked.bySource?.[a]);
-    const lb = bucketTotal(leads.bySource?.[b]) + bucketTotal(booked.bySource?.[b]);
+  const sourceKeys = collectSourceKeys({leads, visits, booked}).slice().sort((a, b) => {
+    let la = 0;
+    let lb = 0;
+    for (const sheet of [leads, visits, booked]) {
+      const rows = sheet?.rows;
+      if (rows?.length) {
+        for (const row of rows) {
+          const key = sourceKey(row);
+          if (key !== a && key !== b) continue;
+          let sum = 0;
+          for (const v of Object.values(row.months || {})) sum += Number(v) || 0;
+          if (key === a) la += sum;
+          else lb += sum;
+        }
+      } else {
+        la += bucketTotal(sheet?.bySource?.[a]);
+        lb += bucketTotal(sheet?.bySource?.[b]);
+      }
+    }
     return lb - la || a.localeCompare(b);
   });
 
@@ -1356,12 +1386,12 @@ function renderChartsGallery(mount, payload, state, register) {
   projects.append(projGrid);
   mount.append(projects);
 
-  // —— Source Name ——
-  const sources = makeSection("By source name", "Normalized Meta source names · all partners/campaigns");
+  // —— Source ——
+  const sources = makeSection("By source", "Grouped by Excel Source · partners and channels");
   const srcGrid = el("div", "dashboard-charts sg-chart-grid");
   mountHeroDualAxis(
     srcGrid, "sg-bar-source",
-    "Leads vs Visits vs Booked by source name",
+    "Leads vs Visits vs Booked by source",
     (st) => {
       const ms = filteredMonths(months, st);
       const names = filterDimNames(sourceKeys, st, "source");
@@ -1383,7 +1413,7 @@ function renderChartsGallery(mount, payload, state, register) {
   );
   mountDoughnut(
     srcGrid, "sg-pie-leads-source",
-    "Leads share by source name",
+    "Leads share by source",
     (st) => {
       const ms = filteredMonths(months, st);
       const names = filterDimNames(sourceKeys, st, "source").slice(0, TOP_N);
@@ -1393,7 +1423,7 @@ function renderChartsGallery(mount, payload, state, register) {
   );
   mountDoughnut(
     srcGrid, "sg-pie-visits-source",
-    "Visits share by source name",
+    "Visits share by source",
     (st) => {
       const ms = filteredMonths(months, st);
       const names = filterDimNames(sourceKeys, st, "source").slice(0, TOP_N);
@@ -1403,7 +1433,7 @@ function renderChartsGallery(mount, payload, state, register) {
   );
   mountDoughnut(
     srcGrid, "sg-pie-booked-source",
-    "Booked share by source name",
+    "Booked share by source",
     (st) => {
       const ms = filteredMonths(months, st);
       const names = filterDimNames(sourceKeys, st, "source").slice(0, TOP_N);
@@ -1637,7 +1667,7 @@ function leadDeclarationDimTotal(booked, dimKind, name) {
 
 function renderTables(mount, payload, state) {
   mount.replaceChildren();
-  const section = makeSection("Tables", "Sortable breakdowns by month, project, source name, and status");
+  const section = makeSection("Tables", "Sortable breakdowns by month, project, source, and status");
   const tabs = el("div", "sg-table-tabs", null);
   const panels = el("div", "sg-table-panels");
   const monthsAll = payload.months || [];
@@ -1731,14 +1761,10 @@ function renderTables(mount, payload, state) {
     },
     {
       id: "source",
-      label: "By Source Name",
+      label: "By Source",
       build() {
-        const names = filterDimNames([...new Set([
-          ...Object.keys(leads.bySource || {}),
-          ...Object.keys(visits.bySource || {}),
-          ...Object.keys(booked.bySource || {}),
-        ])].sort(), state, "source");
-        const headers = ["Source Name"];
+        const names = filterDimNames(collectSourceKeys({leads, visits, booked}), state, "source");
+        const headers = ["Source"];
         const numericCols = new Set();
         let col = 1;
         if (showL) { headers.push("Leads"); numericCols.add(col++); }
@@ -1876,6 +1902,26 @@ export function renderSalesGraphDashboard(mount, payload, opts = {}) {
     }
   };
 
+  const exportBar = el("div", "sg-export-bar inline-actions");
+  const exportBtn = el("button", "secondary-button", "Export PDF");
+  exportBtn.type = "button";
+  exportBtn.addEventListener("click", async () => {
+    exportBtn.disabled = true;
+    try {
+      await downloadSalesGraphPdf(payload, state, {
+        title: payload.title,
+        meta: opts.meta,
+        preview: opts.preview,
+      });
+    } catch (err) {
+      window.alert(err.message || "PDF export failed.");
+    } finally {
+      exportBtn.disabled = false;
+    }
+  });
+  exportBar.append(exportBtn);
+  mount.append(exportBar);
+
   mountGlobalFilterBar(mount, {months, dims, state, onChange});
 
   const kpiHost = el("div", "sg-kpi-host");
@@ -1895,4 +1941,325 @@ export function renderSalesGraphDashboard(mount, payload, opts = {}) {
   register(() => renderTables(tablesHost, payload, state));
 
   onChange();
+}
+
+const PDF_BRAND = {
+  green: "#12372a",
+  mint: "#dff4e8",
+  ink: "#17211d",
+  muted: "#6c7771",
+  white: "#ffffff",
+  line: "#dfe5e1",
+};
+
+function requireJsPdf() {
+  const jsPDF = window.jspdf?.jsPDF;
+  if (typeof jsPDF !== "function") throw new Error("jsPDF failed to load. Reload the page.");
+  return jsPDF;
+}
+
+function pdfHexRgb(hex) {
+  const h = String(hex || "").replace("#", "");
+  return {
+    r: parseInt(h.slice(0, 2), 16),
+    g: parseInt(h.slice(2, 4), 16),
+    b: parseInt(h.slice(4, 6), 16),
+  };
+}
+
+function pdfSetFill(doc, hex) {
+  const {r, g, b} = pdfHexRgb(hex);
+  doc.setFillColor(r, g, b);
+}
+
+function pdfSetText(doc, hex) {
+  const {r, g, b} = pdfHexRgb(hex);
+  doc.setTextColor(r, g, b);
+}
+
+function pdfTruncate(doc, text, maxWidth) {
+  const s = String(text ?? "");
+  if (doc.getTextWidth(s) <= maxWidth) return s;
+  let out = s;
+  while (out.length > 1 && doc.getTextWidth(`${out}…`) > maxWidth) out = out.slice(0, -1);
+  return `${out}…`;
+}
+
+function downloadBlobFile(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  a.rel = "noopener";
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1500);
+}
+
+function buildKpiItemsForPdf(payload, state) {
+  const months = payload.months || [];
+  const ms = filteredMonths(months, state);
+  const leads = payload.leads || {};
+  const visits = payload.visits || {};
+  const booked = payload.booked || {};
+  const leadsTotal = sumSeries(sumSheetByMonths(leads, ms, state));
+  const visitsTotal = sumSeries(sumSheetByMonths(visits, ms, state));
+  const demandTotal = sumSeries(bookedStatusByMonths(booked, STATUS_DEMAND, ms, state));
+  const cancelTotal = sumSeries(bookedStatusByMonths(booked, STATUS_CANCEL, ms, state));
+  const leadDecl = demandTotal + cancelTotal;
+  const monthCount = Math.max(1, ms.length);
+  const showL = metricOn(state, METRIC_LEADS);
+  const showV = metricOn(state, METRIC_VISITS);
+  const showSD = metricOn(state, METRIC_SALES_DECLARATION);
+  const showB = metricOn(state, METRIC_BOOKED);
+  const showC = metricOn(state, METRIC_CANCELED);
+  const showBookedFamily = showSD || showB || showC;
+  const items = [];
+  if (showL) items.push(["Total Leads", num(leadsTotal)]);
+  if (showV) items.push(["Total Visits", num(visitsTotal)]);
+  if (showSD) items.push([LABEL_SALES_DECLARATION, num(leadDecl)]);
+  if (showB) items.push([LABEL_BOOKED, num(demandTotal)]);
+  if (showC) items.push([LABEL_CANCELED, num(cancelTotal)]);
+  if (showL) items.push(["Avg Leads / Month", num(leadsTotal / monthCount)]);
+  if (showV) items.push(["Avg Visits / Month", num(visitsTotal / monthCount)]);
+  if (showSD) items.push(["Avg Sales Declaration / Month", num(leadDecl / monthCount)]);
+  if (showB) items.push(["Avg Booked / Month", num(demandTotal / monthCount)]);
+  if (showC) items.push(["Avg Canceled / Month", num(cancelTotal / monthCount)]);
+  if (showL && showV) items.push(["Visits / Leads", leadsTotal > 0 ? pct(visitsTotal / leadsTotal) : "—"]);
+  if (showV && showBookedFamily) items.push(["Booked / Visits", visitsTotal > 0 ? pct(leadDecl / visitsTotal) : "—"]);
+  if (showL && showBookedFamily) items.push(["Booked / Leads", leadsTotal > 0 ? pct(leadDecl / leadsTotal) : "—"]);
+  items.push(["Months", String(ms.length)]);
+  return items;
+}
+
+function buildTableBlocksForPdf(payload, state) {
+  const monthsAll = payload.months || [];
+  const months = filteredMonths(monthsAll, state);
+  const leads = payload.leads || {};
+  const visits = payload.visits || {};
+  const booked = payload.booked || {};
+  const showL = metricOn(state, METRIC_LEADS);
+  const showV = metricOn(state, METRIC_VISITS);
+  const showSD = metricOn(state, METRIC_SALES_DECLARATION);
+  const showB = metricOn(state, METRIC_BOOKED);
+  const showC = metricOn(state, METRIC_CANCELED);
+  const showBookedFamily = showSD || showB || showC;
+
+  const metricHeaders = () => {
+    const headers = [];
+    if (showL) headers.push("Leads");
+    if (showV) headers.push("Visits");
+    if (showBookedFamily) headers.push("Booked");
+    if (showSD) headers.push(LABEL_SALES_DECLARATION);
+    if (showB) headers.push(LABEL_BOOKED);
+    if (showC) headers.push(LABEL_CANCELED);
+    return headers;
+  };
+
+  const pushMetricCells = (row, n, dimKind) => {
+    if (showL) row.push(sumSeries(sumSheetByDim(leads, [n], dimKind, months, state)));
+    if (showV) row.push(sumSeries(sumSheetByDim(visits, [n], dimKind, months, state)));
+    if (showBookedFamily) row.push(sumSeries(sumSheetByDim(booked, [n], dimKind, months, state)));
+    if (showSD) {
+      row.push(
+        sumSeries(bookedStatusByDim(booked, STATUS_DEMAND, [n], dimKind, months, state))
+        + sumSeries(bookedStatusByDim(booked, STATUS_CANCEL, [n], dimKind, months, state))
+      );
+    }
+    if (showB) row.push(sumSeries(bookedStatusByDim(booked, STATUS_DEMAND, [n], dimKind, months, state)));
+    if (showC) row.push(sumSeries(bookedStatusByDim(booked, STATUS_CANCEL, [n], dimKind, months, state)));
+  };
+
+  const blocks = [];
+
+  {
+    const headers = ["Month", ...metricHeaders()];
+    const rows = months.map(m => {
+      const row = [formatMonth(m)];
+      if (showL) row.push(sumSeries(sumSheetByMonths(leads, [m], state)));
+      if (showV) row.push(sumSeries(sumSheetByMonths(visits, [m], state)));
+      if (showBookedFamily) row.push(sumSeries(sumSheetByMonths(booked, [m], state)));
+      if (showSD) {
+        row.push(
+          sumSeries(bookedStatusByMonths(booked, STATUS_DEMAND, [m], state))
+          + sumSeries(bookedStatusByMonths(booked, STATUS_CANCEL, [m], state))
+        );
+      }
+      if (showB) row.push(sumSeries(bookedStatusByMonths(booked, STATUS_DEMAND, [m], state)));
+      if (showC) row.push(sumSeries(bookedStatusByMonths(booked, STATUS_CANCEL, [m], state)));
+      return row;
+    });
+    blocks.push({title: "By Month", headers, rows});
+  }
+
+  {
+    const names = filterDimNames([...new Set([
+      ...Object.keys(leads.byProject || {}),
+      ...Object.keys(visits.byProject || {}),
+      ...Object.keys(booked.byProject || {}),
+    ])].sort(), state, "project");
+    const headers = ["Project", ...metricHeaders()];
+    const rows = names.map(n => {
+      const row = [n];
+      pushMetricCells(row, n, "project");
+      return row;
+    });
+    blocks.push({title: "By Project", headers, rows});
+  }
+
+  {
+    const names = filterDimNames(collectSourceKeys({leads, visits, booked}), state, "source");
+    const headers = ["Source", ...metricHeaders()];
+    const rows = names.map(n => {
+      const row = [n];
+      pushMetricCells(row, n, "source");
+      return row;
+    });
+    blocks.push({title: "By Source", headers, rows});
+  }
+
+  if (booked.byStatus && Object.keys(booked.byStatus).length) {
+    const names = orderStatusKeys(Object.keys(booked.byStatus)).filter(s => {
+      const key = metricKeyForLabel(s) || metricKeyForLabel(statusDisplayLabel(s));
+      return !key || metricOn(state, key);
+    });
+    const rows = [];
+    if (showSD) {
+      const ld = sumSeries(bookedStatusByMonths(booked, STATUS_DEMAND, months, state))
+        + sumSeries(bookedStatusByMonths(booked, STATUS_CANCEL, months, state));
+      rows.push([LABEL_SALES_DECLARATION, ld]);
+    }
+    for (const n of names) {
+      const local = cloneFilterState(state);
+      local.statuses = new Set([n]);
+      rows.push([statusDisplayLabel(n), sumSeries(sumSheetByMonths(booked, months, local))]);
+    }
+    blocks.push({title: "By Status", headers: ["Status", "Booked"], rows});
+  }
+
+  return blocks;
+}
+
+function drawPdfTable(doc, headers, rows, startY, marginX, marginY, contentW, pageH) {
+  let y = startY;
+  const colCount = Math.max(1, headers.length);
+  const colW = contentW / colCount;
+  const rowH = 5.5;
+  const headerH = 6;
+
+  const drawHeader = () => {
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(7);
+    pdfSetFill(doc, PDF_BRAND.green);
+    doc.rect(marginX, y, contentW, headerH, "F");
+    pdfSetText(doc, PDF_BRAND.white);
+    headers.forEach((h, i) => {
+      doc.text(pdfTruncate(doc, h, colW - 2), marginX + i * colW + 1, y + 4);
+    });
+    y += headerH;
+    doc.setFont("helvetica", "normal");
+  };
+
+  drawHeader();
+  for (const row of rows) {
+    if (y + rowH > pageH - marginY) {
+      doc.addPage();
+      y = marginY;
+      drawHeader();
+    }
+    pdfSetFill(doc, PDF_BRAND.white);
+    doc.rect(marginX, y, contentW, rowH, "F");
+    pdfSetText(doc, PDF_BRAND.ink);
+    row.forEach((cell, i) => {
+      const text = typeof cell === "number" ? num(cell) : String(cell ?? "");
+      doc.text(pdfTruncate(doc, text, colW - 2), marginX + i * colW + 1, y + 4);
+    });
+    y += rowH;
+  }
+  return y;
+}
+
+/**
+ * Export the current filtered Sales Graph (KPIs, tables, chart snapshots) as PDF.
+ */
+export async function downloadSalesGraphPdf(payload, state, opts = {}) {
+  if (!payload?.leads || !payload?.visits) throw new Error("No Sales Graph data to export.");
+  const jsPDF = requireJsPdf();
+  const doc = new jsPDF({orientation: "landscape", unit: "mm", format: "a4"});
+  const marginX = 10;
+  const marginY = 12;
+  const pageW = doc.internal.pageSize.getWidth();
+  const pageH = doc.internal.pageSize.getHeight();
+  const contentW = pageW - marginX * 2;
+
+  pdfSetFill(doc, PDF_BRAND.green);
+  doc.rect(0, 0, pageW, 22, "F");
+  pdfSetText(doc, PDF_BRAND.white);
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(14);
+  doc.text("GPP AI · Sales Graph", marginX, 10);
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(9);
+  const rightBits = [];
+  if (opts.preview) rightBits.push("Preview");
+  if (opts.title) rightBits.push(String(opts.title));
+  doc.text(rightBits.join(" · ") || "Dashboard", pageW - marginX, 10, {align: "right"});
+  doc.setFontSize(8);
+  doc.text(`Exported ${new Date().toISOString().slice(0, 10)} · scale ${state.scaleMode || "relative"}`, marginX, 17);
+
+  let y = 28;
+  pdfSetText(doc, PDF_BRAND.ink);
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(11);
+  doc.text("KPIs", marginX, y);
+  y += 6;
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(8);
+  for (const [label, value] of buildKpiItemsForPdf(payload, state)) {
+    if (y + 5 > pageH - marginY) {
+      doc.addPage();
+      y = marginY;
+    }
+    doc.text(`${label}: ${value}`, marginX, y);
+    y += 4.5;
+  }
+
+  for (const block of buildTableBlocksForPdf(payload, state)) {
+    doc.addPage();
+    y = marginY;
+    pdfSetText(doc, PDF_BRAND.ink);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(11);
+    doc.text(block.title, marginX, y);
+    y += 6;
+    y = drawPdfTable(doc, block.headers, block.rows, y, marginX, marginY, contentW, pageH);
+  }
+
+  const chartEntries = [...chartRegistry.entries()].filter(([, chart]) => {
+    try { return Boolean(chart?.canvas); } catch { return false; }
+  });
+  for (const [id, chart] of chartEntries) {
+    let dataUrl = "";
+    try { dataUrl = chart.toBase64Image("image/png", 1); } catch { continue; }
+    if (!dataUrl) continue;
+    doc.addPage();
+    y = marginY;
+    pdfSetText(doc, PDF_BRAND.ink);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(11);
+    const title = chart.options?.plugins?.title?.text
+      || chart.canvas?.closest(".sg-chart-card, .dashboard-chart-card")?.querySelector("h3")?.textContent
+      || id;
+    doc.text(String(title || id), marginX, y);
+    y += 4;
+    const imgW = contentW;
+    const imgH = Math.min(pageH - y - marginY, contentW * 0.45);
+    try {
+      doc.addImage(dataUrl, "PNG", marginX, y, imgW, imgH);
+    } catch { /* skip broken canvas */ }
+  }
+
+  const stamp = new Date().toISOString().slice(0, 10);
+  downloadBlobFile(doc.output("blob"), `Sales_Graph_${stamp}.pdf`);
 }

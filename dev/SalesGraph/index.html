@@ -7,14 +7,15 @@
   <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#0f2d22">
   <meta name="description" content="GPP AI Sales Graph">
   <title>GPP AI · Sales Graph</title>
-  <meta name="app-version" content="6.2.1.stable">
-  <script src="../theme-boot.js?v=6.2.1.stable"></script>
-  <script src="../motion.js?v=6.2.1.stable"></script>
+  <meta name="app-version" content="6.2.2.stable">
+  <script src="../theme-boot.js?v=6.2.2.stable"></script>
+  <script src="../motion.js?v=6.2.2.stable"></script>
   <link rel="manifest" href="../manifest.webmanifest">
-  <link rel="stylesheet" href="../styles.css?v=6.2.1.stable">
+  <link rel="stylesheet" href="../styles.css?v=6.2.2.stable">
   <script defer src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
-  <script type="module" src="../sales-graph.js?v=6.2.1.stable"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js"></script>
+  <script type="module" src="../sales-graph.js?v=6.2.2.stable"></script>
 </head>
 <body>
   <div id="update-banner" class="update-banner hidden" role="status">
@@ -28,7 +29,7 @@
         <button class="nav-item active" data-view="upload" data-perm="sales_graph.upload"><span>◎</span>Upload</button>
         <button class="nav-item" data-view="dashboard" data-perm="sales_graph.dashboard"><span>▦</span>Dashboard</button>
       </nav>
-      <div class="privacy-note"><strong id="sidebar-version">v6.2.1.stable</strong><span id="sidebar-notes">v6.2.1.stable: Keep Sales Graph Month+Year axis labels clear of Chromium horizontal scrollbars.</span></div>
+      <div class="privacy-note"><strong id="sidebar-version">v6.2.2.stable</strong><span id="sidebar-notes">v6.2.2.stable: Sales Graph filters/aggregates by Source; PDF export for KPIs, tables, and chart snapshots.</span></div>
     </aside>
 
     <main>
@@ -55,7 +56,7 @@
             <input id="sg-leads-input" type="file" accept=".xlsx,.xls,.xlsm" hidden>
             <div class="upload-icon">L</div>
             <h3>Leads</h3>
-            <p>Project Name · Source · Source Name · YYYYMM months</p>
+            <p>Project Name · Source · YYYYMM months</p>
           </div>
           <div id="sg-visits-drop" class="drop-zone" role="button" tabindex="0" aria-label="Upload Visits Excel">
             <input id="sg-visits-input" type="file" accept=".xlsx,.xls,.xlsm" hidden>
@@ -67,7 +68,7 @@
             <input id="sg-booked-input" type="file" accept=".xlsx,.xls,.xlsm" hidden>
             <div class="upload-icon">B</div>
             <h3>Booked</h3>
-            <p>Project · Source · Source Name · Status · YYYYMM</p>
+            <p>Project · Source · Status · YYYYMM</p>
           </div>
         </div>
         <div id="sg-file-list" class="file-list hidden"></div>
