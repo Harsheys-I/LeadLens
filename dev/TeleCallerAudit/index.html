@@ -10,12 +10,12 @@
   <script src="../theme-boot.js?v=6.0.0.dev"></script>
   <script src="../motion.js?v=6.0.0.dev"></script>
   <link rel="manifest" href="../manifest.webmanifest">
-  <link rel="stylesheet" href="../styles.css?v=6.0.0.dev">
+  <link rel="stylesheet" href="../styles.css?v=6.0.0.dev.erp-ux1">
   <script defer src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js"></script>
-  <script type="module" src="../app.js?v=6.0.0.dev"></script>
+  <script type="module" src="../app.js?v=6.0.0.dev.erp-ux1"></script>
 </head>
 <body>
   <div id="update-banner" class="update-banner hidden" role="status">
@@ -233,11 +233,21 @@
               <span>/dev only · Super User. Fetch ERP report via saved Cookie → Audit AI → optional dashboard publish. Auto-publish is off by default.</span>
             </div>
             <div class="inline-actions settings-toolbar-actions">
-              <button id="erp-sync-save" type="button" class="primary-button">Save</button>
-              <button id="erp-sync-test" type="button" class="secondary-button">Test fetch</button>
-              <button id="erp-sync-run" type="button" class="secondary-button">Run sync</button>
-              <span id="erp-sync-message" class="form-message"></span>
+              <button id="erp-sync-save" type="button" class="primary-button">Save settings</button>
+              <button id="erp-sync-refresh-status" type="button" class="text-button">Refresh status</button>
+              <span id="erp-sync-message" class="form-message" aria-live="polite"></span>
             </div>
+          </div>
+
+          <div id="erp-sync-progress" class="review-live-progress" aria-live="polite">
+            <div class="progress-copy">
+              <strong id="erp-sync-progress-label">No active job</strong>
+              <span id="erp-sync-progress-percent">0%</span>
+            </div>
+            <div class="progress-track">
+              <div id="erp-sync-progress-bar" class="progress-bar" style="width:0%"></div>
+            </div>
+            <p id="erp-sync-progress-detail" class="muted form-message" style="margin:0.65rem 0 0">Idle — start a sync or refresh status.</p>
           </div>
 
           <div class="settings-sections">
@@ -259,11 +269,14 @@
             <section class="settings-card">
               <div class="card-title"><h2>2 · Field map</h2><p>Comma-separated ERP column aliases per LeadLens field. After Test fetch, match keys from the preview.</p></div>
               <div id="erp-sync-field-map" class="config-list"></div>
+              <div class="inline-actions" style="margin-top:0.75rem">
+                <button id="erp-sync-test" type="button" class="secondary-button">Test fetch</button>
+              </div>
               <div id="erp-sync-preview" class="muted form-message" style="white-space:pre-wrap;margin-top:0.75rem"></div>
             </section>
 
             <section class="settings-card">
-              <div class="card-title"><h2>3 · Pipeline &amp; cron</h2><p>Enable cron only after a dry-run succeeds. Auto-publish writes live TeleCaller boards (same MySQL as production).</p></div>
+              <div class="card-title"><h2>3 · Pipeline &amp; cron</h2><p>Enable cron only after a dry-run succeeds. Auto-publish writes live TeleCaller boards (same MySQL as production). Auto-continue only resumes audit chunks — it does not publish.</p></div>
               <div class="field-grid run-grid">
                 <label class="check-row"><input id="erp-sync-enabled" type="checkbox"><span>Enable cron / scheduled runs</span></label>
                 <label class="check-row"><input id="erp-sync-auto-publish" type="checkbox"><span>Auto-publish dashboards after audit</span></label>
@@ -272,10 +285,12 @@
               </div>
               <label>Cron bearer secret<input id="erp-sync-cron-secret" type="password" autocomplete="new-password" placeholder="Set a long random secret"></label>
               <p id="erp-sync-cron-hint" class="muted form-message"></p>
-              <div class="inline-actions" style="margin-top:0.75rem">
-                <button id="erp-sync-continue" type="button" class="secondary-button">Continue audit job</button>
+              <div class="inline-actions" style="margin-top:0.75rem;flex-wrap:wrap">
+                <button id="erp-sync-run" type="button" class="primary-button">Start / Run sync</button>
+                <button id="erp-sync-continue" type="button" class="secondary-button">Continue audit</button>
+                <button id="erp-sync-auto-continue" type="button" class="secondary-button">Auto-continue until done</button>
+                <button id="erp-sync-stop" type="button" class="danger-button hidden" disabled>Stop</button>
                 <button id="erp-sync-publish" type="button" class="secondary-button">Publish last results</button>
-                <button id="erp-sync-refresh-status" type="button" class="text-button">Refresh status</button>
               </div>
               <pre id="erp-sync-status" class="muted" style="margin-top:0.75rem;white-space:pre-wrap;font-size:0.85rem"></pre>
             </section>

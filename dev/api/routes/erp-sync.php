@@ -189,23 +189,53 @@ function ll_erp_sync_route_status(): void
   $cfg = ll_erp_sync_public_config();
   $job = ll_erp_sync_load_job();
   $jobMeta = null;
+  $progress = null;
   if (is_array($job)) {
+    $leadCount = $job['lead_count'] ?? (isset($job['leads']) && is_array($job['leads']) ? count($job['leads']) : null);
+    $resultCount = isset($job['results']) && is_array($job['results']) ? count($job['results']) : 0;
+    $jobStatus = (string) ($job['status'] ?? '');
+    $needsContinue = $jobStatus === 'auditing';
+    $complete = in_array($jobStatus, ['audited', 'ready', 'published'], true);
+    $phaseMap = [
+      'auditing' => 'audit',
+      'audited' => 'done',
+      'ready' => 'done',
+      'published' => 'publish',
+      'error' => 'error',
+    ];
+    $lastPhase = is_array($cfg['last_status'] ?? null) ? ($cfg['last_status']['phase'] ?? null) : null;
+    $phase = $lastPhase ?: ($phaseMap[$jobStatus] ?? ($jobStatus !== '' ? $jobStatus : null));
     $jobMeta = [
       'status' => $job['status'] ?? null,
       'cursor' => $job['cursor'] ?? null,
-      'lead_count' => $job['lead_count'] ?? (isset($job['leads']) && is_array($job['leads']) ? count($job['leads']) : null),
-      'result_count' => isset($job['results']) && is_array($job['results']) ? count($job['results']) : 0,
+      'lead_count' => $leadCount,
+      'result_count' => $resultCount,
+      'audited' => $resultCount,
+      'total' => $leadCount,
+      'phase' => $phase,
+      'needs_continue' => $needsContinue,
+      'complete' => $complete,
       'source_file' => $job['source_file'] ?? null,
       'started_at' => $job['started_at'] ?? null,
       'published_at' => $job['published_at'] ?? null,
       'error' => $job['error'] ?? null,
       'publish_skipped' => $job['publish_skipped'] ?? null,
     ];
+    $progress = [
+      'audited' => $resultCount,
+      'total' => $leadCount,
+      'phase' => $phase,
+      'status' => $jobStatus !== '' ? $jobStatus : null,
+      'needs_continue' => $needsContinue,
+      'complete' => $complete,
+      'error' => $job['error'] ?? null,
+    ];
   }
   ll_ok([
     'config' => $cfg,
     'last_status' => $cfg['last_status'] ?? null,
     'job' => $jobMeta,
+    'progress' => $progress,
   ]);
 }
 
