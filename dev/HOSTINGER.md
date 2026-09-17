@@ -57,3 +57,7 @@ The API fell back to `config.example.php` because live `config.local.php` is mis
 - **Super User**: all permissions, including Run console.
 - **Admin**: users/roles/access requests; Run console **off** by default (enable in Roles).
 - **TeleCaller**: own published Dashboard only (link user → exact Excel TeleCaller name).
+
+## ERP Sync (`/dev` only)
+
+Automated ERP report fetch → Audit AI → optional dashboard publish lives under `/dev` for Super User. See **[ERP-SYNC.md](./ERP-SYNC.md)** for Cookie setup, Test fetch, and the Hostinger cron one-liner.

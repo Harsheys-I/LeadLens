@@ -8,6 +8,7 @@ import {persistJob,removeJobSynced,clearJobsSynced,pullJobsFromServer} from "./j
 import {mountPerfReportUpload,mountPerfPublishedDashboard,refreshPerfPublished} from "./perf-dashboard.js?v=6.0.0.dev";
 import {appUrl, homePath} from "./app-base.js?v=6.0.0.dev";
 import {initTheme} from "./theme.js?v=6.0.0.dev";
+import {mountErpSyncPanel, loadErpSyncPanel, canShowErpSync} from "./erp-sync.js?v=6.0.0.dev";
 
 const $=id=>document.getElementById(id);
 const ids=["page-title","key-state","run-name","pause-run","download-result","progress-label","progress-percent","progress-bar","metric-leads","metric-excel-rows","metric-calls","metric-batch","metric-completed","metric-status","metric-input-tokens","metric-cached-tokens","metric-output-tokens","metric-duration","metric-cost","live-log","clear-console","history-list","clear-history","api-key","remember-key","toggle-key","save-key","forget-key","key-message","batch-size","concurrency","model","input-field-config","add-input-field","ai-field-config","output-field-config","yes-values","no-values","input-price","cached-price","output-price","save-settings","reset-settings","settings-message","toast","mobile-menu","active-job-switch","sort-field","sort-direction","app-version","export-settings","import-settings","import-settings-file","update-banner","update-banner-text","reload-app","key-modal","onboard-key","onboard-toggle","onboard-remember","onboard-message","onboard-save","onboard-skip","sidebar-version","sidebar-notes","review-drop-zone","review-file-input","review-drop-hint","review-file-list","review-validation","start-review","review-run-panel","review-aggregate","review-cards","review-dashboard-panel","review-dashboard-mount","download-review-excel","review-open-console","review-precounts","review-live-progress","review-progress-label","review-progress-percent","review-progress-bar","review-post-actions","create-review-dashboard","export-dashboard-pdf","upload-dashboard-btn","upload-dashboard-modal","upload-telecaller-list","upload-dash-message","upload-dash-confirm","upload-dash-cancel","published-list","refresh-published","published-dashboard-panel","published-dash-title","published-dash-meta","published-dash-actions","published-dashboard-mount","shell-user-label","shell-logout","shell-account"];
@@ -15,7 +16,7 @@ const els=Object.fromEntries(ids.map(id=>[id,$(id)]));
 // Paint running build immediately so stale HTML never flashes for seconds during auth/boot.
 if(els["sidebar-version"])els["sidebar-version"].textContent=`v${APP_VERSION}`;
 if(els["app-version"])els["app-version"].textContent=APP_VERSION;
-const titles={review:"Bucket 1 Followup Review",console:"Run console",published:"Dashboard",history:"History",settings:"Settings","perf-report":"TeleCalling Performance","perf-dashboard":"Performance Dashboard","perf-settings":"Performance Settings"};
+const titles={review:"Bucket 1 Followup Review",console:"Run console",published:"Dashboard",history:"History",settings:"Settings","erp-sync":"ERP Sync","perf-report":"TeleCalling Performance","perf-dashboard":"Performance Dashboard","perf-settings":"Performance Settings"};
 /** When false, completed audits do not auto-render charts until Create Dashboard. */
 let reviewDashboardRequested=false;
 let lastReadyReviewJobs=[];
@@ -223,6 +224,10 @@ function expandNavGroupForView(name){
 function showView(name){
   const btn=document.querySelector(`.nav-item[data-view="${name}"]:not(.hidden)`)
     ||document.querySelector(`.nav-item[data-view="${name}"]`);
+  if(name==="erp-sync"&&!canShowErpSync()){
+    toast("ERP Sync is only available on /dev for Super User.");
+    return;
+  }
   if(btn?.dataset.perm&&!hasPermission(btn.dataset.perm)){
     toast("You do not have permission for this screen.");
     return;
@@ -246,6 +251,7 @@ function showView(name){
   if(name==="review")renderReviewProgress();
   if(name==="published")refreshPublishedDashboards();
   if(name==="perf-dashboard")refreshPerfPublished();
+  if(name==="erp-sync")loadErpSyncPanel();
 }
 function toast(message){els.toast.textContent=message;els.toast.classList.add("show");clearTimeout(toast.timer);toast.timer=setTimeout(()=>els.toast.classList.remove("show"),3200);}
 function updateKeyState(){
@@ -2216,7 +2222,9 @@ async function bootTeleCallerAudit(){
   else if(hashView==="perf-dashboard"&&hasPermission("telecaller.perf_dashboard"))showView("perf-dashboard");
   else if(hashView==="perf-report"&&hasPermission("telecaller.perf_report"))showView("perf-report");
   else if(hashView==="perf-settings"&&hasPermission("telecaller.perf_settings"))showView("perf-settings");
-  else{
+  else if(hashView==="erp-sync"&&canShowErpSync()){
+    /* shown after mountErpSyncPanel */
+  }else{
     const firstVisible=[...document.querySelectorAll(".nav-item[data-view]:not(.hidden)")][0];
     showView(firstVisible?.dataset.view||"review");
   }
@@ -2225,6 +2233,11 @@ async function bootTeleCallerAudit(){
   if(hasPermission("telecaller.bucket1")||hasPermission("telecaller.settings"))maybePromptForApiKey();
   mountPerfReportUpload({hasPermission,toast,showView});
   mountPerfPublishedDashboard({hasPermission,canViewAll:canSeeComparativeKpis});
+  mountErpSyncPanel({toast,showView});
+  if(canShowErpSync()&&location.hash==="#erp-sync"){
+    await loadErpSyncPanel();
+    showView("erp-sync");
+  }
   mountNotifications({
     variant:"chrome",
     onOpenAccessRequests:()=>{location.href=appUrl("/admin/");},
