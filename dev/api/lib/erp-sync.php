@@ -386,8 +386,11 @@ function ll_erp_sync_store_payload(string $body, string $contentType): string
   $name = 'payload-' . gmdate('Ymd-His') . '-' . bin2hex(random_bytes(4)) . '.bin';
   $path = $dir . '/' . $name;
   file_put_contents($path, $body);
+  // Convenience overwrite for "latest raw" readers.
+  @file_put_contents($dir . '/latest.bin', $body);
   @file_put_contents($dir . '/latest.meta.json', json_encode([
     'file' => $name,
+    'latest' => 'latest.bin',
     'content_type' => $contentType,
     'bytes' => strlen($body),
     'fetched_at' => gmdate('c'),
@@ -399,6 +402,197 @@ function ll_erp_sync_store_payload(string $body, string $contentType): string
     @unlink($old);
   }
   return $name;
+}
+
+/**
+ * Persist mapped leads for the main TeleCaller Audit UI (overwrite latest).
+ *
+ * @param array{leads: list<array>, row_count: int, lead_count: int, mapped_columns: array<string,string>, missing_required?: list<string>} $mapped
+ * @return array{file: string, lead_count: int, row_count: int, bytes: int}
+ */
+function ll_erp_sync_store_mapped_leads(array $mapped, string $payloadFile, string $contentType = ''): array
+{
+  $dir = ll_erp_sync_storage_dir();
+  $fetchedAt = gmdate('c');
+  $doc = [
+    'version' => 1,
+    'payload_file' => $payloadFile,
+    'source_file' => 'ERP:' . $payloadFile,
+    'content_type' => $contentType,
+    'fetched_at' => $fetchedAt,
+    'row_count' => (int) ($mapped['row_count'] ?? 0),
+    'lead_count' => (int) ($mapped['lead_count'] ?? count($mapped['leads'] ?? [])),
+    'mapped_columns' => $mapped['mapped_columns'] ?? new stdClass(),
+    'leads' => array_values($mapped['leads'] ?? []),
+  ];
+  $json = json_encode($doc, JSON_UNESCAPED_UNICODE);
+  if ($json === false) {
+    throw new RuntimeException('Could not encode mapped leads');
+  }
+  $path = $dir . '/latest-leads.json';
+  if (file_put_contents($path, $json) === false) {
+    throw new RuntimeException('Could not write latest-leads.json');
+  }
+  $metaPath = $dir . '/latest.meta.json';
+  $meta = [];
+  if (is_file($metaPath)) {
+    $decoded = json_decode((string) file_get_contents($metaPath), true);
+    if (is_array($decoded)) {
+      $meta = $decoded;
+    }
+  }
+  $meta['file'] = $meta['file'] ?? $payloadFile;
+  $meta['latest'] = $meta['latest'] ?? 'latest.bin';
+  $meta['leads_file'] = 'latest-leads.json';
+  $meta['lead_count'] = $doc['lead_count'];
+  $meta['row_count'] = $doc['row_count'];
+  $meta['mapped_at'] = $fetchedAt;
+  @file_put_contents($metaPath, json_encode($meta, JSON_UNESCAPED_UNICODE));
+  return [
+    'file' => 'latest-leads.json',
+    'lead_count' => $doc['lead_count'],
+    'row_count' => $doc['row_count'],
+    'bytes' => strlen($json),
+  ];
+}
+
+/** @return ?array<string, mixed> */
+function ll_erp_sync_load_latest_leads(): ?array
+{
+  $path = ll_erp_sync_storage_dir() . '/latest-leads.json';
+  if (!is_file($path)) {
+    return null;
+  }
+  $decoded = json_decode((string) file_get_contents($path), true);
+  return is_array($decoded) ? $decoded : null;
+}
+
+/**
+ * Fetch ERP once → store raw payload → map → store latest-leads.json (no OpenAI).
+ *
+ * @return array<string, mixed>
+ */
+function ll_erp_sync_fetch_for_audit(): array
+{
+  @set_time_limit(180);
+  $cfg = ll_erp_sync_load_config();
+  $url = trim((string) ($cfg['report_url'] ?? ''));
+  $cookie = ll_erp_sync_cookie_plaintext();
+  if ($url === '') {
+    return ['ok' => false, 'error' => 'Report URL not configured', 'phase' => 'fetch'];
+  }
+  if ($cookie === null) {
+    return [
+      'ok' => false,
+      'error' => 'Cookie not configured — paste Cookie header in /dev ERP Sync',
+      'phase' => 'fetch',
+      'session_expired' => true,
+    ];
+  }
+  $extra = $cfg['extra_headers'] ?? [];
+  if ($extra instanceof stdClass) {
+    $extra = (array) $extra;
+  }
+  $fetch = ll_erp_sync_http_fetch($url, (string) ($cfg['http_method'] ?? 'GET'), $cookie, (array) $extra);
+  if (!empty($fetch['session_expired'])) {
+    ll_erp_sync_set_last_status([
+      'ok' => false,
+      'phase' => 'fetch-for-audit',
+      'error' => $fetch['error'] ?? 'session_expired',
+      'session_expired' => true,
+      'http_status' => $fetch['status'],
+      'at' => gmdate('c'),
+    ]);
+    return [
+      'ok' => false,
+      'error' => $fetch['error'] ?? 'ERP session expired',
+      'phase' => 'fetch',
+      'session_expired' => true,
+      'http_status' => $fetch['status'],
+    ];
+  }
+  if (empty($fetch['ok'])) {
+    ll_erp_sync_set_last_status([
+      'ok' => false,
+      'phase' => 'fetch-for-audit',
+      'error' => $fetch['error'] ?? 'fetch failed',
+      'http_status' => $fetch['status'],
+      'at' => gmdate('c'),
+    ]);
+    return [
+      'ok' => false,
+      'error' => $fetch['error'] ?? 'fetch failed',
+      'phase' => 'fetch',
+      'http_status' => $fetch['status'],
+    ];
+  }
+
+  $file = ll_erp_sync_store_payload($fetch['body'], $fetch['content_type']);
+  $format = ll_erp_sync_detect_format($fetch['body'], $fetch['content_type']);
+  if ($format === 'json') {
+    $decoded = json_decode($fetch['body'], true);
+    if (!is_array($decoded)) {
+      return ['ok' => false, 'error' => 'Invalid JSON payload', 'phase' => 'parse'];
+    }
+    [$rows, $usedPath] = ll_erp_sync_extract_rows($decoded, (string) ($cfg['rows_path'] ?? ''));
+  } elseif ($format === 'xlsx') {
+    try {
+      $rows = ll_erp_sync_parse_xlsx_rows($fetch['body']);
+      $usedPath = '';
+    } catch (Throwable $e) {
+      return ['ok' => false, 'error' => $e->getMessage(), 'phase' => 'parse'];
+    }
+  } else {
+    return ['ok' => false, 'error' => 'Unsupported payload format', 'phase' => 'parse'];
+  }
+
+  $mapped = ll_erp_sync_map_to_leads($rows, (array) ($cfg['field_map'] ?? ll_erp_sync_default_field_map()));
+  if (!empty($mapped['missing_required'])) {
+    return [
+      'ok' => false,
+      'error' => 'Missing required field mapping: ' . implode(', ', $mapped['missing_required']),
+      'phase' => 'parse',
+      'mapped_columns' => $mapped['mapped_columns'],
+    ];
+  }
+  if (!$mapped['leads']) {
+    return ['ok' => false, 'error' => 'No leads mapped from ERP payload', 'phase' => 'parse'];
+  }
+
+  $stored = ll_erp_sync_store_mapped_leads($mapped, $file, $fetch['content_type']);
+  $status = [
+    'ok' => true,
+    'phase' => 'ready-for-audit',
+    'http_status' => $fetch['status'],
+    'bytes' => $fetch['bytes'],
+    'content_type' => $fetch['content_type'],
+    'payload_file' => $file,
+    'leads_file' => $stored['file'],
+    'row_count' => $mapped['row_count'],
+    'lead_count' => $mapped['lead_count'],
+    'rows_path' => $usedPath ?? '',
+    'format' => $format,
+    'at' => gmdate('c'),
+  ];
+  ll_erp_sync_set_last_status($status);
+
+  return [
+    'ok' => true,
+    'phase' => 'ready-for-audit',
+    'message' => 'Fetched ' . $mapped['lead_count'] . ' leads — open Audit to run AI',
+    'http_status' => $fetch['status'],
+    'bytes' => $fetch['bytes'],
+    'content_type' => $fetch['content_type'],
+    'payload_file' => $file,
+    'leads_file' => $stored['file'],
+    'leads_bytes' => $stored['bytes'],
+    'row_count' => $mapped['row_count'],
+    'lead_count' => $mapped['lead_count'],
+    'mapped_columns' => $mapped['mapped_columns'],
+    'rows_path' => $usedPath ?? '',
+    'format' => $format,
+    'source_file' => 'ERP:' . $file,
+  ];
 }
 
 /**

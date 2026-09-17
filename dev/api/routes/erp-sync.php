@@ -8,7 +8,9 @@ require_once __DIR__ . '/../lib/erp-sync.php';
  * /dev only. Routes:
  *   GET|PUT|POST erp-sync/config
  *   POST erp-sync/test-fetch
- *   POST erp-sync/run
+ *   POST erp-sync/fetch-for-audit  (primary: fetch → store → map → latest-leads)
+ *   GET  erp-sync/latest-leads
+ *   POST erp-sync/run             (optional advanced: server OpenAI audit loop)
  *   POST erp-sync/publish
  *   GET erp-sync/status
  *   GET erp-sync/job
@@ -25,6 +27,12 @@ function ll_route_erp_sync(string $action): void
       break;
     case 'test-fetch':
       ll_erp_sync_route_test_fetch();
+      break;
+    case 'fetch-for-audit':
+      ll_erp_sync_route_fetch_for_audit();
+      break;
+    case 'latest-leads':
+      ll_erp_sync_route_latest_leads();
       break;
     case 'run':
       ll_erp_sync_route_run();
@@ -148,6 +156,54 @@ function ll_erp_sync_route_test_fetch(): void
     'preview' => $preview,
     'mapping' => $mapped,
     'message' => 'Test fetch OK — use sample keys to refine field map, then Run sync',
+  ]);
+}
+
+function ll_erp_sync_route_fetch_for_audit(): void
+{
+  ll_require_method('POST');
+  ll_erp_sync_require_actor(false);
+  try {
+    $result = ll_erp_sync_fetch_for_audit();
+  } catch (Throwable $e) {
+    ll_error('ERP fetch failed: ' . $e->getMessage(), 500);
+  }
+  if (empty($result['ok'])) {
+    $code = !empty($result['session_expired']) ? 401 : 400;
+    ll_error((string) ($result['error'] ?? 'Fetch failed'), $code, $result);
+  }
+  ll_ok($result);
+}
+
+function ll_erp_sync_route_latest_leads(): void
+{
+  ll_require_method('GET');
+  ll_erp_sync_require_actor(false);
+  $doc = ll_erp_sync_load_latest_leads();
+  if ($doc === null) {
+    ll_error('No ERP fetch stored yet — use Fetch & send to Audit first', 404);
+  }
+  $metaOnly = isset($_GET['meta']) && (string) $_GET['meta'] === '1';
+  if ($metaOnly) {
+    ll_ok([
+      'payload_file' => $doc['payload_file'] ?? null,
+      'source_file' => $doc['source_file'] ?? null,
+      'fetched_at' => $doc['fetched_at'] ?? null,
+      'row_count' => $doc['row_count'] ?? 0,
+      'lead_count' => $doc['lead_count'] ?? (isset($doc['leads']) && is_array($doc['leads']) ? count($doc['leads']) : 0),
+      'mapped_columns' => $doc['mapped_columns'] ?? new stdClass(),
+      'has_leads' => !empty($doc['leads']) && is_array($doc['leads']),
+    ]);
+  }
+  // Full mapped leads for Audit UI (can be large — same shape as parseWorkbook leads).
+  ll_ok([
+    'source_file' => $doc['source_file'] ?? ('ERP:' . ($doc['payload_file'] ?? 'latest')),
+    'payload_file' => $doc['payload_file'] ?? null,
+    'fetched_at' => $doc['fetched_at'] ?? null,
+    'row_count' => $doc['row_count'] ?? 0,
+    'lead_count' => $doc['lead_count'] ?? (isset($doc['leads']) && is_array($doc['leads']) ? count($doc['leads']) : 0),
+    'mapped_columns' => $doc['mapped_columns'] ?? new stdClass(),
+    'leads' => array_values(is_array($doc['leads'] ?? null) ? $doc['leads'] : []),
   ]);
 }
 

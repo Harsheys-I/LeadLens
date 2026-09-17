@@ -1,7 +1,7 @@
 /**
- * /dev Super User ERP Sync panel — config, test fetch, run, continue, auto-continue, publish.
+ * /dev Super User ERP Sync panel — fetch ERP → store raw → hand off to main Audit UI.
  */
-import {api} from './api-client.js?v=6.0.0.dev';
+import {api} from './api-client.js?v=6.0.0.dev.erp-handoff1';
 import {isDevHost} from './app-base.js?v=6.0.0.dev';
 import {getUser} from './auth.js?v=6.0.0.dev';
 
@@ -26,40 +26,38 @@ const DEFAULT_ALIASES = {
   budget: 'Estimated Budget, Budget'
 };
 
-const ACTION_BUTTON_IDS = [
+const BUSY_DISABLE_IDS = [
   'erp-sync-save',
   'erp-sync-test',
-  'erp-sync-run',
-  'erp-sync-continue',
-  'erp-sync-auto-continue',
-  'erp-sync-publish',
-  'erp-sync-refresh-status'
+  'erp-sync-fetch-audit',
+  'erp-sync-run-server',
+  'erp-sync-publish'
 ];
 
-const AUTO_CONTINUE_DELAY_MS = 750;
+/** @type {((entry: object) => void|Promise<void>)|null} */
+let loadIntoAuditFn = null;
+/** @type {((msg: string) => void)|null} */
+let toastFn = null;
+/** @type {((name: string) => void)|null} */
+let showViewFn = null;
 
-const PHASE_LABELS = {
-  fetch: 'Fetch',
-  parse: 'Map',
-  map: 'Map',
-  audit: 'Audit',
-  auditing: 'Audit',
-  publish: 'Publish',
-  published: 'Publish',
-  ready: 'Done',
-  done: 'Done',
-  audited: 'Done',
-  error: 'Error',
-  disabled: 'Disabled'
-};
-
-let autoContinueActive = false;
-let autoContinueStop = false;
+let busy = false;
+/** @type {AbortController|null} */
+let activeAbort = null;
 /** @type {Map<string, string>} */
 const buttonLabels = new Map();
 
 function $(id) {
   return document.getElementById(id);
+}
+
+function isAbortError(err) {
+  return Boolean(
+    err
+    && (err.name === 'AbortError'
+      || err.code === 20
+      || /aborted|AbortError/i.test(String(err.message || '')))
+  );
 }
 
 function setMsg(text, isError = false) {
@@ -156,174 +154,42 @@ function formatStatus(payload) {
   if (job) {
     lines.push('Job: ' + JSON.stringify(job, null, 2));
   }
-  if (!lines.length) return 'No runs yet.';
+  if (!lines.length) return 'No fetches yet.';
   return lines.join('\n\n');
 }
 
-function phaseLabel(phase) {
-  if (!phase) return 'Idle';
-  const key = String(phase).toLowerCase();
-  return PHASE_LABELS[key] || String(phase);
-}
-
-function numOrNull(v) {
-  if (v == null || v === '') return null;
-  const n = Number(v);
-  return Number.isFinite(n) ? n : null;
-}
-
-/**
- * Normalize progress fields from run/status payloads.
- * @returns {{audited:number|null,total:number|null,phase:string|null,needsContinue:boolean,complete:boolean,error:string|null,indeterminate:boolean}}
- */
-function extractProgress(data) {
-  const progress = data?.progress || null;
-  const job = data?.job || null;
-  const last = data?.last_status || data?.config?.last_status || null;
-
-  const audited = numOrNull(
-    progress?.audited ?? data?.audited ?? data?.done ?? data?.result_count
-      ?? job?.audited ?? job?.result_count ?? last?.done ?? last?.audited
-  );
-  const total = numOrNull(
-    progress?.total ?? data?.total ?? data?.lead_count
-      ?? job?.total ?? job?.lead_count ?? last?.lead_count ?? last?.total
-  );
-  let phase = progress?.phase ?? data?.phase ?? job?.phase ?? last?.phase ?? null;
-  if (!phase && job?.status) phase = job.status;
-  if (!phase && data?.status && data.status !== 'disabled') phase = data.status;
-
-  const needsContinue = Boolean(
-    progress?.needs_continue
-      ?? data?.needs_continue
-      ?? data?.partial
-      ?? job?.needs_continue
-      ?? (job?.status === 'auditing')
-  );
-  const complete = Boolean(
-    progress?.complete
-      ?? data?.complete
-      ?? job?.complete
-      ?? (!needsContinue && (
-        data?.ok === true && data?.partial !== true
-          && ['ready', 'published', 'done', 'audited'].includes(String(phase || '').toLowerCase())
-      ))
-  );
-  const error = progress?.error || data?.error || job?.error || last?.error || null;
-
-  return {
-    audited,
-    total,
-    phase: phase ? String(phase) : null,
-    needsContinue,
-    complete,
-    error: error ? String(error) : null,
-    indeterminate: false
-  };
-}
-
-function setProgressIndeterminate(active, label = 'Working…') {
-  const bar = $('erp-sync-progress-bar');
+function updateProgressUI({label = 'Idle', percent = '0%', width = '0%', detail = '', indeterminate = false, error = false} = {}) {
   const labelEl = $('erp-sync-progress-label');
   const pctEl = $('erp-sync-progress-percent');
+  const bar = $('erp-sync-progress-bar');
   const detailEl = $('erp-sync-progress-detail');
   if (labelEl) labelEl.textContent = label;
-  if (pctEl) pctEl.textContent = '…';
-  if (detailEl) detailEl.textContent = 'Request in flight — waiting for server response.';
+  if (pctEl) pctEl.textContent = percent;
+  if (detailEl) {
+    detailEl.textContent = detail;
+    detailEl.style.color = error ? 'var(--danger, #b42318)' : '';
+  }
   if (bar) {
-    bar.classList.toggle('is-indeterminate', active);
-    if (active) bar.style.width = '35%';
+    bar.classList.toggle('is-indeterminate', indeterminate);
+    bar.style.width = indeterminate ? '35%' : width;
   }
-}
-
-function updateProgressUI(info, {busy = false} = {}) {
-  const labelEl = $('erp-sync-progress-label');
-  const pctEl = $('erp-sync-progress-percent');
-  const bar = $('erp-sync-progress-bar');
-  const detailEl = $('erp-sync-progress-detail');
-  if (!labelEl || !pctEl || !bar || !detailEl) return;
-
-  if (info?.indeterminate || (busy && info?.audited == null && info?.total == null)) {
-    setProgressIndeterminate(true, busy ? 'Working…' : phaseLabel(info?.phase));
-    return;
-  }
-
-  bar.classList.remove('is-indeterminate');
-
-  const audited = info?.audited;
-  const total = info?.total;
-  const phase = info?.phase;
-  const hasCounts = audited != null && total != null && total > 0;
-  const pct = hasCounts ? Math.round(Math.min(audited, total) / total * 100) : (info?.complete ? 100 : 0);
-
-  if (info?.error || String(phase || '').toLowerCase() === 'error') {
-    labelEl.textContent = hasCounts
-      ? `Error — audited ${audited.toLocaleString()} / ${total.toLocaleString()}`
-      : 'Error';
-    pctEl.textContent = hasCounts ? `${pct}%` : '—';
-    bar.style.width = `${pct}%`;
-    detailEl.textContent = info.error || 'Audit job failed. Fix the issue, then Start / Run or Continue.';
-    return;
-  }
-
-  if (hasCounts) {
-    const phaseBit = phaseLabel(phase);
-    if (info.needsContinue) {
-      labelEl.textContent = `Auditing… ${audited.toLocaleString()} / ${total.toLocaleString()}`;
-      detailEl.textContent = `Phase: ${phaseBit} — call Continue or Auto-continue until done.`;
-    } else if (info.complete || pct >= 100) {
-      labelEl.textContent = `Complete — ${audited.toLocaleString()} / ${total.toLocaleString()}`;
-      detailEl.textContent = `Phase: ${phaseBit}` + (
-        String(phase || '').toLowerCase() === 'published'
-          ? ' · dashboards published'
-          : ' · use Publish last results if auto-publish is off'
-      );
-    } else {
-      labelEl.textContent = `${phaseBit} — ${audited.toLocaleString()} / ${total.toLocaleString()}`;
-      detailEl.textContent = `Phase: ${phaseBit}`;
-    }
-    pctEl.textContent = `${pct}%`;
-    bar.style.width = `${pct}%`;
-    return;
-  }
-
-  if (phase) {
-    labelEl.textContent = phaseLabel(phase);
-    pctEl.textContent = info.complete ? '100%' : '0%';
-    bar.style.width = info.complete ? '100%' : '0%';
-    detailEl.textContent = info.complete
-      ? 'Job finished. Refresh status or publish if needed.'
-      : `Phase: ${phaseLabel(phase)}`;
-    return;
-  }
-
-  labelEl.textContent = 'No active job';
-  pctEl.textContent = '0%';
-  bar.style.width = '0%';
-  detailEl.textContent = 'Idle — start a sync or refresh status.';
 }
 
 function rememberButtonLabels() {
-  for (const id of ACTION_BUTTON_IDS) {
+  for (const id of BUSY_DISABLE_IDS) {
     const btn = $(id);
     if (btn && !buttonLabels.has(id)) buttonLabels.set(id, btn.textContent || '');
   }
-  const stop = $('erp-sync-stop');
-  if (stop && !buttonLabels.has('erp-sync-stop')) {
-    buttonLabels.set('erp-sync-stop', stop.textContent || 'Stop');
-  }
 }
 
-function setStopVisible(visible) {
-  const stop = $('erp-sync-stop');
-  if (!stop) return;
-  stop.classList.toggle('hidden', !visible);
-  stop.disabled = !visible;
-}
-
-function setBusy(active, {activeId = null, workingLabel = 'Working…', allowStop = false} = {}) {
+/**
+ * @param {boolean} active
+ * @param {{activeId?: string|null, workingLabel?: string}} [opts]
+ */
+function setBusy(active, {activeId = null, workingLabel = 'Working…'} = {}) {
   rememberButtonLabels();
-  for (const id of ACTION_BUTTON_IDS) {
+  busy = active;
+  for (const id of BUSY_DISABLE_IDS) {
     const btn = $(id);
     if (!btn) continue;
     btn.disabled = active;
@@ -337,21 +203,26 @@ function setBusy(active, {activeId = null, workingLabel = 'Working…', allowSto
       btn.textContent = buttonLabels.get(id) || btn.textContent;
     }
   }
-  const stop = $('erp-sync-stop');
-  if (stop) {
-    if (!active) {
-      stop.textContent = buttonLabels.get('erp-sync-stop') || 'Stop';
-    }
-  }
-  setStopVisible(active && allowStop);
   if (!active) {
-    const bar = $('erp-sync-progress-bar');
-    bar?.classList.remove('is-indeterminate');
+    $('erp-sync-progress-bar')?.classList.remove('is-indeterminate');
   }
 }
 
-function sleep(ms) {
-  return new Promise(resolve => setTimeout(resolve, ms));
+function beginAbortableRequest() {
+  if (activeAbort) {
+    try { activeAbort.abort(); } catch { /* ignore */ }
+  }
+  activeAbort = new AbortController();
+  return activeAbort.signal;
+}
+
+function clearAbortController() {
+  activeAbort = null;
+}
+
+function statusElWrite(payload) {
+  const statusEl = $('erp-sync-status');
+  if (statusEl) statusEl.textContent = formatStatus(payload);
 }
 
 export function canShowErpSync() {
@@ -363,9 +234,31 @@ export async function loadErpSyncPanel() {
   try {
     const data = await api('erp-sync/status');
     applyConfig(data.config || {});
-    const statusEl = $('erp-sync-status');
-    if (statusEl) statusEl.textContent = formatStatus(data);
-    updateProgressUI(extractProgress(data));
+    statusElWrite(data);
+    const last = data.last_status;
+    if (last?.phase === 'ready-for-audit' && last.lead_count != null) {
+      updateProgressUI({
+        label: `Ready — ${Number(last.lead_count).toLocaleString()} leads`,
+        percent: '100%',
+        width: '100%',
+        detail: 'Stored on server. Use Fetch & send to Audit again, or open Bucket 1 and Start Audit if already loaded.'
+      });
+    } else if (last?.ok === false) {
+      updateProgressUI({
+        label: 'Last fetch failed',
+        percent: '—',
+        width: '0%',
+        detail: last.error || 'Error',
+        error: true
+      });
+    } else {
+      updateProgressUI({
+        label: 'Idle',
+        percent: '0%',
+        width: '0%',
+        detail: 'Configure URL + Cookie, Save, then Fetch & send to Audit.'
+      });
+    }
   } catch (err) {
     setMsg(err.message || 'Could not load ERP sync config', true);
   }
@@ -408,7 +301,7 @@ async function saveConfig() {
   }
 }
 
-async function saveConfigQuiet() {
+async function saveConfigQuiet(signal) {
   let extra_headers;
   try {
     extra_headers = parseExtraHeaders();
@@ -430,18 +323,20 @@ async function saveConfigQuiet() {
   if (cookie) body.cookie = cookie;
   const cron = $('erp-sync-cron-secret')?.value?.trim() || '';
   if (cron) body.cron_secret = cron;
-  const data = await api('erp-sync/config', {method: 'POST', body});
+  const data = await api('erp-sync/config', {method: 'POST', body, signal});
   applyConfig(data.config || {});
 }
 
 async function testFetch() {
+  if (busy) return;
+  const signal = beginAbortableRequest();
   setBusy(true, {activeId: 'erp-sync-test', workingLabel: 'Testing…'});
   setMsg('Fetching…');
-  setProgressIndeterminate(true, 'Test fetch…');
+  updateProgressUI({label: 'Test fetch…', percent: '…', indeterminate: true, detail: 'Request in flight…'});
   $('erp-sync-preview').textContent = '';
   try {
-    await saveConfigQuiet();
-    const data = await api('erp-sync/test-fetch', {method: 'POST', body: {}});
+    await saveConfigQuiet(signal);
+    const data = await api('erp-sync/test-fetch', {method: 'POST', body: {}, signal});
     const preview = data.preview || {};
     const mapping = data.mapping || {};
     const lines = [
@@ -462,246 +357,236 @@ async function testFetch() {
     $('erp-sync-preview').textContent = lines.join('\n');
     setMsg(data.message || 'Test fetch OK');
     updateProgressUI({
-      audited: 0,
-      total: mapping.lead_count ?? preview.row_count ?? null,
-      phase: 'map',
-      needsContinue: false,
-      complete: false,
-      error: null
+      label: `Preview — ${(mapping.lead_count ?? preview.row_count ?? 0).toLocaleString()} rows/leads`,
+      percent: '100%',
+      width: '100%',
+      detail: 'Test only — use Fetch & send to Audit to load into Bucket 1.'
     });
-    await refreshStatus({keepBusy: true});
+    await refreshStatus({signal});
   } catch (err) {
-    setMsg(err.message || 'Test fetch failed', true);
-    updateProgressUI({phase: 'error', error: err.message || 'Test fetch failed', needsContinue: false, complete: false, audited: null, total: null});
-    if (err.data?.session_expired) {
-      $('erp-sync-cookie-hint').textContent = 'Session expired — paste a fresh Cookie header and Save settings.';
+    if (isAbortError(err)) {
+      setMsg('Stopped.');
+    } else {
+      setMsg(err.message || 'Test fetch failed', true);
+      updateProgressUI({label: 'Error', percent: '—', width: '0%', detail: err.message || 'Test fetch failed', error: true});
+      if (err.data?.session_expired) {
+        $('erp-sync-cookie-hint').textContent = 'Session expired — paste a fresh Cookie header and Save settings.';
+      }
     }
   } finally {
+    clearAbortController();
     setBusy(false);
   }
 }
 
 /**
- * @returns {Promise<object|null>} run payload or null on hard failure already messaged
+ * Primary path: fetch ERP → store raw + mapped leads → hand off to main Audit UI.
  */
-async function runSyncOnce({forceFetch = true, dryRun = false} = {}) {
-  if (forceFetch) await saveConfigQuiet();
-  const data = await api('erp-sync/run', {
-    method: 'POST',
-    body: {force_fetch: forceFetch, dry_run: dryRun}
+async function fetchAndSendToAudit() {
+  if (busy) return;
+  if (typeof loadIntoAuditFn !== 'function') {
+    setMsg('Audit handoff is not available — reload the page.', true);
+    return;
+  }
+  const signal = beginAbortableRequest();
+  setBusy(true, {activeId: 'erp-sync-fetch-audit', workingLabel: 'Fetching…'});
+  setMsg('Fetching ERP report…');
+  updateProgressUI({
+    label: 'Fetching ERP…',
+    percent: '…',
+    indeterminate: true,
+    detail: 'Saving raw payload, then mapping leads for Audit.'
   });
-  updateProgressUI(extractProgress(data));
-  return data;
-}
 
-function applyRunMessage(data) {
-  if (!data) return;
-  if (data.ok === false) {
-    setMsg(data.error || 'Run failed', true);
-    if (data.session_expired) {
-      $('erp-sync-cookie-hint').textContent = 'Session expired — paste a fresh Cookie header and Save settings.';
-    }
-    return;
-  }
-  if (data.partial || data.needs_continue) {
-    const done = data.audited ?? data.done;
-    const total = data.total ?? data.lead_count;
-    setMsg(data.message || `Partial: ${done}/${total} — continue audit`);
-    return;
-  }
-  setMsg(
-    data.auto_publish
-      ? `Done — published ${data.published_count || 0} board(s)`
-      : `Done — ${data.result_count ?? data.audited ?? data.done ?? 0} results (auto-publish off; use Publish last results)`
-  );
-}
-
-async function runSync({forceFetch = true, dryRun = false} = {}) {
-  const activeId = forceFetch ? 'erp-sync-run' : 'erp-sync-continue';
-  const workingLabel = forceFetch ? 'Starting…' : 'Continuing…';
-  setBusy(true, {activeId, workingLabel});
-  setMsg(forceFetch ? 'Running sync (fetch + audit)…' : 'Continuing audit…');
-  setProgressIndeterminate(true, forceFetch ? 'Starting sync…' : 'Continuing audit…');
   try {
-    const data = await runSyncOnce({forceFetch, dryRun});
-    applyRunMessage(data);
-    await refreshStatus({keepBusy: true});
+    await saveConfigQuiet(signal);
+    const summary = await api('erp-sync/fetch-for-audit', {method: 'POST', body: {}, signal});
+    if (!summary?.ok) {
+      throw Object.assign(new Error(summary?.error || 'Fetch failed'), {data: summary});
+    }
+
+    updateProgressUI({
+      label: `Mapped ${Number(summary.lead_count || 0).toLocaleString()} leads`,
+      percent: '…',
+      indeterminate: true,
+      detail: 'Downloading mapped leads into Audit…'
+    });
+    setMsg(`Mapped ${summary.lead_count} leads — loading into Audit…`);
+
+    const pack = await api('erp-sync/latest-leads', {signal});
+    const leads = Array.isArray(pack?.leads) ? pack.leads : [];
+    if (!leads.length) {
+      throw new Error('Server stored the fetch but returned no mapped leads');
+    }
+
+    const fileName = pack.source_file || summary.source_file || `ERP:${summary.payload_file || 'latest'}`;
+    const entry = {
+      sheetName: 'ERP',
+      leads,
+      rowCount: pack.row_count ?? summary.row_count ?? leads.length,
+      leadCount: pack.lead_count ?? summary.lead_count ?? leads.length,
+      callCount: pack.row_count ?? summary.row_count ?? leads.length,
+      latestDayCalls: leads.length,
+      invalidRows: 0,
+      dedupedRows: 0,
+      expectedColumns: [],
+      missingColumns: [],
+      unknownHeaders: [],
+      looksAudited: false,
+      fileName,
+      fileSize: summary.bytes || 0,
+      sourceFormat: 'raw',
+      fromErpSync: true
+    };
+
+    await loadIntoAuditFn(entry);
+    updateProgressUI({
+      label: `Ready — ${leads.length.toLocaleString()} leads in Audit`,
+      percent: '100%',
+      width: '100%',
+      detail: 'Open Bucket 1 Followup Review and click Start Audit → (same progress bar / Stop as Excel RAW).'
+    });
+    setMsg(`Loaded ${leads.length.toLocaleString()} leads into Audit`);
+    toastFn?.(`ERP → Audit: ${leads.length.toLocaleString()} leads ready`);
+    await refreshStatus({signal});
   } catch (err) {
-    setMsg(err.message || 'Run failed', true);
-    updateProgressUI({phase: 'error', error: err.message || 'Run failed', needsContinue: false, complete: false, audited: null, total: null});
-    if (err.data?.session_expired) {
-      $('erp-sync-cookie-hint').textContent = 'Session expired — paste a fresh Cookie header and Save settings.';
-    }
-  } finally {
-    setBusy(false);
-  }
-}
-
-async function autoContinueUntilDone() {
-  if (autoContinueActive) return;
-  autoContinueActive = true;
-  autoContinueStop = false;
-  setBusy(true, {
-    activeId: 'erp-sync-auto-continue',
-    workingLabel: 'Auto-continuing…',
-    allowStop: true
-  });
-  setMsg('Auto-continue started…');
-  setProgressIndeterminate(true, 'Auto-continue…');
-
-  try {
-    // Only resume an incomplete audit job — never re-fetch as part of auto-continue.
-    let statusData;
-    try {
-      statusData = await api('erp-sync/status');
-    } catch (err) {
-      setMsg(err.message || 'Could not read job status', true);
-      return;
-    }
-    const starting = extractProgress(statusData);
-    updateProgressUI(starting);
-    statusElWrite(statusData);
-    if (starting.complete) {
-      setMsg('Audit already complete — nothing to auto-continue. Use Start / Run sync for a fresh fetch.');
-      return;
-    }
-    if (!starting.needsContinue && statusData?.job?.status !== 'auditing') {
-      setMsg('No incomplete audit job — use Start / Run sync first, then Auto-continue.');
-      return;
-    }
-
-    let rounds = 0;
-    while (!autoContinueStop) {
-      rounds += 1;
-      setBusy(true, {
-        activeId: 'erp-sync-auto-continue',
-        workingLabel: `Auto-continuing… (#${rounds})`,
-        allowStop: true
+    if (isAbortError(err)) {
+      setMsg('Stopped.');
+      updateProgressUI({label: 'Stopped', percent: '—', width: '0%', detail: 'Fetch cancelled.'});
+    } else {
+      setMsg(err.message || 'Fetch & send failed', true);
+      updateProgressUI({
+        label: 'Error',
+        percent: '—',
+        width: '0%',
+        detail: err.message || 'Fetch & send failed',
+        error: true
       });
-      setMsg(`Auto-continue round ${rounds}…`);
-      if (rounds === 1) setProgressIndeterminate(true, `Auto-continue #${rounds}…`);
-
-      let data;
-      try {
-        data = await runSyncOnce({forceFetch: false, dryRun: false});
-      } catch (err) {
-        setMsg(err.message || 'Auto-continue failed', true);
-        updateProgressUI({
-          phase: 'error',
-          error: err.message || 'Auto-continue failed',
-          needsContinue: false,
-          complete: false,
-          audited: null,
-          total: null
-        });
-        if (err.data?.session_expired) {
-          $('erp-sync-cookie-hint').textContent = 'Session expired — paste a fresh Cookie header and Save settings.';
-        }
-        break;
-      }
-
-      const progress = extractProgress(data);
-      updateProgressUI(progress);
-
-      if (data.ok === false) {
-        applyRunMessage(data);
-        break;
-      }
-
-      if (progress.complete || (!progress.needsContinue && !data.partial)) {
-        applyRunMessage(data);
-        setMsg(data.message || `Auto-continue finished after ${rounds} round(s).`);
-        break;
-      }
-
-      applyRunMessage(data);
-      if (autoContinueStop) {
-        setMsg(`Stopped after ${rounds} round(s). Progress kept — use Continue to resume.`);
-        break;
-      }
-      await sleep(AUTO_CONTINUE_DELAY_MS);
-      if (autoContinueStop) {
-        setMsg(`Stopped after ${rounds} round(s). Progress kept — use Continue to resume.`);
-        break;
+      if (err.data?.session_expired) {
+        $('erp-sync-cookie-hint').textContent = 'Session expired — paste a fresh Cookie header and Save settings.';
       }
     }
-
-    await refreshStatus({keepBusy: true});
   } finally {
-    autoContinueActive = false;
-    autoContinueStop = false;
+    clearAbortController();
     setBusy(false);
   }
 }
 
-function statusElWrite(payload) {
-  const statusEl = $('erp-sync-status');
-  if (statusEl) statusEl.textContent = formatStatus(payload);
-}
-
-function stopAutoContinue() {
-  if (!autoContinueActive) return;
-  autoContinueStop = true;
-  setMsg('Stopping after current round…');
-  const stop = $('erp-sync-stop');
-  if (stop) {
-    stop.disabled = true;
-    stop.textContent = 'Stopping…';
+/** Optional advanced: server-side OpenAI audit (not the primary path). */
+async function runServerAuditOnce() {
+  if (busy) return;
+  const signal = beginAbortableRequest();
+  setBusy(true, {activeId: 'erp-sync-run-server', workingLabel: 'Server audit…'});
+  setMsg('Running optional server audit (one batch)…');
+  updateProgressUI({
+    label: 'Server audit…',
+    percent: '…',
+    indeterminate: true,
+    detail: 'Advanced path — prefer Fetch & send to Audit for the main UI.'
+  });
+  try {
+    await saveConfigQuiet(signal);
+    const data = await api('erp-sync/run', {
+      method: 'POST',
+      body: {force_fetch: true, dry_run: false},
+      signal
+    });
+    if (data.ok === false) {
+      setMsg(data.error || 'Server audit failed', true);
+      updateProgressUI({label: 'Error', percent: '—', width: '0%', detail: data.error || 'Failed', error: true});
+    } else if (data.partial || data.needs_continue) {
+      const done = data.audited ?? data.done ?? 0;
+      const total = data.total ?? data.lead_count ?? '?';
+      setMsg(`Partial server audit ${done}/${total} — call again to continue (or use main Audit instead).`);
+      updateProgressUI({
+        label: `Server audit ${done}/${total}`,
+        percent: total && Number(total) ? `${Math.round(done / Number(total) * 100)}%` : '…',
+        width: total && Number(total) ? `${Math.min(100, Math.round(done / Number(total) * 100))}%` : '35%',
+        detail: 'Incomplete. Prefer Fetch & send to Audit for reliable progress.'
+      });
+    } else {
+      setMsg(data.message || `Server audit done (${data.result_count ?? data.audited ?? 0} results)`);
+      updateProgressUI({
+        label: 'Server audit complete',
+        percent: '100%',
+        width: '100%',
+        detail: data.auto_publish
+          ? 'Auto-published.'
+          : 'Use Publish last results if needed.'
+      });
+    }
+    await refreshStatus({signal});
+  } catch (err) {
+    if (isAbortError(err)) {
+      setMsg('Stopped.');
+    } else {
+      setMsg(err.message || 'Server audit failed', true);
+      updateProgressUI({label: 'Error', percent: '—', width: '0%', detail: err.message || 'Failed', error: true});
+    }
+  } finally {
+    clearAbortController();
+    setBusy(false);
   }
 }
 
 async function publishLast() {
+  if (busy) return;
+  const signal = beginAbortableRequest();
   setBusy(true, {activeId: 'erp-sync-publish', workingLabel: 'Publishing…'});
   setMsg('Publishing…');
-  setProgressIndeterminate(true, 'Publishing…');
+  updateProgressUI({label: 'Publishing…', percent: '…', indeterminate: true, detail: 'Publishing last server-audit results…'});
   try {
-    const data = await api('erp-sync/publish', {method: 'POST', body: {}});
+    const data = await api('erp-sync/publish', {method: 'POST', body: {}, signal});
     setMsg(data.message || `Published ${(data.published || []).length} board(s)`);
-    await refreshStatus({keepBusy: true});
+    await refreshStatus({signal});
+    updateProgressUI({
+      label: 'Published',
+      percent: '100%',
+      width: '100%',
+      detail: data.message || 'Dashboards published from last server audit.'
+    });
   } catch (err) {
-    setMsg(err.message || 'Publish failed', true);
-    updateProgressUI({phase: 'error', error: err.message || 'Publish failed', needsContinue: false, complete: false, audited: null, total: null});
+    if (isAbortError(err)) {
+      setMsg('Stopped.');
+    } else {
+      setMsg(err.message || 'Publish failed', true);
+      updateProgressUI({label: 'Error', percent: '—', width: '0%', detail: err.message || 'Publish failed', error: true});
+    }
   } finally {
+    clearAbortController();
     setBusy(false);
   }
 }
 
-async function refreshStatus({keepBusy = false} = {}) {
-  if (!keepBusy) {
-    setBusy(true, {activeId: 'erp-sync-refresh-status', workingLabel: 'Refreshing…'});
-  }
-  try {
-    const data = await api('erp-sync/status');
-    const statusEl = $('erp-sync-status');
-    if (statusEl) statusEl.textContent = formatStatus(data);
-    updateProgressUI(extractProgress(data));
-    if (!keepBusy) setMsg('');
-  } catch (err) {
-    setMsg(err.message || 'Status refresh failed', true);
-  } finally {
-    if (!keepBusy) setBusy(false);
-  }
+async function refreshStatus({signal} = {}) {
+  const data = await api('erp-sync/status', {signal});
+  statusElWrite(data);
+  return data;
 }
 
-export function mountErpSyncPanel({toast, showView} = {}) {
+/**
+ * @param {{toast?: (msg: string) => void, showView?: (name: string) => void, loadErpIntoAudit?: (entry: object) => void|Promise<void>}} [opts]
+ */
+export function mountErpSyncPanel({toast, showView, loadErpIntoAudit} = {}) {
   const nav = $('nav-erp-sync');
   if (!canShowErpSync()) {
     nav?.classList.add('hidden');
     return;
   }
   nav?.classList.remove('hidden');
+  toastFn = typeof toast === 'function' ? toast : null;
+  showViewFn = typeof showView === 'function' ? showView : null;
+  loadIntoAuditFn = typeof loadErpIntoAudit === 'function' ? loadErpIntoAudit : null;
   rememberButtonLabels();
 
   $('erp-sync-save')?.addEventListener('click', () => {
-    saveConfig().then(() => toast?.('ERP sync settings saved'));
+    saveConfig().then(() => toastFn?.('ERP sync settings saved'));
   });
   $('erp-sync-test')?.addEventListener('click', () => testFetch());
-  $('erp-sync-run')?.addEventListener('click', () => runSync({forceFetch: true, dryRun: false}));
-  $('erp-sync-continue')?.addEventListener('click', () => runSync({forceFetch: false, dryRun: false}));
-  $('erp-sync-auto-continue')?.addEventListener('click', () => autoContinueUntilDone());
-  $('erp-sync-stop')?.addEventListener('click', () => stopAutoContinue());
+  $('erp-sync-fetch-audit')?.addEventListener('click', () => fetchAndSendToAudit());
+  $('erp-sync-run-server')?.addEventListener('click', () => runServerAuditOnce());
   $('erp-sync-publish')?.addEventListener('click', () => publishLast());
-  $('erp-sync-refresh-status')?.addEventListener('click', () => refreshStatus());
 
-  // Lazy-load when navigating is handled by showView("erp-sync").
+  // Silence unused lint if showView not used here — kept for callers / future.
+  void showViewFn;
 }
