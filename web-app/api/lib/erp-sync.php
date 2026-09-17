@@ -1401,11 +1401,15 @@ function ll_erp_sync_run(array $actor, bool $forceFetch = false, bool $dryRun = 
     return [
       'ok' => true,
       'partial' => true,
+      'needs_continue' => true,
+      'complete' => false,
       'phase' => 'audit',
       'message' => 'Audited ' . count($results) . ' / ' . count($leads) . ' leads — call run again to continue',
       'cursor' => $cursor,
       'lead_count' => count($leads),
       'done' => count($results),
+      'audited' => count($results),
+      'total' => count($leads),
     ];
   }
 
@@ -1427,9 +1431,15 @@ function ll_erp_sync_run(array $actor, bool $forceFetch = false, bool $dryRun = 
 
   $status = [
     'ok' => true,
+    'partial' => false,
+    'needs_continue' => false,
+    'complete' => true,
     'phase' => $autoPublish ? 'published' : 'ready',
     'lead_count' => count($leads),
     'result_count' => count($results),
+    'done' => count($results),
+    'audited' => count($results),
+    'total' => count($leads),
     'dashboard_count' => count($dashboards),
     'auto_publish' => $autoPublish,
     'published_count' => is_array($published) ? count($published['published'] ?? []) : 0,
