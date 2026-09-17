@@ -1,0 +1,2 @@
+# Deny web access to ERP sync payloads and secrets on disk
+Require all denied

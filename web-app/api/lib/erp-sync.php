@@ -1,0 +1,1477 @@
+<?php
+
+declare(strict_types=1);
+
+require_once __DIR__ . '/settings.php';
+require_once __DIR__ . '/crypto.php';
+require_once __DIR__ . '/dashboard-publish.php';
+
+const LL_ERP_SYNC_CONFIG_KEY = 'erp_sync_config';
+const LL_ERP_SYNC_COOKIE_KEY = 'erp_sync_cookie_encrypted';
+const LL_ERP_SYNC_CRON_KEY = 'erp_sync_cron_secret_hash';
+const LL_ERP_SYNC_JOB_KEY = 'erp_sync_job';
+const LL_ERP_SYNC_MAX_BYTES = 25_000_000;
+const LL_ERP_SYNC_TIMEOUT = 90;
+
+/** @return array<string, list<string>> */
+function ll_erp_sync_default_field_map(): array
+{
+  return [
+    'mobile' => ['Mobile', 'Mobile Number', 'Mobile No', 'mobile', 'phone', 'PHONE', 'MOBILE_NO'],
+    'project' => ['Project Name', 'Project', 'project', 'PROJECT_NAME'],
+    'registration' => ['Lead Registration Date', 'Registration Date', 'LRD', 'registration'],
+    'telecaller' => ['Telecaller Name', 'Tele Caller Name', 'Agent Name', 'telecaller', 'EXECUTIVE_NAME'],
+    'source' => ['Source', 'Source Name', 'source'],
+    'update' => ['Lead Update Date', 'Call Date', 'Update Date', 'LUD', 'update'],
+    'status' => ['Lead Status', 'Status', 'status', 'LEAD_STATUS'],
+    'comments' => ['Comments', 'Comment', 'Remarks', 'remarks', 'comments'],
+    'next' => ['Next Followup Date', 'Next Follow-up Date', 'NFD', 'next'],
+    'location' => ['Customer Location', 'Location', 'location'],
+    'requirement' => ['Customer Requirement', 'Requirement', 'requirement'],
+    'parameter' => ['Analysis Parameter', 'Analysis Parameters', 'parameter'],
+    'budget' => ['Estimated Budget', 'Budget', 'budget'],
+  ];
+}
+
+function ll_erp_sync_storage_dir(): string
+{
+  $dir = __DIR__ . '/../storage/erp-sync';
+  if (!is_dir($dir)) {
+    @mkdir($dir, 0750, true);
+  }
+  $deny = $dir . '/.htaccess';
+  if (!is_file($deny)) {
+    @file_put_contents($deny, "Require all denied\n");
+  }
+  return $dir;
+}
+
+/** @return array<string, mixed> */
+function ll_erp_sync_default_config(): array
+{
+  return [
+    'report_url' => '',
+    'http_method' => 'GET',
+    'extra_headers' => new stdClass(),
+    'enabled' => false,
+    'auto_publish' => false,
+    'batch_size' => 10,
+    'max_leads_per_run' => 40,
+    'rows_path' => '',
+    'field_map' => ll_erp_sync_default_field_map(),
+    'cookie_configured' => false,
+    'cron_secret_configured' => false,
+    'last_status' => null,
+  ];
+}
+
+/** @return array<string, mixed> */
+function ll_erp_sync_load_config(): array
+{
+  $base = ll_erp_sync_default_config();
+  $row = ll_setting_get(LL_ERP_SYNC_CONFIG_KEY);
+  if ($row && $row['setting_value']) {
+    $decoded = json_decode((string) $row['setting_value'], true);
+    if (is_array($decoded)) {
+      $base = array_merge($base, $decoded);
+    }
+  }
+  if (!isset($base['field_map']) || !is_array($base['field_map'])) {
+    $base['field_map'] = ll_erp_sync_default_field_map();
+  }
+  if (!is_array($base['extra_headers'] ?? null) && !($base['extra_headers'] instanceof stdClass)) {
+    $base['extra_headers'] = [];
+  }
+  $cookieRow = ll_setting_get(LL_ERP_SYNC_COOKIE_KEY);
+  $base['cookie_configured'] = $cookieRow && trim((string) ($cookieRow['setting_value'] ?? '')) !== '';
+  $cronRow = ll_setting_get(LL_ERP_SYNC_CRON_KEY);
+  $base['cron_secret_configured'] = $cronRow && trim((string) ($cronRow['setting_value'] ?? '')) !== '';
+  // Never expose secrets in public config.
+  unset($base['cookie'], $base['cookie_header'], $base['cron_secret']);
+  return $base;
+}
+
+/**
+ * Public-safe config for GET responses (no secrets).
+ * @return array<string, mixed>
+ */
+function ll_erp_sync_public_config(): array
+{
+  $cfg = ll_erp_sync_load_config();
+  if ($cfg['extra_headers'] instanceof stdClass) {
+    $cfg['extra_headers'] = (array) $cfg['extra_headers'];
+  }
+  // Strip any accidental Authorization / Cookie from extra headers listing values.
+  $safeHeaders = [];
+  foreach ((array) ($cfg['extra_headers'] ?? []) as $k => $v) {
+    $lk = strtolower((string) $k);
+    if ($lk === 'cookie' || $lk === 'authorization') {
+      $safeHeaders[$k] = '(stored separately)';
+      continue;
+    }
+    $safeHeaders[$k] = $v;
+  }
+  $cfg['extra_headers'] = $safeHeaders;
+  return $cfg;
+}
+
+/**
+ * Persist config. Body may include cookie / cron_secret which are stored encrypted/hashed.
+ * @param array<string, mixed> $body
+ */
+function ll_erp_sync_save_config(array $body, int $userId): array
+{
+  $current = ll_erp_sync_load_config();
+  $next = $current;
+
+  if (array_key_exists('report_url', $body)) {
+    $next['report_url'] = trim((string) $body['report_url']);
+  }
+  if (array_key_exists('http_method', $body)) {
+    $method = strtoupper(trim((string) $body['http_method']));
+    $next['http_method'] = in_array($method, ['GET', 'POST'], true) ? $method : 'GET';
+  }
+  if (array_key_exists('extra_headers', $body) && is_array($body['extra_headers'])) {
+    $headers = [];
+    foreach ($body['extra_headers'] as $k => $v) {
+      $name = trim((string) $k);
+      if ($name === '') {
+        continue;
+      }
+      $lk = strtolower($name);
+      if ($lk === 'cookie' || $lk === 'authorization') {
+        continue;
+      }
+      $headers[$name] = trim((string) $v);
+    }
+    $next['extra_headers'] = $headers;
+  }
+  if (array_key_exists('enabled', $body)) {
+    $next['enabled'] = (bool) $body['enabled'];
+  }
+  if (array_key_exists('auto_publish', $body)) {
+    $next['auto_publish'] = (bool) $body['auto_publish'];
+  }
+  if (array_key_exists('batch_size', $body)) {
+    $next['batch_size'] = max(1, min(20, (int) $body['batch_size']));
+  }
+  if (array_key_exists('max_leads_per_run', $body)) {
+    $next['max_leads_per_run'] = max(1, min(200, (int) $body['max_leads_per_run']));
+  }
+  if (array_key_exists('rows_path', $body)) {
+    $next['rows_path'] = trim((string) $body['rows_path']);
+  }
+  if (array_key_exists('field_map', $body) && is_array($body['field_map'])) {
+    $map = [];
+    foreach ($body['field_map'] as $fieldId => $aliases) {
+      $id = trim((string) $fieldId);
+      if ($id === '') {
+        continue;
+      }
+      if (is_string($aliases)) {
+        $parts = array_values(array_filter(array_map('trim', explode(',', $aliases)), static fn ($s) => $s !== ''));
+        $map[$id] = $parts;
+      } elseif (is_array($aliases)) {
+        $map[$id] = array_values(array_filter(array_map(static fn ($s) => trim((string) $s), $aliases), static fn ($s) => $s !== ''));
+      }
+    }
+    if ($map) {
+      $next['field_map'] = $map;
+    }
+  }
+
+  // Secrets — never land in the JSON blob.
+  $cookie = trim((string) ($body['cookie'] ?? $body['cookie_header'] ?? ''));
+  if ($cookie !== '') {
+    if (stripos($cookie, 'cookie:') === 0) {
+      $cookie = trim(substr($cookie, 7));
+    }
+    ll_setting_set(LL_ERP_SYNC_COOKIE_KEY, ll_encrypt_secret($cookie), $userId);
+  }
+  if (!empty($body['clear_cookie'])) {
+    ll_setting_delete(LL_ERP_SYNC_COOKIE_KEY);
+  }
+
+  $cronSecret = trim((string) ($body['cron_secret'] ?? ''));
+  if ($cronSecret !== '') {
+    ll_setting_set(LL_ERP_SYNC_CRON_KEY, password_hash($cronSecret, PASSWORD_DEFAULT), $userId);
+  }
+  if (!empty($body['clear_cron_secret'])) {
+    ll_setting_delete(LL_ERP_SYNC_CRON_KEY);
+  }
+
+  unset($next['cookie_configured'], $next['cron_secret_configured'], $next['cookie'], $next['cron_secret']);
+  $json = json_encode($next, JSON_UNESCAPED_UNICODE);
+  if ($json === false) {
+    ll_error('Could not encode ERP sync config');
+  }
+  ll_setting_set(LL_ERP_SYNC_CONFIG_KEY, $json, $userId);
+  return ll_erp_sync_public_config();
+}
+
+function ll_erp_sync_cookie_plaintext(): ?string
+{
+  $row = ll_setting_get(LL_ERP_SYNC_COOKIE_KEY);
+  if (!$row || trim((string) ($row['setting_value'] ?? '')) === '') {
+    return null;
+  }
+  $plain = ll_decrypt_secret((string) $row['setting_value']);
+  return ($plain !== null && $plain !== '') ? $plain : null;
+}
+
+function ll_erp_sync_verify_cron_secret(string $candidate): bool
+{
+  $row = ll_setting_get(LL_ERP_SYNC_CRON_KEY);
+  if (!$row || trim((string) ($row['setting_value'] ?? '')) === '') {
+    return false;
+  }
+  return password_verify($candidate, (string) $row['setting_value']);
+}
+
+/**
+ * Super User session or cron Bearer / X-ERP-Sync-Secret.
+ * @return array{id:int,display_name:string,username:string,is_super:bool}
+ */
+function ll_erp_sync_require_actor(bool $allowCron = false): array
+{
+  if ($allowCron) {
+    $secret = ll_erp_sync_extract_bearer();
+    if ($secret !== null && $secret !== '') {
+      if (!ll_erp_sync_verify_cron_secret($secret)) {
+        ll_error('Invalid cron secret', 401);
+      }
+      return [
+        'id' => 0,
+        'display_name' => 'ERP Sync Cron',
+        'username' => 'erp-sync-cron',
+        'is_super' => true,
+      ];
+    }
+  }
+  $user = ll_require_user();
+  if (empty($user['is_super'])) {
+    ll_error('Only Super User can manage ERP sync', 403);
+  }
+  return $user;
+}
+
+function ll_erp_sync_extract_bearer(): ?string
+{
+  $candidates = [
+    $_SERVER['HTTP_AUTHORIZATION'] ?? '',
+    $_SERVER['REDIRECT_HTTP_AUTHORIZATION'] ?? '',
+    $_SERVER['HTTP_X_ERP_SYNC_SECRET'] ?? '',
+  ];
+  foreach ($candidates as $raw) {
+    $raw = trim((string) $raw);
+    if ($raw === '') {
+      continue;
+    }
+    if (preg_match('/^Bearer\s+(\S+)/i', $raw, $m)) {
+      return $m[1];
+    }
+    // Bare secret via X-ERP-Sync-Secret
+    if (!str_contains(strtolower($raw), ' ')) {
+      return $raw;
+    }
+  }
+  return null;
+}
+
+/** @param array<string, mixed> $status */
+function ll_erp_sync_set_last_status(array $status): void
+{
+  $cfg = ll_erp_sync_load_config();
+  // Never persist cookie values into status.
+  unset($status['cookie'], $status['request_headers']);
+  $cfg['last_status'] = $status;
+  unset($cfg['cookie_configured'], $cfg['cron_secret_configured']);
+  $json = json_encode($cfg, JSON_UNESCAPED_UNICODE);
+  if ($json !== false) {
+    ll_setting_set(LL_ERP_SYNC_CONFIG_KEY, $json, null);
+  }
+}
+
+/**
+ * @return array{ok:bool,status:int,content_type:string,body:string,bytes:int,error?:string,session_expired?:bool}
+ */
+function ll_erp_sync_http_fetch(string $url, string $method, ?string $cookie, array $extraHeaders): array
+{
+  if (!function_exists('curl_init')) {
+    return ['ok' => false, 'status' => 0, 'content_type' => '', 'body' => '', 'bytes' => 0, 'error' => 'cURL required'];
+  }
+  if ($url === '' || !preg_match('#^https?://#i', $url)) {
+    return ['ok' => false, 'status' => 0, 'content_type' => '', 'body' => '', 'bytes' => 0, 'error' => 'Invalid report URL'];
+  }
+
+  $headers = ['Accept: application/json, application/vnd.openxmlformats-officedocument.spreadsheetml.sheet, */*'];
+  foreach ($extraHeaders as $k => $v) {
+    $name = trim((string) $k);
+    $lk = strtolower($name);
+    if ($name === '' || $lk === 'cookie' || $lk === 'authorization') {
+      continue;
+    }
+    $headers[] = $name . ': ' . trim((string) $v);
+  }
+  if ($cookie !== null && $cookie !== '') {
+    $headers[] = 'Cookie: ' . $cookie;
+  }
+
+  $ch = curl_init($url);
+  curl_setopt_array($ch, [
+    CURLOPT_RETURNTRANSFER => true,
+    CURLOPT_FOLLOWLOCATION => true,
+    CURLOPT_MAXREDIRS => 5,
+    CURLOPT_TIMEOUT => LL_ERP_SYNC_TIMEOUT,
+    CURLOPT_CUSTOMREQUEST => $method,
+    CURLOPT_HTTPHEADER => $headers,
+    CURLOPT_USERAGENT => 'LeadLens-ERP-Sync/1.0',
+    CURLOPT_SSL_VERIFYPEER => true,
+  ]);
+  $body = curl_exec($ch);
+  $status = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
+  $contentType = (string) curl_getinfo($ch, CURLINFO_CONTENT_TYPE);
+  $err = curl_error($ch);
+  curl_close($ch);
+
+  if ($body === false) {
+    return ['ok' => false, 'status' => $status, 'content_type' => $contentType, 'body' => '', 'bytes' => 0, 'error' => $err ?: 'fetch failed'];
+  }
+  $bytes = strlen($body);
+  if ($bytes > LL_ERP_SYNC_MAX_BYTES) {
+    return ['ok' => false, 'status' => $status, 'content_type' => $contentType, 'body' => '', 'bytes' => $bytes, 'error' => 'Payload too large'];
+  }
+
+  $sessionExpired = ll_erp_sync_looks_like_login($body, $contentType, $status);
+  $ok = $status >= 200 && $status < 300 && !$sessionExpired && $bytes > 0;
+  return [
+    'ok' => $ok,
+    'status' => $status,
+    'content_type' => $contentType,
+    'body' => $body,
+    'bytes' => $bytes,
+    'session_expired' => $sessionExpired,
+    'error' => $sessionExpired ? 'ERP session expired — refresh Cookie in /dev ERP Sync' : ($ok ? null : ('HTTP ' . $status)),
+  ];
+}
+
+function ll_erp_sync_looks_like_login(string $body, string $contentType, int $status): bool
+{
+  if ($status === 401 || $status === 403) {
+    return true;
+  }
+  $ct = strtolower($contentType);
+  $sample = strtolower(substr($body, 0, 4000));
+  if (str_contains($ct, 'html') || str_starts_with(ltrim($body), '<')) {
+    if (
+      str_contains($sample, 'login')
+      || str_contains($sample, 'signin')
+      || str_contains($sample, 'sign-in')
+      || str_contains($sample, 'j_password')
+      || str_contains($sample, 'session expired')
+      || str_contains($sample, 'please log')
+    ) {
+      return true;
+    }
+  }
+  if (str_contains($sample, '"error"') && (str_contains($sample, 'unauthorized') || str_contains($sample, 'session'))) {
+    return true;
+  }
+  return false;
+}
+
+function ll_erp_sync_store_payload(string $body, string $contentType): string
+{
+  $dir = ll_erp_sync_storage_dir();
+  $name = 'payload-' . gmdate('Ymd-His') . '-' . bin2hex(random_bytes(4)) . '.bin';
+  $path = $dir . '/' . $name;
+  file_put_contents($path, $body);
+  @file_put_contents($dir . '/latest.meta.json', json_encode([
+    'file' => $name,
+    'content_type' => $contentType,
+    'bytes' => strlen($body),
+    'fetched_at' => gmdate('c'),
+  ], JSON_UNESCAPED_UNICODE));
+  // Keep only the newest few payloads.
+  $files = glob($dir . '/payload-*.bin') ?: [];
+  rsort($files);
+  foreach (array_slice($files, 5) as $old) {
+    @unlink($old);
+  }
+  return $name;
+}
+
+/**
+ * @return array{keys: list<string>, row_count: int, sample_row: ?array, rows_path: string, format: string, error?: string}
+ */
+function ll_erp_sync_preview_payload(string $body, string $contentType, string $rowsPath = ''): array
+{
+  $format = ll_erp_sync_detect_format($body, $contentType);
+  if ($format === 'json') {
+    $decoded = json_decode($body, true);
+    if (!is_array($decoded)) {
+      return ['keys' => [], 'row_count' => 0, 'sample_row' => null, 'rows_path' => $rowsPath, 'format' => 'json', 'error' => 'Invalid JSON'];
+    }
+    [$rows, $usedPath] = ll_erp_sync_extract_rows($decoded, $rowsPath);
+    $sample = null;
+    $keys = [];
+    if ($rows) {
+      $first = $rows[0];
+      if (is_array($first)) {
+        $sample = ll_erp_sync_truncate_row($first);
+        $keys = array_map('strval', array_keys($first));
+      }
+    }
+    return [
+      'keys' => $keys,
+      'row_count' => count($rows),
+      'sample_row' => $sample,
+      'rows_path' => $usedPath,
+      'format' => 'json',
+    ];
+  }
+  if ($format === 'xlsx') {
+    try {
+      $rows = ll_erp_sync_parse_xlsx_rows($body);
+    } catch (Throwable $e) {
+      return ['keys' => [], 'row_count' => 0, 'sample_row' => null, 'rows_path' => '', 'format' => 'xlsx', 'error' => $e->getMessage()];
+    }
+    $sample = $rows[0] ?? null;
+    $keys = $sample ? array_map('strval', array_keys($sample)) : [];
+    return [
+      'keys' => $keys,
+      'row_count' => count($rows),
+      'sample_row' => $sample ? ll_erp_sync_truncate_row($sample) : null,
+      'rows_path' => '',
+      'format' => 'xlsx',
+    ];
+  }
+  return ['keys' => [], 'row_count' => 0, 'sample_row' => null, 'rows_path' => '', 'format' => $format, 'error' => 'Unsupported payload format'];
+}
+
+function ll_erp_sync_detect_format(string $body, string $contentType): string
+{
+  $ct = strtolower($contentType);
+  if (str_contains($ct, 'json') || str_starts_with(ltrim($body), '{') || str_starts_with(ltrim($body), '[')) {
+    return 'json';
+  }
+  if (
+    str_contains($ct, 'spreadsheet')
+    || str_contains($ct, 'excel')
+    || str_starts_with($body, 'PK')
+  ) {
+    return 'xlsx';
+  }
+  return 'unknown';
+}
+
+/** @param array<string, mixed> $row */
+function ll_erp_sync_truncate_row(array $row): array
+{
+  $out = [];
+  $i = 0;
+  foreach ($row as $k => $v) {
+    if ($i++ >= 40) {
+      break;
+    }
+    if (is_scalar($v) || $v === null) {
+      $s = (string) $v;
+      $out[$k] = strlen($s) > 120 ? substr($s, 0, 117) . '…' : $s;
+    } else {
+      $out[$k] = '[complex]';
+    }
+  }
+  return $out;
+}
+
+/**
+ * @return array{0: list<array>, 1: string}
+ */
+function ll_erp_sync_extract_rows(array $decoded, string $rowsPath = ''): array
+{
+  if ($rowsPath !== '') {
+    $node = ll_erp_sync_path_get($decoded, $rowsPath);
+    if (is_array($node) && ll_erp_sync_is_list($node)) {
+      return [array_values(array_filter($node, 'is_array')), $rowsPath];
+    }
+  }
+  if (ll_erp_sync_is_list($decoded) && isset($decoded[0]) && is_array($decoded[0])) {
+    return [array_values($decoded), ''];
+  }
+  $candidates = ['data', 'rows', 'records', 'result', 'results', 'reportData', 'ReportData', 'jsondata', 'JSONData', 'list'];
+  foreach ($candidates as $key) {
+    if (!isset($decoded[$key])) {
+      continue;
+    }
+    $node = $decoded[$key];
+    if (is_array($node) && ll_erp_sync_is_list($node) && isset($node[0]) && is_array($node[0])) {
+      return [array_values($node), $key];
+    }
+    if (is_array($node) && !ll_erp_sync_is_list($node)) {
+      foreach (['data', 'rows', 'records', 'list'] as $inner) {
+        if (isset($node[$inner]) && is_array($node[$inner]) && ll_erp_sync_is_list($node[$inner])) {
+          return [array_values(array_filter($node[$inner], 'is_array')), $key . '.' . $inner];
+        }
+      }
+    }
+  }
+  // Deep search first list-of-objects.
+  $found = ll_erp_sync_find_row_list($decoded, '');
+  if ($found !== null) {
+    return $found;
+  }
+  return [[], $rowsPath];
+}
+
+function ll_erp_sync_path_get(array $data, string $path): mixed
+{
+  $parts = array_values(array_filter(explode('.', $path), static fn ($p) => $p !== ''));
+  $node = $data;
+  foreach ($parts as $part) {
+    if (!is_array($node) || !array_key_exists($part, $node)) {
+      return null;
+    }
+    $node = $node[$part];
+  }
+  return $node;
+}
+
+function ll_erp_sync_is_list(array $arr): bool
+{
+  if ($arr === []) {
+    return true;
+  }
+  return array_keys($arr) === range(0, count($arr) - 1);
+}
+
+/** @return ?array{0: list<array>, 1: string} */
+function ll_erp_sync_find_row_list(array $node, string $prefix, int $depth = 0): ?array
+{
+  if ($depth > 5) {
+    return null;
+  }
+  if (ll_erp_sync_is_list($node) && isset($node[0]) && is_array($node[0])) {
+    $keys = array_keys($node[0]);
+    $scalarish = count(array_filter($keys, static fn ($k) => is_string($k))) >= 2;
+    if ($scalarish) {
+      return [array_values(array_filter($node, 'is_array')), $prefix];
+    }
+  }
+  foreach ($node as $k => $v) {
+    if (!is_array($v)) {
+      continue;
+    }
+    $path = $prefix === '' ? (string) $k : $prefix . '.' . $k;
+    $hit = ll_erp_sync_find_row_list($v, $path, $depth + 1);
+    if ($hit !== null) {
+      return $hit;
+    }
+  }
+  return null;
+}
+
+/**
+ * Minimal XLSX → associative rows (first sheet). Requires ZipArchive + SimpleXML.
+ * @return list<array<string, string>>
+ */
+function ll_erp_sync_parse_xlsx_rows(string $binary): array
+{
+  if (!class_exists('ZipArchive')) {
+    throw new RuntimeException('ZipArchive required to parse Excel');
+  }
+  $tmp = tempnam(sys_get_temp_dir(), 'llxlsx');
+  if ($tmp === false) {
+    throw new RuntimeException('Could not create temp file');
+  }
+  file_put_contents($tmp, $binary);
+  $zip = new ZipArchive();
+  if ($zip->open($tmp) !== true) {
+    @unlink($tmp);
+    throw new RuntimeException('Invalid XLSX archive');
+  }
+  $shared = [];
+  $ss = $zip->getFromName('xl/sharedStrings.xml');
+  if ($ss !== false) {
+    $xml = @simplexml_load_string($ss);
+    if ($xml) {
+      foreach ($xml->si as $si) {
+        if (isset($si->t)) {
+          $shared[] = (string) $si->t;
+        } else {
+          $parts = [];
+          foreach ($si->r as $r) {
+            $parts[] = (string) $r->t;
+          }
+          $shared[] = implode('', $parts);
+        }
+      }
+    }
+  }
+  $sheetXml = $zip->getFromName('xl/worksheets/sheet1.xml');
+  $zip->close();
+  @unlink($tmp);
+  if ($sheetXml === false) {
+    throw new RuntimeException('sheet1.xml missing');
+  }
+  $sheet = @simplexml_load_string($sheetXml);
+  if (!$sheet) {
+    throw new RuntimeException('Could not parse sheet XML');
+  }
+  $grid = [];
+  foreach ($sheet->sheetData->row as $row) {
+    $rIdx = (int) $row['r'];
+    foreach ($row->c as $c) {
+      $ref = (string) $c['r'];
+      if (!preg_match('/^([A-Z]+)(\d+)$/', $ref, $m)) {
+        continue;
+      }
+      $col = ll_erp_sync_col_index($m[1]);
+      $type = (string) ($c['t'] ?? '');
+      $val = isset($c->v) ? (string) $c->v : '';
+      if ($type === 's' && $val !== '' && isset($shared[(int) $val])) {
+        $val = $shared[(int) $val];
+      }
+      $grid[$rIdx][$col] = $val;
+    }
+  }
+  if (!$grid) {
+    return [];
+  }
+  ksort($grid);
+  $headerRow = reset($grid);
+  ksort($headerRow);
+  $headers = [];
+  foreach ($headerRow as $col => $label) {
+    $label = trim((string) $label);
+    if ($label !== '') {
+      $headers[$col] = $label;
+    }
+  }
+  $out = [];
+  $firstKey = array_key_first($grid);
+  foreach ($grid as $rIdx => $cols) {
+    if ($rIdx === $firstKey) {
+      continue;
+    }
+    $assoc = [];
+    $empty = true;
+    foreach ($headers as $col => $label) {
+      $v = trim((string) ($cols[$col] ?? ''));
+      if ($v !== '') {
+        $empty = false;
+      }
+      $assoc[$label] = $v;
+    }
+    if (!$empty) {
+      $out[] = $assoc;
+    }
+  }
+  return $out;
+}
+
+function ll_erp_sync_col_index(string $letters): int
+{
+  $n = 0;
+  $len = strlen($letters);
+  for ($i = 0; $i < $len; $i++) {
+    $n = $n * 26 + (ord($letters[$i]) - 64);
+  }
+  return $n;
+}
+
+function ll_erp_sync_norm_key(string $s): string
+{
+  $s = strtolower(trim($s));
+  $s = preg_replace('/[^a-z0-9]+/', '', $s) ?? $s;
+  return $s;
+}
+
+/**
+ * Map raw ERP rows → audit lead objects (simplified parseWorkbook grouping).
+ *
+ * @param list<array<string, mixed>> $rows
+ * @param array<string, list<string>> $fieldMap
+ * @return array{leads: list<array>, row_count: int, lead_count: int, mapped_columns: array<string,string>, missing_required: list<string>}
+ */
+function ll_erp_sync_map_to_leads(array $rows, array $fieldMap): array
+{
+  if (!$rows) {
+    return ['leads' => [], 'row_count' => 0, 'lead_count' => 0, 'mapped_columns' => [], 'missing_required' => ['mobile', 'project']];
+  }
+  $headers = array_map('strval', array_keys($rows[0]));
+  $headerNorm = [];
+  foreach ($headers as $h) {
+    $headerNorm[ll_erp_sync_norm_key($h)] = $h;
+  }
+  $columns = [];
+  foreach ($fieldMap as $fieldId => $aliases) {
+    $candidates = is_array($aliases) ? $aliases : [ (string) $aliases ];
+    array_unshift($candidates, $fieldId);
+    foreach ($candidates as $alias) {
+      $n = ll_erp_sync_norm_key((string) $alias);
+      if ($n !== '' && isset($headerNorm[$n])) {
+        $columns[$fieldId] = $headerNorm[$n];
+        break;
+      }
+    }
+  }
+  $missing = [];
+  if (empty($columns['mobile'])) {
+    $missing[] = 'mobile';
+  }
+  if (empty($columns['project'])) {
+    $missing[] = 'project';
+  }
+
+  $grouped = [];
+  $lastMobile = '';
+  $lastProject = '';
+  foreach ($rows as $index => $row) {
+    if (!is_array($row)) {
+      continue;
+    }
+    $rawMobile = isset($columns['mobile']) ? trim((string) ($row[$columns['mobile']] ?? '')) : '';
+    $rawProject = isset($columns['project']) ? trim((string) ($row[$columns['project']] ?? '')) : '';
+    $normMobile = $rawMobile !== '' ? (ll_erp_sync_indian_mobile($rawMobile) ?: '') : '';
+    if ($rawMobile !== '') {
+      if ($normMobile === '') {
+        continue;
+      }
+      $lastMobile = $normMobile;
+    }
+    if ($rawProject !== '') {
+      $lastProject = $rawProject;
+    }
+    if ($lastMobile === '' || $lastProject === '') {
+      continue;
+    }
+    $values = [];
+    foreach ($fieldMap as $fieldId => $_aliases) {
+      $header = $columns[$fieldId] ?? null;
+      $values[$fieldId] = $header ? trim((string) ($row[$header] ?? '')) : '';
+    }
+    $values['mobile'] = $lastMobile;
+    $values['project'] = $lastProject;
+    $key = $lastProject . ' | ' . $lastMobile;
+    if (!isset($grouped[$key])) {
+      $grouped[$key] = [];
+    }
+    $grouped[$key][] = ['values' => $values, 'rowIndex' => $index];
+  }
+
+  $leads = [];
+  foreach ($grouped as $groupId => $records) {
+    // Fill-down telecaller/status within group.
+    $carry = ['telecaller' => '', 'registration' => '', 'source' => '', 'status' => ''];
+    foreach ($records as &$rec) {
+      foreach ($carry as $k => $v) {
+        $cur = $rec['values'][$k] ?? '';
+        if ($cur !== '') {
+          $carry[$k] = $cur;
+        } elseif ($v !== '') {
+          $rec['values'][$k] = $v;
+        }
+      }
+    }
+    unset($rec);
+    $last = $records[array_key_last($records)];
+    $sv = $last['values'];
+    $commentsHistory = array_map(static fn ($r) => (string) ($r['values']['comments'] ?? ''), $records);
+    $connected = ll_erp_sync_connected_from_parameter((string) ($sv['parameter'] ?? ''));
+    foreach ($records as $r) {
+      if (ll_erp_sync_connected_from_parameter((string) ($r['values']['parameter'] ?? '')) === 'Yes') {
+        $connected = 'Yes';
+        break;
+      }
+    }
+    $localErrors = ll_erp_sync_local_errors($sv, $connected);
+    $auditContext = [
+      's' => $sv['status'] ?? '',
+      'c' => $commentsHistory,
+      'n' => $sv['next'] ?? '',
+      'u' => $sv['update'] ?? '',
+      'l' => $sv['location'] ?? '',
+      'rq' => $sv['requirement'] ?? '',
+      'b' => $sv['budget'] ?? '',
+      'k' => $connected,
+      'le' => $localErrors,
+    ];
+    if (trim((string) ($sv['requirement'] ?? '')) === '') {
+      unset($auditContext['rq']);
+    }
+    if (trim((string) ($sv['budget'] ?? '')) === '') {
+      unset($auditContext['b']);
+    }
+    $leads[] = [
+      'leadId' => $groupId . '#' . $last['rowIndex'],
+      'groupId' => $groupId,
+      'staticValues' => [
+        'project' => $sv['project'] ?? '',
+        'mobile' => $sv['mobile'] ?? '',
+        'registration' => $sv['registration'] ?? '',
+        'telecaller' => $sv['telecaller'] ?? '',
+        'status' => $sv['status'] ?? '',
+        'comments' => $sv['comments'] ?? '',
+        'next' => $sv['next'] ?? '',
+        'overdue' => ll_erp_sync_overdue_display((string) ($sv['status'] ?? ''), (string) ($sv['next'] ?? '')),
+        'callDate' => $sv['update'] ?? '',
+        'update' => $sv['update'] ?? '',
+        'totalFollowups' => count($records),
+        'dayCallCount' => 1,
+        'dayCallIndex' => 1,
+        'connected' => $connected,
+        'location' => $sv['location'] ?? '',
+        'requirement' => $sv['requirement'] ?? '',
+        'parameter' => $sv['parameter'] ?? '',
+        'budget' => $sv['budget'] ?? '',
+        'source' => $sv['source'] ?? '',
+      ],
+      'auditContext' => $auditContext,
+      'localErrors' => $localErrors,
+    ];
+  }
+
+  return [
+    'leads' => $leads,
+    'row_count' => count($rows),
+    'lead_count' => count($leads),
+    'mapped_columns' => $columns,
+    'missing_required' => $missing,
+  ];
+}
+
+function ll_erp_sync_indian_mobile(string $raw): ?string
+{
+  $digits = preg_replace('/\D+/', '', $raw) ?? '';
+  if (strlen($digits) === 12 && str_starts_with($digits, '91')) {
+    $digits = substr($digits, 2);
+  } elseif (strlen($digits) === 11 && str_starts_with($digits, '0')) {
+    $digits = substr($digits, 1);
+  }
+  if (strlen($digits) === 10 && preg_match('/^[6-9]/', $digits)) {
+    return $digits;
+  }
+  return null;
+}
+
+function ll_erp_sync_connected_from_parameter(string $parameter): string
+{
+  $settings = ll_erp_sync_audit_settings();
+  $yes = array_map('ll_erp_sync_norm_key', array_map('trim', explode(',', (string) ($settings['yesValues'] ?? ''))));
+  $no = array_map('ll_erp_sync_norm_key', array_map('trim', explode(',', (string) ($settings['noValues'] ?? ''))));
+  $n = ll_erp_sync_norm_key($parameter);
+  if ($n === '') {
+    return '';
+  }
+  if (in_array($n, $yes, true)) {
+    return 'Yes';
+  }
+  if (in_array($n, $no, true)) {
+    return 'No';
+  }
+  return '';
+}
+
+/** @param array<string, mixed> $sv @return list<string> */
+function ll_erp_sync_local_errors(array $sv, string $connected): array
+{
+  $errors = [];
+  $param = trim((string) ($sv['parameter'] ?? ''));
+  if ($param === '') {
+    $errors[] = 'Analysis Parameter Empty';
+  }
+  if ($connected === 'Yes') {
+    if (trim((string) ($sv['location'] ?? '')) === '') {
+      $errors[] = 'Customer Location Empty';
+    }
+    if (trim((string) ($sv['requirement'] ?? '')) === '') {
+      $errors[] = 'Customer Requirement Empty';
+    }
+    if (trim((string) ($sv['budget'] ?? '')) === '') {
+      $errors[] = 'Estimate Budget Empty';
+    }
+  }
+  return $errors;
+}
+
+function ll_erp_sync_overdue_display(string $status, string $next): int|string
+{
+  if (in_array(ll_erp_sync_norm_key($status), ['lost', 'beyondbudget'], true) || str_contains(ll_erp_sync_norm_key($status), 'beyondbudget')) {
+    return '-';
+  }
+  // Best-effort: if next parses as past date, rough day count; else 0.
+  $ts = strtotime($next);
+  if ($ts === false) {
+    // DD/MM/YYYY
+    if (preg_match('#^(\d{1,2})/(\d{1,2})/(\d{2,4})#', $next, $m)) {
+      $y = (int) $m[3];
+      if ($y < 100) {
+        $y += 2000;
+      }
+      $ts = mktime(0, 0, 0, (int) $m[2], (int) $m[1], $y);
+    }
+  }
+  if ($ts === false) {
+    return 0;
+  }
+  $today = strtotime('today');
+  $days = (int) floor(($today - $ts) / 86400);
+  return max(0, $days);
+}
+
+/** @return array<string, mixed> */
+function ll_erp_sync_audit_settings(): array
+{
+  $row = ll_setting_get('audit_settings');
+  $settings = [];
+  if ($row && $row['setting_value']) {
+    $decoded = json_decode((string) $row['setting_value'], true);
+    if (is_array($decoded)) {
+      $settings = $decoded;
+    }
+  }
+  if (empty($settings['model'])) {
+    $settings['model'] = 'gpt-4o-mini';
+  }
+  if (empty($settings['batchSize'])) {
+    $settings['batchSize'] = 10;
+  }
+  if (empty($settings['yesValues'])) {
+    $settings['yesValues'] = 'Site Visited, In Progress, Immediate Possession, Not Interested';
+  }
+  if (empty($settings['noValues'])) {
+    $settings['noValues'] = 'RNR, 1st RNR, 2nd RNR, 3rd RNR, Continues RNR, Call Disconnected, Wrong Number';
+  }
+  return $settings;
+}
+
+/**
+ * Call OpenAI chat completions and return decoded content JSON.
+ * @param array<string, mixed> $body
+ * @return array<string, mixed>
+ */
+function ll_erp_sync_openai_chat(array $body): array
+{
+  $key = ll_openai_key_plaintext();
+  if ($key === null || $key === '') {
+    throw new RuntimeException('Server OpenAI API key is not configured');
+  }
+  if (!function_exists('curl_init')) {
+    throw new RuntimeException('cURL required for OpenAI');
+  }
+  $payload = json_encode($body, JSON_UNESCAPED_UNICODE);
+  if ($payload === false) {
+    throw new RuntimeException('Could not encode OpenAI body');
+  }
+  $ch = curl_init('https://api.openai.com/v1/chat/completions');
+  curl_setopt_array($ch, [
+    CURLOPT_RETURNTRANSFER => true,
+    CURLOPT_POST => true,
+    CURLOPT_TIMEOUT => 180,
+    CURLOPT_HTTPHEADER => [
+      'Authorization: Bearer ' . $key,
+      'Content-Type: application/json',
+      'Accept: application/json',
+    ],
+    CURLOPT_POSTFIELDS => $payload,
+  ]);
+  $response = curl_exec($ch);
+  $status = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
+  $err = curl_error($ch);
+  curl_close($ch);
+  if ($response === false) {
+    throw new RuntimeException('OpenAI request failed: ' . ($err ?: 'unknown'));
+  }
+  $decoded = json_decode($response, true);
+  if (!is_array($decoded)) {
+    throw new RuntimeException('OpenAI returned invalid JSON');
+  }
+  if ($status < 200 || $status >= 300) {
+    $msg = $decoded['error']['message'] ?? ('HTTP ' . $status);
+    throw new RuntimeException('OpenAI ' . $status . ': ' . $msg);
+  }
+  return $decoded;
+}
+
+function ll_erp_sync_build_system_prompt(array $settings): string
+{
+  $rules = '';
+  if (!empty($settings['rules']) && is_array($settings['rules'])) {
+    $i = 1;
+    foreach ($settings['rules'] as $rule) {
+      if (!is_array($rule)) {
+        continue;
+      }
+      $instruction = trim((string) ($rule['instruction'] ?? ''));
+      if ($instruction === '') {
+        continue;
+      }
+      $field = trim((string) ($rule['field'] ?? 'check'));
+      $rules .= $i . '. ' . $field . ': ' . $instruction . "\n";
+      $i++;
+    }
+  }
+  $extra = trim((string) ($settings['additionalInstructions'] ?? ''));
+  return "LeadLens ERP server auditor. Evidence only. Never invent facts.\n"
+    . "OUTPUT: JSON object with a[] items {id,q,e,i,o,r}. Echo each id.\n"
+    . "q=comment quality 0-10; e=error labels from allowed set only; i=0|1 buying intent; o=18-28 words; r=20-40 words.\n"
+    . "Allowed e labels: Lead Status Not Aligned With Comments | Customer Requirement Empty | Incorrect Customer Requirement | Customer Comment Quality Not Appropriate.\n"
+    . "Never emit Follow-up Missed, Budget/Location/Parameter Empty, or TAT labels (those are in le).\n"
+    . "Never recommend Status→Lost (Cold is the floor).\n\n"
+    . "RUN CHECKS:\n" . ($rules !== '' ? $rules : "none\n")
+    . ($extra !== '' ? "\nEXTRA:\n" . $extra : '');
+}
+
+/**
+ * @param list<array> $leads
+ * @return list<array>
+ */
+function ll_erp_sync_audit_batch(array $leads, array $settings): array
+{
+  if (!$leads) {
+    return [];
+  }
+  $modelInput = [];
+  foreach ($leads as $lead) {
+    $ctx = $lead['auditContext'] ?? [];
+    $modelInput[] = array_merge(['id' => $lead['leadId']], is_array($ctx) ? $ctx : []);
+  }
+  $model = (string) ($settings['model'] ?? 'gpt-4o-mini');
+  $maxTokens = max(500, count($leads) * 140);
+  $schema = [
+    'type' => 'object',
+    'additionalProperties' => false,
+    'required' => ['a'],
+    'properties' => [
+      'a' => [
+        'type' => 'array',
+        'items' => [
+          'type' => 'object',
+          'additionalProperties' => false,
+          'required' => ['id', 'q', 'e', 'i', 'o', 'r'],
+          'properties' => [
+            'id' => ['type' => 'string'],
+            'q' => ['type' => 'integer', 'minimum' => 0, 'maximum' => 10],
+            'e' => ['type' => 'array', 'items' => ['type' => 'string']],
+            'i' => ['type' => 'integer', 'enum' => [0, 1]],
+            'o' => ['type' => 'string'],
+            'r' => ['type' => 'string'],
+          ],
+        ],
+      ],
+    ],
+  ];
+  $body = [
+    'model' => $model,
+    'temperature' => 0,
+    'max_tokens' => $maxTokens,
+    'messages' => [
+      ['role' => 'system', 'content' => ll_erp_sync_build_system_prompt($settings)],
+      [
+        'role' => 'user',
+        'content' => 'Audit ' . count($leads) . " call(s). Echo each id. Judge status vs comments; comment quality; buying intent. le=local errors — explain in o/r, never copy into e.\n"
+          . json_encode(['L' => $modelInput], JSON_UNESCAPED_UNICODE),
+      ],
+    ],
+    'response_format' => [
+      'type' => 'json_schema',
+      'json_schema' => [
+        'name' => 'll_audit',
+        'strict' => true,
+        'schema' => $schema,
+      ],
+    ],
+  ];
+  // Reasoning models need max_completion_tokens.
+  if (preg_match('/(^|[^a-z])(gpt-5|o1|o3|o4)([.-]|$)/i', $model) && !str_contains(strtolower($model), 'gpt-5-chat')) {
+    unset($body['max_tokens'], $body['temperature']);
+    $body['max_completion_tokens'] = $maxTokens;
+  }
+
+  $aiList = null;
+  $lastError = null;
+  for ($attempt = 1; $attempt <= 3; $attempt++) {
+    try {
+      $data = ll_erp_sync_openai_chat($body);
+      $content = $data['choices'][0]['message']['content'] ?? null;
+      if (!$content) {
+        throw new RuntimeException('OpenAI returned no content');
+      }
+      $parsed = json_decode((string) $content, true);
+      if (!is_array($parsed) || !isset($parsed['a']) || !is_array($parsed['a'])) {
+        throw new RuntimeException('OpenAI response missing a[]');
+      }
+      $aiList = $parsed['a'];
+      break;
+    } catch (Throwable $e) {
+      $lastError = $e;
+      $msg = $e->getMessage();
+      if (str_contains($msg, '429')) {
+        sleep(30);
+        continue;
+      }
+      if ($attempt < 3) {
+        usleep($attempt * 1_500_000);
+      }
+    }
+  }
+  if ($aiList === null) {
+    throw $lastError ?? new RuntimeException('Audit batch failed');
+  }
+
+  $byId = [];
+  foreach ($aiList as $item) {
+    if (!is_array($item)) {
+      continue;
+    }
+    $id = trim((string) ($item['id'] ?? ''));
+    if ($id !== '') {
+      $byId[$id] = $item;
+    }
+  }
+
+  $allowed = [
+    'Lead Status Not Aligned With Comments' => true,
+    'Customer Requirement Empty' => true,
+    'Incorrect Customer Requirement' => true,
+    'Customer Comment Quality Not Appropriate' => true,
+  ];
+  $high = [
+    'Follow-up Missed' => true,
+    'Customer Requirement Empty' => true,
+    'Customer Comment Quality Not Appropriate' => true,
+  ];
+
+  $results = [];
+  foreach ($leads as $lead) {
+    $id = trim((string) ($lead['leadId'] ?? ''));
+    $ai = $byId[$id] ?? null;
+    if ($ai === null) {
+      throw new RuntimeException('OpenAI omitted lead id: ' . $id);
+    }
+    $sv = $lead['staticValues'] ?? [];
+    $local = is_array($lead['localErrors'] ?? null) ? $lead['localErrors'] : [];
+    $aiErrors = [];
+    if (isset($ai['e']) && is_array($ai['e'])) {
+      foreach ($ai['e'] as $label) {
+        $label = trim((string) $label);
+        if (isset($allowed[$label])) {
+          $aiErrors[] = $label;
+        }
+      }
+    }
+    $errors = array_values(array_unique(array_merge($local, $aiErrors)));
+    $q = (int) ($ai['q'] ?? 5);
+    $q = max(0, min(10, $q));
+    $intent = ((int) ($ai['i'] ?? 0) === 1) ? 'Yes' : 'No';
+    $severity = !$errors ? 'NONE' : (array_filter($errors, static fn ($e) => isset($high[$e])) ? 'HIGH' : 'MEDIUM');
+    $results[] = array_merge($sv, [
+      'commentQuality' => $q,
+      'errorTypes' => $errors ? implode(', ', $errors) : 'None',
+      'errorSeverity' => $severity,
+      'buyingIntent' => $intent,
+      'observation' => trim((string) ($ai['o'] ?? '')),
+      'recommendation' => trim((string) ($ai['r'] ?? '')),
+    ]);
+  }
+  return $results;
+}
+
+/**
+ * Group audited results into dashboard publish payloads (same shape as confirmUploadDashboard).
+ * @param list<array> $results
+ * @return list<array{telecaller_name:string,title:string,results:list,source_file:string,lead_count:int}>
+ */
+function ll_erp_sync_build_dashboards(array $results, string $sourceFile): array
+{
+  $byName = [];
+  foreach ($results as $row) {
+    if (!is_array($row)) {
+      continue;
+    }
+    $name = trim((string) ($row['telecaller'] ?? $row['telecallerName'] ?? ''));
+    if ($name === '') {
+      $name = 'Unassigned';
+    }
+    if (!isset($byName[$name])) {
+      $byName[$name] = [];
+    }
+    $byName[$name][] = $row;
+  }
+  $dashboards = [];
+  foreach ($byName as $name => $rows) {
+    $dashboards[] = [
+      'telecaller_name' => $name,
+      'title' => $name . ' · ' . ($sourceFile !== '' ? $sourceFile : 'ERP sync'),
+      'results' => $rows,
+      'source_file' => $sourceFile,
+      'lead_count' => count($rows),
+      'meta' => ['source' => 'erp_sync'],
+    ];
+  }
+  return $dashboards;
+}
+
+/** @return ?array<string, mixed> */
+function ll_erp_sync_load_job(): ?array
+{
+  $row = ll_setting_get(LL_ERP_SYNC_JOB_KEY);
+  if (!$row || !$row['setting_value']) {
+    return null;
+  }
+  $decoded = json_decode((string) $row['setting_value'], true);
+  return is_array($decoded) ? $decoded : null;
+}
+
+/** @param ?array<string, mixed> $job */
+function ll_erp_sync_save_job(?array $job): void
+{
+  if ($job === null) {
+    ll_setting_delete(LL_ERP_SYNC_JOB_KEY);
+    return;
+  }
+  $json = json_encode($job, JSON_UNESCAPED_UNICODE);
+  if ($json === false) {
+    throw new RuntimeException('Could not encode job');
+  }
+  ll_setting_set(LL_ERP_SYNC_JOB_KEY, $json, null);
+}
+
+/**
+ * Full or resumable pipeline: fetch → parse → audit → optional publish.
+ * @return array<string, mixed>
+ */
+function ll_erp_sync_run(array $actor, bool $forceFetch = false, bool $dryRun = false): array
+{
+  @set_time_limit(240);
+  $cfg = ll_erp_sync_load_config();
+  if (empty($cfg['enabled']) && empty($forceFetch) && $actor['username'] === 'erp-sync-cron') {
+    return ['ok' => false, 'error' => 'ERP sync is disabled', 'status' => 'disabled'];
+  }
+
+  $job = ll_erp_sync_load_job();
+  $resume = is_array($job) && ($job['status'] ?? '') === 'auditing' && !empty($job['leads']);
+
+  if (!$resume || $forceFetch) {
+    $url = trim((string) ($cfg['report_url'] ?? ''));
+    $cookie = ll_erp_sync_cookie_plaintext();
+    if ($url === '') {
+      ll_erp_sync_set_last_status(['ok' => false, 'phase' => 'fetch', 'error' => 'Report URL not configured', 'at' => gmdate('c')]);
+      return ['ok' => false, 'error' => 'Report URL not configured', 'phase' => 'fetch'];
+    }
+    if ($cookie === null) {
+      ll_erp_sync_set_last_status(['ok' => false, 'phase' => 'fetch', 'error' => 'Cookie not configured', 'session_expired' => true, 'at' => gmdate('c')]);
+      return ['ok' => false, 'error' => 'Cookie not configured — paste Cookie header in /dev ERP Sync', 'phase' => 'fetch', 'session_expired' => true];
+    }
+    $extra = $cfg['extra_headers'] ?? [];
+    if ($extra instanceof stdClass) {
+      $extra = (array) $extra;
+    }
+    $fetch = ll_erp_sync_http_fetch($url, (string) ($cfg['http_method'] ?? 'GET'), $cookie, (array) $extra);
+    if (!empty($fetch['session_expired'])) {
+      ll_erp_sync_set_last_status([
+        'ok' => false,
+        'phase' => 'fetch',
+        'error' => $fetch['error'] ?? 'session_expired',
+        'session_expired' => true,
+        'http_status' => $fetch['status'],
+        'at' => gmdate('c'),
+      ]);
+      ll_erp_sync_save_job(null);
+      return [
+        'ok' => false,
+        'error' => $fetch['error'] ?? 'ERP session expired',
+        'phase' => 'fetch',
+        'session_expired' => true,
+      ];
+    }
+    if (empty($fetch['ok'])) {
+      ll_erp_sync_set_last_status([
+        'ok' => false,
+        'phase' => 'fetch',
+        'error' => $fetch['error'] ?? 'fetch failed',
+        'http_status' => $fetch['status'],
+        'at' => gmdate('c'),
+      ]);
+      return ['ok' => false, 'error' => $fetch['error'] ?? 'fetch failed', 'phase' => 'fetch'];
+    }
+
+    $file = ll_erp_sync_store_payload($fetch['body'], $fetch['content_type']);
+    $format = ll_erp_sync_detect_format($fetch['body'], $fetch['content_type']);
+    if ($format === 'json') {
+      $decoded = json_decode($fetch['body'], true);
+      if (!is_array($decoded)) {
+        return ['ok' => false, 'error' => 'Invalid JSON payload', 'phase' => 'parse'];
+      }
+      [$rows] = ll_erp_sync_extract_rows($decoded, (string) ($cfg['rows_path'] ?? ''));
+    } elseif ($format === 'xlsx') {
+      try {
+        $rows = ll_erp_sync_parse_xlsx_rows($fetch['body']);
+      } catch (Throwable $e) {
+        return ['ok' => false, 'error' => $e->getMessage(), 'phase' => 'parse'];
+      }
+    } else {
+      return ['ok' => false, 'error' => 'Unsupported payload format', 'phase' => 'parse'];
+    }
+
+    $mapped = ll_erp_sync_map_to_leads($rows, (array) ($cfg['field_map'] ?? ll_erp_sync_default_field_map()));
+    if (!empty($mapped['missing_required'])) {
+      return [
+        'ok' => false,
+        'error' => 'Missing required field mapping: ' . implode(', ', $mapped['missing_required']),
+        'phase' => 'parse',
+        'mapped_columns' => $mapped['mapped_columns'],
+      ];
+    }
+    if (!$mapped['leads']) {
+      return ['ok' => false, 'error' => 'No leads mapped from ERP payload', 'phase' => 'parse'];
+    }
+
+    $job = [
+      'status' => 'auditing',
+      'payload_file' => $file,
+      'source_file' => 'ERP:' . $file,
+      'leads' => $mapped['leads'],
+      'results' => [],
+      'cursor' => 0,
+      'row_count' => $mapped['row_count'],
+      'lead_count' => $mapped['lead_count'],
+      'started_at' => gmdate('c'),
+      'actor_name' => $actor['display_name'] ?? $actor['username'] ?? 'system',
+    ];
+    ll_erp_sync_save_job($job);
+  }
+
+  $settings = ll_erp_sync_audit_settings();
+  $batchSize = max(1, min(20, (int) ($cfg['batch_size'] ?? $settings['batchSize'] ?? 10)));
+  $maxPerRun = max($batchSize, (int) ($cfg['max_leads_per_run'] ?? 40));
+  $leads = $job['leads'];
+  $cursor = (int) ($job['cursor'] ?? 0);
+  $results = is_array($job['results'] ?? null) ? $job['results'] : [];
+  $processedThisRun = 0;
+
+  while ($cursor < count($leads) && $processedThisRun < $maxPerRun) {
+    $batch = array_slice($leads, $cursor, $batchSize);
+    try {
+      $batchResults = ll_erp_sync_audit_batch($batch, $settings);
+    } catch (Throwable $e) {
+      $job['status'] = 'error';
+      $job['error'] = $e->getMessage();
+      $job['cursor'] = $cursor;
+      $job['results'] = $results;
+      ll_erp_sync_save_job($job);
+      ll_erp_sync_set_last_status([
+        'ok' => false,
+        'phase' => 'audit',
+        'error' => $e->getMessage(),
+        'cursor' => $cursor,
+        'lead_count' => count($leads),
+        'at' => gmdate('c'),
+      ]);
+      return [
+        'ok' => false,
+        'error' => $e->getMessage(),
+        'phase' => 'audit',
+        'cursor' => $cursor,
+        'lead_count' => count($leads),
+        'done' => count($results),
+      ];
+    }
+    foreach ($batchResults as $row) {
+      $results[] = $row;
+    }
+    $cursor += count($batch);
+    $processedThisRun += count($batch);
+    $job['cursor'] = $cursor;
+    $job['results'] = $results;
+    $job['status'] = $cursor >= count($leads) ? 'audited' : 'auditing';
+    ll_erp_sync_save_job($job);
+  }
+
+  if ($cursor < count($leads)) {
+    ll_erp_sync_set_last_status([
+      'ok' => true,
+      'phase' => 'audit',
+      'partial' => true,
+      'cursor' => $cursor,
+      'lead_count' => count($leads),
+      'done' => count($results),
+      'at' => gmdate('c'),
+    ]);
+    return [
+      'ok' => true,
+      'partial' => true,
+      'phase' => 'audit',
+      'message' => 'Audited ' . count($results) . ' / ' . count($leads) . ' leads — call run again to continue',
+      'cursor' => $cursor,
+      'lead_count' => count($leads),
+      'done' => count($results),
+    ];
+  }
+
+  $sourceFile = (string) ($job['source_file'] ?? 'ERP sync');
+  $dashboards = ll_erp_sync_build_dashboards($results, $sourceFile);
+  $published = null;
+  $autoPublish = !empty($cfg['auto_publish']) && !$dryRun;
+
+  if ($autoPublish && $dashboards) {
+    $published = ll_publish_telecaller_dashboards($dashboards, $actor);
+    $job['status'] = 'published';
+    $job['published_at'] = gmdate('c');
+    $job['published_count'] = count($published['published'] ?? []);
+  } else {
+    $job['status'] = 'ready';
+    $job['publish_skipped'] = $dryRun ? 'dry_run' : (empty($cfg['auto_publish']) ? 'auto_publish_off' : 'no_dashboards');
+  }
+  ll_erp_sync_save_job($job);
+
+  $status = [
+    'ok' => true,
+    'phase' => $autoPublish ? 'published' : 'ready',
+    'lead_count' => count($leads),
+    'result_count' => count($results),
+    'dashboard_count' => count($dashboards),
+    'auto_publish' => $autoPublish,
+    'published_count' => is_array($published) ? count($published['published'] ?? []) : 0,
+    'at' => gmdate('c'),
+  ];
+  ll_erp_sync_set_last_status($status);
+
+  return array_merge(['ok' => true], $status, [
+    'dashboards_preview' => array_map(static fn ($d) => [
+      'telecaller_name' => $d['telecaller_name'],
+      'lead_count' => $d['lead_count'],
+      'title' => $d['title'],
+    ], $dashboards),
+    'published' => $published,
+  ]);
+}
+
+/**
+ * Publish the last completed ERP sync job results (manual, when auto-publish off).
+ * @return array<string, mixed>
+ */
+function ll_erp_sync_publish_last(array $actor): array
+{
+  $job = ll_erp_sync_load_job();
+  if (!$job || empty($job['results']) || !is_array($job['results'])) {
+    ll_error('No completed ERP sync results to publish');
+  }
+  $sourceFile = (string) ($job['source_file'] ?? 'ERP sync');
+  $dashboards = ll_erp_sync_build_dashboards($job['results'], $sourceFile);
+  if (!$dashboards) {
+    ll_error('No dashboards to publish');
+  }
+  $out = ll_publish_telecaller_dashboards($dashboards, $actor);
+  $job['status'] = 'published';
+  $job['published_at'] = gmdate('c');
+  $job['published_count'] = count($out['published']);
+  ll_erp_sync_save_job($job);
+  ll_erp_sync_set_last_status([
+    'ok' => true,
+    'phase' => 'published',
+    'published_count' => count($out['published']),
+    'at' => gmdate('c'),
+  ]);
+  return $out;
+}

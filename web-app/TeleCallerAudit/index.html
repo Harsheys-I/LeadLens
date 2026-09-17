@@ -46,6 +46,7 @@
             <button class="nav-item nav-item-child" data-view="published" data-perm="telecaller.dashboard" data-label-flat="Bucket 1"><span>▦</span>Dashboard</button>
             <button class="nav-item nav-item-child" data-view="history" data-perm="telecaller.history"><span>◷</span>History</button>
             <button class="nav-item nav-item-child" data-view="settings" data-perm="telecaller.settings"><span>⚙</span>Settings</button>
+            <button class="nav-item nav-item-child hidden" data-view="erp-sync" id="nav-erp-sync" data-super-dev-only="1"><span>⟳</span>ERP Sync</button>
           </div>
         </div>
         <div class="nav-group is-collapsed" data-nav-group="perf">
@@ -219,6 +220,64 @@
                 <button id="import-settings" type="button" class="secondary-button">Import settings JSON</button>
                 <input id="import-settings-file" type="file" accept="application/json,.json" hidden>
               </div>
+            </section>
+          </div>
+        </div>
+      </section>
+
+      <section id="view-erp-sync" class="view">
+        <div class="settings-page">
+          <div class="settings-toolbar" role="toolbar" aria-label="ERP Sync actions">
+            <div class="settings-toolbar-copy">
+              <strong>ERP Sync</strong>
+              <span>/dev only · Super User. Fetch ERP report via saved Cookie → Audit AI → optional dashboard publish. Auto-publish is off by default.</span>
+            </div>
+            <div class="inline-actions settings-toolbar-actions">
+              <button id="erp-sync-save" type="button" class="primary-button">Save</button>
+              <button id="erp-sync-test" type="button" class="secondary-button">Test fetch</button>
+              <button id="erp-sync-run" type="button" class="secondary-button">Run sync</button>
+              <span id="erp-sync-message" class="form-message"></span>
+            </div>
+          </div>
+
+          <div class="settings-sections">
+            <section class="settings-card">
+              <div class="card-title"><h2>1 · Report request</h2><p>Paste the authenticated report URL and Cookie header from a working browser cURL. Never share cookies outside Super User.</p></div>
+              <label>Report URL<input id="erp-sync-url" type="url" autocomplete="off" placeholder="https://…/getFunction.do?…"></label>
+              <label>HTTP method
+                <select id="erp-sync-method">
+                  <option value="GET">GET</option>
+                  <option value="POST">POST</option>
+                </select>
+              </label>
+              <label>Cookie header<textarea id="erp-sync-cookie" rows="3" autocomplete="off" placeholder="JSESSIONID=…; other=…"></textarea></label>
+              <p id="erp-sync-cookie-hint" class="muted form-message"></p>
+              <label>Extra headers (JSON object, optional)<textarea id="erp-sync-headers" rows="3" placeholder='{"Accept":"application/json"}'></textarea></label>
+              <label>JSON rows path (optional)<input id="erp-sync-rows-path" type="text" placeholder="data.rows — leave blank to auto-detect"></label>
+            </section>
+
+            <section class="settings-card">
+              <div class="card-title"><h2>2 · Field map</h2><p>Comma-separated ERP column aliases per LeadLens field. After Test fetch, match keys from the preview.</p></div>
+              <div id="erp-sync-field-map" class="config-list"></div>
+              <div id="erp-sync-preview" class="muted form-message" style="white-space:pre-wrap;margin-top:0.75rem"></div>
+            </section>
+
+            <section class="settings-card">
+              <div class="card-title"><h2>3 · Pipeline &amp; cron</h2><p>Enable cron only after a dry-run succeeds. Auto-publish writes live TeleCaller boards (same MySQL as production).</p></div>
+              <div class="field-grid run-grid">
+                <label class="check-row"><input id="erp-sync-enabled" type="checkbox"><span>Enable cron / scheduled runs</span></label>
+                <label class="check-row"><input id="erp-sync-auto-publish" type="checkbox"><span>Auto-publish dashboards after audit</span></label>
+                <label>Batch size<input id="erp-sync-batch-size" type="number" min="1" max="20" value="10"></label>
+                <label>Max leads / invocation<input id="erp-sync-max-leads" type="number" min="1" max="200" value="40"></label>
+              </div>
+              <label>Cron bearer secret<input id="erp-sync-cron-secret" type="password" autocomplete="new-password" placeholder="Set a long random secret"></label>
+              <p id="erp-sync-cron-hint" class="muted form-message"></p>
+              <div class="inline-actions" style="margin-top:0.75rem">
+                <button id="erp-sync-continue" type="button" class="secondary-button">Continue audit job</button>
+                <button id="erp-sync-publish" type="button" class="secondary-button">Publish last results</button>
+                <button id="erp-sync-refresh-status" type="button" class="text-button">Refresh status</button>
+              </div>
+              <pre id="erp-sync-status" class="muted" style="margin-top:0.75rem;white-space:pre-wrap;font-size:0.85rem"></pre>
             </section>
           </div>
         </div>

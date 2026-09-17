@@ -105,6 +105,16 @@ export const SettingsApi = {
   clearOpenaiKey: () => api('settings/openai-key', {method: 'POST', body: {clear: true}}),
 };
 
+export const ErpSyncApi = {
+  status: () => api('erp-sync/status'),
+  getConfig: () => api('erp-sync/config'),
+  saveConfig: (body) => api('erp-sync/config', {method: 'POST', body}),
+  testFetch: () => api('erp-sync/test-fetch', {method: 'POST', body: {}}),
+  run: (body = {}) => api('erp-sync/run', {method: 'POST', body}),
+  publish: () => api('erp-sync/publish', {method: 'POST', body: {}}),
+  job: (full = false) => api(`erp-sync/job${full ? '?full=1' : ''}`),
+};
+
 export const JobsApi = {
   list: () => api('jobs/list'),
   get: (jobId) => api(`jobs/${encodeURIComponent(jobId)}`),

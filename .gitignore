@@ -1,3 +1,5 @@
 # Never commit Hostinger credentials
 web-app/api/config.local.php
+web-app/api/storage/erp-sync/*.bin
+web-app/api/storage/erp-sync/*.meta.json
 .cursor/
