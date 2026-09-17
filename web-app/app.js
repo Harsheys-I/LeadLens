@@ -8,7 +8,7 @@ import {persistJob,removeJobSynced,clearJobsSynced,pullJobsFromServer} from "./j
 import {mountPerfReportUpload,mountPerfPublishedDashboard,refreshPerfPublished} from "./perf-dashboard.js?v=6.0.0.dev";
 import {appUrl, homePath} from "./app-base.js?v=6.0.0.dev";
 import {initTheme} from "./theme.js?v=6.0.0.dev";
-import {mountErpSyncPanel, loadErpSyncPanel, canShowErpSync} from "./erp-sync.js?v=6.0.0.dev.erp-ux1";
+import {mountErpSyncPanel, loadErpSyncPanel, canShowErpSync} from "./erp-sync.js?v=6.0.0.dev.erp-handoff1";
 
 const $=id=>document.getElementById(id);
 const ids=["page-title","key-state","run-name","pause-run","download-result","progress-label","progress-percent","progress-bar","metric-leads","metric-excel-rows","metric-calls","metric-batch","metric-completed","metric-status","metric-input-tokens","metric-cached-tokens","metric-output-tokens","metric-duration","metric-cost","live-log","clear-console","history-list","clear-history","api-key","remember-key","toggle-key","save-key","forget-key","key-message","batch-size","concurrency","model","input-field-config","add-input-field","ai-field-config","output-field-config","yes-values","no-values","input-price","cached-price","output-price","save-settings","reset-settings","settings-message","toast","mobile-menu","active-job-switch","sort-field","sort-direction","app-version","export-settings","import-settings","import-settings-file","update-banner","update-banner-text","reload-app","key-modal","onboard-key","onboard-toggle","onboard-remember","onboard-message","onboard-save","onboard-skip","sidebar-version","sidebar-notes","review-drop-zone","review-file-input","review-drop-hint","review-file-list","review-validation","start-review","review-run-panel","review-aggregate","review-cards","review-dashboard-panel","review-dashboard-mount","download-review-excel","review-open-console","review-precounts","review-live-progress","review-progress-label","review-progress-percent","review-progress-bar","review-post-actions","create-review-dashboard","export-dashboard-pdf","upload-dashboard-btn","upload-dashboard-modal","upload-telecaller-list","upload-dash-message","upload-dash-confirm","upload-dash-cancel","published-list","refresh-published","published-dashboard-panel","published-dash-title","published-dash-meta","published-dash-actions","published-dashboard-mount","shell-user-label","shell-logout","shell-account"];
@@ -995,6 +995,35 @@ function setReviewFormat(format){
   reviewParsedFiles=[];
   renderReviewFileList();
   updateReviewValidation();
+}
+
+/**
+ * Hand off ERP-mapped leads into Bucket 1 Audit (same path as Excel RAW upload).
+ * Does not auto-start — user clicks Start Audit → for progress / Stop / Publish.
+ * @param {object} entry parseWorkbook-shaped object with leads[]
+ */
+function loadErpIntoAudit(entry){
+  if(!entry?.leads?.length){
+    toast("No ERP leads to load.");
+    return;
+  }
+  reviewFormat="raw";
+  document.querySelectorAll("[data-review-format]").forEach(button=>{
+    button.classList.toggle("active",button.dataset.reviewFormat==="raw");
+  });
+  if(els["review-drop-hint"]){
+    els["review-drop-hint"].textContent="ERP Sync fetch · mapped leads ready · click Start Audit → (same as Excel RAW)";
+  }
+  const packed={
+    ...entry,
+    sourceFormat:"raw",
+    splitPreview:splitLeadsByTelecaller(entry.leads||[])
+  };
+  reviewParsedFiles=[packed];
+  renderReviewFileList();
+  updateReviewValidation();
+  showView("review");
+  toast(`${entry.leads.length.toLocaleString()} ERP leads ready — click Start Audit →`);
 }
 
 function scheduleReviewProgress(){
@@ -2233,7 +2262,7 @@ async function bootTeleCallerAudit(){
   if(hasPermission("telecaller.bucket1")||hasPermission("telecaller.settings"))maybePromptForApiKey();
   mountPerfReportUpload({hasPermission,toast,showView});
   mountPerfPublishedDashboard({hasPermission,canViewAll:canSeeComparativeKpis});
-  mountErpSyncPanel({toast,showView});
+  mountErpSyncPanel({toast,showView,loadErpIntoAudit});
   if(canShowErpSync()&&location.hash==="#erp-sync"){
     await loadErpSyncPanel();
     showView("erp-sync");

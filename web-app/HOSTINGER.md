@@ -60,4 +60,4 @@ The API fell back to `config.example.php` because live `config.local.php` is mis
 
 ## ERP Sync (`/dev` only)
 
-Automated ERP report fetch → Audit AI → optional dashboard publish lives under `/dev` for Super User. See **[ERP-SYNC.md](./ERP-SYNC.md)** for Cookie setup, Test fetch, and the Hostinger cron one-liner.
+Fetch ERP report → store raw JSON → hand off to Bucket 1 Audit (primary). Optional server OpenAI / cron is advanced. See **[ERP-SYNC.md](./ERP-SYNC.md)**.
