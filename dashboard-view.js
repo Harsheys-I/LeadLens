@@ -890,7 +890,7 @@ function openLeadDetailModal(row){
       ? "dashboard-lead-detail-item dashboard-lead-detail-wide"
       : "dashboard-lead-detail-item");
     item.append(el("span", "dashboard-lead-detail-label", label));
-    const value = el("div", "dashboard-lead-detail-value", text || "-");
+    const value = el("div", "dashboard-lead-detail-value", text || "—");
     if(key === "severity"){
       value.classList.add(`dashboard-sev`, `dashboard-sev-${String(row?.severity || "").toLowerCase()}`);
     }

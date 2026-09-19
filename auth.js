@@ -116,7 +116,7 @@ export function moduleTilesForUser(user = currentUser){
       superOnly: true,
       devOnly: true,
       soon: false,
-      desc: 'SuperUser CSV prompt auditor - custom prompt + Structured Outputs',
+      desc: 'SuperUser CSV prompt auditor — custom prompt + Structured Outputs',
       icon: `<svg viewBox="0 0 96 96" fill="none" aria-hidden="true">
         <rect x="18" y="22" width="60" height="52" rx="8" stroke="currentColor" stroke-width="3.5"/>
         <path d="M30 40h36M30 52h24M30 64h16" stroke="currentColor" stroke-width="3" stroke-linecap="round"/>

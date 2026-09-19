@@ -68,7 +68,7 @@ export const AdminApi = {
 
 export const NotifApi = {
   list: () => api('notifications'),
-  // POST to /notifications with action in body - extra path segments and DELETE/PUT
+  // POST to /notifications with action in body — extra path segments and DELETE/PUT
   // are unreliable on Hostinger/LiteSpeed (rewrite truncation / method blocks).
   markRead: (id) => api('notifications', {method: 'POST', body: {action: 'read', id}}),
   markAllRead: () => api('notifications', {method: 'POST', body: {action: 'read-all'}}),
@@ -183,9 +183,9 @@ export const SettingsApi = {
   saveDebug: (settings) => api('settings/debug', {method: 'PUT', body: {settings}}),
   openaiKeyStatus: () => api('settings/openai-key-status'),
   getOpenaiKey: () => api('settings/openai-key'),
-  // POST - Hostinger/shared hosts often block PUT
+  // POST — Hostinger/shared hosts often block PUT
   saveOpenaiKey: (api_key) => api('settings/openai-key', {method: 'POST', body: {api_key}}),
-  // POST clear - Hostinger/shared hosts often block DELETE
+  // POST clear — Hostinger/shared hosts often block DELETE
   clearOpenaiKey: () => api('settings/openai-key', {method: 'POST', body: {clear: true}}),
 };
 
@@ -208,7 +208,7 @@ export const JobsApi = {
   list: () => api('jobs/list'),
   get: (jobId) => api(`jobs/${encodeURIComponent(jobId)}`),
   upsert: (job) => api('jobs/upsert', {method: 'POST', body: {job}}),
-  // POST - Hostinger/shared hosts often block DELETE
+  // POST — Hostinger/shared hosts often block DELETE
   remove: (jobId) => api('jobs/delete', {method: 'POST', body: {job_id: jobId}}),
   clear: () => api('jobs/clear', {method: 'POST', body: {}}),
 };

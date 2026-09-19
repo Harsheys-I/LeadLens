@@ -1,5 +1,5 @@
 /**
- * Sales Graph Excel parse - Leads / Visits / Booked sheets.
+ * Sales Graph Excel parse — Leads / Visits / Booked sheets.
  *
  * Shared layout (sheet1):
  * - Row 0: [blank…, axis-label spacer, YYYYMM…, Totals]
@@ -252,7 +252,7 @@ export function parseSalesGraphSheet(buffer, opts = {}) {
       colMap.push({index: i, kind: "month", month: label});
       continue;
     }
-    // Axis spacer (e.g. "Year+Month" / "Lead Registration Year + Month") - drop
+    // Axis spacer (e.g. "Year+Month" / "Lead Registration Year + Month") — drop
   }
 
   const missing = [];
@@ -277,7 +277,7 @@ export function parseSalesGraphSheet(buffer, opts = {}) {
     };
   }
 
-  // Keep month order as in sheet (do not re-sort - preserves odd future months like 202704)
+  // Keep month order as in sheet (do not re-sort — preserves odd future months like 202704)
   const monthsOrdered = [...months];
 
   let fillProject = "";

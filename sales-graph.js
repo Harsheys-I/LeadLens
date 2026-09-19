@@ -27,7 +27,7 @@ const els = Object.fromEntries(ids.map(id => [id, $(id)]));
 if (els["sidebar-version"]) els["sidebar-version"].textContent = `v${APP_VERSION}`;
 
 const titles = {upload: "Upload", dashboard: "Dashboard"};
-const RELEASE_NOTES = "v8.0.0.stable: SEO module - Guru Punvaanii audit command center in GPP AI (live scanner, technical/on-page/schema/CWV/traffic, 30-day plan) with LeadLens theme and module.seo permission.";
+const RELEASE_NOTES = "v8.0.0.stable: SEO module — Guru Punvaanii audit command center in GPP AI (live scanner, technical/on-page/schema/CWV/traffic, 30-day plan) with LeadLens theme and module.seo permission.";
 
 let leadsParsed = null;
 let visitsParsed = null;

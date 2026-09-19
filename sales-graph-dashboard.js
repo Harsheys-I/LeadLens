@@ -1,5 +1,5 @@
 /**
- * Sales Graph dashboard - KPI strip, multi-style chart gallery, tabular views.
+ * Sales Graph dashboard — KPI strip, multi-style chart gallery, tabular views.
  * Destroy/recreate Chart.js instances on every render.
  */
 
@@ -19,7 +19,7 @@ const COLOR_BOOKED_DL = "#5b7c99";
 const COLOR_BOOKED_CANCEL = "#a65d57";
 const COLOR_BOOKED_DECL = "#2a6f7a";
 
-/** Excel / internal status keys - keep compatible with sheet parsing. */
+/** Excel / internal status keys — keep compatible with sheet parsing. */
 const STATUS_DEMAND = "Demand Letter";
 const STATUS_CANCEL = "Cancel";
 
@@ -109,7 +109,7 @@ function num(n) {
 }
 
 function pct(n) {
-  if (!Number.isFinite(n)) return "-";
+  if (!Number.isFinite(n)) return "—";
   return `${(n * 100).toFixed(1)}%`;
 }
 
@@ -225,7 +225,7 @@ function sizeScrollableCanvas(scrollEl, canvasWrap, categoryCount, categoryWidth
     containerW = parent?.clientWidth || 0;
   }
   const width = Math.max(containerW || minW, minW);
-  // Only the inner wrap is wider than the scrollport - never stretch the card/page.
+  // Only the inner wrap is wider than the scrollport — never stretch the card/page.
   canvasWrap.style.width = `${width}px`;
   canvasWrap.style.minWidth = `${width}px`;
   canvasWrap.style.maxWidth = "none";
@@ -245,7 +245,7 @@ function sizeScrollableCanvas(scrollEl, canvasWrap, categoryCount, categoryWidth
 /**
  * Horizontal-only chart scroll: only intercept primarily-horizontal wheel
  * (|deltaX| > |deltaY|) or Shift+wheel. Primarily vertical wheel must NOT
- * preventDefault - let the page scroll normally.
+ * preventDefault — let the page scroll normally.
  */
 function bindScrollContainment(scrollEl) {
   if (!scrollEl || scrollEl.dataset.sgScrollBound === "1") return;
@@ -256,7 +256,7 @@ function bindScrollContainment(scrollEl) {
     const shiftHorizontal = e.shiftKey && Math.abs(dy) > 0;
     const primarilyHorizontal = Math.abs(dx) > Math.abs(dy);
     if (!primarilyHorizontal && !shiftHorizontal) {
-      // Vertical (or diagonal-vertical) - do not trap; page scrolls.
+      // Vertical (or diagonal-vertical) — do not trap; page scrolls.
       return;
     }
     const maxScroll = scrollEl.scrollWidth - scrollEl.clientWidth;
@@ -482,24 +482,24 @@ function renderKpis(mount, payload, state) {
   const items = [];
   if (showL) items.push(["Total Leads", num(leadsTotal)]);
   if (showV) items.push(["Total Visits", num(visitsTotal)]);
-  // No Total Booked KPI - same value as Sales Declaration (Demand Letter + Cancel).
+  // No Total Booked KPI — same value as Sales Declaration (Demand Letter + Cancel).
   if (showSD) items.push([LABEL_SALES_DECLARATION, num(leadDecl)]);
   if (showB) items.push([LABEL_BOOKED, num(demandTotal)]);
   if (showC) items.push([LABEL_CANCELED, num(cancelTotal)]);
   if (showL) items.push(["Avg Leads / Month", num(leadsTotal / monthCount)]);
   if (showV) items.push(["Avg Visits / Month", num(visitsTotal / monthCount)]);
   if (showSD) items.push(["Avg Sales Declaration / Month", num(leadDecl / monthCount)]);
-  // Avg Booked = status Booked (Demand Letter) only - not Sales Declaration total.
+  // Avg Booked = status Booked (Demand Letter) only — not Sales Declaration total.
   if (showB) items.push(["Avg Booked / Month", num(demandTotal / monthCount)]);
   if (showC) items.push(["Avg Canceled / Month", num(cancelTotal / monthCount)]);
   if (showL && showV) {
-    items.push(["Visits / Leads", leadsTotal > 0 ? pct(visitsTotal / leadsTotal) : "-"]);
+    items.push(["Visits / Leads", leadsTotal > 0 ? pct(visitsTotal / leadsTotal) : "—"]);
   }
   if (showV && showBookedFamily) {
-    items.push(["Booked / Visits", visitsTotal > 0 ? pct(leadDecl / visitsTotal) : "-"]);
+    items.push(["Booked / Visits", visitsTotal > 0 ? pct(leadDecl / visitsTotal) : "—"]);
   }
   if (showL && showBookedFamily) {
-    items.push(["Booked / Leads", leadsTotal > 0 ? pct(leadDecl / leadsTotal) : "-"]);
+    items.push(["Booked / Leads", leadsTotal > 0 ? pct(leadDecl / leadsTotal) : "—"]);
   }
   items.push(["Months", String(ms.length)]);
   const projNames = filterDimNames(
@@ -597,7 +597,7 @@ function lvbSplitBarDatasets(leadsData, visitsData, demandData, cancelData, decl
   ];
 }
 
-// -- Filter / slicer helpers --
+// —— Filter / slicer helpers ——
 
 /** Prefer Excel Source; fall back to legacy sourceNormalized for older payloads. */
 function sourceKey(row) {
@@ -844,7 +844,7 @@ function filterDimNames(names, selected, kind) {
  * Shared multi-checkbox slicer control.
  * Exposes `details.sgSetValues(next)` to refresh the option list (e.g. Year→Year+Month).
  * @param {object} opts
- * @param {number} [opts.minSelected=0] - refuse to clear below this many
+ * @param {number} [opts.minSelected=0] — refuse to clear below this many
  */
 function multiSlicer(label, allValues, selectedSet, {
   displayFn = null,
@@ -1298,7 +1298,7 @@ function renderChartsGallery(mount, payload, state, register) {
 
   const chartOpts = {state, register};
 
-  // -- Trends --
+  // —— Trends ——
   const trends = makeSection("Trends", "Monthly volume (Leads → Visits → Booked by status)");
   const trendsGrid = el("div", "dashboard-charts sg-chart-grid");
   mountHeroDualAxis(
@@ -1325,7 +1325,7 @@ function renderChartsGallery(mount, payload, state, register) {
   trends.append(trendsGrid);
   mount.append(trends);
 
-  // -- Project comparison --
+  // —— Project comparison ——
   const projects = makeSection("By project", "Grouped bars (all projects) and share of volume");
   const projGrid = el("div", "dashboard-charts sg-chart-grid");
   mountHeroDualAxis(
@@ -1386,7 +1386,7 @@ function renderChartsGallery(mount, payload, state, register) {
   projects.append(projGrid);
   mount.append(projects);
 
-  // -- Source --
+  // —— Source ——
   const sources = makeSection("By source", "Grouped by Excel Source · partners and channels");
   const srcGrid = el("div", "dashboard-charts sg-chart-grid");
   mountHeroDualAxis(
@@ -1444,7 +1444,7 @@ function renderChartsGallery(mount, payload, state, register) {
   sources.append(srcGrid);
   mount.append(sources);
 
-  // -- Booked status --
+  // —— Booked status ——
   if (booked.byStatus && Object.keys(booked.byStatus).length) {
     const statusKeys = orderStatusKeys(Object.keys(booked.byStatus));
     const statusSec = makeSection(
@@ -1508,7 +1508,7 @@ function renderChartsGallery(mount, payload, state, register) {
     });
   }
 
-  // -- Heatmaps --
+  // —— Heatmaps ——
   const heat = makeSection("Heatmaps", "Project × Month intensity (Leads, Visits, Booked)");
   const heatProjectsAll = projectKeys.slice(0, 20);
 
@@ -1880,7 +1880,7 @@ export function renderSalesGraphDashboard(mount, payload, opts = {}) {
   }
 
   if (opts.preview) {
-    mount.append(el("p", "sg-preview-banner", "Local preview - not yet published."));
+    mount.append(el("p", "sg-preview-banner", "Local preview — not yet published."));
   } else if (opts.meta || payload.title) {
     const bits = [];
     if (payload.title) bits.push(payload.title);
@@ -2026,9 +2026,9 @@ function buildKpiItemsForPdf(payload, state) {
   if (showSD) items.push(["Avg Sales Declaration / Month", num(leadDecl / monthCount)]);
   if (showB) items.push(["Avg Booked / Month", num(demandTotal / monthCount)]);
   if (showC) items.push(["Avg Canceled / Month", num(cancelTotal / monthCount)]);
-  if (showL && showV) items.push(["Visits / Leads", leadsTotal > 0 ? pct(visitsTotal / leadsTotal) : "-"]);
-  if (showV && showBookedFamily) items.push(["Booked / Visits", visitsTotal > 0 ? pct(leadDecl / visitsTotal) : "-"]);
-  if (showL && showBookedFamily) items.push(["Booked / Leads", leadsTotal > 0 ? pct(leadDecl / leadsTotal) : "-"]);
+  if (showL && showV) items.push(["Visits / Leads", leadsTotal > 0 ? pct(visitsTotal / leadsTotal) : "—"]);
+  if (showV && showBookedFamily) items.push(["Booked / Visits", visitsTotal > 0 ? pct(leadDecl / visitsTotal) : "—"]);
+  if (showL && showBookedFamily) items.push(["Booked / Leads", leadsTotal > 0 ? pct(leadDecl / leadsTotal) : "—"]);
   items.push(["Months", String(ms.length)]);
   return items;
 }

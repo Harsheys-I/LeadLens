@@ -83,7 +83,7 @@ function openAccountModal(){
   if (!user || !accountModal) return;
   $('account-username').value = user.username || '';
   $('account-display').value = user.display_name || '';
-  $('account-telecaller').value = user.telecaller_name || '- set by Admin only -';
+  $('account-telecaller').value = user.telecaller_name || '— set by Admin only —';
   $('account-pw-current').value = '';
   $('account-pw-new').value = '';
   $('account-pw-confirm').value = '';

@@ -1,5 +1,5 @@
 /**
- * Lightweight motion helpers - soft CSS + tiny JS hooks (no React/build step).
+ * Lightweight motion helpers — soft CSS + tiny JS hooks (no React/build step).
  */
 (function () {
   if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;

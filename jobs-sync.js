@@ -31,7 +31,7 @@ async function pushNow(job){
   try {
     await JobsApi.upsert(job);
   } catch {
-    /* offline / forbidden - local copy remains */
+    /* offline / forbidden — local copy remains */
   }
 }
 

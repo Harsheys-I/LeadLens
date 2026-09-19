@@ -1,5 +1,5 @@
 /**
- * Team Forms - org, form builder, task builder, assignee workspace, review board.
+ * Team Forms — org, form builder, task builder, assignee workspace, review board.
  */
 import {APP_VERSION} from './audit.js?v=8.0.0.stable';
 import {requireAuth, logout, hasPermission, getUser, changePassword, updateProfile} from './auth.js?v=8.0.0.stable';
@@ -802,7 +802,7 @@ $('tf-modal-form')?.addEventListener('submit', async e => {
   }
 });
 
-/* -- Workspace -- */
+/* —— Workspace —— */
 async function refreshWorkspace(){
   try {
     workspaceData = await TeamFormsApi.workspace();
@@ -882,7 +882,7 @@ function renderAssignedTasks(tasks){
   mount.replaceChildren(table);
 }
 
-/* -- Org -- */
+/* —— Org —— */
 async function refreshOrg(){
   try {
     const [d, g] = await Promise.all([
@@ -1155,7 +1155,7 @@ function openAddMember(g){
   });
 }
 
-/* -- Form Builder -- */
+/* —— Form Builder —— */
 async function refreshBuilder(){
   try {
     if (!workspaceData) workspaceData = await TeamFormsApi.workspace();
@@ -1237,7 +1237,7 @@ async function openBuilderForm(formId){
     $('builder-form-title').textContent = builderForm.title;
     $('builder-form-meta').textContent =
       `${builderForm.department_name} · ${builderForm.group_name}` +
-      (builderForm.description ? ` - ${builderForm.description}` : '');
+      (builderForm.description ? ` — ${builderForm.description}` : '');
     $('builder-delete-form')?.classList.toggle('hidden', !canDeleteForm(builderForm));
     renderBuilderFields();
   } catch (err) {
@@ -1465,7 +1465,7 @@ function builderFieldOrderIndex(fieldId){
 
 function builderFieldRefLabel(fieldId, withLabel = true){
   const i = builderFieldOrderIndex(fieldId);
-  if (i < 0) return '-';
+  if (i < 0) return '—';
   const n = `#${i + 1}`;
   if (!withLabel) return n;
   return `${n} ${builderForm.fields[i].label}`;
@@ -1478,7 +1478,7 @@ function numericFieldOptions(selected, excludeId = null){
   );
   return fields.map(f =>
     `<option value="${f.id}" ${Number(selected) === Number(f.id) ? 'selected' : ''}>${escapeHtml(builderFieldRefLabel(f.id))}</option>`
-  ).join('') || '<option value="">- add number fields first -</option>';
+  ).join('') || '<option value="">— add number fields first —</option>';
 }
 
 function openFieldModal(existing = null){
@@ -1531,7 +1531,7 @@ function openNewForm(){
     return;
   }
   openModal('New template', `
-    <p class="muted">A reusable form. Creating it does not assign work - use Task Builder when you are ready.</p>
+    <p class="muted">A reusable form. Creating it does not assign work — use Task Builder when you are ready.</p>
     <label>Title<input name="title" required></label>
     <label>Description<textarea name="description" rows="2"></textarea></label>
   `, async () => {
@@ -1779,7 +1779,7 @@ async function openTaskBuilderForm(formId){
     $('task-builder-form-title').textContent = taskBuilderForm.title;
     $('task-builder-form-meta').textContent =
       `${taskBuilderForm.department_name} · ${taskBuilderForm.group_name}` +
-      (taskBuilderForm.description ? ` - ${taskBuilderForm.description}` : '');
+      (taskBuilderForm.description ? ` — ${taskBuilderForm.description}` : '');
     markTaskBuilderFormSelected(taskBuilderForm.id);
     const sameDraft = taskBuilderTask
       && Number(taskBuilderTask.form_id) === Number(taskBuilderForm.id)
@@ -1952,7 +1952,7 @@ function renderTaskBuilderAssign(form, task){
   });
 }
 
-/* -- Review -- */
+/* —— Review —— */
 async function refreshReview({silent = false} = {}){
   try {
     const data = await TeamFormsApi.reviewTasks();
@@ -1998,7 +1998,7 @@ function renderReviewBoard(tasks){
   mount.replaceChildren(table);
 }
 
-/* -- Task detail -- */
+/* —— Task detail —— */
 async function openTask(taskId, backView = 'workspace'){
   if (currentTask && Number(currentTask.id) !== Number(taskId)) {
     try { await flushTaskAutosave(); } catch { /* keep navigating */ }
@@ -2346,7 +2346,7 @@ function appendTaskFields(formMount, task, {systemMode = 'all', columns = 1} = {
       const who = document.createElement('span');
       who.className = 'muted';
       who.style.fontWeight = '400';
-      who.textContent = task.assignee_name || '-';
+      who.textContent = task.assignee_name || '—';
       wrap.append(who);
       target.append(wrap);
       continue;
@@ -2354,7 +2354,7 @@ function appendTaskFields(formMount, task, {systemMode = 'all', columns = 1} = {
       const who = document.createElement('span');
       who.className = 'muted';
       who.style.fontWeight = '400';
-      who.textContent = reviewerNames(task) || '-';
+      who.textContent = reviewerNames(task) || '—';
       wrap.append(who);
       target.append(wrap);
       continue;
@@ -2383,7 +2383,7 @@ function appendTaskFields(formMount, task, {systemMode = 'all', columns = 1} = {
       input = document.createElement('select');
       const blank = document.createElement('option');
       blank.value = '';
-      blank.textContent = '-';
+      blank.textContent = '—';
       input.append(blank);
       for (const opt of f.options || []) {
         const o = document.createElement('option');
@@ -2415,7 +2415,7 @@ function appendTaskFields(formMount, task, {systemMode = 'all', columns = 1} = {
           const empty = document.createElement('span');
           empty.className = 'muted';
           empty.style.fontWeight = '400';
-          empty.textContent = href || '-';
+          empty.textContent = href || '—';
           wrap.append(empty);
         }
         target.append(wrap);
@@ -2608,7 +2608,7 @@ function applyTaskMeta(task){
   if (currentView === 'task-builder' && taskBuilderForm && $('task-builder-form-meta')) {
     $('task-builder-form-meta').textContent =
       `${taskBuilderForm.department_name} · ${taskBuilderForm.group_name}` +
-      (taskBuilderForm.description ? ` - ${taskBuilderForm.description}` : '');
+      (taskBuilderForm.description ? ` — ${taskBuilderForm.description}` : '');
   }
 }
 
@@ -2704,7 +2704,7 @@ function updateNavVisibility(){
   if (reviewBtn) reviewBtn.classList.toggle('hidden', !isReviewerAnywhere());
 }
 
-/* -- Shell wiring -- */
+/* —— Shell wiring —— */
 function readSidebarCollapsedPref(){
   try { return localStorage.getItem(storageKey('sidebarCollapsed')) === '1'; }
   catch { return false; }

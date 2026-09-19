@@ -272,7 +272,7 @@ function syncApiKeySettingsUi(){
   const hint=document.getElementById("api-key-server-hint");
   if(hint){
     if(serverKeyConfigured&&!isSuper){
-      hint.textContent="Server API key is configured. Audits use the server proxy - you do not need to paste a key.";
+      hint.textContent="Server API key is configured. Audits use the server proxy — you do not need to paste a key.";
     }else if(serverKeyConfigured&&isSuper){
       hint.textContent="Server API key is saved (encrypted). Paste a new key and click Save to server to replace it.";
     }else if(!isSuper){
@@ -331,7 +331,7 @@ async function validateAndSaveKey(key,remember,messageEl,buttonEl,{toServer=fals
   syncApiKeySettingsUi();
   if(messageEl){
     const where=remember?"Saved on this device.":"Saved for this session.";
-    messageEl.textContent=result.ok?`${result.message} ${where}`:`${result.message} Saved anyway - ${where}`;
+    messageEl.textContent=result.ok?`${result.message} ${where}`:`${result.message} Saved anyway — ${where}`;
   }
   return true;
 }
@@ -342,7 +342,7 @@ function openKeyModal(){
     if(serverKeyConfigured)return;
     if(els["key-modal-title"])els["key-modal-title"].textContent="OpenAI key not configured";
     const copy=els["key-modal"].querySelector(".key-modal-copy");
-    if(copy)copy.textContent="Ask a Super User to save the OpenAI API key in Settings. Audits use the server key - you should not paste one here.";
+    if(copy)copy.textContent="Ask a Super User to save the OpenAI API key in Settings. Audits use the server key — you should not paste one here.";
     els["onboard-key"]?.closest("label")?.classList.add("hidden");
     els["onboard-remember"]?.closest("label")?.classList.add("hidden");
     if(els["onboard-save"])els["onboard-save"].classList.add("hidden");
@@ -354,7 +354,7 @@ function openKeyModal(){
   if(serverKeyConfigured)return;
   if(els["key-modal-title"])els["key-modal-title"].textContent="Connect your OpenAI API key";
   const copy=els["key-modal"].querySelector(".key-modal-copy");
-  if(copy)copy.textContent="Save the key to the server (encrypted). Admin and other audit users will use it via the server proxy - they never need to paste a key.";
+  if(copy)copy.textContent="Save the key to the server (encrypted). Admin and other audit users will use it via the server proxy — they never need to paste a key.";
   els["onboard-key"]?.closest("label")?.classList.remove("hidden");
   els["onboard-remember"]?.closest("label")?.classList.add("hidden");
   if(els["onboard-save"]){
@@ -407,7 +407,7 @@ function durationText(ms){const seconds=Math.max(0,Math.floor(ms/1000)),minutes=
 function estimatedCost(job){
   const reviewUsage=job.reviewTokenUsage||{input:0,cached:0,output:0};
   const total=job.tokenUsage||{input:0,cached:0,output:0};
-  // Review tokens are folded into tokenUsage after the second pass - split for dual rates.
+  // Review tokens are folded into tokenUsage after the second pass — split for dual rates.
   const auditUsage={
     input:Math.max(0,number(total.input)-number(reviewUsage.input)),
     cached:Math.max(0,number(total.cached)-number(reviewUsage.cached)),
@@ -487,19 +487,19 @@ function renderProgress(job){
   const pendingLeft=Object.keys(job.pendingBatches||{}).length;
   els["run-name"].textContent=job.fileName||"No active audit";
   els["progress-label"].textContent=job.status==="completed"
-    ?(job.mode==="telecaller-review"?"TeleCaller report ready":job.mode==="telecaller-review-parent"?(job.sourceFormat==="audit"?"Excel Audit complete - dashboard ready":"Excel RAW audit complete - dashboard ready"):"Audit complete")
+    ?(job.mode==="telecaller-review"?"TeleCaller report ready":job.mode==="telecaller-review-parent"?(job.sourceFormat==="audit"?"Excel Audit complete — dashboard ready":"Excel RAW audit complete — dashboard ready"):"Audit complete")
     :job.status==="reviewing"
     ?"Building TeleCaller report…"
     :job.status==="running"
     ?`Keeping ${concurrency} batch request${concurrency>1?"s":""} in flight${pendingLeft?` · ${pendingLeft} batch(es) waiting to checkpoint`:""}…`
-    :job.status==="paused"?"Audit paused - ready to resume":job.status==="failed"?"Audit stopped - saved work is safe":"Waiting for a file";
+    :job.status==="paused"?"Audit paused — ready to resume":job.status==="failed"?"Audit stopped — saved work is safe":"Waiting for a file";
   els["progress-percent"].textContent=`${pct}%`;
   els["progress-bar"].style.width=`${pct}%`;
-  els["metric-leads"].textContent=uniqueLeadCount(job)||"-";
-  if(els["metric-excel-rows"])els["metric-excel-rows"].textContent=job.rowCount?Number(job.rowCount).toLocaleString():"-";
-  if(els["metric-calls"])els["metric-calls"].textContent=job.callCount!=null?Number(job.callCount).toLocaleString():(job.rowCount?Number(job.rowCount).toLocaleString():"-");
-  els["metric-batch"].textContent=batches?`${Math.min((job.nextBatch||0)+1,batches)} / ${batches}`:"-";
-  els["metric-completed"].textContent=totalAudited?`${done} / ${totalAudited}`:"-";
+  els["metric-leads"].textContent=uniqueLeadCount(job)||"—";
+  if(els["metric-excel-rows"])els["metric-excel-rows"].textContent=job.rowCount?Number(job.rowCount).toLocaleString():"—";
+  if(els["metric-calls"])els["metric-calls"].textContent=job.callCount!=null?Number(job.callCount).toLocaleString():(job.rowCount?Number(job.rowCount).toLocaleString():"—");
+  els["metric-batch"].textContent=batches?`${Math.min((job.nextBatch||0)+1,batches)} / ${batches}`:"—";
+  els["metric-completed"].textContent=totalAudited?`${done} / ${totalAudited}`:"—";
   els["metric-status"].textContent=job.status?job.status[0].toUpperCase()+job.status.slice(1):"Idle";
   els["metric-input-tokens"].textContent=`${number(usage.input).toLocaleString()} (${billable.toLocaleString()} billable)`;
   els["metric-cached-tokens"].textContent=number(usage.cached).toLocaleString();
@@ -568,7 +568,7 @@ function schedulePendingPersist(job){
       await persistJob(job);
     }).catch(error=>{
       addLog(job,`Could not save pending checkpoint: ${error.message}`,"error");
-      toast("Checkpoint save failed - free disk space or resume after reload.");
+      toast("Checkpoint save failed — free disk space or resume after reload.");
       if(currentJob?.id===job.id)renderProgress(job);
     });
   },1500));
@@ -591,7 +591,7 @@ function throttleProgress(job){
 
 /**
  * Record a finished batch. Checkpoints only advance in order (1,2,3…).
- * Out-of-order API finishes stay in memory - we do NOT IndexedDB-write on every
+ * Out-of-order API finishes stay in memory — we do NOT IndexedDB-write on every
  * out-of-order completion (that was blocking the contiguous flush behind ~20 heavy saves).
  */
 async function commitBatch(job,index,rows){
@@ -624,7 +624,7 @@ async function commitBatch(job,index,rows){
       throttleProgress(job);
     }else{
       const waitingFor=(job.nextBatch||0)+1;
-      addLog(job,`Batch ${index+1} API done (${rows?.length||0} audited) - progress updated; checkpoint waits for batch ${waitingFor}.`);
+      addLog(job,`Batch ${index+1} API done (${rows?.length||0} audited) — progress updated; checkpoint waits for batch ${waitingFor}.`);
       schedulePendingPersist(job);
       throttleProgress(job);
     }
@@ -678,7 +678,7 @@ async function runJob(job,{navigate=false}={}){
   if(reviewOnly){
     addLog(job,`TeleCaller report: ${job.telecallerName||job.fileName} · ${job.results.length} audited rows · in-app dashboard from audit metrics · app ${APP_VERSION}.`);
   }else{
-    addLog(job,`Run started: live pool of ${concurrency} (next batch fires the instant one frees a slot), batch size ${job.settings.batchSize} leads, model ${job.settings.model}, app ${APP_VERSION}. Checkpoints stay in order - later batches may finish API first and wait.`);
+    addLog(job,`Run started: live pool of ${concurrency} (next batch fires the instant one frees a slot), batch size ${job.settings.batchSize} leads, model ${job.settings.model}, app ${APP_VERSION}. Checkpoints stay in order — later batches may finish API first and wait.`);
   }
   await persistJob(job);
   // Reviews: only paint Run Console when this job is already selected (parallel workers must not steal).
@@ -735,7 +735,7 @@ async function runJob(job,{navigate=false}={}){
           quietLogs?(message,level)=>{if(level==="error"||level==="warn")addLog(job,message,level);}:((message,level)=>addLog(job,message,level)),
           persistUsage
         );
-        // Checkpoint in background - do NOT await before starting the next API call.
+        // Checkpoint in background — do NOT await before starting the next API call.
         checkpointTasks.push(commitBatch(job,index,rows));
       }catch(error){
         if(error.name==="AbortError"){
@@ -761,11 +761,11 @@ async function runJob(job,{navigate=false}={}){
 
     if(isReview){
       job.reviewStatus="skipped";
-      addLog(job,"Audit complete - TeleCaller dashboard will use audit metrics.","success");
+      addLog(job,"Audit complete — TeleCaller dashboard will use audit metrics.","success");
     }
 
     if(isParent){
-      addLog(job,"Excel RAW audit complete - splitting by TeleCaller for in-app dashboard…","success");
+      addLog(job,"Excel RAW audit complete — splitting by TeleCaller for in-app dashboard…","success");
       await spawnCombinedReviewChildren(job);
     }
 
@@ -884,7 +884,7 @@ function createReviewJob({fileName,parentFileName,sheetName,telecallerName,leads
   };
 }
 
-/** Post-audit child: review pass only - never re-audits. */
+/** Post-audit child: review pass only — never re-audits. */
 function createReviewOnlyJob({parentJobId,parentFileName,sheetName,telecallerName,results,leads,leadCount,callCount}){
   const rows=Array.isArray(results)?results:[];
   return{
@@ -924,11 +924,11 @@ function createReviewOnlyJob({parentJobId,parentFileName,sheetName,telecallerNam
 }
 
 /**
- * After Combined parent audit: split results by telecaller into completed report jobs (in-app dashboard from audit metrics - no AI review queue).
+ * After Combined parent audit: split results by telecaller into completed report jobs (in-app dashboard from audit metrics — no AI review queue).
  */
 async function spawnCombinedReviewChildren(parentJob){
   if(Array.isArray(parentJob.childReviewIds)&&parentJob.childReviewIds.length){
-    addLog(parentJob,`TeleCaller report splits already exist (${parentJob.childReviewIds.length}) - refreshing.`);
+    addLog(parentJob,`TeleCaller report splits already exist (${parentJob.childReviewIds.length}) — refreshing.`);
     for(const id of parentJob.childReviewIds){
       const child=liveJobs.get(id)||await getJob(id);
       if(child?.results?.length){
@@ -975,7 +975,7 @@ async function spawnCombinedReviewChildren(parentJob){
   parentJob.updatedAt=timestamp();
   await persistJob(parentJob);
   saveReviewSessionIds();
-  addLog(parentJob,`Split into ${children.length} TeleCaller dashboard${children.length===1?"":"s"} (audit metrics only - no AI review pass).`,"success");
+  addLog(parentJob,`Split into ${children.length} TeleCaller dashboard${children.length===1?"":"s"} (audit metrics only — no AI review pass).`,"success");
   scheduleReviewProgress();
   toast(`${children.length} TeleCaller report${children.length===1?"":"s"} ready for the in-app dashboard.`);
 }
@@ -999,7 +999,7 @@ function setReviewFormat(format){
 
 /**
  * Hand off ERP-mapped leads into Bucket 1 Audit (same path as Excel RAW upload).
- * Does not auto-start - user clicks Start Audit → for progress / Stop / Publish.
+ * Does not auto-start — user clicks Start Audit → for progress / Stop / Publish.
  * @param {object} entry parseWorkbook-shaped object with leads[]
  */
 function loadErpIntoAudit(entry){
@@ -1023,7 +1023,7 @@ function loadErpIntoAudit(entry){
   renderReviewFileList();
   updateReviewValidation();
   showView("review");
-  toast(`${entry.leads.length.toLocaleString()} ERP leads ready - click Start Audit →`);
+  toast(`${entry.leads.length.toLocaleString()} ERP leads ready — click Start Audit →`);
 }
 
 function scheduleReviewProgress(){
@@ -1180,7 +1180,7 @@ async function handleReviewFiles(fileList){
     els["start-review"].disabled=true;
     return;
   }
-  if(files.length>1)toast("Only the first file is used - Excel RAW / Excel Audit take one workbook at a time.");
+  if(files.length>1)toast("Only the first file is used — Excel RAW / Excel Audit take one workbook at a time.");
   reviewParsedFiles=[entry];
   renderReviewFileList();
   updateReviewValidation();
@@ -1260,7 +1260,7 @@ async function startReview(){
       stopClock(parent);
       parent.finishedAt=timestamp();
       parent.updatedAt=timestamp();
-      addLog(parent,`Excel Audit complete - ${parent.childReviewIds?.length||0} TeleCaller dashboard(s) ready.`,"success");
+      addLog(parent,`Excel Audit complete — ${parent.childReviewIds?.length||0} TeleCaller dashboard(s) ready.`,"success");
       await persistJob(parent);
       if(currentJob?.id===parent.id)renderProgress(parent);
       scheduleReviewProgress();
@@ -1279,7 +1279,7 @@ async function startReview(){
     return;
   }
 
-  // Excel RAW - audit entire workbook, then split dashboards
+  // Excel RAW — audit entire workbook, then split dashboards
   if(!file.leads?.length){toast("No leads found to audit.");return;}
   const splits=file.splitPreview||splitLeadsByTelecaller(file.leads||[]);
   if(!splits.length){toast("No TeleCaller groups found.");return;}
@@ -1337,12 +1337,12 @@ function drainReviewQueue(){
     reviewQueueRunning=true;
     (async()=>{
       try{
-        // Fresh IndexedDB copy per worker - never share mutable job state across workers.
+        // Fresh IndexedDB copy per worker — never share mutable job state across workers.
         const fresh=await getJob(queued.id)||queued;
         liveJobs.set(fresh.id,fresh);
         if(currentJob?.id===queued.id)currentJob=fresh;
         await runJob(fresh,{navigate:false});
-        // Parent Combined audit stays as currentJob - mirror child failures onto the parent log
+        // Parent Combined audit stays as currentJob — mirror child failures onto the parent log
         // so Run Console still shows why a TeleCaller failed without hunting the switcher.
         const finished=liveJobs.get(fresh.id)||await getJob(fresh.id)||fresh;
         if(finished.status==="failed"){
@@ -1402,7 +1402,7 @@ async function renderReviewProgress(){
     return;
   }
   panel.classList.remove("hidden");
-  // Per-TeleCaller / Excel RAW cards removed - aggregate + download panel only.
+  // Per-TeleCaller / Excel RAW cards removed — aggregate + download panel only.
   cards.replaceChildren();
   cards.classList.add("hidden");
   const parentJobs=jobs.filter(job=>job.mode==="telecaller-review-parent");
@@ -1450,9 +1450,9 @@ async function renderReviewProgress(){
     const pct=totalTarget?Math.round(Math.min(totalDone,totalTarget)/totalTarget*100):0;
     const items=[
       ["Leads finished",totalLeads.toLocaleString()],
-      ["Audits finished",totalTarget?`${totalDone} / ${totalTarget}`:"-"],
+      ["Audits finished",totalTarget?`${totalDone} / ${totalTarget}`:"—"],
       ["TeleCallers",`${teleDone} / ${teleTotal}${teleFailed?` · ${teleFailed} failed`:""}`],
-      [sessionDone?"Time taken":"Time taken",wallMs?durationText(wallMs):"-"],
+      [sessionDone?"Time taken":"Time taken",wallMs?durationText(wallMs):"—"],
       ["Cost",`₹ ${totalCost.toFixed(4)}`]
     ];
     for(const [label,value] of items){
@@ -1529,7 +1529,7 @@ async function getReadyReviewDownloadJobs(){
   const jobs=await getReviewSessionJobs();
   let ready=jobs.filter(job=>job.mode==="telecaller-review"&&job.status==="completed"&&job.results?.length);
   if(ready.length)return ready;
-  // Children may be missing from session ids - recover from parent childReviewIds or parent results.
+  // Children may be missing from session ids — recover from parent childReviewIds or parent results.
   const parents=jobs.filter(job=>job.mode==="telecaller-review-parent"&&job.status==="completed");
   for(const parent of parents){
     for(const id of parent.childReviewIds||[]){
@@ -1546,7 +1546,7 @@ async function getReadyReviewDownloadJobs(){
   }
   for(const parent of parents){
     if(parent.results?.length){
-      // Combined parent holds full audited rows - valid dashboard source for "All in one".
+      // Combined parent holds full audited rows — valid dashboard source for "All in one".
       ready.push(parent);
     }
   }
@@ -1604,12 +1604,12 @@ async function renderHistory(){
     card.className="history-item";
     title.textContent=job.fileName;
     status.className=`status ${legacy?"legacy":job.status}`;
-    status.textContent=legacy?"legacy - rerun":job.status;
+    status.textContent=legacy?"legacy — rerun":job.status;
     meta.className="history-meta";
     const ownerBit=job.ownerName?` · by ${job.ownerName}`:"";
     meta.textContent=legacy
-      ?`${timeText(job.createdAt)} · previous engine result - upload the file and run it again for v2 rules.${ownerBit}`
-      :`${timeText(job.createdAt)} · ${job.mode==="telecaller-review"?`Review · ${job.telecallerName||"TeleCaller"} · `:job.mode==="telecaller-review-parent"?`${job.sourceFormat==="audit"?"Excel Audit":"Excel RAW"} · `:""}${uniqueLeadCount(job)} leads · ${job.callCount??job.rowCount??"-"} calls · ${auditedDoneCount(job)}/${job.totalLeads} audited · ${durationText(job.elapsedMs||0)} · cost ${estimatedCost(job).toFixed(4)} · cached ${number(job.tokenUsage?.cached).toLocaleString()}${ownerBit}`;
+      ?`${timeText(job.createdAt)} · previous engine result — upload the file and run it again for v2 rules.${ownerBit}`
+      :`${timeText(job.createdAt)} · ${job.mode==="telecaller-review"?`Review · ${job.telecallerName||"TeleCaller"} · `:job.mode==="telecaller-review-parent"?`${job.sourceFormat==="audit"?"Excel Audit":"Excel RAW"} · `:""}${uniqueLeadCount(job)} leads · ${job.callCount??job.rowCount??"—"} calls · ${auditedDoneCount(job)}/${job.totalLeads} audited · ${durationText(job.elapsedMs||0)} · cost ${estimatedCost(job).toFixed(4)} · cached ${number(job.tokenUsage?.cached).toLocaleString()}${ownerBit}`;
     info.append(title,document.createTextNode(" "),status,meta);
     actions.className="history-actions";
     const view=document.createElement("button");
@@ -1864,7 +1864,7 @@ async function restoreFromStorage(){
       stopClock(job);
       job.status="paused";
       job.updatedAt=timestamp();
-      addLog(job,"Browser reloaded during this run. Progress was restored from local storage - resume to continue.","warn");
+      addLog(job,"Browser reloaded during this run. Progress was restored from local storage — resume to continue.","warn");
       await persistJob(job);
       changed=true;
     }
@@ -2014,7 +2014,7 @@ els["shell-account"]?.addEventListener("click",()=>{
   if(!user||!modal)return;
   document.getElementById("account-username").value=user.username||"";
   document.getElementById("account-display").value=user.display_name||"";
-  document.getElementById("account-telecaller").value=user.telecaller_name||"- set by Admin only -";
+  document.getElementById("account-telecaller").value=user.telecaller_name||"— set by Admin only —";
   document.getElementById("account-pw-current").value="";
   document.getElementById("account-pw-new").value="";
   document.getElementById("account-pw-confirm").value="";
@@ -2138,7 +2138,7 @@ els["add-input-field"].onclick=()=>{
   renderSortFields();
 };
 els["save-settings"].onclick=async()=>{
-  // Validate the raw inputs first - collectSettings() clamps to the limits, which
+  // Validate the raw inputs first — collectSettings() clamps to the limits, which
   // would otherwise hide out-of-range values from the checks below.
   const rawBatch=Number(els["batch-size"].value);
   const rawConcurrency=Number(els.concurrency.value);
@@ -2211,7 +2211,7 @@ async function bootTeleCallerAudit(){
 
   if(els["shell-user-label"])els["shell-user-label"].textContent=user.display_name||user.username;
 
-  // Nav chrome as soon as role is known - Sync must not wait on settings/history/restore.
+  // Nav chrome as soon as role is known — Sync must not wait on settings/history/restore.
   document.querySelectorAll(".nav-item[data-perm]").forEach(btn=>{
     const perm=btn.dataset.perm;
     if(perm&&!hasPermission(perm))btn.classList.add("hidden");
@@ -2387,7 +2387,7 @@ function canDeletePublishedDashboard(){
   return canManagePublishedDashboards();
 }
 
-/** Empty the manage list mount - per-TeleCaller Delete cards removed; Delete All lives in panel actions. */
+/** Empty the manage list mount — per-TeleCaller Delete cards removed; Delete All lives in panel actions. */
 function clearPublishedManageList(){
   const mount=els["published-list"];
   if(!mount)return;
@@ -2467,7 +2467,7 @@ async function refreshPublishedDashboards(){
 }
 
 bootTeleCallerAudit();
-// Do not re-register a service worker - it only caused sticky "update" banners.
+// Do not re-register a service worker — it only caused sticky "update" banners.
 if("serviceWorker" in navigator){
   navigator.serviceWorker.getRegistrations().then(regs=>Promise.all(regs.map(reg=>reg.unregister()))).catch(()=>{});
 }
