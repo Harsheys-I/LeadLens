@@ -1,5 +1,5 @@
 {
-  "version": "6.2.2.stable",
+  "version": "6.3.0.stable",
   "name": "GPP AI",
-  "notes": "v6.2.2.stable: Sales Graph filters/aggregates by Source; PDF export for KPIs, tables, and chart snapshots."
+  "notes": "v6.3.0.stable: ERP Sync live for Super User — Sync nav on first paint, Fetch→Audit handoff, session keep-alive; API unlocked on production."
 }

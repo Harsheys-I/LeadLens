@@ -58,6 +58,6 @@ The API fell back to `config.example.php` because live `config.local.php` is mis
 - **Admin**: users/roles/access requests; Run console **off** by default (enable in Roles).
 - **TeleCaller**: own published Dashboard only (link user → exact Excel TeleCaller name).
 
-## ERP Sync (`/dev` only)
+## ERP Sync (live + `/dev`)
 
-Fetch ERP report → store raw JSON → hand off to Bucket 1 Audit (primary). Optional session keep-alive cron (`*/30 * * * *` → `erp-sync/keepalive`) and server OpenAI audit are advanced. See **[ERP-SYNC.md](./ERP-SYNC.md)**.
+Fetch ERP report → store raw JSON → hand off to Bucket 1 Audit (primary). Optional session keep-alive cron (`*/30 * * * *` → `erp-sync/keepalive`) and server OpenAI audit are advanced. Super User only. See **[ERP-SYNC.md](./ERP-SYNC.md)**.
