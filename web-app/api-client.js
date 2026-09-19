@@ -1,7 +1,7 @@
 /**
  * Thin fetch wrapper for LeadLens PHP API (same-origin, session cookie).
  */
-import {apiBase} from './app-base.js?v=7.0.3.stable';
+import {apiBase} from './app-base.js?v=7.1.0.dev';
 
 function resolveApiBase(){
   return apiBase();
@@ -16,8 +16,12 @@ export async function api(path, {method = 'GET', body, signal} = {}){
     signal
   };
   if (body !== undefined) {
-    opts.headers['Content-Type'] = 'application/json';
-    opts.body = JSON.stringify(body);
+    if (typeof FormData !== 'undefined' && body instanceof FormData) {
+      opts.body = body;
+    } else {
+      opts.headers['Content-Type'] = 'application/json';
+      opts.body = JSON.stringify(body);
+    }
   }
   const res = await fetch(url, opts);
   let data = null;
@@ -48,9 +52,11 @@ export const AuthApi = {
 
 export const AdminApi = {
   listUsers: () => api('admin/users'),
+  getUser: (id) => api(`admin/users/${id}`),
   createUser: (body) => api('admin/users', {method: 'POST', body}),
   updateUser: (id, body) => api(`admin/users/${id}`, {method: 'PUT', body}),
   deleteUser: (id) => api(`admin/users/${id}`, {method: 'DELETE'}),
+  orgCatalog: () => api('admin/org'),
   listRoles: () => api('admin/roles'),
   createRole: (body) => api('admin/roles', {method: 'POST', body}),
   updateRole: (id, body) => api(`admin/roles/${id}`, {method: 'PUT', body}),
@@ -122,13 +128,22 @@ export const TeamFormsApi = {
     api(`team-forms/forms/${formId}/fields/${fieldId}/delete`, {method: 'POST', body: {action: 'delete'}}),
   reorderFields: (formId, order) =>
     api(`team-forms/forms/${formId}/fields`, {method: 'POST', body: {action: 'reorder', order}}),
-  assignForm: (formId, body) => api(`team-forms/forms/${formId}/assign`, {method: 'POST', body}),
+  assignForm: (formId, body) => api(`team-forms/forms/${formId}/create-tasks`, {method: 'POST', body}),
+  createTasks: (formId, body) => api(`team-forms/forms/${formId}/create-tasks`, {method: 'POST', body}),
   listFormAssignments: (formId) => api(`team-forms/forms/${formId}/assign`),
   myTasks: (since) => api(`team-forms/tasks?mine=1${since ? `&since=${encodeURIComponent(since)}` : ''}`),
   reviewTasks: (since) =>
     api(`team-forms/review/tasks${since ? `?since=${encodeURIComponent(since)}` : ''}`),
   getTask: (id) => api(`team-forms/tasks/${id}`),
   saveAnswers: (id, answers) => api(`team-forms/tasks/${id}/answers`, {method: 'POST', body: {answers}}),
+  uploadTaskFile: (id, fieldId, file) => {
+    const fd = new FormData();
+    fd.append('field_id', String(fieldId));
+    fd.append('file', file);
+    return api(`team-forms/tasks/${id}/files`, {method: 'POST', body: fd});
+  },
+  taskFileUrl: (id, fieldId) =>
+    `${resolveApiBase()}team-forms/tasks/${id}/file?field_id=${encodeURIComponent(fieldId)}`,
   setStatus: (id, status, extra = {}) =>
     api(`team-forms/tasks/${id}/status`, {method: 'POST', body: {status, ...extra}}),
   addComment: (id, body) => api(`team-forms/tasks/${id}/comments`, {method: 'POST', body: {body}}),
