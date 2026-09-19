@@ -12,8 +12,8 @@ UI and API are available on **production `/`** and **`/dev`**, gated to **Super 
 1. Open **https://ai.gurupunvaanii.com/TeleCallerAudit/** (or `/dev/TeleCallerAudit/` for staging) and sign in as Super User.
 2. Open **ERP Sync** in the Bucket 1 nav (Super User only).
 3. Paste:
-   - **Report URL** — the `getFunction.do` (or JSON report) URL that works in cURL
-   - **Cookie header** — full `Cookie:` value from a working authenticated cURL
+   - **Report URL** - the `getFunction.do` (or JSON report) URL that works in cURL
+   - **Cookie header** - full `Cookie:` value from a working authenticated cURL
    - Optional **Extra headers** as JSON (do not put Cookie here)
 4. Click **Save**, then **Test fetch**.
 5. Check preview: **keys**, **row count**, and **mapped columns**. Adjust the field map until Mobile + Project map correctly.
@@ -26,7 +26,7 @@ When Test fetch / Fetch / keep-alive / daily run shows **session expired**:
 
 1. Log into ERP in a browser and copy a fresh Cookie from DevTools or a new cURL.
 2. Paste into **Cookie header** → **Save** → **Test fetch** (or **Ping keep-alive now**).
-3. No Playwright / OTP automation — refresh is always manual.
+3. No Playwright / OTP automation - refresh is always manual.
 
 **Important for daily automation:** if the Cookie is dead at 6 AM, the daily job **fails clearly**, does **not** publish, and writes status for Super User. Keep-alive every 1 minute is strongly recommended so idle sessions last overnight.
 
@@ -44,12 +44,12 @@ When Test fetch / Fetch / keep-alive / daily run shows **session expired**:
 
 Each PHP request audits in chunks (`Max leads / invocation`, default 40). After each chunk:
 
-1. **In-request loop** — if wall-clock time still has ~18s headroom before `max_execution_time`, the same request starts the next chunk immediately.
-2. **Fire-and-forget self-HTTP** — when about to hit the limit and the job is still incomplete, PHP POSTs `erp-sync/continue` on the same host with a one-time chain token (`X-ERP-Sync-Chain`). A running lock prevents stampede (cron + self-chain overlap → busy no-op).
-3. **Continue cron (optional backup)** — every 10 minutes still works if a self-chain handoff fails; idle no-ops are harmless.
+1. **In-request loop** - if wall-clock time still has ~18s headroom before `max_execution_time`, the same request starts the next chunk immediately.
+2. **Fire-and-forget self-HTTP** - when about to hit the limit and the job is still incomplete, PHP POSTs `erp-sync/continue` on the same host with a one-time chain token (`X-ERP-Sync-Chain`). A running lock prevents stampede (cron + self-chain overlap → busy no-op).
+3. **Continue cron (optional backup)** - every 10 minutes still works if a self-chain handoff fails; idle no-ops are harmless.
 
-- **Daily cron (6:00 AM IST)** → `POST /api/erp-sync/daily` — always starts a **fresh fetch**, begins audit, and **self-chains** until complete (or session expired / error).
-- **Continue cron (every 10 minutes)** → `POST /api/erp-sync/continue` — safety net only; resumes if a job is still `auditing`. You can keep or remove this cron once self-chain is confirmed working.
+- **Daily cron (6:00 AM IST)** → `POST /api/erp-sync/daily` - always starts a **fresh fetch**, begins audit, and **self-chains** until complete (or session expired / error).
+- **Continue cron (every 10 minutes)** → `POST /api/erp-sync/continue` - safety net only; resumes if a job is still `auditing`. You can keep or remove this cron once self-chain is confirmed working.
 
 ## API (Super User session or cron bearer where noted)
 
@@ -74,9 +74,9 @@ India is **UTC+5:30** (no DST).
 |-------------|-------------------------------------------|-----------------------------------------------------|
 | 6:00 AM IST | `30 0 * * *` (00:30 UTC) | `0 6 * * *` |
 
-Confirm the timezone shown in **hPanel → Advanced · Cron Jobs**. Most Hostinger shared plans schedule in **UTC** — use **`30 0 * * *`** for 6:00 AM IST.
+Confirm the timezone shown in **hPanel → Advanced · Cron Jobs**. Most Hostinger shared plans schedule in **UTC** - use **`30 0 * * *`** for 6:00 AM IST.
 
-## Hostinger cron — daily kickoff (6:00 AM IST)
+## Hostinger cron - daily kickoff (6:00 AM IST)
 
 ```bash
 # 6:00 AM IST = 00:30 UTC  →  schedule: 30 0 * * *  (when cron is UTC)
@@ -84,7 +84,7 @@ curl -sS -X POST -H "Authorization: Bearer YOUR_CRON_SECRET" -H "Content-Type: a
   "https://ai.gurupunvaanii.com/api/erp-sync/daily"
 ```
 
-## Hostinger cron — continue incomplete audits (optional backup, every 10 minutes)
+## Hostinger cron - continue incomplete audits (optional backup, every 10 minutes)
 
 Self-chain is the primary resume path. Keep this cron only as a safety net (or remove it after verifying daily runs finish without it):
 
@@ -96,9 +96,9 @@ curl -sS -X POST -H "Authorization: Bearer YOUR_CRON_SECRET" -H "Content-Type: a
 
 Idle response is harmless (`idle: true`). Only runs audit work when a job needs continue. Concurrent self-chain + cron returns `busy` instead of double-auditing.
 
-## Hostinger cron — session keep-alive (every 1 minute)
+## Hostinger cron - session keep-alive (every 1 minute)
 
-**Use the production API URL** (`/api/…`), not `/dev/api/…`. Staging and live share the same DB, but cron should target live so production PHP handles the ping. Enabling the checkbox + Save does **not** start a schedule — hPanel cron must call the endpoint every minute.
+**Use the production API URL** (`/api/…`), not `/dev/api/…`. Staging and live share the same DB, but cron should target live so production PHP handles the ping. Enabling the checkbox + Save does **not** start a schedule - hPanel cron must call the endpoint every minute.
 
 ```bash
 # every 1 minute →  */1 * * * *
@@ -125,12 +125,12 @@ Notes:
 - Status line shows **IST** times and whether the last ping was **manual** vs **cron**.
 - Alternative header if `Authorization` is stripped: `-H "X-ERP-Sync-Secret: YOUR_CRON_SECRET"`.
 - Cookies are never logged.
-- Keep-alive can slow absolute session TTL expiry but cannot defeat hard ERP logouts — refresh Cookie when status shows `session_expired`.
+- Keep-alive can slow absolute session TTL expiry but cannot defeat hard ERP logouts - refresh Cookie when status shows `session_expired`.
 
 ## Risk controls
 
 - Cookies are encrypted at rest (`session.secret` / `app.secrets_key`); never logged.
-- Keep-alive samples a small response body only — it does not store payloads or run Audit.
+- Keep-alive samples a small response body only - it does not store payloads or run Audit.
 - **Cron auto-publish** defaults **on** for the daily/continue path; manual **Auto-publish after server audit** stays separate (defaults off).
 - Session expired at fetch → clear error status, **no publish**.
 - `erp-sync/*` requires Super User session or a valid cron bearer secret.

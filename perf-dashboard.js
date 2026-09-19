@@ -1,8 +1,8 @@
 /**
- * TeleCalling Performance — Excel parse, metrics engine, published dashboard UI.
+ * TeleCalling Performance - Excel parse, metrics engine, published dashboard UI.
  */
-import {PerfDashboardApi} from "./api-client.js?v=7.2.2.stable";
-import {downloadBlobFile} from "./audit.js?v=7.2.2.stable";
+import {PerfDashboardApi} from "./api-client.js?v=8.0.0.stable";
+import {downloadBlobFile} from "./audit.js?v=8.0.0.stable";
 
 const MASTER_FIELDS = [
   {id: "mobile", label: "Mobile", aliases: "mobile, mobile number, phone"},
@@ -198,7 +198,7 @@ function dateToIso(d) {
 }
 
 function formatDisplayDate(iso) {
-  if (!iso) return "—";
+  if (!iso) return "-";
   const d = parseDateValue(iso);
   if (!d) return String(iso);
   return d.toLocaleDateString(undefined, {year: "numeric", month: "short", day: "numeric"});
@@ -349,7 +349,7 @@ function metricCellIsClickable(bucket, col, reportDays) {
   const metricKey = detailMetricKey(col);
   if (!metricKey) return false;
   const display = scorecardCellValue(bucket, col, reportDays);
-  if (display === "—" || display === "0") return false;
+  if (display === "-" || display === "0") return false;
   if (col.kind === "pct" && !(Number(bucket?.siteVisited) > 0)) return false;
   return true;
 }
@@ -362,12 +362,12 @@ function pct(numerator, denominator) {
 }
 
 function formatPct(value) {
-  if (value === null || value === undefined || Number.isNaN(Number(value))) return "—";
+  if (value === null || value === undefined || Number.isNaN(Number(value))) return "-";
   return `${Number(value).toFixed(Number(value) % 1 === 0 ? 0 : 1)}%`;
 }
 
 function formatAvg(value) {
-  if (value === null || value === undefined || Number.isNaN(Number(value))) return "—";
+  if (value === null || value === undefined || Number.isNaN(Number(value))) return "-";
   return String(Math.round(Number(value)));
 }
 
@@ -467,13 +467,13 @@ function scorecardCellValue(bucket, col, reportDays = 0) {
     if (col.key === "totalLeadsVsSiteVisitedPct") {
       return formatPct(pct(bucket.siteVisited, bucket.totalLeads));
     }
-    return "—";
+    return "-";
   }
   if (col.kind === "avg") {
     if (col.key === "avgCallsPerDay") {
       return formatAvg(avgCallsPerDay(bucket?.totalCalls, reportDays));
     }
-    return "—";
+    return "-";
   }
   return String(bucket?.[col.key] ?? 0);
 }
@@ -688,7 +688,7 @@ function matchesSentToEnquiry(status) {
   return s === "sent to enquiry" || s === "send to enquiry";
 }
 
-/** Match History Status on any row (visit statuses — parallel to STE). */
+/** Match History Status on any row (visit statuses - parallel to STE). */
 function matchesHistoryStatus(row, target) {
   return norm(row.status) === norm(target);
 }
@@ -1273,7 +1273,7 @@ function renderPerfDetailTable(rows) {
     const tr = document.createElement("tr");
     for (const [, key] of PERF_DETAIL_COLUMNS) {
       const td = document.createElement("td");
-      td.textContent = row[key] || "—";
+      td.textContent = row[key] || "-";
       tr.append(td);
     }
     tbody.append(tr);
@@ -1662,9 +1662,9 @@ export function mountPerfReportUpload(ctx) {
     if (!fileList) return;
     const items = [];
     if (masterParsed?.ok) items.push(`Master (${masterParsed.sheetName}): ${masterParsed.rowCount} rows`);
-    else if (masterParsed) items.push(`Master: invalid — missing ${masterParsed.missing.join(", ")}`);
+    else if (masterParsed) items.push(`Master: invalid - missing ${masterParsed.missing.join(", ")}`);
     if (historyParsed?.ok) items.push(`History (${historyParsed.sheetName}): ${historyParsed.rowCount} rows`);
-    else if (historyParsed) items.push(`History: invalid — missing ${historyParsed.missing.join(", ")}`);
+    else if (historyParsed) items.push(`History: invalid - missing ${historyParsed.missing.join(", ")}`);
     if (!items.length) {
       fileList.classList.add("hidden");
       fileList.replaceChildren();
@@ -1684,7 +1684,7 @@ export function mountPerfReportUpload(ctx) {
     const ready = masterParsed?.ok && historyParsed?.ok;
     if (createBtn) createBtn.disabled = !ready;
     if (ready) {
-      updatePerfValidation(validation, [`Ready — ${masterParsed.rowCount} master rows, ${historyParsed.rowCount} history rows`], false);
+      updatePerfValidation(validation, [`Ready - ${masterParsed.rowCount} master rows, ${historyParsed.rowCount} history rows`], false);
     } else {
       const msgs = [];
       if (masterParsed && !masterParsed.ok) msgs.push(`Master missing: ${masterParsed.missing.join(", ")}`);
@@ -1972,7 +1972,7 @@ function updatePerfFilterVisibility(showAdminControls) {
 function syncPerfPresentationChrome() {
   const isSummary = perfActiveView === "summary";
   const showAdmin = isPerfAdminView();
-  // Task 8: TeleCallers only see table / summary metrics — no Table|Graph sub-tabs.
+  // Task 8: TeleCallers only see table / summary metrics - no Table|Graph sub-tabs.
   const showSubTabs = !isSummary && showAdmin;
   if (!showAdmin) perfActiveTab = "table";
 

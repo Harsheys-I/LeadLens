@@ -1,15 +1,15 @@
 /**
  * Sales Graph module â€” Upload (Leads + Visits + Booked) + published Dashboard.
  */
-import {APP_VERSION} from "./audit.js?v=7.2.2.stable";
-import {requireAuth, logout, hasPermission, getUser, changePassword, updateProfile} from "./auth.js?v=7.2.2.stable";
-import {SalesGraphApi} from "./api-client.js?v=7.2.2.stable";
-import {mountNotifications} from "./notifications-ui.js?v=7.2.2.stable";
-import {appUrl, homePath} from "./app-base.js?v=7.2.2.stable";
-import {initTheme} from "./theme.js?v=7.2.2.stable";
-import {setStorageUserId, storageKey} from "./db.js?v=7.2.2.stable";
-import {parseSalesGraphSheet, buildSalesGraphPayload} from "./sales-graph-parse.js?v=7.2.2.stable";
-import {renderSalesGraphDashboard, destroySalesGraphCharts} from "./sales-graph-dashboard.js?v=7.2.2.stable";
+import {APP_VERSION} from "./audit.js?v=8.0.0.stable";
+import {requireAuth, logout, hasPermission, getUser, changePassword, updateProfile} from "./auth.js?v=8.0.0.stable";
+import {SalesGraphApi} from "./api-client.js?v=8.0.0.stable";
+import {mountNotifications} from "./notifications-ui.js?v=8.0.0.stable";
+import {appUrl, homePath} from "./app-base.js?v=8.0.0.stable";
+import {initTheme} from "./theme.js?v=8.0.0.stable";
+import {setStorageUserId, storageKey} from "./db.js?v=8.0.0.stable";
+import {parseSalesGraphSheet, buildSalesGraphPayload} from "./sales-graph-parse.js?v=8.0.0.stable";
+import {renderSalesGraphDashboard, destroySalesGraphCharts} from "./sales-graph-dashboard.js?v=8.0.0.stable";
 
 const $ = id => document.getElementById(id);
 const ids = [
@@ -27,7 +27,7 @@ const els = Object.fromEntries(ids.map(id => [id, $(id)]));
 if (els["sidebar-version"]) els["sidebar-version"].textContent = `v${APP_VERSION}`;
 
 const titles = {upload: "Upload", dashboard: "Dashboard"};
-const RELEASE_NOTES = "v7.2.2.stable: Team Forms per-field Task Builder edit lock, two-column fill, hide Status/comments in Task Builder, Form Builder/Task Builder naming, creator delete + Pending lock on create.";
+const RELEASE_NOTES = "v8.0.0.stable: SEO module - Guru Punvaanii audit command center in GPP AI (live scanner, technical/on-page/schema/CWV/traffic, 30-day plan) with LeadLens theme and module.seo permission.";
 
 let leadsParsed = null;
 let visitsParsed = null;

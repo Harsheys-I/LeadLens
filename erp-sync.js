@@ -1,8 +1,8 @@
 /**
- * /dev Super User ERP Sync panel — fetch ERP → store raw → hand off to main Audit UI.
+ * /dev Super User ERP Sync panel - fetch ERP → store raw → hand off to main Audit UI.
  */
-import {api} from './api-client.js?v=7.2.2.stable';
-import {getUser} from './auth.js?v=7.2.2.stable';
+import {api} from './api-client.js?v=8.0.0.stable';
+import {getUser} from './auth.js?v=8.0.0.stable';
 
 const FIELD_IDS = [
   'mobile', 'project', 'registration', 'telecaller', 'source', 'update',
@@ -120,7 +120,7 @@ function parseExtraHeaders() {
 
 /** Display server UTC timestamps in Asia/Kolkata (IST). */
 function formatIst(iso) {
-  if (!iso) return '—';
+  if (!iso) return '-';
   const d = new Date(String(iso));
   if (Number.isNaN(d.getTime())) return String(iso);
   const parts = new Intl.DateTimeFormat('en-GB', {
@@ -149,7 +149,7 @@ function formatAgeSeconds(ageSec) {
 function formatKeepaliveLine(ka, diag = null) {
   if (!ka || typeof ka !== 'object') {
     if (diag?.enabled) {
-      return 'Keep-alive: enabled, but never run. Cron must be set in hPanel to */1 — Save alone does not ping on a schedule.';
+      return 'Keep-alive: enabled, but never run. Cron must be set in hPanel to */1 - Save alone does not ping on a schedule.';
     }
     return 'Keep-alive: never run.';
   }
@@ -159,16 +159,16 @@ function formatKeepaliveLine(ka, diag = null) {
   const sourceBit = source ? ` via ${source}` : '';
   const ageBit = diag?.age_seconds != null ? ` (${formatAgeSeconds(diag.age_seconds)})` : '';
   if (result === 'disabled') {
-    return `Keep-alive: cron hit but disabled at ${when}${ageBit} — enable checkbox and Save.`;
+    return `Keep-alive: cron hit but disabled at ${when}${ageBit} - enable checkbox and Save.`;
   }
   if (result === 'session_expired' || ka.session_expired) {
-    return `Keep-alive: session_expired at ${when}${sourceBit}${ageBit} — refresh Cookie and Save.`;
+    return `Keep-alive: session_expired at ${when}${sourceBit}${ageBit} - refresh Cookie and Save.`;
   }
   if (result === 'ok' && ka.ok) {
     const http = ka.http_status != null ? ` HTTP ${ka.http_status}` : '';
     return `Keep-alive: ok at ${when}${sourceBit}${ageBit}${http}`;
   }
-  return `Keep-alive: ${result} at ${when}${sourceBit}${ageBit}${ka.error ? ` — ${ka.error}` : ''}`;
+  return `Keep-alive: ${result} at ${when}${sourceBit}${ageBit}${ka.error ? ` - ${ka.error}` : ''}`;
 }
 
 function writeKeepaliveStatus(ka, diag = null) {
@@ -186,10 +186,10 @@ function formatDailyLine(daily) {
   if (!daily || typeof daily !== 'object') return 'Last scheduled run: never.';
   const when = formatIst(daily.at);
   if (daily.session_expired) {
-    return `Last scheduled run: session expired at ${when} — refresh Cookie; no publish.`;
+    return `Last scheduled run: session expired at ${when} - refresh Cookie; no publish.`;
   }
   if (daily.ok === false) {
-    return `Last scheduled run: failed at ${when} — ${daily.error || daily.phase || 'error'}`;
+    return `Last scheduled run: failed at ${when} - ${daily.error || daily.phase || 'error'}`;
   }
   if (daily.needs_continue || daily.partial) {
     const done = daily.done ?? daily.audited ?? 0;
@@ -200,9 +200,9 @@ function formatDailyLine(daily) {
     return `Last scheduled run: published ${daily.published_count ?? 0} dashboard(s) at ${when}`;
   }
   if (daily.complete || daily.phase === 'ready') {
-    return `Last scheduled run: audit complete at ${when}${daily.message ? ` — ${daily.message}` : ''}`;
+    return `Last scheduled run: audit complete at ${when}${daily.message ? ` - ${daily.message}` : ''}`;
   }
-  return `Last scheduled run: ${daily.phase || 'ok'} at ${when}${daily.message ? ` — ${daily.message}` : ''}`;
+  return `Last scheduled run: ${daily.phase || 'ok'} at ${when}${daily.message ? ` - ${daily.message}` : ''}`;
 }
 
 function writeDailyStatus(daily) {
@@ -269,15 +269,15 @@ function formatStatus(payload) {
     lines.push('Keep-alive hint: ' + payload.keepalive.hint);
   }
   if (daily) {
-    const when = daily.at ? formatIst(daily.at) : '—';
+    const when = daily.at ? formatIst(daily.at) : '-';
     lines.push(`Scheduled (${when}): ` + JSON.stringify({...daily, at_ist: when}, null, 2));
   }
   if (ka) {
-    const when = ka.at ? formatIst(ka.at) : '—';
+    const when = ka.at ? formatIst(ka.at) : '-';
     lines.push(`Keep-alive (${when}): ` + JSON.stringify({...ka, at_ist: when}, null, 2));
   }
   if (last) {
-    const when = last.at ? formatIst(last.at) : '—';
+    const when = last.at ? formatIst(last.at) : '-';
     lines.push(`Last (${when}): ` + JSON.stringify({...last, at_ist: when}, null, 2));
   }
   if (job) {
@@ -357,7 +357,7 @@ function statusElWrite(payload) {
   writeDailyStatus(payload?.last_daily_status || payload?.config?.last_daily_status);
 }
 
-/** Super User only — available on production `/` and `/dev`. */
+/** Super User only - available on production `/` and `/dev`. */
 export function canShowErpSync() {
   return Boolean(getUser()?.is_super);
 }
@@ -378,7 +378,7 @@ export async function loadErpSyncPanel() {
     const last = data.last_status;
     if (last?.phase === 'ready-for-audit' && last.lead_count != null) {
       updateProgressUI({
-        label: `Ready — ${Number(last.lead_count).toLocaleString()} leads`,
+        label: `Ready - ${Number(last.lead_count).toLocaleString()} leads`,
         percent: '100%',
         width: '100%',
         detail: 'Stored on server. Use Fetch & send to Audit again, or open Bucket 1 and Start Audit if already loaded.'
@@ -386,7 +386,7 @@ export async function loadErpSyncPanel() {
     } else if (last?.ok === false) {
       updateProgressUI({
         label: 'Last fetch failed',
-        percent: '—',
+        percent: '-',
         width: '0%',
         detail: last.error || 'Error',
         error: true
@@ -425,7 +425,7 @@ function buildConfigBody() {
     max_leads_per_run: Number($('erp-sync-max-leads')?.value || 40),
     field_map: readFieldMapFromUi()
   };
-  // Only send keepalive flags when the controls exist — avoids wiping enabled
+  // Only send keepalive flags when the controls exist - avoids wiping enabled
   // state from quiet saves against a stale HTML cache missing the checkbox.
   const kaEl = $('erp-sync-keepalive');
   if (kaEl) {
@@ -457,7 +457,7 @@ async function saveConfig() {
     const data = await api('erp-sync/config', {method: 'POST', body});
     applyConfig(data.config || {});
     const note = body.keepalive_enabled
-      ? 'Saved. Cron must be set in hPanel to */1 — Save alone does not ping on a schedule.'
+      ? 'Saved. Cron must be set in hPanel to */1 - Save alone does not ping on a schedule.'
       : (data.message || 'Saved');
     setMsg(note);
   } catch (err) {
@@ -508,10 +508,10 @@ async function testFetch() {
     $('erp-sync-preview').textContent = lines.join('\n');
     setMsg(data.message || 'Test fetch OK');
     updateProgressUI({
-      label: `Preview — ${(mapping.lead_count ?? preview.row_count ?? 0).toLocaleString()} rows/leads`,
+      label: `Preview - ${(mapping.lead_count ?? preview.row_count ?? 0).toLocaleString()} rows/leads`,
       percent: '100%',
       width: '100%',
-      detail: 'Test only — use Fetch & send to Audit to load into Bucket 1.'
+      detail: 'Test only - use Fetch & send to Audit to load into Bucket 1.'
     });
     await refreshStatus({signal});
   } catch (err) {
@@ -519,9 +519,9 @@ async function testFetch() {
       setMsg('Stopped.');
     } else {
       setMsg(err.message || 'Test fetch failed', true);
-      updateProgressUI({label: 'Error', percent: '—', width: '0%', detail: err.message || 'Test fetch failed', error: true});
+      updateProgressUI({label: 'Error', percent: '-', width: '0%', detail: err.message || 'Test fetch failed', error: true});
       if (err.data?.session_expired) {
-        $('erp-sync-cookie-hint').textContent = 'Session expired — paste a fresh Cookie header and Save settings.';
+        $('erp-sync-cookie-hint').textContent = 'Session expired - paste a fresh Cookie header and Save settings.';
       }
     }
   } finally {
@@ -536,7 +536,7 @@ async function testFetch() {
 async function fetchAndSendToAudit() {
   if (busy) return;
   if (typeof loadIntoAuditFn !== 'function') {
-    setMsg('Audit handoff is not available — reload the page.', true);
+    setMsg('Audit handoff is not available - reload the page.', true);
     return;
   }
   const signal = beginAbortableRequest();
@@ -562,7 +562,7 @@ async function fetchAndSendToAudit() {
       indeterminate: true,
       detail: 'Downloading mapped leads into Audit…'
     });
-    setMsg(`Mapped ${summary.lead_count} leads — loading into Audit…`);
+    setMsg(`Mapped ${summary.lead_count} leads - loading into Audit…`);
 
     const pack = await api('erp-sync/latest-leads', {signal});
     const leads = Array.isArray(pack?.leads) ? pack.leads : [];
@@ -592,7 +592,7 @@ async function fetchAndSendToAudit() {
 
     await loadIntoAuditFn(entry);
     updateProgressUI({
-      label: `Ready — ${leads.length.toLocaleString()} leads in Audit`,
+      label: `Ready - ${leads.length.toLocaleString()} leads in Audit`,
       percent: '100%',
       width: '100%',
       detail: 'Open Bucket 1 Followup Review and click Start Audit → (same progress bar / Stop as Excel RAW).'
@@ -603,18 +603,18 @@ async function fetchAndSendToAudit() {
   } catch (err) {
     if (isAbortError(err)) {
       setMsg('Stopped.');
-      updateProgressUI({label: 'Stopped', percent: '—', width: '0%', detail: 'Fetch cancelled.'});
+      updateProgressUI({label: 'Stopped', percent: '-', width: '0%', detail: 'Fetch cancelled.'});
     } else {
       setMsg(err.message || 'Fetch & send failed', true);
       updateProgressUI({
         label: 'Error',
-        percent: '—',
+        percent: '-',
         width: '0%',
         detail: err.message || 'Fetch & send failed',
         error: true
       });
       if (err.data?.session_expired) {
-        $('erp-sync-cookie-hint').textContent = 'Session expired — paste a fresh Cookie header and Save settings.';
+        $('erp-sync-cookie-hint').textContent = 'Session expired - paste a fresh Cookie header and Save settings.';
       }
     }
   } finally {
@@ -639,8 +639,8 @@ async function pingKeepalive() {
         : ''
     });
     if (data.session_expired || data.result === 'session_expired') {
-      setMsg(data.error || 'ERP session expired — refresh Cookie', true);
-      $('erp-sync-cookie-hint').textContent = 'Session expired — paste a fresh Cookie header and Save settings.';
+      setMsg(data.error || 'ERP session expired - refresh Cookie', true);
+      $('erp-sync-cookie-hint').textContent = 'Session expired - paste a fresh Cookie header and Save settings.';
     } else if (data.ok) {
       setMsg(`Keep-alive OK at ${formatIst(data.at)}`);
     } else {
@@ -654,7 +654,7 @@ async function pingKeepalive() {
       setMsg(err.message || 'Keep-alive failed', true);
       if (err.data?.session_expired) {
         writeKeepaliveStatus({...err.data, result: 'session_expired', at: err.data.at || new Date().toISOString(), source: 'manual'});
-        $('erp-sync-cookie-hint').textContent = 'Session expired — paste a fresh Cookie header and Save settings.';
+        $('erp-sync-cookie-hint').textContent = 'Session expired - paste a fresh Cookie header and Save settings.';
       }
     }
   } finally {
@@ -673,7 +673,7 @@ async function runServerAuditOnce() {
     label: 'Server audit…',
     percent: '…',
     indeterminate: true,
-    detail: 'Advanced path — prefer Fetch & send to Audit for the main UI.'
+    detail: 'Advanced path - prefer Fetch & send to Audit for the main UI.'
   });
   try {
     await saveConfigQuiet(signal);
@@ -684,11 +684,11 @@ async function runServerAuditOnce() {
     });
     if (data.ok === false) {
       setMsg(data.error || 'Server audit failed', true);
-      updateProgressUI({label: 'Error', percent: '—', width: '0%', detail: data.error || 'Failed', error: true});
+      updateProgressUI({label: 'Error', percent: '-', width: '0%', detail: data.error || 'Failed', error: true});
     } else if (data.partial || data.needs_continue) {
       const done = data.audited ?? data.done ?? 0;
       const total = data.total ?? data.lead_count ?? '?';
-      setMsg(`Partial server audit ${done}/${total} — call again to continue (or use main Audit instead).`);
+      setMsg(`Partial server audit ${done}/${total} - call again to continue (or use main Audit instead).`);
       updateProgressUI({
         label: `Server audit ${done}/${total}`,
         percent: total && Number(total) ? `${Math.round(done / Number(total) * 100)}%` : '…',
@@ -712,7 +712,7 @@ async function runServerAuditOnce() {
       setMsg('Stopped.');
     } else {
       setMsg(err.message || 'Server audit failed', true);
-      updateProgressUI({label: 'Error', percent: '—', width: '0%', detail: err.message || 'Failed', error: true});
+      updateProgressUI({label: 'Error', percent: '-', width: '0%', detail: err.message || 'Failed', error: true});
     }
   } finally {
     clearAbortController();
@@ -741,7 +741,7 @@ async function publishLast() {
       setMsg('Stopped.');
     } else {
       setMsg(err.message || 'Publish failed', true);
-      updateProgressUI({label: 'Error', percent: '—', width: '0%', detail: err.message || 'Publish failed', error: true});
+      updateProgressUI({label: 'Error', percent: '-', width: '0%', detail: err.message || 'Publish failed', error: true});
     }
   } finally {
     clearAbortController();
@@ -775,6 +775,6 @@ export function mountErpSyncPanel({toast, showView, loadErpIntoAudit} = {}) {
   $('erp-sync-run-server')?.addEventListener('click', () => runServerAuditOnce());
   $('erp-sync-publish')?.addEventListener('click', () => publishLast());
 
-  // Silence unused lint if showView not used here — kept for callers / future.
+  // Silence unused lint if showView not used here - kept for callers / future.
   void showViewFn;
 }

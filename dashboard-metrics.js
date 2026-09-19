@@ -3,7 +3,7 @@
  * Reuses mapResultsToRawDataRows for severity / overdue / error labels.
  */
 
-import {mapResultsToRawDataRows} from "./dashboard-export.js?v=7.2.2.stable";
+import {mapResultsToRawDataRows} from "./dashboard-export.js?v=8.0.0.stable";
 
 const MONTHS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
 
@@ -142,7 +142,7 @@ function seriesFromMap(map, {sortBy = "label"} = {}){
 }
 
 const CQ_BUCKETS = ["0-2", "3-4", "5-6", "7-8", "9-10"];
-/** Chart legend / series labels only — keys stay as CQ_BUCKETS. */
+/** Chart legend / series labels only - keys stay as CQ_BUCKETS. */
 const CQ_BUCKET_LABELS = {
   "0-2": "Bad",
   "3-4": "Average",

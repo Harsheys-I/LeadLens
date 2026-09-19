@@ -1,5 +1,5 @@
 /**
- * DeBug Mode engine — CSV batches + composed per-error prompts + dynamic Structured Outputs.
+ * DeBug Mode engine - CSV batches + composed per-error prompts + dynamic Structured Outputs.
  */
 import {
   APP_VERSION,
@@ -13,15 +13,15 @@ import {
   auditBatch,
   resolveAuditResultId,
   promptCacheKey,
-} from "./audit.js?v=7.2.2.stable";
-import {apiBase} from "./app-base.js?v=7.2.2.stable";
+} from "./audit.js?v=8.0.0.stable";
+import {apiBase} from "./app-base.js?v=8.0.0.stable";
 import {
   LAB_ERROR_TYPES,
   SHARED_PREAMBLE,
   DEFAULT_ERROR_PROMPTS,
-} from "./debug-prompts.js?v=7.2.2.stable";
+} from "./debug-prompts.js?v=8.0.0.stable";
 
-/** App-local labels — never shown in DeBug focus-lab results / Excel. */
+/** App-local labels - never shown in DeBug focus-lab results / Excel. */
 const LOCAL_OWNED_ERRORS = new Set([
   "Follow-up Missed",
   "Analysis Parameter Empty",
@@ -141,7 +141,7 @@ async function requestDebugAudit(apiKey,settings,leads,signal,log,onUsage){
     prompt_cache_key:promptCacheKey(settings),
     messages:[
       {role:"system",content:system},
-      {role:"user",content:`Audit ${leads.length} call(s). Echo each id. c=full history — assess cumulative buying intent; 1–5 RNR/Busy/Unreachable are neutral and do not cancel prior interest; interest cancels only on ACTIVE rejection or 8+ consecutive RNRs. For each id, o must explain WHY each e label was raised.\n${JSON.stringify({L:modelInput})}`}
+      {role:"user",content:`Audit ${leads.length} call(s). Echo each id. c=full history - assess cumulative buying intent; 1–5 RNR/Busy/Unreachable are neutral and do not cancel prior interest; interest cancels only on ACTIVE rejection or 8+ consecutive RNRs. For each id, o must explain WHY each e label was raised.\n${JSON.stringify({L:modelInput})}`}
     ],
     response_format:{type:"json_schema",json_schema:{name:"ll_audit",strict:true,schema}}
   });

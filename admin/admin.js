@@ -1,8 +1,8 @@
-import {requireAuth, logout, getUser, hasPermission, requirePermission, changePassword, updateProfile} from '../auth.js?v=7.2.2.stable';
-import {AdminApi, DashboardApi, TeamFormsApi} from '../api-client.js?v=7.2.2.stable';
-import {mountNotifications} from '../notifications-ui.js?v=7.2.2.stable';
-import {appUrl, homePath} from '../app-base.js?v=7.2.2.stable';
-import {initTheme} from '../theme.js?v=7.2.2.stable';
+import {requireAuth, logout, getUser, hasPermission, requirePermission, changePassword, updateProfile} from '../auth.js?v=8.0.0.stable';
+import {AdminApi, DashboardApi, TeamFormsApi} from '../api-client.js?v=8.0.0.stable';
+import {mountNotifications} from '../notifications-ui.js?v=8.0.0.stable';
+import {appUrl, homePath} from '../app-base.js?v=8.0.0.stable';
+import {initTheme} from '../theme.js?v=8.0.0.stable';
 
 const $ = id => document.getElementById(id);
 const titles = {users: 'User creation', roles: 'Roles'};
@@ -312,7 +312,7 @@ function renderUsersTable(users){
     tr.innerHTML = `<td>${escapeHtml(u.username)}</td>
       <td>${escapeHtml(u.display_name || '')}</td>
       <td>${escapeHtml(u.role_name)}</td>
-      <td>${escapeHtml(u.telecaller_name || '—')}</td>
+      <td>${escapeHtml(u.telecaller_name || '-')}</td>
       <td>${u.is_active ? 'Yes' : 'No'}</td>`;
     const td = document.createElement('td');
     if (canEditUserRow(u)) {
@@ -323,7 +323,7 @@ function renderUsersTable(users){
       edit.onclick = () => openUserModal(u);
       td.append(edit);
     } else {
-      td.textContent = '—';
+      td.textContent = '-';
     }
     tr.append(td);
     tbody.append(tr);
@@ -499,7 +499,7 @@ async function openUserModal(user = null){
   $('user-must-pw').checked = user ? !!user.must_change_password : true;
   $('user-delete').classList.toggle('hidden', !user || user.role_key === 'super' || editingSelf);
   $('user-form-message').textContent = editingSelf
-    ? 'Your own role is locked — ask a higher-rank account to change it.'
+    ? 'Your own role is locked - ask a higher-rank account to change it.'
     : '';
   await loadOrgCatalog();
   let detail = user;
@@ -754,7 +754,7 @@ function openAccountModal(){
   if (!user) return;
   $('account-username').value = user.username || '';
   $('account-display').value = user.display_name || '';
-  $('account-telecaller').value = user.telecaller_name || '— set by Admin only —';
+  $('account-telecaller').value = user.telecaller_name || '- set by Admin only -';
   $('account-pw-current').value = '';
   $('account-pw-new').value = '';
   $('account-pw-confirm').value = '';

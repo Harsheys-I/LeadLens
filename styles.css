@@ -79,7 +79,7 @@
   --ll-ease-spring-soft:cubic-bezier(0.22,1.15,0.36,1);
   --ll-ease-out-expo:cubic-bezier(0.16,1,0.3,1);
   --ll-ease-out-smooth:cubic-bezier(0.2,0.8,0.2,1);
-  /* Soft high-refresh timings — browser interpolates every display frame */
+  /* Soft high-refresh timings - browser interpolates every display frame */
   --ll-duration-fast:0.14s;
   --ll-duration-med:0.28s;
   --ll-duration-slow:0.4s;
@@ -295,7 +295,7 @@ body .key-modal-card .check-row small{display:block;color:var(--muted);font-weig
 body .key-modal-card .inline-actions{margin-top:16px}
 body .key-modal-card .form-message{min-height:18px}
 
-/* —— Auth / home hub —— */
+/* -- Auth / home hub -- */
 body.auth-body{min-height:100vh;position:relative;display:grid;place-items:center;padding:28px 16px}
 body.auth-body.home-mode{display:block;padding:0;place-items:unset}
 .auth-bg{position:fixed;inset:0;z-index:0;background:
@@ -335,7 +335,7 @@ body.auth-body.home-mode{display:block;padding:0;place-items:unset}
 .home-tile em{font-style:normal;font-size:11px;font-weight:750;color:var(--amber);text-transform:uppercase;letter-spacing:.06em}
 .home-tile.is-soon{opacity:.72}
 
-/* —— Module shell extras —— */
+/* -- Module shell extras -- */
 .nav-group{display:grid;gap:4px}
 .nav-group.is-collapsed .nav-children{display:none}
 .nav-parent-row{display:flex;align-items:stretch;gap:2px;min-width:0}
@@ -371,7 +371,7 @@ body.auth-body.home-mode{display:block;padding:0;place-items:unset}
 .upload-telecaller-list{display:grid;gap:8px;max-height:240px;overflow:auto;margin:12px 0}
 .upload-dash-card{max-width:480px}
 
-/* —— Right Filters rail (fixed to viewport edge) —— */
+/* -- Right Filters rail (fixed to viewport edge) -- */
 body .dashboard-with-filters{display:block;min-width:0}
 body .dashboard-body{display:grid;gap:22px;min-width:0}
 body .dashboard-main-search{
@@ -443,7 +443,7 @@ body .dashboard-filter-reset{width:100%;justify-self:stretch;margin-top:4px}
   flex:1 1 auto;min-height:0;height:100%;overflow:auto
 }
 
-/* —— Admin —— */
+/* -- Admin -- */
 .access-queue{display:grid;gap:12px;margin:0 0 24px}
 .access-queue-head{display:flex;justify-content:space-between;align-items:center}
 .access-request-card{display:flex;justify-content:space-between;gap:16px;flex-wrap:wrap;padding:16px 18px;background:var(--panel);border:1px solid var(--warn-border);border-radius:12px;background:linear-gradient(180deg,var(--access-card-top),var(--access-card-bot))}
@@ -650,7 +650,7 @@ body .perf-chart-block h4{margin:0;font-size:14px;color:var(--ink)}
   body .perf-chart-wrap{height:200px}
 }
 
-/* —— Sales Graph —— */
+/* -- Sales Graph -- */
 body .sg-upload-grid{grid-template-columns:repeat(3,minmax(0,1fr))}
 body .drop-zone-disabled,body .drop-zone[aria-disabled="true"]{
   opacity:.55;cursor:not-allowed;pointer-events:auto;background:var(--soft-2)
@@ -749,7 +749,7 @@ body .sg-chart-scroll{
   /* Chromium overlays the X bar on the canvas when overflow-y is hidden.
      JS sets --sg-hscroll-gutter to the bar thickness only in that case. */
   padding-bottom:var(--sg-hscroll-gutter,0px);
-  /* Contain horizontal overscroll only — vertical page scroll must pass through. */
+  /* Contain horizontal overscroll only - vertical page scroll must pass through. */
   overscroll-behavior-x:contain;
   overscroll-behavior-y:auto;
   -webkit-overflow-scrolling:touch;
@@ -831,7 +831,7 @@ body .sg-sortable:hover{color:var(--green-2)}
 .auth-theme-bar label{display:inline-flex;align-items:center;gap:8px}
 .auth-theme-bar select{min-width:7.5rem}
 body.home-mode .auth-theme-bar{display:none}
-/* —— Dark theme —— */
+/* -- Dark theme -- */
 :root[data-theme="dark"]{
     color-scheme:dark;
     --ink:#e6efe9;

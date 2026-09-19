@@ -1,6 +1,6 @@
 /**
  * Fill Telecalling Lead Audit template via JSZip (preserves slicers/charts/formulas).
- * Writes Raw Data only — Executive / Performance / Detailed / ChartCache stay formula-driven.
+ * Writes Raw Data only - Executive / Performance / Detailed / ChartCache stay formula-driven.
  *
  * Excel Online: opens after calcChain dangling-refs are stripped. Slicers + FILTER/UNIQUE
  * ChartCache sync are desktop Excel 365 features; Online may show static charts / limited slicers.
@@ -217,7 +217,7 @@ function buildRawDataRowsXml(rawRows){
     cells.push(inlineStr(`S${r}`, row.severity));
     cells.push(inlineStr(`T${r}`, row.auditStatus));
     cells.push(numberCell(`U${r}`, row.errorFlag, STYLE.int));
-    // Hidden RowVis — SUBTOTAL so Graphical slicers drive ChartCache formulas
+    // Hidden RowVis - SUBTOTAL so Graphical slicers drive ChartCache formulas
     cells.push(`<c r="V${r}"><f>SUBTOTAL(103,B${r})</f><v>1</v></c>`);
     parts.push(`<row r="${r}" spans="1:22">${cells.join("")}</row>`);
   }
@@ -301,7 +301,7 @@ export async function buildTelecallerDashboardBlob(results, options = {}){
 
   const lastDataRow = 1 + rawRows.length;
   const dataXml = buildRawDataRowsXml(rawRows);
-  // Do NOT merge cells inside RawData — Excel Tables forbid merges; Online treats that as corrupt.
+  // Do NOT merge cells inside RawData - Excel Tables forbid merges; Online treats that as corrupt.
   const dimension = `A1:V${Math.max(lastDataRow, 2)}`;
 
   const bytes = await loadTemplateBytes(options.templateUrl || TEMPLATE_URL);

@@ -7,12 +7,12 @@
   <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#0f2d22">
   <meta name="description" content="GPP AI DeBug Mode">
   <title>GPP AI · DeBug Mode</title>
-  <script src="../theme-boot.js?v=7.2.2.stable"></script>
-  <script src="../motion.js?v=7.2.2.stable"></script>
+  <script src="../theme-boot.js?v=8.0.0.stable"></script>
+  <script src="../motion.js?v=8.0.0.stable"></script>
   <link rel="manifest" href="../manifest.webmanifest">
-  <link rel="stylesheet" href="../styles.css?v=7.2.2.stable">
+  <link rel="stylesheet" href="../styles.css?v=8.0.0.stable">
   <script defer src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-  <script type="module" src="../debug-mode.js?v=7.2.2.stable"></script>
+  <script type="module" src="../debug-mode.js?v=8.0.0.stable"></script>
 </head>
 <body>
   <div id="update-banner" class="update-banner hidden" role="status">
@@ -26,7 +26,7 @@
         <button class="nav-item active" data-view="run"><span>◎</span>Run</button>
         <button class="nav-item" data-view="settings"><span>⚙</span>Settings</button>
       </nav>
-      <div class="privacy-note"><strong id="sidebar-version">v7.2.2.stable</strong><span id="sidebar-notes">v7.2.2.stable: ERP Sync daily/continue self-chains audit batches (in-request loop + fire-and-forget continue) so progress does not wait on the 10-minute cron; continue cron is optional backup.</span></div>
+      <div class="privacy-note"><strong id="sidebar-version">v8.0.0.stable</strong><span id="sidebar-notes">v8.0.0.stable: SEO module - Guru Punvaanii audit command center in GPP AI (live scanner, technical/on-page/schema/CWV/traffic, 30-day plan) with LeadLens theme and module.seo permission.</span></div>
     </aside>
 
     <main>
@@ -75,7 +75,7 @@
             <div class="progress-copy"><strong id="progress-label">Waiting</strong><span id="progress-percent">0%</span></div>
             <div class="progress-track"><div id="progress-bar" class="progress-bar"></div></div>
           </div>
-          <div class="metrics"><div><span>Leads</span><strong id="metric-leads">—</strong></div><div><span>Calls</span><strong id="metric-calls">—</strong></div><div><span>Audited</span><strong id="metric-completed">—</strong></div><div><span>Batch</span><strong id="metric-batch">—</strong></div><div><span>Status</span><strong id="metric-status">Idle</strong></div><div><span>Input tokens</span><strong id="metric-input-tokens">—</strong></div><div><span>Cached input</span><strong id="metric-cached-tokens">—</strong></div><div><span>Output tokens</span><strong id="metric-output-tokens">—</strong></div><div><span>Run time</span><strong id="metric-duration">—</strong></div><div><span>Run cost</span><strong id="metric-cost">—</strong></div></div>
+          <div class="metrics"><div><span>Leads</span><strong id="metric-leads">-</strong></div><div><span>Calls</span><strong id="metric-calls">-</strong></div><div><span>Audited</span><strong id="metric-completed">-</strong></div><div><span>Batch</span><strong id="metric-batch">-</strong></div><div><span>Status</span><strong id="metric-status">Idle</strong></div><div><span>Input tokens</span><strong id="metric-input-tokens">-</strong></div><div><span>Cached input</span><strong id="metric-cached-tokens">-</strong></div><div><span>Output tokens</span><strong id="metric-output-tokens">-</strong></div><div><span>Run time</span><strong id="metric-duration">-</strong></div><div><span>Run cost</span><strong id="metric-cost">-</strong></div></div>
           <div id="debug-results-panel" class="debug-results-panel hidden">
             <div class="section-head">
               <div><h2>Results</h2><p>Columns match Settings → Output Excel (enabled fields and sort order). Filter by All / Flagged / Clean or a single active error.</p></div>
@@ -164,7 +164,7 @@
             <section class="settings-card">
               <div class="card-title"><h2>5 · Error Focus prompts</h2><p>Select AI Error Types to run. Edit the focused prompt below. <strong>Sync from Bucket 1</strong> (Status only) loads the app’s built-in production Status rules into DeBug.</p></div>
               <div id="error-type-checks" class="debug-error-checks" role="group" aria-label="Active error types"></div>
-              <p id="error-run-hint" class="form-message muted">Running with 0 error(s): —</p>
+              <p id="error-run-hint" class="form-message muted">Running with 0 error(s): -</p>
               <div class="debug-focus-toolbar">
                 <label class="debug-focus-select">Editing<select id="focus-error-type"></select></label>
                 <div class="inline-actions">

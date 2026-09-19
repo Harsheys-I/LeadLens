@@ -1,5 +1,5 @@
 /**
- * DeBug Mode UI — SuperUser-only Error Focus Lab (Run + Settings).
+ * DeBug Mode UI - SuperUser-only Error Focus Lab (Run + Settings).
  */
 import {
   APP_VERSION,
@@ -16,25 +16,25 @@ import {
   sortResults,
   validateApiKey,
   SERVER_API_KEY,
-} from "./audit.js?v=7.2.2.stable";
-import {getApiKey,apiKeyIsRemembered,saveApiKey,forgetApiKey,setStorageUserId,storageKey} from "./db.js?v=7.2.2.stable";
-import {requireAuth,logout,getUser,changePassword,updateProfile} from "./auth.js?v=7.2.2.stable";
-import {SettingsApi} from "./api-client.js?v=7.2.2.stable";
-import {mountNotifications} from "./notifications-ui.js?v=7.2.2.stable";
-import {appUrl, homePath, isDevHost} from "./app-base.js?v=7.2.2.stable";
-import {initTheme} from "./theme.js?v=7.2.2.stable";
+} from "./audit.js?v=8.0.0.stable";
+import {getApiKey,apiKeyIsRemembered,saveApiKey,forgetApiKey,setStorageUserId,storageKey} from "./db.js?v=8.0.0.stable";
+import {requireAuth,logout,getUser,changePassword,updateProfile} from "./auth.js?v=8.0.0.stable";
+import {SettingsApi} from "./api-client.js?v=8.0.0.stable";
+import {mountNotifications} from "./notifications-ui.js?v=8.0.0.stable";
+import {appUrl, homePath, isDevHost} from "./app-base.js?v=8.0.0.stable";
+import {initTheme} from "./theme.js?v=8.0.0.stable";
 import {
   debugAuditBatch,
   telecallerAuditBatch,
   compareDebugVsTelecaller,
   activePromptsReady,
   normalizeActiveErrorTypes,
-} from "./debug-engine.js?v=7.2.2.stable";
+} from "./debug-engine.js?v=8.0.0.stable";
 import {
   LAB_ERROR_TYPES,
   STATUS_HISTORY_PROMPT,
   emptyErrorPrompts,
-} from "./debug-prompts.js?v=7.2.2.stable";
+} from "./debug-prompts.js?v=8.0.0.stable";
 
 const $=id=>document.getElementById(id);
 const ids=[
@@ -74,7 +74,7 @@ const WIDE_RESULT_COLS=new Set(["observation","recommendation","comments"]);
 
 function formatResultCell(fieldId,value){
   const text=String(value??"").trim();
-  if(!text)return fieldId==="errorTypes"?"None":"—";
+  if(!text)return fieldId==="errorTypes"?"None":"-";
   return text;
 }
 
@@ -201,7 +201,7 @@ function resultsTableColSpan(columns,multiRunStats){
   return(columns?.length||1)+(multiRunStats?1:0)+1;
 }
 
-/** Per lead: count each error label (and "None") across repeated runs — one increment per run per lead. */
+/** Per lead: count each error label (and "None") across repeated runs - one increment per run per lead. */
 function aggregatePerLeadFrequencies(resultSets){
   const byLead=new Map();
   for(const results of resultSets||[]){
@@ -231,7 +231,7 @@ function renderLeadFrequencyMini(container,entries,runCount){
   container.replaceChildren();
   container.className="debug-lead-freq-mini";
   if(!entries?.length){
-    container.textContent="—";
+    container.textContent="-";
     return;
   }
   const max=Math.max(runCount,...entries.map(([,count])=>count),1);
@@ -739,13 +739,13 @@ function renderComparePanel(job){
     }else{
       for(const row of cmp.rows.slice(0,400)){
         const tr=document.createElement("tr");
-        const obs=row.debugObservation||"—";
+        const obs=row.debugObservation||"-";
         for(const text of [
-          row.mobile||"—",
-          row.status||"—",
-          row.onlyDebug.join(", ")||"—",
-          row.onlyTele.join(", ")||"—",
-          row.both.join(", ")||"—",
+          row.mobile||"-",
+          row.status||"-",
+          row.onlyDebug.join(", ")||"-",
+          row.onlyTele.join(", ")||"-",
+          row.both.join(", ")||"-",
           obs
         ]){
           const td=document.createElement("td");
@@ -773,13 +773,13 @@ function renderProgress(job){
     ?"DeBug complete"
     :job.status==="running"
     ?`Keeping ${concurrency} batch request${concurrency>1?"s":""} in flight${pendingLeft?` · ${pendingLeft} batch(es) waiting to checkpoint`:""}…`
-    :job.status==="paused"?"DeBug paused — ready to resume":job.status==="failed"?"DeBug stopped":"Waiting for a file";
+    :job.status==="paused"?"DeBug paused - ready to resume":job.status==="failed"?"DeBug stopped":"Waiting for a file";
   if(els["progress-percent"])els["progress-percent"].textContent=`${pct}%`;
   if(els["progress-bar"])els["progress-bar"].style.width=`${pct}%`;
-  if(els["metric-leads"])els["metric-leads"].textContent=uniqueLeadCount(job)||"—";
-  if(els["metric-calls"])els["metric-calls"].textContent=job.callCount!=null?Number(job.callCount).toLocaleString():"—";
-  if(els["metric-batch"])els["metric-batch"].textContent=batches?`${Math.min((job.nextBatch||0)+1,batches)} / ${batches}`:"—";
-  if(els["metric-completed"])els["metric-completed"].textContent=totalAudited?`${done} / ${totalAudited}`:"—";
+  if(els["metric-leads"])els["metric-leads"].textContent=uniqueLeadCount(job)||"-";
+  if(els["metric-calls"])els["metric-calls"].textContent=job.callCount!=null?Number(job.callCount).toLocaleString():"-";
+  if(els["metric-batch"])els["metric-batch"].textContent=batches?`${Math.min((job.nextBatch||0)+1,batches)} / ${batches}`:"-";
+  if(els["metric-completed"])els["metric-completed"].textContent=totalAudited?`${done} / ${totalAudited}`:"-";
   if(els["metric-status"])els["metric-status"].textContent=job.status?job.status[0].toUpperCase()+job.status.slice(1):"Idle";
   if(els["metric-input-tokens"])els["metric-input-tokens"].textContent=`${number(usage.input).toLocaleString()} (${billable.toLocaleString()} billable)`;
   if(els["metric-cached-tokens"])els["metric-cached-tokens"].textContent=number(usage.cached).toLocaleString();
@@ -831,7 +831,7 @@ function commitBatch(job,index,rows){
       ?`Checkpoint batch ${from+1}. ${auditedDoneCount(job)}/${job.totalLeads} audited.`
       :`Checkpoint batches ${from+1}–${job.nextBatch}. ${auditedDoneCount(job)}/${job.totalLeads} audited.`);
   }else{
-    addLog(job,`Batch ${index+1} API done (${rows?.length||0} audited) — waiting for earlier batches.`);
+    addLog(job,`Batch ${index+1} API done (${rows?.length||0} audited) - waiting for earlier batches.`);
   }
   throttleProgress(job);
 }
@@ -955,7 +955,7 @@ async function runJob(job){
     stopClock(job);
     if(error.name==="AbortError"){
       job.status="paused";
-      addLog(job,"DeBug paused. Completed batches are kept in memory — resume to continue.","warn");
+      addLog(job,"DeBug paused. Completed batches are kept in memory - resume to continue.","warn");
     }else{
       job.status="failed";
       job.error=error.message||String(error);
@@ -1008,7 +1008,7 @@ async function runTelecallerCompare(job){
     }catch(err){
       addLog(job,`Compare: could not load audit_settings (${err.message||err}); using defaults.`,"warn");
     }
-    // Throughput only — never reuse DeBug model/prompts/error focus.
+    // Throughput only - never reuse DeBug model/prompts/error focus.
     auditSettings={
       ...auditSettings,
       batchSize:Math.max(1,Number(job.settings?.batchSize)||Number(auditSettings.batchSize)||1),
@@ -1068,7 +1068,7 @@ async function runTelecallerCompare(job){
     await Promise.all(workers);
     if(fatalError)throw fatalError;
 
-    // Preserve batch order (dense) — do not flatMap sparse holes.
+    // Preserve batch order (dense) - do not flatMap sparse holes.
     const flat=[];
     for(let i=0;i<totalBatches;i++){
       const rows=teleResults[i];
@@ -1076,7 +1076,7 @@ async function runTelecallerCompare(job){
       flat.push(...rows);
     }
     if(flat.length!==(job.results||[]).length){
-      addLog(job,`Compare: row count DeBug ${job.results.length} vs TeleCaller ${flat.length} — pairing by index then key.`,"warn");
+      addLog(job,`Compare: row count DeBug ${job.results.length} vs TeleCaller ${flat.length} - pairing by index then key.`,"warn");
     }
     job.telecallerResults=flat;
     job.compare=compareDebugVsTelecaller(job.results,flat,activeForJob(job));
@@ -1145,7 +1145,7 @@ async function reAuditResultRow(job,row){
   if(!job||!row)return;
   const key=resultLeadKey(row);
   if(!key||key==="\u0001"){
-    toast("This row is missing mobile/project — cannot re-audit.");
+    toast("This row is missing mobile/project - cannot re-audit.");
     return;
   }
   if(rowReAuditKeys.has(key)){
@@ -1166,7 +1166,7 @@ async function reAuditResultRow(job,row){
 
   const sourceLeads=leadsForResultRow(job,row);
   if(!sourceLeads.length){
-    toast("Lead not found in memory — re-upload the file or run a full Re-Audit.");
+    toast("Lead not found in memory - re-upload the file or run a full Re-Audit.");
     return;
   }
   const leadGroup=groupCallRowsByLead(sourceLeads)[0]||sourceLeads;
@@ -1232,7 +1232,7 @@ async function reAuditResultRowTenTimes(job,row){
   if(!job||!row)return;
   const key=resultLeadKey(row);
   if(!key||key==="\u0001"){
-    toast("This row is missing mobile/project — cannot re-audit.");
+    toast("This row is missing mobile/project - cannot re-audit.");
     return;
   }
   if(rowReAuditKeys.has(key)){
@@ -1253,7 +1253,7 @@ async function reAuditResultRowTenTimes(job,row){
 
   const sourceLeads=leadsForResultRow(job,row);
   if(!sourceLeads.length){
-    toast("Lead not found in memory — re-upload the file or run a full Re-Audit.");
+    toast("Lead not found in memory - re-upload the file or run a full Re-Audit.");
     return;
   }
   const leadGroup=groupCallRowsByLead(sourceLeads)[0]||sourceLeads;
@@ -1309,7 +1309,7 @@ async function reAuditResultRowTenTimes(job,row){
 
     if(!runsCompleted||!lastRow){
       addLog(job,`Row Re-Audit 10× finished with no successful runs: ${label}.`,"error");
-      toast(`Re-Audit 10× failed for ${row.mobile||"lead"} — no successful runs.`);
+      toast(`Re-Audit 10× failed for ${row.mobile||"lead"} - no successful runs.`);
       return;
     }
 
@@ -1511,7 +1511,7 @@ async function runTenTimes(){
 
     if(!perLeadStats.size){
       addLog(logJob,`Run 10 times finished with no successful runs.`,"error");
-      toast("Run 10 times finished — no successful runs.");
+      toast("Run 10 times finished - no successful runs.");
     }else{
       addLog(logJob,`Run 10 times complete · ${runsCompleted}/${MULTI_RUN_COUNT} succeeded${runsFailed?`, ${runsFailed} failed`:""}. Per-lead consistency shown in Results.`,"success");
       toast(`Run 10 times complete (${runsCompleted}/${MULTI_RUN_COUNT}).`);
@@ -1848,7 +1848,7 @@ function updateValidation(){
   }
   if(pre){
     pre.classList.remove("hidden");
-    pre.textContent=`Sheet “${parsedFile.sheetName||"—"}” · ${Number(parsedFile.rowCount||0).toLocaleString()} Excel rows · ${Number(parsedFile.callCount||parsedFile.leads.length).toLocaleString()} calls · latest-day ${parsedFile.leads.length}`;
+    pre.textContent=`Sheet “${parsedFile.sheetName||"-"}” · ${Number(parsedFile.rowCount||0).toLocaleString()} Excel rows · ${Number(parsedFile.callCount||parsedFile.leads.length).toLocaleString()} calls · latest-day ${parsedFile.leads.length}`;
   }
   start.disabled=!(parsedFile.leads||[]).length;
   syncRunActionButtons();
@@ -1959,7 +1959,7 @@ async function checkForUpdate(){
   }catch{/* offline */}
 }
 
-// —— wire events ——
+// -- wire events --
 function readSidebarCollapsedPref(){
   try{return localStorage.getItem(storageKey("sidebarCollapsed"))==="1";}
   catch{return false;}
@@ -2005,7 +2005,7 @@ els["shell-account"]?.addEventListener("click",()=>{
   if(!user||!modal)return;
   document.getElementById("account-username").value=user.username||"";
   document.getElementById("account-display").value=user.display_name||"";
-  document.getElementById("account-telecaller").value=user.telecaller_name||"— set by Admin only —";
+  document.getElementById("account-telecaller").value=user.telecaller_name||"- set by Admin only -";
   document.getElementById("account-pw-current").value="";
   document.getElementById("account-pw-new").value="";
   document.getElementById("account-pw-confirm").value="";

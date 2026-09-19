@@ -29,7 +29,7 @@ Do not replace the entire `hostinger` tree on a normal push.
 2. On the **live** site document root (File Manager or FTP), open `api/`:
    - Copy `config.example.php` → `config.local.php` (same folder).
    - Or New File → `config.local.php` and paste the example contents.
-3. Edit **live** `api/config.local.php` (replace placeholders — do not leave `your_database_*`):
+3. Edit **live** `api/config.local.php` (replace placeholders - do not leave `your_database_*`):
    - `db.host` → usually `localhost`
    - `db.name` → exact database name from hPanel
    - `db.user` → exact MySQL username from hPanel

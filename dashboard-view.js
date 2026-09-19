@@ -6,8 +6,8 @@ import {
   buildDashboardModel,
   OVERDUE_BUCKETS,
   commentQualityBucketKeyFromLabel
-} from "./dashboard-metrics.js?v=7.2.2.stable";
-import {storageKey} from "./db.js?v=7.2.2.stable";
+} from "./dashboard-metrics.js?v=8.0.0.stable";
+import {storageKey} from "./db.js?v=8.0.0.stable";
 
 /** Panel switcher labels (presentation) → internal section titles stay as-built. */
 const DASHBOARD_PANELS = [
@@ -890,7 +890,7 @@ function openLeadDetailModal(row){
       ? "dashboard-lead-detail-item dashboard-lead-detail-wide"
       : "dashboard-lead-detail-item");
     item.append(el("span", "dashboard-lead-detail-label", label));
-    const value = el("div", "dashboard-lead-detail-value", text || "—");
+    const value = el("div", "dashboard-lead-detail-value", text || "-");
     if(key === "severity"){
       value.classList.add(`dashboard-sev`, `dashboard-sev-${String(row?.severity || "").toLowerCase()}`);
     }
