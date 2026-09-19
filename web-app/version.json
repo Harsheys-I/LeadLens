@@ -1,5 +1,5 @@
 {
-  "version": "6.3.1.stable",
+  "version": "6.3.2.stable",
   "name": "GPP AI",
-  "notes": "v6.3.1.stable: Unattended ERP Sync daily pipeline — cron fetch + server AI audit + auto-publish at 6:00 AM IST, with continue cron for Hostinger time limits."
+  "notes": "v6.3.2.stable: ERP Sync keep-alive recommended every 1 minute (*/1) so idle ERP sessions last overnight."
 }
