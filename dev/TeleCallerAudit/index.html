@@ -15,7 +15,7 @@
   <script defer src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js"></script>
-  <script type="module" src="../app.js?v=6.0.0.dev.erp-handoff1"></script>
+  <script type="module" src="../app.js?v=6.0.0.dev.erp-keepalive1"></script>
 </head>
 <body>
   <div id="update-banner" class="update-banner hidden" role="status">
@@ -285,13 +285,17 @@
               <div class="card-title"><h2>4 · Cron &amp; advanced (optional)</h2><p>Cron / server OpenAI audit is optional and can get stuck on Hostinger time limits. Prefer Fetch &amp; send to Audit. Publish here only applies to results from the advanced server audit path.</p></div>
               <div class="field-grid run-grid">
                 <label class="check-row"><input id="erp-sync-enabled" type="checkbox"><span>Enable cron / scheduled runs</span></label>
+                <label class="check-row"><input id="erp-sync-keepalive" type="checkbox"><span>Enable session keep-alive (cron every 30 min)</span></label>
                 <label class="check-row"><input id="erp-sync-auto-publish" type="checkbox"><span>Auto-publish after server audit</span></label>
                 <label>Batch size<input id="erp-sync-batch-size" type="number" min="1" max="20" value="10"></label>
                 <label>Max leads / invocation<input id="erp-sync-max-leads" type="number" min="1" max="200" value="40"></label>
               </div>
+              <label>Keep-alive URL (optional)<input id="erp-sync-keepalive-url" type="url" autocomplete="off" placeholder="Defaults to Report URL — use a lighter same-host page if preferred"></label>
               <label>Cron bearer secret<input id="erp-sync-cron-secret" type="password" autocomplete="new-password" placeholder="Set a long random secret"></label>
               <p id="erp-sync-cron-hint" class="muted form-message"></p>
+              <p id="erp-sync-keepalive-status" class="muted form-message" aria-live="polite"></p>
               <div class="inline-actions" style="margin-top:0.75rem;flex-wrap:wrap">
+                <button id="erp-sync-ping" type="button" class="secondary-button">Ping keep-alive now</button>
                 <button id="erp-sync-run-server" type="button" class="secondary-button">Server audit (advanced)</button>
                 <button id="erp-sync-publish" type="button" class="secondary-button">Publish last server results</button>
               </div>

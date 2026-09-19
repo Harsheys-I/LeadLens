@@ -21,11 +21,23 @@ UI and API are active only under **`/dev`**. Production site root `/` is unchang
 
 ### Cookie refresh
 
-When Test fetch / Fetch shows **session expired**:
+When Test fetch / Fetch / keep-alive shows **session expired**:
 
 1. Log into ERP in a browser and copy a fresh Cookie from DevTools or a new cURL.
-2. Paste into **Cookie header** → **Save** → **Test fetch**.
+2. Paste into **Cookie header** → **Save** → **Test fetch** (or **Ping keep-alive now**).
 3. No Playwright / OTP automation — refresh is always manual.
+
+## Session keep-alive (experiment)
+
+Periodically HTTP-request the ERP with the saved Cookie so **idle** sessions may last longer. This does **not** help if the ERP uses an absolute session TTL.
+
+1. In ERP Sync → **4 · Cron & advanced**, check **Enable session keep-alive**.
+2. Ensure a **Cron bearer secret** is set (same secret as other ERP cron jobs).
+3. Optional: set **Keep-alive URL** to a lighter same-host page; leave blank to use the Report URL.
+4. Save, then optionally click **Ping keep-alive now** to verify.
+5. Add a Hostinger cron job every 30 minutes (see below).
+
+Last keep-alive result (`ok` / `session_expired` / `error` + timestamp) appears in the status area. Cookies are never logged.
 
 ## API (Super User session)
 
@@ -35,12 +47,28 @@ When Test fetch / Fetch shows **session expired**:
 | GET | `erp-sync/latest-leads` | Download mapped leads for Audit UI |
 | GET | `erp-sync/latest-leads?meta=1` | Counts only |
 | POST | `erp-sync/test-fetch` | Preview without Audit handoff |
+| POST | `erp-sync/keepalive` | Session keep-alive ping (also `erp-sync/ping`) |
 | POST | `erp-sync/run` | Optional advanced server OpenAI loop |
 | POST | `erp-sync/publish` | Publish last **server-audit** results |
 
-## Hostinger cron (optional / advanced)
+## Hostinger cron — session keep-alive (every 30 minutes)
 
-In **hPanel → Advanced · Cron Jobs**, add a job that hits **only** the `/dev` API:
+In **hPanel → Advanced · Cron Jobs**, schedule `*/30 * * * *` (or the hPanel UI equivalent “every 30 minutes”) and run:
+
+```bash
+# every 30 minutes
+curl -sS -X POST -H "Authorization: Bearer YOUR_CRON_SECRET" \
+  "https://ai.gurupunvaanii.com/dev/api/erp-sync/keepalive"
+```
+
+Notes:
+
+- Replace `YOUR_CRON_SECRET` with the secret saved in ERP Sync.
+- Cron is ignored while **Enable session keep-alive** is off.
+- Only helps if the ERP renews idle sessions; absolute TTL sessions still expire.
+- Alternative header if `Authorization` is stripped by the proxy: `-H "X-ERP-Sync-Secret: YOUR_CRON_SECRET"`.
+
+## Hostinger cron (optional / advanced server audit)
 
 ```bash
 curl -sS -X POST -H "Authorization: Bearer YOUR_CRON_SECRET" -H "Content-Type: application/json" -d '{}' "https://ai.gurupunvaanii.com/dev/api/erp-sync/run"
@@ -48,14 +76,13 @@ curl -sS -X POST -H "Authorization: Bearer YOUR_CRON_SECRET" -H "Content-Type: a
 
 Notes:
 
-- Replace `YOUR_CRON_SECRET` with the secret saved in ERP Sync.
 - Cron is ignored while **Enable cron** is off.
 - Prefer the main Audit UI for large fetches; cron server audit may only process a batch per invocation.
-- Alternative header if `Authorization` is stripped by the proxy: `-H "X-ERP-Sync-Secret: YOUR_CRON_SECRET"`.
 
 ## Risk controls
 
 - Cookies are encrypted at rest (`session.secret` / `app.secrets_key`); never logged.
+- Keep-alive samples a small response body only — it does not store payloads or run Audit.
 - Auto-publish defaults **off** on the advanced server path.
 - All `erp-sync/*` routes return **404** outside `/dev`.
 - Raw payloads + `latest-leads.json` land under `api/storage/erp-sync/` (blocked by `.htaccess`, gitignored).

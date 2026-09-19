@@ -11,6 +11,7 @@ require_once __DIR__ . '/../lib/erp-sync.php';
  *   POST erp-sync/fetch-for-audit  (primary: fetch → store → map → latest-leads)
  *   GET  erp-sync/latest-leads
  *   POST erp-sync/run             (optional advanced: server OpenAI audit loop)
+ *   POST erp-sync/keepalive|ping  (session keep-alive; cron or Super User)
  *   POST erp-sync/publish
  *   GET erp-sync/status
  *   GET erp-sync/job
@@ -36,6 +37,10 @@ function ll_route_erp_sync(string $action): void
       break;
     case 'run':
       ll_erp_sync_route_run();
+      break;
+    case 'keepalive':
+    case 'ping':
+      ll_erp_sync_route_keepalive();
       break;
     case 'publish':
       ll_erp_sync_route_publish();
@@ -226,6 +231,27 @@ function ll_erp_sync_route_run(): void
   ll_ok($result);
 }
 
+function ll_erp_sync_route_keepalive(): void
+{
+  ll_require_method('POST');
+  $actor = ll_erp_sync_require_actor(true);
+  $cfg = ll_erp_sync_load_config();
+  if ($actor['username'] === 'erp-sync-cron' && empty($cfg['keepalive_enabled'])) {
+    ll_ok([
+      'ok' => false,
+      'result' => 'disabled',
+      'error' => 'ERP keep-alive is disabled',
+      'status' => 'disabled',
+    ]);
+  }
+  try {
+    $result = ll_erp_sync_keepalive();
+  } catch (Throwable $e) {
+    ll_error('ERP keep-alive failed: ' . $e->getMessage(), 500);
+  }
+  ll_ok($result);
+}
+
 function ll_erp_sync_route_publish(): void
 {
   ll_require_method('POST');
@@ -290,6 +316,7 @@ function ll_erp_sync_route_status(): void
   ll_ok([
     'config' => $cfg,
     'last_status' => $cfg['last_status'] ?? null,
+    'last_keepalive' => $cfg['last_keepalive'] ?? null,
     'job' => $jobMeta,
     'progress' => $progress,
   ]);

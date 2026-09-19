@@ -30,6 +30,7 @@ const BUSY_DISABLE_IDS = [
   'erp-sync-save',
   'erp-sync-test',
   'erp-sync-fetch-audit',
+  'erp-sync-ping',
   'erp-sync-run-server',
   'erp-sync-publish'
 ];
@@ -118,6 +119,29 @@ function parseExtraHeaders() {
   return parsed;
 }
 
+function formatKeepaliveLine(ka) {
+  if (!ka || typeof ka !== 'object') return 'Keep-alive: never run.';
+  const result = ka.result || (ka.session_expired ? 'session_expired' : (ka.ok ? 'ok' : 'error'));
+  const when = ka.at ? String(ka.at) : '—';
+  if (result === 'session_expired' || ka.session_expired) {
+    return `Keep-alive: session_expired at ${when} — refresh Cookie and Save.`;
+  }
+  if (result === 'ok' && ka.ok) {
+    const http = ka.http_status != null ? ` HTTP ${ka.http_status}` : '';
+    return `Keep-alive: ok at ${when}${http}`;
+  }
+  return `Keep-alive: ${result} at ${when}${ka.error ? ` — ${ka.error}` : ''}`;
+}
+
+function writeKeepaliveStatus(ka) {
+  const el = $('erp-sync-keepalive-status');
+  if (!el) return;
+  el.textContent = formatKeepaliveLine(ka);
+  el.style.color = (ka?.session_expired || ka?.result === 'session_expired')
+    ? 'var(--danger, #b42318)'
+    : '';
+}
+
 function applyConfig(config) {
   if (!$('erp-sync-url')) return;
   $('erp-sync-url').value = config.report_url || '';
@@ -134,6 +158,12 @@ function applyConfig(config) {
     : '';
   $('erp-sync-rows-path').value = config.rows_path || '';
   $('erp-sync-enabled').checked = Boolean(config.enabled);
+  if ($('erp-sync-keepalive')) {
+    $('erp-sync-keepalive').checked = Boolean(config.keepalive_enabled);
+  }
+  if ($('erp-sync-keepalive-url')) {
+    $('erp-sync-keepalive-url').value = config.keepalive_url || '';
+  }
   $('erp-sync-auto-publish').checked = Boolean(config.auto_publish);
   $('erp-sync-batch-size').value = String(config.batch_size ?? 10);
   $('erp-sync-max-leads').value = String(config.max_leads_per_run ?? 40);
@@ -141,13 +171,18 @@ function applyConfig(config) {
   $('erp-sync-cron-hint').textContent = config.cron_secret_configured
     ? 'Cron secret is set. Paste a new value only to rotate it.'
     : 'Set a cron secret before enabling Hostinger cron.';
+  writeKeepaliveStatus(config.last_keepalive);
   renderFieldMap(config.field_map || DEFAULT_ALIASES);
 }
 
 function formatStatus(payload) {
   const last = payload?.last_status || payload?.config?.last_status;
+  const ka = payload?.last_keepalive || payload?.config?.last_keepalive;
   const job = payload?.job;
   const lines = [];
+  if (ka) {
+    lines.push('Keep-alive: ' + JSON.stringify(ka, null, 2));
+  }
   if (last) {
     lines.push('Last: ' + JSON.stringify(last, null, 2));
   }
@@ -223,6 +258,7 @@ function clearAbortController() {
 function statusElWrite(payload) {
   const statusEl = $('erp-sync-status');
   if (statusEl) statusEl.textContent = formatStatus(payload);
+  writeKeepaliveStatus(payload?.last_keepalive || payload?.config?.last_keepalive);
 }
 
 export function canShowErpSync() {
@@ -264,23 +300,16 @@ export async function loadErpSyncPanel() {
   }
 }
 
-async function saveConfig() {
-  setBusy(true, {activeId: 'erp-sync-save', workingLabel: 'Saving…'});
-  setMsg('Saving…');
-  let extra_headers;
-  try {
-    extra_headers = parseExtraHeaders();
-  } catch (err) {
-    setBusy(false);
-    setMsg(err.message, true);
-    return;
-  }
+function buildConfigBody() {
+  const extra_headers = parseExtraHeaders();
   const body = {
     report_url: $('erp-sync-url')?.value?.trim() || '',
     http_method: $('erp-sync-method')?.value || 'GET',
     extra_headers,
     rows_path: $('erp-sync-rows-path')?.value?.trim() || '',
     enabled: Boolean($('erp-sync-enabled')?.checked),
+    keepalive_enabled: Boolean($('erp-sync-keepalive')?.checked),
+    keepalive_url: $('erp-sync-keepalive-url')?.value?.trim() || '',
     auto_publish: Boolean($('erp-sync-auto-publish')?.checked),
     batch_size: Number($('erp-sync-batch-size')?.value || 10),
     max_leads_per_run: Number($('erp-sync-max-leads')?.value || 40),
@@ -290,6 +319,20 @@ async function saveConfig() {
   if (cookie) body.cookie = cookie;
   const cron = $('erp-sync-cron-secret')?.value?.trim() || '';
   if (cron) body.cron_secret = cron;
+  return body;
+}
+
+async function saveConfig() {
+  setBusy(true, {activeId: 'erp-sync-save', workingLabel: 'Saving…'});
+  setMsg('Saving…');
+  let body;
+  try {
+    body = buildConfigBody();
+  } catch (err) {
+    setBusy(false);
+    setMsg(err.message, true);
+    return;
+  }
   try {
     const data = await api('erp-sync/config', {method: 'POST', body});
     applyConfig(data.config || {});
@@ -302,27 +345,12 @@ async function saveConfig() {
 }
 
 async function saveConfigQuiet(signal) {
-  let extra_headers;
+  let body;
   try {
-    extra_headers = parseExtraHeaders();
+    body = buildConfigBody();
   } catch {
     return;
   }
-  const body = {
-    report_url: $('erp-sync-url')?.value?.trim() || '',
-    http_method: $('erp-sync-method')?.value || 'GET',
-    extra_headers,
-    rows_path: $('erp-sync-rows-path')?.value?.trim() || '',
-    enabled: Boolean($('erp-sync-enabled')?.checked),
-    auto_publish: Boolean($('erp-sync-auto-publish')?.checked),
-    batch_size: Number($('erp-sync-batch-size')?.value || 10),
-    max_leads_per_run: Number($('erp-sync-max-leads')?.value || 40),
-    field_map: readFieldMapFromUi()
-  };
-  const cookie = $('erp-sync-cookie')?.value?.trim() || '';
-  if (cookie) body.cookie = cookie;
-  const cron = $('erp-sync-cron-secret')?.value?.trim() || '';
-  if (cron) body.cron_secret = cron;
   const data = await api('erp-sync/config', {method: 'POST', body, signal});
   applyConfig(data.config || {});
 }
@@ -472,6 +500,40 @@ async function fetchAndSendToAudit() {
   }
 }
 
+async function pingKeepalive() {
+  if (busy) return;
+  const signal = beginAbortableRequest();
+  setBusy(true, {activeId: 'erp-sync-ping', workingLabel: 'Pinging…'});
+  setMsg('Keep-alive ping…');
+  try {
+    await saveConfigQuiet(signal);
+    const data = await api('erp-sync/keepalive', {method: 'POST', body: {}, signal});
+    writeKeepaliveStatus(data);
+    if (data.session_expired || data.result === 'session_expired') {
+      setMsg(data.error || 'ERP session expired — refresh Cookie', true);
+      $('erp-sync-cookie-hint').textContent = 'Session expired — paste a fresh Cookie header and Save settings.';
+    } else if (data.ok) {
+      setMsg('Keep-alive OK');
+    } else {
+      setMsg(data.error || 'Keep-alive failed', true);
+    }
+    await refreshStatus({signal});
+  } catch (err) {
+    if (isAbortError(err)) {
+      setMsg('Stopped.');
+    } else {
+      setMsg(err.message || 'Keep-alive failed', true);
+      if (err.data?.session_expired) {
+        writeKeepaliveStatus({...err.data, result: 'session_expired', at: new Date().toISOString()});
+        $('erp-sync-cookie-hint').textContent = 'Session expired — paste a fresh Cookie header and Save settings.';
+      }
+    }
+  } finally {
+    clearAbortController();
+    setBusy(false);
+  }
+}
+
 /** Optional advanced: server-side OpenAI audit (not the primary path). */
 async function runServerAuditOnce() {
   if (busy) return;
@@ -584,6 +646,7 @@ export function mountErpSyncPanel({toast, showView, loadErpIntoAudit} = {}) {
   });
   $('erp-sync-test')?.addEventListener('click', () => testFetch());
   $('erp-sync-fetch-audit')?.addEventListener('click', () => fetchAndSendToAudit());
+  $('erp-sync-ping')?.addEventListener('click', () => pingKeepalive());
   $('erp-sync-run-server')?.addEventListener('click', () => runServerAuditOnce());
   $('erp-sync-publish')?.addEventListener('click', () => publishLast());
 
