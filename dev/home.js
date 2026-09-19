@@ -42,6 +42,7 @@ function renderTiles(user){
   for (const tile of tiles) {
     const btn = document.createElement(tile.soon ? 'div' : 'a');
     btn.className = 'home-tile' + (tile.soon ? ' is-soon' : '');
+    btn.dataset.module = tile.id;
     if (!tile.soon) btn.href = tile.href;
     btn.innerHTML = `${tile.icon ? `<span class="home-tile-visual">${tile.icon}</span>` : ''}<strong class="home-tile-title">${tile.title}</strong><span class="home-tile-desc">${tile.desc}</span>${tile.soon ? '<em>Coming soon</em>' : ''}`;
     if (tile.soon) {

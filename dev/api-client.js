@@ -56,7 +56,6 @@ export const AdminApi = {
   createUser: (body) => api('admin/users', {method: 'POST', body}),
   updateUser: (id, body) => api(`admin/users/${id}`, {method: 'PUT', body}),
   deleteUser: (id) => api(`admin/users/${id}`, {method: 'DELETE'}),
-  orgCatalog: () => api('admin/org'),
   listRoles: () => api('admin/roles'),
   createRole: (body) => api('admin/roles', {method: 'POST', body}),
   updateRole: (id, body) => api(`admin/roles/${id}`, {method: 'PUT', body}),
@@ -98,82 +97,6 @@ export const SalesGraphApi = {
   publish: (payload, {title, meta} = {}) =>
     api('sales-graph/publish', {method: 'POST', body: {payload, title, meta}}),
   removeAll: () => api('sales-graph/all', {method: 'DELETE'}),
-};
-
-export const TeamFormsApi = {
-  workspace: () => api('team-forms/workspace'),
-  listUsers: () => api('team-forms/users'),
-  listDepartments: () => api('team-forms/departments'),
-  createDepartment: (body) => api('team-forms/departments', {method: 'POST', body}),
-  updateDepartment: (id, body) => api(`team-forms/departments/${id}/update`, {method: 'POST', body}),
-  deleteDepartment: (id) => api(`team-forms/departments/${id}/delete`, {method: 'POST', body: {}}),
-  listGroups: (departmentId) =>
-    api(`team-forms/groups${departmentId ? `?department_id=${encodeURIComponent(departmentId)}` : ''}`),
-  createGroup: (body) => api('team-forms/groups', {method: 'POST', body}),
-  updateGroup: (id, body) => api(`team-forms/groups/${id}/update`, {method: 'POST', body}),
-  deleteGroup: (id) => api(`team-forms/groups/${id}/delete`, {method: 'POST', body: {}}),
-  listMembers: (groupId) => api(`team-forms/groups/${groupId}/members`),
-  addMember: (groupId, body) => api(`team-forms/groups/${groupId}/members`, {method: 'POST', body}),
-  removeMember: (groupId, body) =>
-    api(`team-forms/groups/${groupId}/members`, {method: 'POST', body: {...body, action: 'remove'}}),
-  listForms: (groupId) => api(`team-forms/groups/${groupId}/forms`),
-  createForm: (groupId, body) => api(`team-forms/groups/${groupId}/forms`, {method: 'POST', body}),
-  getForm: (id) => api(`team-forms/forms/${id}`),
-  updateForm: (id, body) => api(`team-forms/forms/${id}/update`, {method: 'POST', body}),
-  deleteForm: (id) => api(`team-forms/forms/${id}/delete`, {method: 'POST', body: {}}),
-  addField: (formId, body) => api(`team-forms/forms/${formId}/fields`, {method: 'POST', body}),
-  updateField: (formId, fieldId, body) =>
-    api(`team-forms/forms/${formId}/fields/${fieldId}/update`, {method: 'POST', body}),
-  deleteField: (formId, fieldId) =>
-    api(`team-forms/forms/${formId}/fields/${fieldId}/delete`, {method: 'POST', body: {action: 'delete'}}),
-  reorderFields: (formId, order) =>
-    api(`team-forms/forms/${formId}/fields`, {method: 'POST', body: {action: 'reorder', order}}),
-  assignForm: (formId, body) => api(`team-forms/forms/${formId}/create-tasks`, {method: 'POST', body}),
-  createTasks: (formId, body) => api(`team-forms/forms/${formId}/create-tasks`, {method: 'POST', body}),
-  listFormAssignments: (formId) => api(`team-forms/forms/${formId}/assign`),
-  myTasks: (since) => api(`team-forms/tasks?mine=1${since ? `&since=${encodeURIComponent(since)}` : ''}`),
-  reviewTasks: (since) =>
-    api(`team-forms/review/tasks${since ? `?since=${encodeURIComponent(since)}` : ''}`),
-  getTask: (id) => api(`team-forms/tasks/${id}`),
-  assignTask: (id, body) => api(`team-forms/tasks/${id}/update`, {method: 'POST', body}),
-  saveAnswers: (id, answers) => api(`team-forms/tasks/${id}/answers`, {method: 'POST', body: {answers}}),
-  uploadTaskFile: (id, fieldId, file) => {
-    const fd = new FormData();
-    fd.append('field_id', String(fieldId));
-    fd.append('file', file);
-    return api(`team-forms/tasks/${id}/files`, {method: 'POST', body: fd});
-  },
-  taskFileUrl: (id, fieldId) =>
-    `${resolveApiBase()}team-forms/tasks/${id}/file?field_id=${encodeURIComponent(fieldId)}`,
-  setStatus: (id, status, extra = {}) =>
-    api(`team-forms/tasks/${id}/status`, {method: 'POST', body: {status, ...extra}}),
-  addComment: (id, bodyOrOpts) => {
-    const opts = typeof bodyOrOpts === 'string' || bodyOrOpts == null
-      ? {body: bodyOrOpts || ''}
-      : bodyOrOpts;
-    const fd = new FormData();
-    fd.append('body', String(opts.body ?? ''));
-    fd.append('links', JSON.stringify(Array.isArray(opts.links) ? opts.links : []));
-    if (opts.time_spent_minutes != null && opts.time_spent_minutes !== '') {
-      fd.append('time_spent_minutes', String(opts.time_spent_minutes));
-    }
-    for (const file of opts.files || []) fd.append('files[]', file);
-    return api(`team-forms/tasks/${id}/comments`, {method: 'POST', body: fd});
-  },
-  submitTask: (id, opts = {}) => {
-    const fd = new FormData();
-    fd.append('body', String(opts.body ?? ''));
-    fd.append('links', JSON.stringify(Array.isArray(opts.links) ? opts.links : []));
-    for (const file of opts.files || []) fd.append('files[]', file);
-    return api(`team-forms/tasks/${id}/submit`, {method: 'POST', body: fd});
-  },
-  commentFileUrl: (id, commentId, index) =>
-    `${resolveApiBase()}team-forms/tasks/${id}/comment-file?comment_id=${encodeURIComponent(commentId)}&i=${encodeURIComponent(index)}`,
-  approveTask: (id) => api(`team-forms/tasks/${id}/approve`, {method: 'POST', body: {}}),
-  reworkTask: (id, note = '') =>
-    api(`team-forms/tasks/${id}/rework`, {method: 'POST', body: {body: note}}),
-  closeTask: (id) => api(`team-forms/tasks/${id}/close`, {method: 'POST', body: {}}),
-  deleteTask: (id) => api(`team-forms/tasks/${id}/delete`, {method: 'POST', body: {}}),
 };
 
 export const SettingsApi = {

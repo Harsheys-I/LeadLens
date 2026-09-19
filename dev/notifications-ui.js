@@ -24,11 +24,6 @@ function typeIcon(type){
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M19 8v6M22 11h-6"/></svg>
     </span>`;
   }
-  if (type === 'team_forms_task') {
-    return `<span class="notif-type-icon notif-type-generic" aria-hidden="true">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
-    </span>`;
-  }
   return `<span class="notif-type-icon notif-type-generic" aria-hidden="true">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 16h.01"/></svg>
   </span>`;
@@ -84,7 +79,7 @@ function openPerfDashboardFromNotification(opts){
 }
 
 /**
- * @param {{onOpenAccessRequests?: () => void, onDashboardUpdate?: () => void, onPerfDashboardUpdate?: () => void, onTeamFormsTask?: (meta: object) => void, variant?: 'sidebar'|'chrome'}} opts
+ * @param {{onOpenAccessRequests?: () => void, onDashboardUpdate?: () => void, onPerfDashboardUpdate?: () => void, variant?: 'sidebar'|'chrome'}} opts
  */
 export function mountNotifications(opts = {}){
   const bell = document.getElementById('notif-bell');
@@ -181,14 +176,6 @@ export function mountNotifications(opts = {}){
       openDashboardFromNotification(opts);
     } else if (type === 'perf_dashboard_update') {
       openPerfDashboardFromNotification(opts);
-    } else if (type === 'team_forms_task') {
-      let meta = {};
-      try { meta = row?.dataset?.meta ? JSON.parse(row.dataset.meta) : {}; } catch { meta = {}; }
-      if (typeof opts.onTeamFormsTask === 'function') {
-        opts.onTeamFormsTask(meta);
-      } else {
-        location.href = appUrl('/TeamForms/#review');
-      }
     }
     refresh();
   }

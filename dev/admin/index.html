@@ -16,8 +16,8 @@
     <aside class="sidebar">
       <a class="brand" href="../"><img class="brand-mark" src="../assets/gpp-ai-logo.png" alt="" width="48" height="28"><span>GPP AI</span></a>
       <nav aria-label="Admin navigation">
-        <button class="nav-item active" data-view="users" data-perm="admin.users"><span>◎</span>User creation</button>
-        <button class="nav-item" data-view="roles" data-perm="admin.roles"><span>⌁</span>Roles</button>
+        <button class="nav-item active" data-view="users" data-perm="admin.users"><span>👤</span>User creation</button>
+        <button class="nav-item" data-view="roles" data-perm="admin.roles"><span>🛡️</span>Roles</button>
       </nav>
       <div class="privacy-note"><strong>Admin</strong><span>Users, roles, and access requests.</span></div>
     </aside>
@@ -92,18 +92,6 @@
           <small class="hint-copy">Suggestions from Bucket 1 + TeleCalling Performance. You can type a custom name.</small>
         </label>
         <label>Notes<textarea id="user-notes" rows="2"></textarea></label>
-        <div id="user-org-wrap" class="user-org-block">
-          <p id="user-org-hint" class="hint-copy"></p>
-          <div class="perm-group">
-            <strong>Departments</strong>
-            <div id="user-departments" class="role-perms user-org-checks"></div>
-          </div>
-          <div id="user-groups-section" class="perm-group">
-            <strong>Groups</strong>
-            <small class="hint-copy">Groups appear for selected departments. Checking a department does not select its groups.</small>
-            <div id="user-groups" class="role-perms user-org-checks"></div>
-          </div>
-        </div>
         <label class="check-row"><input id="user-active" type="checkbox" checked><span>Active</span></label>
         <label class="check-row"><input id="user-must-pw" type="checkbox"><span>Must change password on next login</span></label>
         <div id="user-form-message" class="form-message"></div>

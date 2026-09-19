@@ -173,10 +173,6 @@ function ll_install_run(): void
     CONSTRAINT fk_sg_pub_user FOREIGN KEY (uploaded_by) REFERENCES users(id) ON DELETE SET NULL
   ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
 
-  // Team Forms (also created via ll_team_forms_ensure_tables on first API hit)
-  require_once __DIR__ . '/lib/team-forms.php';
-  ll_team_forms_ensure_tables();
-
   $roles = [
     ['Super User', 'super', 100, ll_default_role_permissions('super'), 1],
     ['Admin', 'admin', 50, ll_default_role_permissions('admin'), 1],

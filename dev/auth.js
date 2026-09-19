@@ -101,13 +101,7 @@ export function moduleTilesForUser(user = currentUser){
       perm: 'module.telecaller_audit',
       soon: false,
       desc: 'Bucket 1 Followup Review, Run console, published dashboards',
-      icon: `<svg viewBox="0 0 96 96" fill="none" aria-hidden="true">
-        <rect x="22" y="18" width="36" height="48" rx="8" stroke="currentColor" stroke-width="3.5"/>
-        <path d="M32 32h16M32 42h12M32 52h8" stroke="currentColor" stroke-width="3" stroke-linecap="round"/>
-        <circle cx="62" cy="58" r="14" stroke="currentColor" stroke-width="3.5"/>
-        <path d="M56.5 58c0-3 2.5-5.5 5.5-5.5s5.5 2.5 5.5 5.5" stroke="currentColor" stroke-width="3" stroke-linecap="round"/>
-        <path d="M67.5 65v5c0 2-1.5 3.5-3.5 3.5h-4" stroke="currentColor" stroke-width="3" stroke-linecap="round"/>
-      </svg>`
+      icon: '📊'
     },
     {
       id: 'debug',
@@ -117,11 +111,7 @@ export function moduleTilesForUser(user = currentUser){
       devOnly: true,
       soon: false,
       desc: 'SuperUser CSV prompt auditor — custom prompt + Structured Outputs',
-      icon: `<svg viewBox="0 0 96 96" fill="none" aria-hidden="true">
-        <rect x="18" y="22" width="60" height="52" rx="8" stroke="currentColor" stroke-width="3.5"/>
-        <path d="M30 40h36M30 52h24M30 64h16" stroke="currentColor" stroke-width="3" stroke-linecap="round"/>
-        <path d="M58 58l8 8M66 58l-8 8" stroke="currentColor" stroke-width="3.5" stroke-linecap="round"/>
-      </svg>`
+      icon: '🧪'
     },
     {
       id: 'sales-graph',
@@ -130,27 +120,7 @@ export function moduleTilesForUser(user = currentUser){
       perm: 'module.sales_graph',
       soon: false,
       desc: 'Leads & Visits Excel upload, published charts and tables',
-      icon: `<svg viewBox="0 0 96 96" fill="none" aria-hidden="true">
-        <path d="M18 72V28M18 72h60" stroke="currentColor" stroke-width="3.5" stroke-linecap="round"/>
-        <path d="M30 58l14-16 12 10 18-24" stroke="currentColor" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"/>
-        <circle cx="30" cy="58" r="3.5" fill="currentColor"/>
-        <circle cx="44" cy="42" r="3.5" fill="currentColor"/>
-        <circle cx="56" cy="52" r="3.5" fill="currentColor"/>
-        <circle cx="74" cy="28" r="3.5" fill="currentColor"/>
-      </svg>`
-    },
-    {
-      id: 'team-forms',
-      title: 'Team Forms',
-      href: appUrl('/TeamForms/'),
-      perm: 'module.team_forms',
-      soon: false,
-      desc: 'Departments, groups, custom forms, assign & review',
-      icon: `<svg viewBox="0 0 96 96" fill="none" aria-hidden="true">
-        <rect x="22" y="18" width="52" height="60" rx="8" stroke="currentColor" stroke-width="3.5"/>
-        <path d="M34 34h28M34 46h28M34 58h16" stroke="currentColor" stroke-width="3" stroke-linecap="round"/>
-        <path d="M58 64l6 6 10-12" stroke="currentColor" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"/>
-      </svg>`
+      icon: '📈'
     },
     {
       id: 'seo',
@@ -159,12 +129,7 @@ export function moduleTilesForUser(user = currentUser){
       perm: 'module.seo',
       soon: false,
       desc: 'Technical SEO audit, live scanner, schema studio & action plan',
-      icon: `<svg viewBox="0 0 96 96" fill="none" aria-hidden="true">
-        <circle cx="42" cy="42" r="18" stroke="currentColor" stroke-width="3.5"/>
-        <path d="M55 55l18 18" stroke="currentColor" stroke-width="3.5" stroke-linecap="round"/>
-        <path d="M34 38h16M34 46h10" stroke="currentColor" stroke-width="3" stroke-linecap="round"/>
-        <path d="M68 28c4 2 8 6 10 10" stroke="currentColor" stroke-width="3" stroke-linecap="round"/>
-      </svg>`
+      icon: '🔍'
     },
     {
       id: 'admin',
@@ -173,11 +138,7 @@ export function moduleTilesForUser(user = currentUser){
       perm: 'module.admin',
       soon: false,
       desc: 'Users, roles, access requests',
-      icon: `<svg viewBox="0 0 96 96" fill="none" aria-hidden="true">
-        <circle cx="48" cy="34" r="14" stroke="currentColor" stroke-width="3.5"/>
-        <path d="M22 78c3.5-16 14-24 26-24s22.5 8 26 24" stroke="currentColor" stroke-width="3.5" stroke-linecap="round"/>
-        <path d="M64 28h12M70 22v12" stroke="currentColor" stroke-width="3.5" stroke-linecap="round"/>
-      </svg>`
+      icon: '🛡️'
     },
   ];
   return tiles.filter(t => {

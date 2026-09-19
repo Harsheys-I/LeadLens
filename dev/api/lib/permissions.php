@@ -8,7 +8,6 @@ function ll_permission_catalog(): array
   return [
     ['id' => 'module.telecaller_audit', 'label' => 'Module · LeadLens', 'group' => 'Modules'],
     ['id' => 'module.sales_graph', 'label' => 'Module · Sales Graph', 'group' => 'Modules'],
-    ['id' => 'module.team_forms', 'label' => 'Module · Team Forms', 'group' => 'Modules'],
     ['id' => 'module.seo', 'label' => 'Module · SEO', 'group' => 'Modules'],
     ['id' => 'module.admin', 'label' => 'Module · Admin', 'group' => 'Modules'],
     ['id' => 'module.crm', 'label' => 'Module · CRM (coming soon)', 'group' => 'Modules'],
@@ -16,8 +15,6 @@ function ll_permission_catalog(): array
     ['id' => 'admin.users', 'label' => 'Admin · Users', 'group' => 'Admin'],
     ['id' => 'admin.roles', 'label' => 'Admin · Roles', 'group' => 'Admin'],
     ['id' => 'admin.access_requests', 'label' => 'Admin · Access requests', 'group' => 'Admin'],
-    ['id' => 'team_forms.manage_org', 'label' => 'Team Forms · Manage org (departments / groups / team)', 'group' => 'Team Forms'],
-    ['id' => 'team_forms.use', 'label' => 'Team Forms · Use forms (membership roles apply)', 'group' => 'Team Forms'],
     ['id' => 'telecaller.bucket1', 'label' => 'LeadLens · Bucket 1 Followup Review', 'group' => 'LeadLens'],
     ['id' => 'telecaller.run_console', 'label' => 'LeadLens · Run console', 'group' => 'LeadLens'],
     ['id' => 'telecaller.dashboard', 'label' => 'LeadLens · Dashboard', 'group' => 'LeadLens'],
@@ -49,7 +46,6 @@ function ll_default_role_permissions(string $key): array
       'telecaller.run_console',
       'module.crm',
       'module.hr',
-      'team_forms.manage_org',
     ])),
     'telecaller' => [
       'module.telecaller_audit',
