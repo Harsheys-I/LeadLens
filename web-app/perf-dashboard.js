@@ -15,7 +15,7 @@ const MASTER_FIELDS = [
 ];
 
 const HISTORY_FIELDS = [
-  ...MASTER_FIELDS.filter(f => f.id !== "next"),
+  ...MASTER_FIELDS.filter(f => f.id !== "next" && f.id !== "registration"),
   {id: "update", label: "Lead Update Date", aliases: "lead update date, call date, update date, lead update"},
 ];
 
