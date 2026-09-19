@@ -5,7 +5,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/../lib/erp-sync.php';
 
 /**
- * /dev only. Routes:
+ * Super User (or cron bearer). Routes (production `/` and `/dev`):
  *   GET|PUT|POST erp-sync/config
  *   POST erp-sync/test-fetch
  *   POST erp-sync/fetch-for-audit  (primary: fetch → store → map → latest-leads)
@@ -18,10 +18,6 @@ require_once __DIR__ . '/../lib/erp-sync.php';
  */
 function ll_route_erp_sync(string $action): void
 {
-  if (!ll_is_dev_request()) {
-    ll_error('Not found', 404);
-  }
-
   switch ($action) {
     case 'config':
       ll_erp_sync_route_config();

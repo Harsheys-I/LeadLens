@@ -1,15 +1,15 @@
-# ERP Sync (Hostinger `/dev` only)
+# ERP Sync (production + `/dev`)
 
 **Primary path:** fetch ERP report (cURL + Cookie) → store raw payload under `api/storage/erp-sync/` → map leads → **hand off to Bucket 1 TeleCaller Audit** (same Start Audit / progress / Stop / Publish as Excel RAW).
 
 Server-side OpenAI audit + cron remain optional/advanced (can hit Hostinger time limits).
 
-UI and API are active only under **`/dev`**. Production site root `/` is unchanged until you promote.
+UI and API are available on **production `/`** and **`/dev`**, gated to **Super User** (plus cron bearer for keep-alive / scheduled jobs).
 
 ## Super User setup (once)
 
-1. Open **https://ai.gurupunvaanii.com/dev/TeleCallerAudit/** and sign in as Super User.
-2. Open **ERP Sync** in the Bucket 1 nav (visible only on `/dev` for Super User).
+1. Open **https://ai.gurupunvaanii.com/TeleCallerAudit/** (or `/dev/TeleCallerAudit/` for staging) and sign in as Super User.
+2. Open **ERP Sync** in the Bucket 1 nav (Super User only; visible as soon as auth resolves).
 3. Paste:
    - **Report URL** — the `getFunction.do` (or JSON report) URL that works in cURL
    - **Cookie header** — full `Cookie:` value from a working authenticated cURL (session lasts until ERP rejects it)
@@ -56,10 +56,12 @@ Last keep-alive result (`ok` / `session_expired` / `error` + timestamp) appears 
 In **hPanel → Advanced · Cron Jobs**, schedule `*/30 * * * *` (or the hPanel UI equivalent “every 30 minutes”) and run:
 
 ```bash
-# every 30 minutes
+# every 30 minutes (production)
 curl -sS -X POST -H "Authorization: Bearer YOUR_CRON_SECRET" \
-  "https://ai.gurupunvaanii.com/dev/api/erp-sync/keepalive"
+  "https://ai.gurupunvaanii.com/api/erp-sync/keepalive"
 ```
+
+Staging equivalent: use `https://ai.gurupunvaanii.com/dev/api/erp-sync/keepalive`.
 
 Notes:
 
@@ -71,7 +73,7 @@ Notes:
 ## Hostinger cron (optional / advanced server audit)
 
 ```bash
-curl -sS -X POST -H "Authorization: Bearer YOUR_CRON_SECRET" -H "Content-Type: application/json" -d '{}' "https://ai.gurupunvaanii.com/dev/api/erp-sync/run"
+curl -sS -X POST -H "Authorization: Bearer YOUR_CRON_SECRET" -H "Content-Type: application/json" -d '{}' "https://ai.gurupunvaanii.com/api/erp-sync/run"
 ```
 
 Notes:
@@ -84,7 +86,7 @@ Notes:
 - Cookies are encrypted at rest (`session.secret` / `app.secrets_key`); never logged.
 - Keep-alive samples a small response body only — it does not store payloads or run Audit.
 - Auto-publish defaults **off** on the advanced server path.
-- All `erp-sync/*` routes return **404** outside `/dev`.
+- `erp-sync/*` requires Super User session or a valid cron bearer secret.
 - Raw payloads + `latest-leads.json` land under `api/storage/erp-sync/` (blocked by `.htaccess`, gitignored).
 
 ## Related

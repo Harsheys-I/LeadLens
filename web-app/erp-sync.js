@@ -1,9 +1,8 @@
 /**
  * /dev Super User ERP Sync panel — fetch ERP → store raw → hand off to main Audit UI.
  */
-import {api} from './api-client.js?v=6.0.0.dev.erp-handoff1';
-import {isDevHost} from './app-base.js?v=6.0.0.dev';
-import {getUser} from './auth.js?v=6.0.0.dev';
+import {api} from './api-client.js?v=6.3.0.stable';
+import {getUser} from './auth.js?v=6.3.0.stable';
 
 const FIELD_IDS = [
   'mobile', 'project', 'registration', 'telecaller', 'source', 'update',
@@ -261,8 +260,16 @@ function statusElWrite(payload) {
   writeKeepaliveStatus(payload?.last_keepalive || payload?.config?.last_keepalive);
 }
 
+/** Super User only — available on production `/` and `/dev`. */
 export function canShowErpSync() {
-  return isDevHost() && Boolean(getUser()?.is_super);
+  return Boolean(getUser()?.is_super);
+}
+
+/** Reveal/hide Sync nav as soon as auth/role is known (before slow boot awaits). */
+export function applyErpSyncNavVisibility() {
+  const nav = $('nav-erp-sync');
+  if (!nav) return;
+  nav.classList.toggle('hidden', !canShowErpSync());
 }
 
 export async function loadErpSyncPanel() {
@@ -630,12 +637,8 @@ async function refreshStatus({signal} = {}) {
  * @param {{toast?: (msg: string) => void, showView?: (name: string) => void, loadErpIntoAudit?: (entry: object) => void|Promise<void>}} [opts]
  */
 export function mountErpSyncPanel({toast, showView, loadErpIntoAudit} = {}) {
-  const nav = $('nav-erp-sync');
-  if (!canShowErpSync()) {
-    nav?.classList.add('hidden');
-    return;
-  }
-  nav?.classList.remove('hidden');
+  applyErpSyncNavVisibility();
+  if (!canShowErpSync()) return;
   toastFn = typeof toast === 'function' ? toast : null;
   showViewFn = typeof showView === 'function' ? showView : null;
   loadIntoAuditFn = typeof loadErpIntoAudit === 'function' ? loadErpIntoAudit : null;
