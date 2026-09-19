@@ -28,7 +28,7 @@ When Test fetch / Fetch / keep-alive / daily run shows **session expired**:
 2. Paste into **Cookie header** → **Save** → **Test fetch** (or **Ping keep-alive now**).
 3. No Playwright / OTP automation — refresh is always manual.
 
-**Important for daily automation:** if the Cookie is dead at 6 AM, the daily job **fails clearly**, does **not** publish, and writes status for Super User. Keep-alive every 30 minutes is strongly recommended so idle sessions last overnight.
+**Important for daily automation:** if the Cookie is dead at 6 AM, the daily job **fails clearly**, does **not** publish, and writes status for Super User. Keep-alive every 1 minute is strongly recommended so idle sessions last overnight.
 
 ## Daily auto pipeline (recommended for production)
 
@@ -90,10 +90,10 @@ curl -sS -X POST -H "Authorization: Bearer YOUR_CRON_SECRET" -H "Content-Type: a
 
 Idle response is harmless (`idle: true`). Only runs audit work when a job needs continue.
 
-## Hostinger cron — session keep-alive (every 30 minutes)
+## Hostinger cron — session keep-alive (every 1 minute)
 
 ```bash
-# every 30 minutes →  */30 * * * *
+# every 1 minute →  */1 * * * *
 curl -sS -X POST -H "Authorization: Bearer YOUR_CRON_SECRET" \
   "https://ai.gurupunvaanii.com/api/erp-sync/keepalive"
 ```
