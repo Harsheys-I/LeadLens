@@ -1,16 +1,16 @@
 /**
  * Team Forms — org, form builder, assignee workspace, review board.
  */
-import {APP_VERSION} from './audit.js?v=7.0.1.dev';
-import {requireAuth, logout, hasPermission, getUser, changePassword, updateProfile} from './auth.js?v=7.0.1.dev';
-import {TeamFormsApi} from './api-client.js?v=7.0.1.dev';
-import {mountNotifications} from './notifications-ui.js?v=7.0.1.dev';
-import {appUrl, homePath} from './app-base.js?v=7.0.1.dev';
-import {initTheme} from './theme.js?v=7.0.1.dev';
-import {setStorageUserId, storageKey} from './db.js?v=7.0.1.dev';
+import {APP_VERSION} from './audit.js?v=7.0.2.dev';
+import {requireAuth, logout, hasPermission, getUser, changePassword, updateProfile} from './auth.js?v=7.0.2.dev';
+import {TeamFormsApi} from './api-client.js?v=7.0.2.dev';
+import {mountNotifications} from './notifications-ui.js?v=7.0.2.dev';
+import {appUrl, homePath} from './app-base.js?v=7.0.2.dev';
+import {initTheme} from './theme.js?v=7.0.2.dev';
+import {setStorageUserId, storageKey} from './db.js?v=7.0.2.dev';
 
 const $ = id => document.getElementById(id);
-const VERSION = APP_VERSION || '7.0.1.dev';
+const VERSION = APP_VERSION || '7.0.2.dev';
 const POLL_MS = 7000;
 
 const titles = {
@@ -54,6 +54,7 @@ let expandedDeptId = null;
 let expandedGroupId = null;
 let builderGroupId = null;
 let builderForm = null;
+let builderDragFieldId = null;
 let currentTask = null;
 let taskBackView = 'workspace';
 let reviewTimer = null;
@@ -713,32 +714,26 @@ function renderBuilderFields(){
   for (const f of fields) {
     const row = document.createElement('div');
     row.className = 'tf-field-row';
-    let detail = escapeHtml(f.field_type);
+    row.dataset.fieldId = String(f.id);
+    const orderNo = fields.indexOf(f) + 1;
+    let detail = `#${orderNo} · ${escapeHtml(f.field_type)}`;
     if (f.field_type === 'readonly') detail += ` · value “${escapeHtml(f.readonly_value || '')}”`;
     if (f.field_type === 'calculated') {
-      detail += ` · ${escapeHtml(f.calc_op || '')} (#${f.calc_left_field_id} , #${f.calc_right_field_id})`;
+      detail += ` · ${escapeHtml(f.calc_op || '')} (${escapeHtml(builderFieldRefLabel(f.calc_left_field_id, false))} , ${escapeHtml(builderFieldRefLabel(f.calc_right_field_id, false))})`;
     }
     if (f.required) detail += ' · required';
     row.innerHTML = `<div class="tf-field-head">
-      <div><strong>${escapeHtml(f.label)}</strong>
+      <span class="tf-drag-handle" role="button" tabindex="0" draggable="true" aria-label="Reorder ${escapeHtml(f.label)}. Drag or use arrow keys." title="Drag to reorder">
+        <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" fill="currentColor">
+          <circle cx="5" cy="3.5" r="1.35"/><circle cx="11" cy="3.5" r="1.35"/>
+          <circle cx="5" cy="8" r="1.35"/><circle cx="11" cy="8" r="1.35"/>
+          <circle cx="5" cy="12.5" r="1.35"/><circle cx="11" cy="12.5" r="1.35"/>
+        </svg>
+      </span>
+      <div class="tf-field-meta"><strong>${escapeHtml(f.label)}</strong>
       <div class="muted" style="font-size:12px;font-weight:400">${detail}</div></div>
       <div class="inline-actions"></div></div>`;
     const actions = row.querySelector('.inline-actions');
-    const idx = fields.indexOf(f);
-    const up = document.createElement('button');
-    up.type = 'button';
-    up.className = 'text-button';
-    up.textContent = 'Up';
-    up.disabled = idx === 0;
-    up.setAttribute('aria-label', `Move ${f.label} up`);
-    up.onclick = () => moveBuilderField(f.id, -1);
-    const down = document.createElement('button');
-    down.type = 'button';
-    down.className = 'text-button';
-    down.textContent = 'Down';
-    down.disabled = idx === fields.length - 1;
-    down.setAttribute('aria-label', `Move ${f.label} down`);
-    down.onclick = () => moveBuilderField(f.id, 1);
     const edit = document.createElement('button');
     edit.type = 'button';
     edit.className = 'text-button';
@@ -756,8 +751,111 @@ function renderBuilderFields(){
         await openBuilderForm(builderForm.id);
       } catch (err) { toast(err.message || 'Delete failed'); }
     };
-    actions.append(up, down, edit, del);
+    actions.append(edit, del);
     mount.append(row);
+  }
+}
+
+function sameFieldOrder(a, b){
+  return a.length === b.length && a.every((f, i) => Number(f.id) === Number(b[i]?.id));
+}
+
+function clearBuilderFieldDropState(mount = $('builder-fields')){
+  mount?.querySelectorAll('.tf-field-row').forEach(row => {
+    row.classList.remove('is-dragging', 'drop-before', 'drop-after');
+    row.querySelector('.tf-drag-handle')?.removeAttribute('aria-grabbed');
+  });
+  builderDragFieldId = null;
+}
+
+function reorderBuilderFieldsTo(fromId, toId, placeBefore){
+  const fields = builderForm?.fields || [];
+  const from = fields.findIndex(f => Number(f.id) === Number(fromId));
+  if (from < 0 || Number(fromId) === Number(toId)) return;
+  const next = fields.slice();
+  const [item] = next.splice(from, 1);
+  let insertAt = next.findIndex(f => Number(f.id) === Number(toId));
+  if (insertAt < 0) return;
+  if (!placeBefore) insertAt += 1;
+  next.splice(insertAt, 0, item);
+  if (sameFieldOrder(next, fields)) return;
+  persistBuilderFieldOrder(next);
+}
+
+function bindBuilderFieldReorder(mount){
+  if (!mount || mount.dataset.reorderBound) return;
+  mount.dataset.reorderBound = '1';
+
+  mount.addEventListener('dragstart', e => {
+    const handle = e.target.closest?.('.tf-drag-handle');
+    const row = handle?.closest('.tf-field-row');
+    if (!row || !mount.contains(row)) {
+      e.preventDefault();
+      return;
+    }
+    builderDragFieldId = Number(row.dataset.fieldId);
+    row.classList.add('is-dragging');
+    handle.setAttribute('aria-grabbed', 'true');
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/plain', String(builderDragFieldId));
+    try { e.dataTransfer.setDragImage(row, 20, 16); } catch { /* optional ghost */ }
+  });
+
+  mount.addEventListener('dragover', e => {
+    if (builderDragFieldId == null) return;
+    const row = e.target.closest('.tf-field-row');
+    if (!row || !mount.contains(row)) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    const rect = row.getBoundingClientRect();
+    const before = e.clientY < rect.top + rect.height / 2;
+    mount.querySelectorAll('.tf-field-row').forEach(el => el.classList.remove('drop-before', 'drop-after'));
+    row.classList.add(before ? 'drop-before' : 'drop-after');
+  });
+
+  mount.addEventListener('drop', e => {
+    const row = e.target.closest('.tf-field-row');
+    if (!row || builderDragFieldId == null || !mount.contains(row)) return;
+    e.preventDefault();
+    const rect = row.getBoundingClientRect();
+    const before = e.clientY < rect.top + rect.height / 2;
+    const fromId = builderDragFieldId;
+    const toId = Number(row.dataset.fieldId);
+    clearBuilderFieldDropState(mount);
+    reorderBuilderFieldsTo(fromId, toId, before);
+  });
+
+  mount.addEventListener('dragend', () => clearBuilderFieldDropState(mount));
+
+  mount.addEventListener('keydown', e => {
+    const handle = e.target.closest('.tf-drag-handle');
+    if (!handle || !mount.contains(handle)) return;
+    const row = handle.closest('.tf-field-row');
+    if (!row) return;
+    if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      moveBuilderField(Number(row.dataset.fieldId), -1);
+    } else if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      moveBuilderField(Number(row.dataset.fieldId), 1);
+    }
+  });
+}
+
+async function persistBuilderFieldOrder(next, {focusId} = {}){
+  builderForm.fields = next;
+  renderBuilderFields();
+  try {
+    const data = await TeamFormsApi.reorderFields(builderForm.id, next.map(f => f.id));
+    if (data.fields) builderForm.fields = data.fields;
+    renderBuilderFields();
+  } catch (err) {
+    toast(err.message || 'Reorder failed');
+    if (builderForm?.id) await openBuilderForm(builderForm.id);
+    return;
+  }
+  if (focusId != null) {
+    $('builder-fields')?.querySelector(`[data-field-id="${focusId}"] .tf-drag-handle`)?.focus();
   }
 }
 
@@ -769,16 +867,7 @@ async function moveBuilderField(fieldId, dir){
   const next = fields.slice();
   const [item] = next.splice(i, 1);
   next.splice(j, 0, item);
-  builderForm.fields = next;
-  renderBuilderFields();
-  try {
-    const data = await TeamFormsApi.reorderFields(builderForm.id, next.map(f => f.id));
-    if (data.fields) builderForm.fields = data.fields;
-    renderBuilderFields();
-  } catch (err) {
-    toast(err.message || 'Reorder failed');
-    if (builderForm?.id) await openBuilderForm(builderForm.id);
-  }
+  await persistBuilderFieldOrder(next, {focusId: fieldId});
 }
 
 function fieldTypeOptions(selected){
@@ -793,12 +882,25 @@ function calcOpOptions(selected){
   ).join('');
 }
 
-function numericFieldOptions(selected){
+function builderFieldOrderIndex(fieldId){
+  return (builderForm?.fields || []).findIndex(f => Number(f.id) === Number(fieldId));
+}
+
+function builderFieldRefLabel(fieldId, withLabel = true){
+  const i = builderFieldOrderIndex(fieldId);
+  if (i < 0) return '—';
+  const n = `#${i + 1}`;
+  if (!withLabel) return n;
+  return `${n} ${builderForm.fields[i].label}`;
+}
+
+function numericFieldOptions(selected, excludeId = null){
   const fields = (builderForm?.fields || []).filter(f =>
-    ['number', 'calculated', 'readonly'].includes(f.field_type)
+    ['number', 'calculated', 'readonly'].includes(f.field_type) &&
+    (excludeId == null || Number(f.id) !== Number(excludeId))
   );
   return fields.map(f =>
-    `<option value="${f.id}" ${Number(selected) === f.id ? 'selected' : ''}>${escapeHtml(f.label)} (#${f.id})</option>`
+    `<option value="${f.id}" ${Number(selected) === Number(f.id) ? 'selected' : ''}>${escapeHtml(builderFieldRefLabel(f.id))}</option>`
   ).join('') || '<option value="">— add number fields first —</option>';
 }
 
@@ -812,8 +914,8 @@ function openFieldModal(existing = null){
     <label class="tf-opt-readonly">Readonly value<input name="readonly_value" value="${escapeHtml(existing?.readonly_value || '')}"></label>
     <label class="tf-opt-select">Select options (one per line)<textarea name="options_text" rows="3">${escapeHtml((existing?.options || []).join('\n'))}</textarea></label>
     <label class="tf-opt-calc">Operation<select name="calc_op">${calcOpOptions(existing?.calc_op || 'add')}</select></label>
-    <label class="tf-opt-calc">Left field<select name="calc_left">${numericFieldOptions(existing?.calc_left_field_id)}</select></label>
-    <label class="tf-opt-calc">Right field<select name="calc_right">${numericFieldOptions(existing?.calc_right_field_id)}</select></label>
+    <label class="tf-opt-calc">Left field<select name="calc_left">${numericFieldOptions(existing?.calc_left_field_id, existing?.id)}</select></label>
+    <label class="tf-opt-calc">Right field<select name="calc_right">${numericFieldOptions(existing?.calc_right_field_id, existing?.id)}</select></label>
   `, async () => {
     const form = $('tf-modal-form');
     const body = {
@@ -897,11 +999,12 @@ function openAssignModal(){
     const openIds = new Set(
       (assignData.assignee_ids || []).map(id => Number(id))
     );
-    // unique users
+    const me = Number(getUser()?.id);
+    // unique users, omitting the current user
     const seen = new Set();
     const unique = [];
     for (const m of members) {
-      if (seen.has(m.user_id)) continue;
+      if (Number(m.user_id) === me || seen.has(m.user_id)) continue;
       seen.add(m.user_id);
       unique.push(m);
     }
@@ -909,19 +1012,13 @@ function openAssignModal(){
       el.innerHTML = '<span class="muted">No group members to assign.</span>';
       return;
     }
-    const me = Number(getUser()?.id);
     el.innerHTML = unique.map(m => {
       const already = openIds.has(Number(m.user_id));
-      const isSelf = Number(m.user_id) === me;
       let extraClass = '';
       let checked = '';
       let disabled = '';
       let note = '';
-      if (isSelf) {
-        extraClass = ' is-self';
-        disabled = ' disabled';
-        note = ' <span class="muted">(you cannot assign this to yourself)</span>';
-      } else if (already) {
+      if (already) {
         extraClass = ' is-assigned';
         checked = ' checked';
         disabled = ' disabled';
@@ -1510,6 +1607,7 @@ $('org-new-dept')?.addEventListener('click', () => openNewDept());
 $('builder-refresh')?.addEventListener('click', () => refreshBuilder());
 $('builder-new-form')?.addEventListener('click', () => openNewForm());
 $('builder-add-field')?.addEventListener('click', () => openFieldModal(null));
+bindBuilderFieldReorder($('builder-fields'));
 $('builder-assign')?.addEventListener('click', () => openAssignModal());
 $('builder-delete-form')?.addEventListener('click', () => deleteBuilderForm(builderForm));
 $('builder-group')?.addEventListener('change', () => loadBuilderForms());
