@@ -1,22 +1,23 @@
 /**
- * Team Forms — org, form builder, assignee workspace, review board.
+ * Team Forms — org, form builder, task builder, assignee workspace, review board.
  */
-import {APP_VERSION} from './audit.js?v=7.1.0.dev';
-import {requireAuth, logout, hasPermission, getUser, changePassword, updateProfile} from './auth.js?v=7.1.0.dev';
-import {TeamFormsApi} from './api-client.js?v=7.1.0.dev';
-import {mountNotifications} from './notifications-ui.js?v=7.1.0.dev';
-import {appUrl, homePath} from './app-base.js?v=7.1.0.dev';
-import {initTheme} from './theme.js?v=7.1.0.dev';
-import {setStorageUserId, storageKey} from './db.js?v=7.1.0.dev';
+import {APP_VERSION} from './audit.js?v=7.1.1.dev';
+import {requireAuth, logout, hasPermission, getUser, changePassword, updateProfile} from './auth.js?v=7.1.1.dev';
+import {TeamFormsApi} from './api-client.js?v=7.1.1.dev';
+import {mountNotifications} from './notifications-ui.js?v=7.1.1.dev';
+import {appUrl, homePath} from './app-base.js?v=7.1.1.dev';
+import {initTheme} from './theme.js?v=7.1.1.dev';
+import {setStorageUserId, storageKey} from './db.js?v=7.1.1.dev';
 
 const $ = id => document.getElementById(id);
-const VERSION = APP_VERSION || '7.1.0.dev';
+const VERSION = APP_VERSION || '7.1.1.dev';
 const POLL_MS = 7000;
 
 const titles = {
   workspace: 'My workspace',
   org: 'Org',
   builder: 'Form builder',
+  'task-builder': 'Task builder',
   review: 'Review board',
   task: 'Task',
 };
@@ -95,6 +96,9 @@ let expandedGroupId = null;
 let builderGroupId = null;
 let builderForm = null;
 let builderDragFieldId = null;
+let taskBuilderGroupId = null;
+let taskBuilderForm = null;
+let taskBuilderPrefetchFormId = null;
 let currentTask = null;
 let taskBackView = 'workspace';
 let reviewTimer = null;
@@ -333,6 +337,10 @@ function showView(name, {hash = true} = {}){
     toast('Form builder requires Form Creator membership.');
     return;
   }
+  if (name === 'task-builder' && !isFormCreatorAnywhere()) {
+    toast('Task builder requires Form Creator membership.');
+    return;
+  }
   if (name === 'review' && !isReviewerAnywhere()) {
     toast('Review board requires Reviewer membership.');
     return;
@@ -356,6 +364,7 @@ function showView(name, {hash = true} = {}){
   if (name === 'workspace') refreshWorkspace();
   if (name === 'org') refreshOrg();
   if (name === 'builder') refreshBuilder();
+  if (name === 'task-builder') refreshTaskBuilder();
   if (name === 'review') refreshReview();
 }
 
@@ -793,7 +802,7 @@ async function loadBuilderForms(){
       create.type = 'button';
       create.className = 'primary-button';
       create.textContent = 'Create task';
-      create.onclick = () => openCreateTaskModal(f);
+      create.onclick = () => openTaskBuilderWithForm(f);
       const btn = document.createElement('button');
       btn.type = 'button';
       btn.className = 'secondary-button';
@@ -1114,7 +1123,7 @@ function openNewForm(){
     return;
   }
   openModal('New template', `
-    <p class="muted">A reusable form. Creating it does not assign work — use Create task when you are ready.</p>
+    <p class="muted">A reusable form. Creating it does not assign work — use Task builder when you are ready.</p>
     <label>Title<input name="title" required></label>
     <label>Description<textarea name="description" rows="2"></textarea></label>
   `, async () => {
@@ -1129,101 +1138,284 @@ function openNewForm(){
   });
 }
 
-function openCreateTaskModal(form = builderForm){
-  if (!form?.id) return;
-  if (form.is_active === false) {
-    toast('This template is inactive');
-    return;
+function snapshotFieldTypeLabel(f){
+  if (f?.field_type === 'assign_to') return 'Assign To';
+  if (f?.field_type === 'reviewer') return 'Reviewer';
+  if (f?.field_type === 'status') return 'Status';
+  return FIELD_TYPES.find(([k]) => k === f?.field_type)?.[1] || f?.field_type || 'Field';
+}
+
+function collectCreateTaskAssignees(root){
+  const me = Number(getUser()?.id);
+  const seen = new Set();
+  const ids = [];
+  for (const el of root.querySelectorAll('input[name="assignee"]:checked')) {
+    const id = Number(el.value);
+    if (!id || id === me || seen.has(id)) continue;
+    seen.add(id);
+    ids.push(id);
   }
-  openModal(`Create task · ${form.title}`, `
-    <p class="muted">Assign To, Reviewer, and Status are system fields on this template. One task is created per selected person; you can create another later.</p>
-    <div>
-      <strong>Assign To</strong>
-      <p class="muted" style="margin:4px 0 8px">Group members except you. Required.</p>
-      <div id="assign-user-list"><span class="muted">Loading members…</span></div>
-    </div>
-    <label>Reviewer
-      <select name="reviewer_id" required>
-        <option value="">Loading…</option>
-      </select>
-    </label>
-    <label>Status
-      <select name="status">
-        <option value="pending" selected>Pending</option>
-        <option value="in_progress">In progress</option>
-        <option value="submitted">Completed</option>
-      </select>
-    </label>
-  `, async () => {
-    const modal = $('tf-modal-form');
-    const me = Number(getUser()?.id);
-    const seen = new Set();
-    const ids = [];
-    for (const el of modal.querySelectorAll('input[name="assignee"]:checked')) {
-      const id = Number(el.value);
-      if (!id || id === me || seen.has(id)) continue;
-      seen.add(id);
-      ids.push(id);
-    }
-    if (!ids.length) throw new Error('Select at least one person in Assign To');
-    const reviewerId = Number(modal.querySelector('[name="reviewer_id"]')?.value || 0);
-    if (!reviewerId) throw new Error('Select a Reviewer');
-    if (ids.includes(reviewerId)) throw new Error('Reviewer cannot be the same as Assign To');
-    const res = await TeamFormsApi.createTasks(form.id, {
-      assignee_ids: ids,
-      reviewer_id: reviewerId,
-      status: modal.querySelector('[name="status"]')?.value || 'pending',
-    });
-    const n = Number(res.count ?? ids.length);
-    toast(n ? `Created ${n} task(s)` : 'No tasks created');
-  });
+  return ids;
+}
 
-  const refreshReviewerOptions = (people, reviewerRolePeople) => {
-    const sel = $('tf-modal-form')?.querySelector('[name="reviewer_id"]');
-    if (!sel) return;
-    const assigned = new Set(
-      [...($('tf-modal-form')?.querySelectorAll('input[name="assignee"]:checked') || [])]
-        .map(el => Number(el.value))
-    );
-    let pool = reviewerRolePeople.filter(p => !assigned.has(Number(p.user_id)));
-    if (!pool.length) pool = people.filter(p => !assigned.has(Number(p.user_id)));
-    const prev = sel.value;
-    sel.replaceChildren();
-    const blank = document.createElement('option');
-    blank.value = '';
-    blank.textContent = pool.length ? 'Select reviewer' : 'No eligible reviewer';
-    sel.append(blank);
-    for (const p of pool) {
-      const opt = document.createElement('option');
-      opt.value = String(p.user_id);
-      opt.textContent = p.display_name;
-      sel.append(opt);
-    }
-    if (prev && [...sel.options].some(o => o.value === prev)) sel.value = prev;
-    else if (pool.length === 1) sel.value = String(pool[0].user_id);
-  };
+function refreshCreateTaskReviewerOptions(root, people, reviewerRolePeople){
+  const sel = root?.querySelector('[name="reviewer_id"]');
+  if (!sel) return;
+  const assigned = new Set(collectCreateTaskAssignees(root));
+  let pool = reviewerRolePeople.filter(p => !assigned.has(Number(p.user_id)));
+  if (!pool.length) pool = people.filter(p => !assigned.has(Number(p.user_id)));
+  const prev = sel.value;
+  sel.replaceChildren();
+  const blank = document.createElement('option');
+  blank.value = '';
+  blank.textContent = pool.length ? 'Select reviewer' : 'No eligible reviewer';
+  sel.append(blank);
+  for (const p of pool) {
+    const opt = document.createElement('option');
+    opt.value = String(p.user_id);
+    opt.textContent = p.display_name;
+    sel.append(opt);
+  }
+  if (prev && [...sel.options].some(o => o.value === prev)) sel.value = prev;
+  else if (pool.length === 1) sel.value = String(pool[0].user_id);
+}
 
+function fillCreateTaskAssignUi(root, form, listEl){
+  if (!root || !listEl || !form?.group_id) return;
+  listEl.innerHTML = '<span class="muted">Loading members…</span>';
   TeamFormsApi.listMembers(form.group_id).then(membersData => {
-    const el = $('assign-user-list');
     const members = membersData.members || [];
     const me = Number(getUser()?.id);
     const assignable = uniqueGroupPeople(members, {excludeUserId: me});
     const reviewerRole = uniqueGroupPeople(members, {role: 'reviewer'});
     const allForReviewer = uniqueGroupPeople(members);
     if (!assignable.length) {
-      el.innerHTML = '<span class="muted">No other group members to assign.</span>';
-      refreshReviewerOptions(allForReviewer, reviewerRole);
+      listEl.innerHTML = '<span class="muted">No other group members to assign.</span>';
+      refreshCreateTaskReviewerOptions(root, allForReviewer, reviewerRole);
       return;
     }
-    el.innerHTML = assignable.map(m => `<label class="tf-check-row">
+    listEl.innerHTML = assignable.map(m => `<label class="tf-check-row">
       <input type="checkbox" name="assignee" value="${m.user_id}">
       <span>${escapeHtml(m.display_name)}</span></label>`).join('');
-    el.querySelectorAll('input[name="assignee"]').forEach(cb => {
-      cb.addEventListener('change', () => refreshReviewerOptions(allForReviewer, reviewerRole));
+    listEl.querySelectorAll('input[name="assignee"]').forEach(cb => {
+      cb.addEventListener('change', () => refreshCreateTaskReviewerOptions(root, allForReviewer, reviewerRole));
     });
-    refreshReviewerOptions(allForReviewer, reviewerRole);
+    refreshCreateTaskReviewerOptions(root, allForReviewer, reviewerRole);
   }).catch(err => {
-    $('assign-user-list').textContent = err.message || 'Could not load members';
+    listEl.textContent = err.message || 'Could not load members';
+  });
+}
+
+async function submitCreateTasksFromRoot(form, root){
+  if (!form?.id) throw new Error('Select a template first');
+  if (form.is_active === false) throw new Error('This template is inactive');
+  const ids = collectCreateTaskAssignees(root);
+  if (!ids.length) throw new Error('Select at least one person in Assign To');
+  const reviewerId = Number(root.querySelector('[name="reviewer_id"]')?.value || 0);
+  if (!reviewerId) throw new Error('Select a Reviewer');
+  if (ids.includes(reviewerId)) throw new Error('Reviewer cannot be the same as Assign To');
+  const res = await TeamFormsApi.createTasks(form.id, {
+    assignee_ids: ids,
+    reviewer_id: reviewerId,
+    status: root.querySelector('[name="status"]')?.value || 'pending',
+  });
+  const n = Number(res.count ?? ids.length);
+  toast(n ? `Created ${n} task(s)` : 'No tasks created');
+  return res;
+}
+
+function createTaskFieldsHtml(listId = 'assign-user-list'){
+  return `
+    <p class="muted">Assign To, Reviewer, and Status are system fields on this template. One task is created per selected person; you can create another later.</p>
+    <div>
+      <strong>Assign To</strong>
+      <p class="muted" style="margin:4px 0 8px">Group members except you. Required.</p>
+      <div id="${listId}"><span class="muted">Loading members…</span></div>
+    </div>
+    <label class="tf-inline-label">Reviewer
+      <select name="reviewer_id" required>
+        <option value="">Loading…</option>
+      </select>
+    </label>
+    <label class="tf-inline-label">Status
+      <select name="status">
+        <option value="pending" selected>Pending</option>
+        <option value="in_progress">In progress</option>
+        <option value="submitted">Completed</option>
+      </select>
+    </label>
+  `;
+}
+
+function openCreateTaskModal(form = builderForm){
+  if (!form?.id) return;
+  if (form.is_active === false) {
+    toast('This template is inactive');
+    return;
+  }
+  openModal(`Create task · ${form.title}`, createTaskFieldsHtml(), async () => {
+    await submitCreateTasksFromRoot(form, $('tf-modal-form'));
+  });
+  fillCreateTaskAssignUi($('tf-modal-form'), form, $('assign-user-list'));
+}
+
+function openTaskBuilderWithForm(form){
+  if (!form?.id) return;
+  taskBuilderGroupId = form.group_id || taskBuilderGroupId;
+  taskBuilderPrefetchFormId = form.id;
+  showView('task-builder');
+}
+
+async function refreshTaskBuilder(){
+  try {
+    if (!workspaceData) workspaceData = await TeamFormsApi.workspace();
+    const groups = workspaceData.creator_groups || [];
+    const sel = $('task-builder-group');
+    const prev = taskBuilderGroupId || sel.value;
+    sel.replaceChildren();
+    if (!groups.length) {
+      sel.innerHTML = '<option value="">No groups available</option>';
+      $('task-builder-forms').innerHTML = '<div class="empty-card">You need Form Creator role on a group (or Org manage permission).</div>';
+      $('task-builder-editor').classList.add('hidden');
+      taskBuilderForm = null;
+      return;
+    }
+    for (const g of groups) {
+      const opt = document.createElement('option');
+      opt.value = g.group_id;
+      opt.textContent = `${g.department_name} · ${g.group_name}`;
+      sel.append(opt);
+    }
+    if (prev && [...sel.options].some(o => o.value === String(prev))) sel.value = String(prev);
+    taskBuilderGroupId = Number(sel.value);
+    await loadTaskBuilderForms();
+  } catch (err) {
+    toast(err.message || 'Task builder load failed');
+  }
+}
+
+async function loadTaskBuilderForms(){
+  const gid = Number($('task-builder-group').value);
+  taskBuilderGroupId = gid;
+  if (!gid) return;
+  try {
+    const data = await TeamFormsApi.listForms(gid);
+    const forms = (data.forms || []).filter(f => f.is_active !== false);
+    const mount = $('task-builder-forms');
+    if (!forms.length) {
+      mount.innerHTML = '<div class="empty-card">No active templates in this group. Create one in Form builder.</div>';
+      taskBuilderForm = null;
+      $('task-builder-editor').classList.add('hidden');
+      return;
+    }
+    const table = document.createElement('table');
+    table.className = 'admin-table tf-forms-table';
+    table.innerHTML = '<thead><tr><th>Template</th><th></th></tr></thead>';
+    const tbody = document.createElement('tbody');
+    const selectedId = taskBuilderPrefetchFormId || taskBuilderForm?.id;
+    for (const f of forms) {
+      const tr = document.createElement('tr');
+      tr.dataset.formId = String(f.id);
+      const isSelected = Number(f.id) === Number(selectedId);
+      if (isSelected) tr.classList.add('is-selected');
+      tr.innerHTML = `<td>${escapeHtml(f.title)}</td><td></td>`;
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = isSelected ? 'primary-button' : 'secondary-button';
+      btn.textContent = isSelected ? 'Selected' : 'Use template';
+      btn.onclick = () => openTaskBuilderForm(f.id);
+      tr.lastElementChild.append(btn);
+      tbody.append(tr);
+    }
+    table.append(tbody);
+    mount.replaceChildren(table);
+    if (selectedId && forms.some(f => Number(f.id) === Number(selectedId))) {
+      await openTaskBuilderForm(selectedId);
+    } else {
+      taskBuilderForm = null;
+      $('task-builder-editor').classList.add('hidden');
+    }
+  } catch (err) {
+    $('task-builder-forms').innerHTML = `<div class="empty-card">${escapeHtml(err.message || '')}</div>`;
+  }
+}
+
+async function openTaskBuilderForm(formId){
+  try {
+    const data = await TeamFormsApi.getForm(formId);
+    taskBuilderForm = data.form;
+    taskBuilderPrefetchFormId = taskBuilderForm.id;
+    taskBuilderGroupId = taskBuilderForm.group_id;
+    $('task-builder-editor').classList.remove('hidden');
+    $('task-builder-form-title').textContent = taskBuilderForm.title;
+    $('task-builder-form-meta').textContent =
+      `${taskBuilderForm.department_name} · ${taskBuilderForm.group_name}` +
+      (taskBuilderForm.description ? ` — ${taskBuilderForm.description}` : '');
+    renderTaskBuilderSnapshot(taskBuilderForm);
+    renderTaskBuilderCreate(taskBuilderForm);
+    markTaskBuilderFormSelected(taskBuilderForm.id);
+  } catch (err) {
+    toast(err.message || 'Could not load template');
+  }
+}
+
+function markTaskBuilderFormSelected(formId){
+  const mount = $('task-builder-forms');
+  if (!mount) return;
+  mount.querySelectorAll('tbody tr').forEach(tr => {
+    const isSelected = Number(tr.dataset.formId) === Number(formId);
+    tr.classList.toggle('is-selected', isSelected);
+    const btn = tr.querySelector('button');
+    if (!btn) return;
+    btn.className = isSelected ? 'primary-button' : 'secondary-button';
+    btn.textContent = isSelected ? 'Selected' : 'Use template';
+  });
+}
+
+function renderTaskBuilderSnapshot(form){
+  const mount = $('task-builder-fields');
+  const fields = form?.fields || [];
+  if (!fields.length) {
+    mount.innerHTML = '<div class="empty-card">This template has no fields yet. Add them in Form builder.</div>';
+    return;
+  }
+  mount.replaceChildren();
+  for (const f of fields) {
+    const row = document.createElement('div');
+    row.className = 'tf-snapshot-row';
+    const system = isSystemField(f);
+    const type = snapshotFieldTypeLabel(f);
+    row.innerHTML = `<strong>${escapeHtml(f.label)}</strong>
+      <div class="muted" style="font-size:12px;font-weight:400">${escapeHtml(type)}${system ? ' · system' : ''}${f.required && !system ? ' · required' : ''}</div>`;
+    mount.append(row);
+  }
+}
+
+function renderTaskBuilderCreate(form){
+  const mount = $('task-builder-create');
+  if (!form?.id) {
+    mount.replaceChildren();
+    return;
+  }
+  if (form.is_active === false) {
+    mount.innerHTML = '<div class="empty-card">This template is inactive.</div>';
+    return;
+  }
+  mount.innerHTML = `${createTaskFieldsHtml('task-builder-assign-list')}
+    <div class="inline-actions">
+      <button type="button" id="task-builder-submit" class="primary-button">Create task</button>
+      <span id="task-builder-message" class="form-message"></span>
+    </div>`;
+  fillCreateTaskAssignUi(mount, form, $('task-builder-assign-list'));
+  $('task-builder-submit')?.addEventListener('click', async () => {
+    const msg = $('task-builder-message');
+    if (msg) msg.textContent = 'Creating…';
+    try {
+      await submitCreateTasksFromRoot(form, mount);
+      if (msg) msg.textContent = '';
+    } catch (err) {
+      if (msg) msg.textContent = err.message || 'Create failed';
+    }
   });
 }
 
@@ -1808,8 +2000,10 @@ function updateNavVisibility(){
     else if (perm) btn.classList.remove('hidden');
   });
   const builderBtn = document.querySelector('.nav-item[data-view="builder"]');
+  const taskBuilderBtn = document.querySelector('.nav-item[data-view="task-builder"]');
   const reviewBtn = document.querySelector('.nav-item[data-view="review"]');
   if (builderBtn) builderBtn.classList.toggle('hidden', !isFormCreatorAnywhere());
+  if (taskBuilderBtn) taskBuilderBtn.classList.toggle('hidden', !isFormCreatorAnywhere());
   if (reviewBtn) reviewBtn.classList.toggle('hidden', !isReviewerAnywhere());
 }
 
@@ -1906,6 +2100,13 @@ $('builder-add-field')?.addEventListener('click', () => openFieldModal(null));
 bindBuilderFieldReorder($('builder-fields'));
 $('builder-delete-form')?.addEventListener('click', () => deleteBuilderForm(builderForm));
 $('builder-group')?.addEventListener('change', () => loadBuilderForms());
+$('task-builder-refresh')?.addEventListener('click', () => refreshTaskBuilder());
+$('task-builder-group')?.addEventListener('change', () => {
+  taskBuilderForm = null;
+  taskBuilderPrefetchFormId = null;
+  $('task-builder-editor')?.classList.add('hidden');
+  loadTaskBuilderForms();
+});
 $('review-refresh')?.addEventListener('click', () => refreshReview());
 $('task-back')?.addEventListener('click', () => showView(taskBackView || 'workspace'));
 $('task-search-toggle')?.addEventListener('click', () => toggleTaskFieldSearch());
@@ -1957,7 +2158,7 @@ async function boot(){
   });
 
   const hash = location.hash.slice(1);
-  const start = ['workspace', 'org', 'builder', 'review'].includes(hash) ? hash : 'workspace';
+  const start = ['workspace', 'org', 'builder', 'task-builder', 'review'].includes(hash) ? hash : 'workspace';
   try {
     if (start !== 'workspace') await refreshWorkspace();
   } catch { /* showView will retry */ }
@@ -1965,7 +2166,7 @@ async function boot(){
 
   window.addEventListener('hashchange', () => {
     const h = location.hash.slice(1);
-    if (['workspace', 'org', 'builder', 'review'].includes(h) && h !== currentView) showView(h, {hash: false});
+    if (['workspace', 'org', 'builder', 'task-builder', 'review'].includes(h) && h !== currentView) showView(h, {hash: false});
   });
 }
 

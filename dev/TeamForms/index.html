@@ -7,12 +7,12 @@
   <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#0f2d22">
   <meta name="description" content="GPP AI Team Forms">
   <title>GPP AI · Team Forms</title>
-  <meta name="app-version" content="7.1.0.dev">
-  <script src="../theme-boot.js?v=7.1.0.dev"></script>
-  <script src="../motion.js?v=7.1.0.dev"></script>
+  <meta name="app-version" content="7.1.1.dev">
+  <script src="../theme-boot.js?v=7.1.1.dev"></script>
+  <script src="../motion.js?v=7.1.1.dev"></script>
   <link rel="manifest" href="../manifest.webmanifest">
-  <link rel="stylesheet" href="../styles.css?v=7.1.0.dev">
-  <script type="module" src="../team-forms.js?v=7.1.0.dev"></script>
+  <link rel="stylesheet" href="../styles.css?v=7.1.1.dev">
+  <script type="module" src="../team-forms.js?v=7.1.1.dev"></script>
 </head>
 <body>
   <div id="update-banner" class="update-banner hidden" role="status">
@@ -26,6 +26,7 @@
         <button class="nav-item active" data-view="workspace"><span>◎</span>My workspace</button>
         <button class="nav-item hidden" data-view="org" data-perm="team_forms.manage_org"><span>▣</span>Org</button>
         <button class="nav-item" data-view="builder"><span>✎</span>Form builder</button>
+        <button class="nav-item" data-view="task-builder"><span>＋</span>Task builder</button>
         <button class="nav-item" data-view="review"><span>▦</span>Review board</button>
         <button class="nav-item hidden" data-view="task"><span>·</span>Task</button>
       </nav>
@@ -79,7 +80,7 @@
         <div class="section-head">
           <div>
             <h2>Form builder</h2>
-            <p>Build reusable templates (title, description, fields). Create a task later to assign work.</p>
+            <p>Build reusable templates (title, description, fields). Creating a task is a separate action in Task builder.</p>
           </div>
           <div class="inline-actions">
             <button id="builder-new-form" type="button" class="primary-button">New template</button>
@@ -105,6 +106,37 @@
               </div>
             </div>
             <div id="builder-fields"></div>
+          </div>
+        </div>
+      </section>
+
+      <section id="view-task-builder" class="view">
+        <div class="section-head">
+          <div>
+            <h2>Task builder</h2>
+            <p>Pick a template and create a task. The task snapshots Assign To, Status, Reviewer, and this template’s custom fields. Editing the template stays in Form builder.</p>
+          </div>
+          <div class="inline-actions">
+            <button id="task-builder-refresh" type="button" class="secondary-button">Refresh</button>
+          </div>
+        </div>
+        <div class="tf-builder-layout">
+          <div>
+            <label class="tf-inline-label">Group
+              <select id="task-builder-group"></select>
+            </label>
+            <div id="task-builder-forms" class="admin-table-wrap" style="margin-top:12px"></div>
+          </div>
+          <div id="task-builder-editor" class="tf-panel hidden">
+            <div class="section-head">
+              <div>
+                <h3 id="task-builder-form-title">Template</h3>
+                <p id="task-builder-form-meta" class="muted"></p>
+              </div>
+            </div>
+            <p class="muted">Snapshot fields on the task (not an edit of the template). Assignees fill custom fields after you create it.</p>
+            <div id="task-builder-fields"></div>
+            <div id="task-builder-create" class="tf-task-builder-create"></div>
           </div>
         </div>
       </section>
@@ -273,6 +305,10 @@
     #task-search-input{flex:1;min-width:160px;border:1px solid var(--input-border);border-radius:9px;background:var(--input-bg);padding:10px 11px;color:var(--ink)}
     .tf-form-field.is-search-hide{display:none}
     .tf-form-field.is-search-match{outline:2px solid var(--accent,#2f6f5e);outline-offset:4px;border-radius:8px}
+    .tf-task-builder-create{margin-top:18px;padding-top:16px;border-top:1px solid var(--line);display:grid;gap:12px}
+    .tf-snapshot-row{padding:10px 0;border-bottom:1px solid var(--line)}
+    .tf-snapshot-row:last-child{border-bottom:0}
+    .tf-forms-table tr.is-selected td{background:var(--soft-3)}
   </style>
 </body>
 </html>
