@@ -1,5 +1,5 @@
 {
-  "version": "6.3.2.stable",
+  "version": "6.3.3.stable",
   "name": "GPP AI",
-  "notes": "v6.3.2.stable: ERP Sync keep-alive recommended every 1 minute (*/1) so idle ERP sessions last overnight."
+  "notes": "v6.3.3.stable: History Excel no longer requires Lead Registration Date; Master still does. Cache-bust so clients load the fix."
 }
