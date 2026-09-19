@@ -1,5 +1,5 @@
 {
-  "version": "8.0.0.stable",
+  "version": "8.0.1.kpi-fix",
   "name": "GPP AI",
-  "notes": "v8.0.0.stable: SEO module - Guru Punvaanii audit command center in GPP AI (live scanner, technical/on-page/schema/CWV/traffic, 30-day plan) with LeadLens theme and module.seo permission."
+  "notes": "v8.0.1.kpi-fix: Sales Graph KPI/byline build — corrected dashboard KPIs and byline, with a full cache-bust so live Hostinger/SW stop serving 8.0.0.stable."
 }
