@@ -15,7 +15,240 @@ function ll_tf_task_statuses(): array
 
 function ll_tf_field_types(): array
 {
-  return ['text', 'textarea', 'number', 'select', 'checkbox', 'date', 'readonly', 'calculated'];
+  return [
+    'text', 'textarea', 'number', 'select', 'checkbox', 'date', 'url', 'document',
+    'assign_to', 'status', 'reviewer',
+    'readonly', 'calculated',
+  ];
+}
+
+function ll_tf_system_field_types(): array
+{
+  return ['assign_to', 'status', 'reviewer'];
+}
+
+/** @return list<array{field_key:string,label:string,field_type:string}> */
+function ll_tf_system_field_defs(): array
+{
+  return [
+    ['field_key' => 'sys_assign_to', 'label' => 'Assign To', 'field_type' => 'assign_to'],
+    ['field_key' => 'sys_status', 'label' => 'Status', 'field_type' => 'status'],
+    ['field_key' => 'sys_reviewer', 'label' => 'Reviewer', 'field_type' => 'reviewer'],
+  ];
+}
+
+function ll_tf_is_system_field(array $f): bool
+{
+  $key = (string) ($f['field_key'] ?? '');
+  $type = (string) ($f['field_type'] ?? '');
+  if (in_array($type, ll_tf_system_field_types(), true)) {
+    return true;
+  }
+  return str_starts_with($key, 'sys_');
+}
+
+function ll_tf_ensure_system_fields(int $formId): void
+{
+  if ($formId < 1) {
+    return;
+  }
+  $pdo = ll_pdo();
+  $existing = $pdo->prepare('SELECT field_key, field_type FROM form_fields WHERE form_id = ?');
+  $existing->execute([$formId]);
+  $have = [];
+  foreach ($existing->fetchAll() as $row) {
+    $have[(string) $row['field_key']] = true;
+    $have['type:' . (string) $row['field_type']] = true;
+  }
+  $missing = [];
+  foreach (ll_tf_system_field_defs() as $def) {
+    if (!empty($have[$def['field_key']]) || !empty($have['type:' . $def['field_type']])) {
+      continue;
+    }
+    $missing[] = $def;
+  }
+  if (!$missing) {
+    return;
+  }
+  $min = (int) $pdo->query(
+    'SELECT COALESCE(MIN(sort_order), 0) FROM form_fields WHERE form_id = ' . (int) $formId
+  )->fetchColumn();
+  $sort = $min - count($missing);
+  $ins = $pdo->prepare(
+    'INSERT INTO form_fields
+      (form_id, field_key, label, field_type, options_json, required, sort_order)
+     VALUES (?, ?, ?, ?, NULL, 1, ?)'
+  );
+  foreach ($missing as $def) {
+    $ins->execute([$formId, $def['field_key'], $def['label'], $def['field_type'], $sort]);
+    $sort++;
+  }
+}
+
+const LL_TF_DOC_MAX_BYTES = 10 * 1024 * 1024;
+
+/** @return array<string, list<string>> */
+function ll_tf_doc_allowed_map(): array
+{
+  return [
+    'pdf' => ['application/pdf'],
+    'png' => ['image/png'],
+    'jpg' => ['image/jpeg'],
+    'jpeg' => ['image/jpeg'],
+    'gif' => ['image/gif'],
+    'webp' => ['image/webp'],
+    'txt' => ['text/plain'],
+    'csv' => ['text/csv', 'text/plain', 'application/vnd.ms-excel'],
+    'doc' => ['application/msword', 'application/octet-stream'],
+    'docx' => ['application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'application/octet-stream'],
+    'xls' => ['application/vnd.ms-excel', 'application/octet-stream'],
+    'xlsx' => ['application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'application/octet-stream'],
+    'ppt' => ['application/vnd.ms-powerpoint', 'application/octet-stream'],
+    'pptx' => ['application/vnd.openxmlformats-officedocument.presentationml.presentation', 'application/octet-stream'],
+    'odt' => ['application/vnd.oasis.opendocument.text', 'application/octet-stream'],
+    'ods' => ['application/vnd.oasis.opendocument.spreadsheet', 'application/octet-stream'],
+  ];
+}
+
+function ll_tf_is_valid_url_answer($value): bool
+{
+  if ($value === null) {
+    return true;
+  }
+  if (!is_scalar($value)) {
+    return false;
+  }
+  $s = trim((string) $value);
+  if ($s === '') {
+    return true;
+  }
+  if (strlen($s) > 2048) {
+    return false;
+  }
+  if (filter_var($s, FILTER_VALIDATE_URL) === false) {
+    return false;
+  }
+  $scheme = strtolower((string) (parse_url($s, PHP_URL_SCHEME) ?? ''));
+  return $scheme === 'http' || $scheme === 'https';
+}
+
+/** @return array{name:string,size:int,mime:string,stored:string}|null */
+function ll_tf_parse_document_answer($value): ?array
+{
+  if ($value === null || $value === '') {
+    return null;
+  }
+  $decoded = is_array($value) ? $value : json_decode((string) $value, true);
+  if (!is_array($decoded)) {
+    return null;
+  }
+  $stored = trim((string) ($decoded['stored'] ?? ''));
+  $name = trim((string) ($decoded['name'] ?? ''));
+  if ($stored === '' || $name === '') {
+    return null;
+  }
+  return [
+    'name' => $name,
+    'size' => (int) ($decoded['size'] ?? 0),
+    'mime' => (string) ($decoded['mime'] ?? ''),
+    'stored' => $stored,
+  ];
+}
+
+function ll_tf_doc_storage_dir(): string
+{
+  $dir = __DIR__ . '/../storage/team-forms';
+  if (!is_dir($dir)) {
+    @mkdir($dir, 0750, true);
+  }
+  $deny = $dir . '/.htaccess';
+  if (!is_file($deny)) {
+    @file_put_contents($deny, "Require all denied\n");
+  }
+  return $dir;
+}
+
+function ll_tf_doc_abs_path(string $stored): ?string
+{
+  $stored = str_replace('\\', '/', $stored);
+  if ($stored === '' || str_contains($stored, '..')) {
+    return null;
+  }
+  if (!preg_match('#^\d+/[A-Za-z0-9._-]+$#', $stored)) {
+    return null;
+  }
+  $base = realpath(ll_tf_doc_storage_dir());
+  $abs = realpath(ll_tf_doc_storage_dir() . '/' . $stored);
+  if ($base === false || $abs === false) {
+    return null;
+  }
+  $prefix = $base . DIRECTORY_SEPARATOR;
+  if (!str_starts_with($abs, $prefix)) {
+    return null;
+  }
+  return $abs;
+}
+
+function ll_tf_doc_unlink_stored(?string $stored): void
+{
+  if (!$stored) {
+    return;
+  }
+  $abs = ll_tf_doc_abs_path($stored);
+  if ($abs && is_file($abs)) {
+    @unlink($abs);
+  }
+}
+
+function ll_tf_doc_delete_task_dir(int $taskId): void
+{
+  if ($taskId < 1) {
+    return;
+  }
+  $dir = ll_tf_doc_storage_dir() . '/' . $taskId;
+  if (!is_dir($dir)) {
+    return;
+  }
+  foreach (glob($dir . '/*') ?: [] as $f) {
+    if (is_file($f)) {
+      @unlink($f);
+    }
+  }
+  @rmdir($dir);
+}
+
+function ll_tf_doc_cleanup_field(int $fieldId): void
+{
+  if ($fieldId < 1) {
+    return;
+  }
+  $stmt = ll_pdo()->prepare('SELECT value_text FROM form_answers WHERE field_id = ?');
+  $stmt->execute([$fieldId]);
+  foreach ($stmt->fetchAll() as $row) {
+    $meta = ll_tf_parse_document_answer($row['value_text'] ?? null);
+    if ($meta) {
+      ll_tf_doc_unlink_stored($meta['stored']);
+    }
+  }
+}
+
+/** Empty is allowed; reject letters / scientific notation / non-finite values. */
+function ll_tf_is_valid_number_answer($value): bool
+{
+  if ($value === null) {
+    return true;
+  }
+  if (!is_scalar($value)) {
+    return false;
+  }
+  $s = trim((string) $value);
+  if ($s === '') {
+    return true;
+  }
+  if (!preg_match('/^[+-]?(?:\d+(?:\.\d*)?|\.\d+)$/', $s)) {
+    return false;
+  }
+  return is_finite((float) $s);
 }
 
 function ll_tf_calc_ops(): array
@@ -114,8 +347,12 @@ function ll_team_forms_ensure_tables(): void
     form_id INT UNSIGNED NOT NULL,
     assignee_id INT UNSIGNED NOT NULL,
     assigned_by INT UNSIGNED NULL,
+    reviewer_id INT UNSIGNED NULL,
     reviewer_scope ENUM('group','department') NOT NULL DEFAULT 'group',
     status ENUM('pending','in_progress','submitted','approved','rework','closed') NOT NULL DEFAULT 'pending',
+    title VARCHAR(200) NULL,
+    due_on DATE NULL,
+    field_snapshot_json LONGTEXT NULL,
     submitted_at DATETIME NULL,
     approved_at DATETIME NULL,
     closed_at DATETIME NULL,
@@ -124,12 +361,12 @@ function ll_team_forms_ensure_tables(): void
     KEY idx_form_tasks_form (form_id),
     KEY idx_form_tasks_assignee (assignee_id, status),
     KEY idx_form_tasks_status (status, updated_at),
+    KEY idx_form_tasks_reviewer (reviewer_id),
     CONSTRAINT fk_form_tasks_form FOREIGN KEY (form_id) REFERENCES form_templates(id) ON DELETE CASCADE,
     CONSTRAINT fk_form_tasks_assignee FOREIGN KEY (assignee_id) REFERENCES users(id) ON DELETE CASCADE,
-    CONSTRAINT fk_form_tasks_assigned_by FOREIGN KEY (assigned_by) REFERENCES users(id) ON DELETE SET NULL
+    CONSTRAINT fk_form_tasks_assigned_by FOREIGN KEY (assigned_by) REFERENCES users(id) ON DELETE SET NULL,
+    CONSTRAINT fk_form_tasks_reviewer FOREIGN KEY (reviewer_id) REFERENCES users(id) ON DELETE SET NULL
   ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
-
-  ll_tf_ensure_form_tasks_open_assignee_unique($pdo);
 
   $pdo->exec("CREATE TABLE IF NOT EXISTS form_answers (
     id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
@@ -153,41 +390,186 @@ function ll_team_forms_ensure_tables(): void
     CONSTRAINT fk_form_comments_task FOREIGN KEY (task_id) REFERENCES form_tasks(id) ON DELETE CASCADE,
     CONSTRAINT fk_form_comments_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
   ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+
+  ll_tf_ensure_task_instance_schema($pdo);
 }
 
 /**
- * Existing installs: one open task per form+assignee (closed tasks may repeat).
- * Dedupes open duplicates then adds generated column + unique key when missing.
+ * Templates may spawn many task instances for the same assignee.
+ * Snapshot field defs onto each task; drop the old one-open-per-form+assignee unique.
  */
-function ll_tf_ensure_form_tasks_open_assignee_unique(PDO $pdo): void
+function ll_tf_ensure_task_instance_schema(PDO $pdo): void
 {
   try {
-    $hasCol = $pdo->query("SHOW COLUMNS FROM form_tasks LIKE 'open_assignee_guard'")->fetch();
-    if ($hasCol) {
-      return;
+    $idx = $pdo->query("SHOW INDEX FROM form_tasks WHERE Key_name = 'uq_form_tasks_open_assignee'")->fetch();
+    if ($idx) {
+      $pdo->exec('ALTER TABLE form_tasks DROP INDEX uq_form_tasks_open_assignee');
     }
-    // Keep oldest open task; close newer duplicates so the unique key can apply.
-    $pdo->exec(
-      "UPDATE form_tasks t
-       INNER JOIN (
-         SELECT form_id, assignee_id, MIN(id) AS keep_id
-         FROM form_tasks
-         WHERE status <> 'closed'
-         GROUP BY form_id, assignee_id
-         HAVING COUNT(*) > 1
-       ) d ON t.form_id = d.form_id AND t.assignee_id = d.assignee_id
-         AND t.id <> d.keep_id AND t.status <> 'closed'
-       SET t.status = 'closed', t.closed_at = UTC_TIMESTAMP()"
-    );
-    $pdo->exec(
-      "ALTER TABLE form_tasks
-       ADD COLUMN open_assignee_guard TINYINT UNSIGNED
-         GENERATED ALWAYS AS (CASE WHEN status = 'closed' THEN NULL ELSE 1 END) STORED,
-       ADD UNIQUE KEY uq_form_tasks_open_assignee (form_id, assignee_id, open_assignee_guard)"
-    );
   } catch (Throwable $e) {
-    // Older MySQL or concurrent migrate — assign path still enforces via SELECT.
+    /* index may already be gone */
   }
+  try {
+    $col = $pdo->query("SHOW COLUMNS FROM form_tasks LIKE 'open_assignee_guard'")->fetch();
+    if ($col) {
+      $pdo->exec('ALTER TABLE form_tasks DROP COLUMN open_assignee_guard');
+    }
+  } catch (Throwable $e) {
+    /* generated column may already be gone */
+  }
+  $add = [
+    'title' => 'VARCHAR(200) NULL',
+    'due_on' => 'DATE NULL',
+    'field_snapshot_json' => 'LONGTEXT NULL',
+    'reviewer_id' => 'INT UNSIGNED NULL',
+  ];
+  foreach ($add as $name => $ddl) {
+    try {
+      $has = $pdo->query("SHOW COLUMNS FROM form_tasks LIKE " . $pdo->quote($name))->fetch();
+      if (!$has) {
+        $pdo->exec("ALTER TABLE form_tasks ADD COLUMN `$name` $ddl");
+      }
+    } catch (Throwable $e) {
+      /* concurrent migrate */
+    }
+  }
+  try {
+    $fk = $pdo->query(
+      "SELECT CONSTRAINT_NAME FROM information_schema.TABLE_CONSTRAINTS
+       WHERE TABLE_SCHEMA = DATABASE()
+         AND TABLE_NAME = 'form_answers'
+         AND CONSTRAINT_NAME = 'fk_form_answers_field'
+         AND CONSTRAINT_TYPE = 'FOREIGN KEY'
+       LIMIT 1"
+    )->fetch();
+    if ($fk) {
+      $pdo->exec('ALTER TABLE form_answers DROP FOREIGN KEY fk_form_answers_field');
+    }
+  } catch (Throwable $e) {
+    /* answers stay keyed by snapshot field id even if template field is later deleted */
+  }
+  try {
+    $revFk = $pdo->query(
+      "SELECT CONSTRAINT_NAME FROM information_schema.TABLE_CONSTRAINTS
+       WHERE TABLE_SCHEMA = DATABASE()
+         AND TABLE_NAME = 'form_tasks'
+         AND CONSTRAINT_NAME = 'fk_form_tasks_reviewer'
+         AND CONSTRAINT_TYPE = 'FOREIGN KEY'
+       LIMIT 1"
+    )->fetch();
+    if (!$revFk) {
+      $hasRev = $pdo->query("SHOW COLUMNS FROM form_tasks LIKE 'reviewer_id'")->fetch();
+      if ($hasRev) {
+        $pdo->exec(
+          'ALTER TABLE form_tasks
+           ADD CONSTRAINT fk_form_tasks_reviewer FOREIGN KEY (reviewer_id) REFERENCES users(id) ON DELETE SET NULL'
+        );
+      }
+    }
+  } catch (Throwable $e) {
+    /* reviewer_id still usable without FK */
+  }
+  try {
+    ll_tf_backfill_task_field_snapshots($pdo);
+  } catch (Throwable $e) {
+    /* first-hit migrate should not block the module */
+  }
+}
+
+function ll_tf_fields_snapshot(array $fields): array
+{
+  $out = [];
+  foreach ($fields as $f) {
+    $out[] = [
+      'id' => (int) ($f['id'] ?? 0),
+      'form_id' => (int) ($f['form_id'] ?? 0),
+      'field_key' => (string) ($f['field_key'] ?? ''),
+      'label' => (string) ($f['label'] ?? ''),
+      'field_type' => (string) ($f['field_type'] ?? 'text'),
+      'options' => is_array($f['options'] ?? null) ? array_values($f['options']) : [],
+      'readonly_value' => $f['readonly_value'] ?? null,
+      'calc_op' => $f['calc_op'] ?? null,
+      'calc_left_field_id' => isset($f['calc_left_field_id']) ? (int) $f['calc_left_field_id'] : null,
+      'calc_right_field_id' => isset($f['calc_right_field_id']) ? (int) $f['calc_right_field_id'] : null,
+      'required' => !empty($f['required']),
+      'is_system' => ll_tf_is_system_field($f),
+      'sort_order' => (int) ($f['sort_order'] ?? 0),
+    ];
+  }
+  return $out;
+}
+
+function ll_tf_fields_from_snapshot($raw): array
+{
+  if (is_array($raw)) {
+    $decoded = $raw;
+  } else {
+    $decoded = json_decode((string) $raw, true);
+  }
+  if (!is_array($decoded) || !$decoded) {
+    return [];
+  }
+  $fields = [];
+  foreach ($decoded as $f) {
+    if (!is_array($f) || (int) ($f['id'] ?? 0) < 1) {
+      continue;
+    }
+    $fields[] = [
+      'id' => (int) $f['id'],
+      'form_id' => (int) ($f['form_id'] ?? 0),
+      'field_key' => (string) ($f['field_key'] ?? ''),
+      'label' => (string) ($f['label'] ?? ''),
+      'field_type' => (string) ($f['field_type'] ?? 'text'),
+      'options' => is_array($f['options'] ?? null) ? array_values($f['options']) : [],
+      'readonly_value' => array_key_exists('readonly_value', $f) && $f['readonly_value'] !== null
+        ? (string) $f['readonly_value'] : null,
+      'calc_op' => !empty($f['calc_op']) ? (string) $f['calc_op'] : null,
+      'calc_left_field_id' => !empty($f['calc_left_field_id']) ? (int) $f['calc_left_field_id'] : null,
+      'calc_right_field_id' => !empty($f['calc_right_field_id']) ? (int) $f['calc_right_field_id'] : null,
+      'required' => !empty($f['required']),
+      'sort_order' => (int) ($f['sort_order'] ?? 0),
+    ];
+    $fields[array_key_last($fields)]['is_system'] = ll_tf_is_system_field($fields[array_key_last($fields)]);
+  }
+  usort($fields, static fn ($a, $b) => ($a['sort_order'] <=> $b['sort_order']) ?: ($a['id'] <=> $b['id']));
+  return $fields;
+}
+
+function ll_tf_backfill_task_field_snapshots(PDO $pdo): void
+{
+  $has = $pdo->query("SHOW COLUMNS FROM form_tasks LIKE 'field_snapshot_json'")->fetch();
+  if (!$has) {
+    return;
+  }
+  $rows = $pdo->query(
+    "SELECT id, form_id FROM form_tasks
+     WHERE field_snapshot_json IS NULL OR field_snapshot_json = ''"
+  )->fetchAll();
+  if (!$rows) {
+    return;
+  }
+  $cache = [];
+  $upd = $pdo->prepare('UPDATE form_tasks SET field_snapshot_json = ? WHERE id = ?');
+  $load = $pdo->prepare('SELECT * FROM form_fields WHERE form_id = ? ORDER BY sort_order ASC, id ASC');
+  foreach ($rows as $row) {
+    $formId = (int) $row['form_id'];
+    if (!isset($cache[$formId])) {
+      $load->execute([$formId]);
+      $cache[$formId] = ll_tf_fields_snapshot(array_map('ll_tf_row_field', $load->fetchAll()));
+    }
+    $upd->execute([
+      json_encode($cache[$formId], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
+      (int) $row['id'],
+    ]);
+  }
+}
+
+function ll_tf_task_display_title(?string $taskTitle, ?string $templateTitle): string
+{
+  $custom = trim((string) $taskTitle);
+  if ($custom !== '') {
+    return $custom;
+  }
+  return trim((string) $templateTitle);
 }
 
 function ll_tf_can_manage_org(array $user): bool
@@ -259,6 +641,178 @@ function ll_tf_org_memberships(int $userId): array
     $byGroup[$gid]['roles'][] = (string) $row['role'];
   }
   return array_values($byGroup);
+}
+
+/**
+ * @param list<array{department_id?:int,group_id?:int}> $memberships
+ * @return array{department_ids:list<int>,group_ids:list<int>}
+ */
+function ll_tf_org_ids_from_memberships(array $memberships): array
+{
+  $groupIds = [];
+  $deptIds = [];
+  foreach ($memberships as $m) {
+    $gid = (int) ($m['group_id'] ?? 0);
+    $did = (int) ($m['department_id'] ?? 0);
+    if ($gid > 0) {
+      $groupIds[$gid] = true;
+    }
+    if ($did > 0) {
+      $deptIds[$did] = true;
+    }
+  }
+  return [
+    'department_ids' => array_map('intval', array_keys($deptIds)),
+    'group_ids' => array_map('intval', array_keys($groupIds)),
+  ];
+}
+
+/**
+ * Batch department/group ids for Admin user list.
+ * @param list<int> $userIds
+ * @return array<int,array{department_ids:list<int>,group_ids:list<int>}>
+ */
+function ll_tf_org_ids_map_for_users(array $userIds): array
+{
+  $out = [];
+  $ids = [];
+  foreach ($userIds as $uid) {
+    $id = (int) $uid;
+    if ($id > 0) {
+      $ids[$id] = true;
+      $out[$id] = ['department_ids' => [], 'group_ids' => []];
+    }
+  }
+  $ids = array_map('intval', array_keys($ids));
+  if (!$ids) {
+    return $out;
+  }
+  try {
+    ll_team_forms_ensure_tables();
+  } catch (Throwable $e) {
+    return $out;
+  }
+  $placeholders = implode(',', array_fill(0, count($ids), '?'));
+  $stmt = ll_pdo()->prepare(
+    "SELECT gm.user_id, gm.group_id, g.department_id
+     FROM group_members gm
+     INNER JOIN org_groups g ON g.id = gm.group_id
+     WHERE gm.user_id IN ($placeholders)"
+  );
+  $stmt->execute($ids);
+  $groups = [];
+  $depts = [];
+  foreach ($stmt->fetchAll() as $row) {
+    $uid = (int) $row['user_id'];
+    $groups[$uid][(int) $row['group_id']] = true;
+    $depts[$uid][(int) $row['department_id']] = true;
+  }
+  foreach ($ids as $uid) {
+    $out[$uid] = [
+      'department_ids' => array_map('intval', array_keys($depts[$uid] ?? [])),
+      'group_ids' => array_map('intval', array_keys($groups[$uid] ?? [])),
+    ];
+  }
+  return $out;
+}
+
+/** @return array{departments:list<array>,groups:list<array>} */
+function ll_tf_org_catalog(): array
+{
+  ll_team_forms_ensure_tables();
+  $pdo = ll_pdo();
+  $depts = $pdo->query(
+    'SELECT id, name, description, created_by, created_at, updated_at
+     FROM departments ORDER BY name ASC'
+  )->fetchAll();
+  $groups = $pdo->query(
+    'SELECT g.*, d.name AS department_name
+     FROM org_groups g INNER JOIN departments d ON d.id = g.department_id
+     ORDER BY d.name ASC, g.name ASC'
+  )->fetchAll();
+  return [
+    'departments' => array_map('ll_tf_row_department', $depts),
+    'groups' => array_map('ll_tf_row_group', $groups),
+  ];
+}
+
+/**
+ * Normalize and validate group_ids from Admin user save.
+ * @return list<int>
+ */
+function ll_tf_normalize_group_ids(mixed $raw): array
+{
+  if (!is_array($raw)) {
+    ll_error('group_ids must be an array');
+  }
+  $ids = [];
+  foreach ($raw as $v) {
+    $id = (int) $v;
+    if ($id > 0) {
+      $ids[$id] = true;
+    }
+  }
+  $wanted = array_map('intval', array_keys($ids));
+  if (!$wanted) {
+    return [];
+  }
+  ll_team_forms_ensure_tables();
+  $placeholders = implode(',', array_fill(0, count($wanted), '?'));
+  $stmt = ll_pdo()->prepare("SELECT id FROM org_groups WHERE id IN ($placeholders)");
+  $stmt->execute($wanted);
+  $found = array_map('intval', $stmt->fetchAll(PDO::FETCH_COLUMN));
+  if (count($found) !== count($wanted)) {
+    ll_error('One or more groups were not found');
+  }
+  return $wanted;
+}
+
+/**
+ * Checkbox semantics: member of this group.
+ * New membership → assignee only. Kept groups retain form_creator/reviewer.
+ * Unchecked groups → delete all group_members rows for that user+group.
+ * @param list<int> $groupIds
+ */
+function ll_tf_sync_user_group_memberships(int $userId, array $groupIds): void
+{
+  ll_team_forms_ensure_tables();
+  $pdo = ll_pdo();
+  $wanted = [];
+  foreach ($groupIds as $gid) {
+    $id = (int) $gid;
+    if ($id > 0) {
+      $wanted[$id] = true;
+    }
+  }
+  $wantedIds = array_map('intval', array_keys($wanted));
+
+  $stmt = $pdo->prepare('SELECT DISTINCT group_id FROM group_members WHERE user_id = ?');
+  $stmt->execute([$userId]);
+  $existing = array_map('intval', $stmt->fetchAll(PDO::FETCH_COLUMN));
+  $wantedSet = array_flip($wantedIds);
+
+  $del = $pdo->prepare('DELETE FROM group_members WHERE user_id = ? AND group_id = ?');
+  foreach ($existing as $gid) {
+    if (!isset($wantedSet[$gid])) {
+      $del->execute([$userId, $gid]);
+    }
+  }
+
+  $chk = $pdo->prepare('SELECT id FROM group_members WHERE user_id = ? AND group_id = ? LIMIT 1');
+  $ins = $pdo->prepare(
+    'INSERT INTO group_members (group_id, user_id, role) VALUES (?, ?, \'assignee\')'
+  );
+  foreach ($wantedIds as $gid) {
+    $chk->execute([$userId, $gid]);
+    if ($chk->fetch()) {
+      continue;
+    }
+    try {
+      $ins->execute([$gid, $userId]);
+    } catch (PDOException $e) {
+      // Unique race: already a member.
+    }
+  }
 }
 
 function ll_tf_slug_key(string $label, string $fallback = 'field'): string
@@ -415,6 +969,8 @@ function ll_tf_row_field(array $row): array
     'required' => (int) ($row['required'] ?? 0) === 1,
     'sort_order' => (int) ($row['sort_order'] ?? 0),
   ];
+  $out['is_system'] = ll_tf_is_system_field($out);
+  return $out;
 }
 
 function ll_tf_progress(array $fields, array $answersByFieldId): array
@@ -423,7 +979,7 @@ function ll_tf_progress(array $fields, array $answersByFieldId): array
   $filled = 0;
   foreach ($fields as $f) {
     $type = $f['field_type'] ?? '';
-    if ($type === 'readonly' || $type === 'calculated') {
+    if ($type === 'readonly' || $type === 'calculated' || ll_tf_is_system_field($f)) {
       continue;
     }
     $writable++;
@@ -443,6 +999,10 @@ function ll_tf_progress(array $fields, array $answersByFieldId): array
  */
 function ll_tf_reviewer_user_ids_for_task(array $task): array
 {
+  $designated = (int) ($task['reviewer_id'] ?? 0);
+  if ($designated > 0) {
+    return [$designated];
+  }
   $scope = (string) ($task['reviewer_scope'] ?? 'group');
   $groupId = (int) ($task['group_id'] ?? 0);
   $deptId = (int) ($task['department_id'] ?? 0);

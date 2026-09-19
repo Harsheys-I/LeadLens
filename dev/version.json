@@ -1,5 +1,5 @@
 {
-  "version": "7.0.3.stable",
+  "version": "7.1.0.dev",
   "name": "GPP AI",
-  "notes": "v7.0.3.stable: ERP Sync keep-alive diagnostics (manual vs cron), IST timestamps, GET/cron_secret for Hostinger, clearer hPanel setup."
+  "notes": "v7.1.0.dev: Team Forms templates vs snapshot tasks, Assign To/Status/Reviewer system fields, URL/document uploads, number-only fields, Admin user dept/group checkboxes."
 }

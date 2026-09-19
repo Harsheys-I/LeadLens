@@ -7,12 +7,12 @@
   <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#0f2d22">
   <meta name="description" content="GPP AI Team Forms">
   <title>GPP AI · Team Forms</title>
-  <meta name="app-version" content="7.0.3.stable">
-  <script src="../theme-boot.js?v=7.0.3.stable"></script>
-  <script src="../motion.js?v=7.0.3.stable"></script>
+  <meta name="app-version" content="7.1.0.dev">
+  <script src="../theme-boot.js?v=7.1.0.dev"></script>
+  <script src="../motion.js?v=7.1.0.dev"></script>
   <link rel="manifest" href="../manifest.webmanifest">
-  <link rel="stylesheet" href="../styles.css?v=7.0.3.stable">
-  <script type="module" src="../team-forms.js?v=7.0.3.stable"></script>
+  <link rel="stylesheet" href="../styles.css?v=7.1.0.dev">
+  <script type="module" src="../team-forms.js?v=7.1.0.dev"></script>
 </head>
 <body>
   <div id="update-banner" class="update-banner hidden" role="status">
@@ -56,7 +56,7 @@
         </div>
         <div id="ws-memberships" class="tf-panel"></div>
         <div class="section-head" style="margin-top:28px">
-          <div><h2>Assigned to me</h2><p>Open a task to fill fields, update status, and comment.</p></div>
+          <div><h2>Assigned to me</h2><p>Your tasks (not templates). Open one to fill fields, update status, and comment.</p></div>
         </div>
         <div id="ws-tasks" class="admin-table-wrap"></div>
       </section>
@@ -79,10 +79,10 @@
         <div class="section-head">
           <div>
             <h2>Form builder</h2>
-            <p>Create forms for groups where you are a Form Creator. Add fields, then assign.</p>
+            <p>Build reusable templates (title, description, fields). Create a task later to assign work.</p>
           </div>
           <div class="inline-actions">
-            <button id="builder-new-form" type="button" class="primary-button">New form</button>
+            <button id="builder-new-form" type="button" class="primary-button">New template</button>
             <button id="builder-refresh" type="button" class="secondary-button">Refresh</button>
           </div>
         </div>
@@ -96,12 +96,11 @@
           <div id="builder-editor" class="tf-panel hidden">
             <div class="section-head">
               <div>
-                <h3 id="builder-form-title">Form</h3>
+                <h3 id="builder-form-title">Template</h3>
                 <p id="builder-form-meta" class="muted"></p>
               </div>
               <div class="inline-actions">
                 <button id="builder-add-field" type="button" class="secondary-button">Add field</button>
-                <button id="builder-assign" type="button" class="primary-button">Assign</button>
                 <button id="builder-delete-form" type="button" class="text-button hidden">Delete form</button>
               </div>
             </div>
@@ -257,6 +256,9 @@
     #task-comment-input{border:1px solid var(--input-border);border-radius:9px;background:var(--input-bg);padding:10px 11px;color:var(--ink)}
     .tf-form-field{display:grid;gap:6px;margin:12px 0;font-size:13px;font-weight:650}
     .tf-form-field input,.tf-form-field textarea,.tf-form-field select{width:100%;border:1px solid var(--input-border);border-radius:9px;background:var(--input-bg);padding:10px 11px;color:var(--ink);font-weight:400}
+    .tf-form-field input[type="number"]{-moz-appearance:textfield}
+    .tf-form-field input[type="number"]::-webkit-outer-spin-button,
+    .tf-form-field input[type="number"]::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
     .tf-form-field.readonly,.tf-form-field.calculated{opacity:.92}
     .tf-check-row{display:flex;align-items:center;gap:8px;font-weight:500}
     .tf-check-row.is-assigned{opacity:.72}

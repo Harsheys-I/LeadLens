@@ -1,9 +1,9 @@
 /**
  * Shared History sync: IndexedDB <-> MySQL audit_jobs (full job JSON).
  */
-import {JobsApi} from './api-client.js?v=7.0.3.stable';
-import {putJob, getJob, getJobs, deleteJob, clearJobs} from './db.js?v=7.0.3.stable';
-import {getUser, hasPermission} from './auth.js?v=7.0.3.stable';
+import {JobsApi} from './api-client.js?v=7.1.0.dev';
+import {putJob, getJob, getJobs, deleteJob, clearJobs} from './db.js?v=7.1.0.dev';
+import {getUser, hasPermission} from './auth.js?v=7.1.0.dev';
 
 const pushTimers = new Map();
 const PUSH_DEBOUNCE_MS = 2000;
