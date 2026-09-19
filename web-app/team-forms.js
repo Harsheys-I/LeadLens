@@ -1,16 +1,16 @@
 /**
  * Team Forms — org, form builder, assignee workspace, review board.
  */
-import {APP_VERSION} from './audit.js?v=7.0.0.dev';
-import {requireAuth, logout, hasPermission, getUser, changePassword, updateProfile} from './auth.js?v=7.0.0.dev';
-import {TeamFormsApi} from './api-client.js?v=7.0.0.dev';
-import {mountNotifications} from './notifications-ui.js?v=7.0.0.dev';
-import {appUrl, homePath} from './app-base.js?v=7.0.0.dev';
-import {initTheme} from './theme.js?v=7.0.0.dev';
-import {setStorageUserId, storageKey} from './db.js?v=7.0.0.dev';
+import {APP_VERSION} from './audit.js?v=7.0.1.dev';
+import {requireAuth, logout, hasPermission, getUser, changePassword, updateProfile} from './auth.js?v=7.0.1.dev';
+import {TeamFormsApi} from './api-client.js?v=7.0.1.dev';
+import {mountNotifications} from './notifications-ui.js?v=7.0.1.dev';
+import {appUrl, homePath} from './app-base.js?v=7.0.1.dev';
+import {initTheme} from './theme.js?v=7.0.1.dev';
+import {setStorageUserId, storageKey} from './db.js?v=7.0.1.dev';
 
 const $ = id => document.getElementById(id);
-const VERSION = APP_VERSION || '7.0.0.dev';
+const VERSION = APP_VERSION || '7.0.1.dev';
 const POLL_MS = 7000;
 
 const titles = {
@@ -50,12 +50,16 @@ let workspaceData = null;
 let orgDepts = [];
 let orgGroups = [];
 let usersCache = [];
+let expandedDeptId = null;
+let expandedGroupId = null;
 let builderGroupId = null;
 let builderForm = null;
 let currentTask = null;
 let taskBackView = 'workspace';
 let reviewTimer = null;
 let modalSubmitHandler = null;
+let taskSaveTimer = null;
+let taskSaveInFlight = null;
 
 function toast(msg){
   const el = $('toast');
@@ -83,6 +87,13 @@ function myRolesInGroup(groupId){
   return m?.roles || [];
 }
 
+function canDeleteForm(form){
+  const u = getUser();
+  if (!u || !form) return false;
+  if (u.is_super || canManageOrg()) return true;
+  return Number(form.created_by) > 0 && Number(u.id) === Number(form.created_by);
+}
+
 function isFormCreatorAnywhere(){
   const u = getUser();
   if (u?.is_super || canManageOrg()) return true;
@@ -96,7 +107,17 @@ function isReviewerAnywhere(){
 }
 
 function statusLabel(s){
-  return String(s || '').replace(/_/g, ' ');
+  const key = String(s || '');
+  const labels = {
+    pending: 'Pending',
+    in_progress: 'In progress',
+    submitted: 'Completed',
+    completed: 'Completed',
+    approved: 'Approved',
+    rework: 'Rework',
+    closed: 'Closed',
+  };
+  return labels[key] || key.replace(/_/g, ' ');
 }
 
 function evalCalc(op, left, right){
@@ -152,6 +173,9 @@ function startReviewPoll(){
 }
 
 function showView(name, {hash = true} = {}){
+  if (currentView === 'task' && name !== 'task') {
+    flushTaskAutosave().catch(() => {});
+  }
   if (name === 'org' && !canManageOrg()) {
     toast('Org management requires permission.');
     return;
@@ -320,13 +344,36 @@ function renderOrgTree(){
     mount.innerHTML = '<div class="empty-card">No departments yet. Create one to get started.</div>';
     return;
   }
+  if (expandedDeptId != null && !orgDepts.some(d => Number(d.id) === Number(expandedDeptId))) {
+    expandedDeptId = null;
+    expandedGroupId = null;
+  }
+  if (expandedGroupId != null && !orgGroups.some(g => Number(g.id) === Number(expandedGroupId))) {
+    expandedGroupId = null;
+  }
   for (const dept of orgDepts) {
+    const deptOpen = Number(expandedDeptId) === Number(dept.id);
     const block = document.createElement('div');
     block.className = 'tf-dept-block';
     const head = document.createElement('div');
     head.className = 'section-head';
-    head.innerHTML = `<div><h3>${escapeHtml(dept.name)}</h3>
-      <p class="muted">${escapeHtml(dept.description || '')}</p></div>`;
+    const toggle = document.createElement('button');
+    toggle.type = 'button';
+    toggle.className = 'tf-accordion-toggle';
+    toggle.setAttribute('aria-expanded', deptOpen ? 'true' : 'false');
+    toggle.innerHTML = `<span class="tf-accordion-caret" aria-hidden="true">${deptOpen ? '▾' : '▸'}</span>
+      <span class="tf-accordion-label"><h3>${escapeHtml(dept.name)}</h3>
+      <p class="muted">${escapeHtml(dept.description || '')}</p></span>`;
+    toggle.onclick = () => {
+      if (deptOpen) {
+        expandedDeptId = null;
+        expandedGroupId = null;
+      } else {
+        expandedDeptId = dept.id;
+        expandedGroupId = null;
+      }
+      renderOrgTree();
+    };
     const actions = document.createElement('div');
     actions.className = 'inline-actions';
     const addGroup = document.createElement('button');
@@ -352,29 +399,44 @@ function renderOrgTree(){
       } catch (err) { toast(err.message || 'Delete failed'); }
     };
     actions.append(addGroup, editDept, delDept);
-    head.append(actions);
+    head.append(toggle, actions);
     block.append(head);
 
-    const groups = orgGroups.filter(g => g.department_id === dept.id);
-    if (!groups.length) {
-      const empty = document.createElement('p');
-      empty.className = 'muted';
-      empty.textContent = 'No groups in this department.';
-      block.append(empty);
-    }
-    for (const g of groups) {
-      block.append(renderGroupCard(g));
+    if (deptOpen) {
+      const groups = orgGroups.filter(g => Number(g.department_id) === Number(dept.id));
+      if (!groups.length) {
+        const empty = document.createElement('p');
+        empty.className = 'muted';
+        empty.textContent = 'No groups in this department.';
+        block.append(empty);
+      }
+      for (const g of groups) {
+        block.append(renderGroupCard(g));
+      }
     }
     mount.append(block);
   }
 }
 
 function renderGroupCard(g){
+  const groupOpen = Number(expandedGroupId) === Number(g.id);
   const card = document.createElement('div');
   card.className = 'tf-group-card';
-  card.innerHTML = `<strong>${escapeHtml(g.name)}</strong>
-    <p class="muted" style="margin:4px 0 0">${escapeHtml(g.description || '')}</p>
-    <div class="tf-members" data-gid="${g.id}"><span class="muted">Loading members…</span></div>`;
+  const head = document.createElement('div');
+  head.className = 'tf-group-head';
+  const toggle = document.createElement('button');
+  toggle.type = 'button';
+  toggle.className = 'tf-accordion-toggle';
+  toggle.setAttribute('aria-expanded', groupOpen ? 'true' : 'false');
+  toggle.innerHTML = `<span class="tf-accordion-caret" aria-hidden="true">${groupOpen ? '▾' : '▸'}</span>
+    <span class="tf-accordion-label"><strong>${escapeHtml(g.name)}</strong>
+    <p class="muted" style="margin:4px 0 0">${escapeHtml(g.description || '')}</p></span>`;
+  toggle.onclick = () => {
+    expandedGroupId = groupOpen ? null : g.id;
+    renderOrgTree();
+  };
+  head.append(toggle);
+  card.append(head);
   const actions = document.createElement('div');
   actions.className = 'inline-actions';
   const addMem = document.createElement('button');
@@ -401,7 +463,14 @@ function renderGroupCard(g){
   };
   actions.append(addMem, editG, delG);
   card.append(actions);
-  loadMembersInto(card.querySelector('.tf-members'), g.id);
+  if (groupOpen) {
+    const members = document.createElement('div');
+    members.className = 'tf-members';
+    members.dataset.gid = String(g.id);
+    members.innerHTML = '<span class="muted">Loading members…</span>';
+    card.append(members);
+    loadMembersInto(members, g.id);
+  }
   return card;
 }
 
@@ -558,6 +627,7 @@ async function loadBuilderForms(){
     const mount = $('builder-forms');
     if (!forms.length) {
       mount.innerHTML = '<div class="empty-card">No forms in this group yet.</div>';
+      builderForm = null;
       $('builder-editor').classList.add('hidden');
       return;
     }
@@ -569,12 +639,21 @@ async function loadBuilderForms(){
       const tr = document.createElement('tr');
       tr.innerHTML = `<td>${escapeHtml(f.title)}</td>
         <td>${f.is_active ? 'Yes' : 'No'}</td><td></td>`;
+      const actions = tr.lastElementChild;
       const btn = document.createElement('button');
       btn.type = 'button';
       btn.className = 'secondary-button';
       btn.textContent = 'Edit';
       btn.onclick = () => openBuilderForm(f.id);
-      tr.lastElementChild.append(btn);
+      actions.append(btn);
+      if (canDeleteForm(f)) {
+        const del = document.createElement('button');
+        del.type = 'button';
+        del.className = 'text-button';
+        del.textContent = 'Delete';
+        del.onclick = () => deleteBuilderForm(f);
+        actions.append(del);
+      }
       tbody.append(tr);
     }
     table.append(tbody);
@@ -593,9 +672,33 @@ async function openBuilderForm(formId){
     $('builder-form-meta').textContent =
       `${builderForm.department_name} · ${builderForm.group_name}` +
       (builderForm.description ? ` — ${builderForm.description}` : '');
+    $('builder-delete-form')?.classList.toggle('hidden', !canDeleteForm(builderForm));
     renderBuilderFields();
   } catch (err) {
     toast(err.message || 'Could not load form');
+  }
+}
+
+async function deleteBuilderForm(form){
+  const target = form || builderForm;
+  if (!target?.id) return;
+  if (!canDeleteForm(target)) {
+    toast('Only the form creator can delete this form');
+    return;
+  }
+  if (!confirm(`Delete form “${target.title}”? This removes its fields, assignments, and answers.`)) {
+    return;
+  }
+  try {
+    await TeamFormsApi.deleteForm(target.id);
+    if (builderForm && Number(builderForm.id) === Number(target.id)) {
+      builderForm = null;
+      $('builder-editor').classList.add('hidden');
+    }
+    toast('Form deleted');
+    await loadBuilderForms();
+  } catch (err) {
+    toast(err.message || 'Delete failed');
   }
 }
 
@@ -618,9 +721,24 @@ function renderBuilderFields(){
     if (f.required) detail += ' · required';
     row.innerHTML = `<div class="tf-field-head">
       <div><strong>${escapeHtml(f.label)}</strong>
-      <div class="muted" style="font-size:12px;font-weight:400">${detail} · key ${escapeHtml(f.field_key)}</div></div>
+      <div class="muted" style="font-size:12px;font-weight:400">${detail}</div></div>
       <div class="inline-actions"></div></div>`;
     const actions = row.querySelector('.inline-actions');
+    const idx = fields.indexOf(f);
+    const up = document.createElement('button');
+    up.type = 'button';
+    up.className = 'text-button';
+    up.textContent = 'Up';
+    up.disabled = idx === 0;
+    up.setAttribute('aria-label', `Move ${f.label} up`);
+    up.onclick = () => moveBuilderField(f.id, -1);
+    const down = document.createElement('button');
+    down.type = 'button';
+    down.className = 'text-button';
+    down.textContent = 'Down';
+    down.disabled = idx === fields.length - 1;
+    down.setAttribute('aria-label', `Move ${f.label} down`);
+    down.onclick = () => moveBuilderField(f.id, 1);
     const edit = document.createElement('button');
     edit.type = 'button';
     edit.className = 'text-button';
@@ -638,8 +756,28 @@ function renderBuilderFields(){
         await openBuilderForm(builderForm.id);
       } catch (err) { toast(err.message || 'Delete failed'); }
     };
-    actions.append(edit, del);
+    actions.append(up, down, edit, del);
     mount.append(row);
+  }
+}
+
+async function moveBuilderField(fieldId, dir){
+  const fields = builderForm?.fields || [];
+  const i = fields.findIndex(f => Number(f.id) === Number(fieldId));
+  const j = i + dir;
+  if (i < 0 || j < 0 || j >= fields.length) return;
+  const next = fields.slice();
+  const [item] = next.splice(i, 1);
+  next.splice(j, 0, item);
+  builderForm.fields = next;
+  renderBuilderFields();
+  try {
+    const data = await TeamFormsApi.reorderFields(builderForm.id, next.map(f => f.id));
+    if (data.fields) builderForm.fields = data.fields;
+    renderBuilderFields();
+  } catch (err) {
+    toast(err.message || 'Reorder failed');
+    if (builderForm?.id) await openBuilderForm(builderForm.id);
   }
 }
 
@@ -670,7 +808,6 @@ function openFieldModal(existing = null){
   openModal(isEdit ? 'Edit field' : 'Add field', `
     <label>Label<input name="label" required value="${escapeHtml(existing?.label || '')}"></label>
     <label>Type<select name="field_type">${fieldTypeOptions(type)}</select></label>
-    <label>Field key<input name="field_key" value="${escapeHtml(existing?.field_key || '')}" placeholder="auto from label"></label>
     <label class="check-row"><input name="required" type="checkbox" ${existing?.required ? 'checked' : ''}><span>Required</span></label>
     <label class="tf-opt-readonly">Readonly value<input name="readonly_value" value="${escapeHtml(existing?.readonly_value || '')}"></label>
     <label class="tf-opt-select">Select options (one per line)<textarea name="options_text" rows="3">${escapeHtml((existing?.options || []).join('\n'))}</textarea></label>
@@ -682,7 +819,6 @@ function openFieldModal(existing = null){
     const body = {
       label: form.label.value.trim(),
       field_type: form.field_type.value,
-      field_key: form.field_key.value.trim(),
       required: form.required.checked,
       readonly_value: form.readonly_value.value,
       options: form.options_text.value.split('\n').map(s => s.trim()).filter(Boolean),
@@ -730,7 +866,7 @@ function openNewForm(){
 function openAssignModal(){
   if (!builderForm) return;
   openModal(`Assign · ${builderForm.title}`, `
-    <p class="muted">Assignees must be members of this group. Each selected user gets a task.</p>
+    <p class="muted">Assignees must be members of this group. Each selected user gets a task. People with an open task are already checked and cannot be assigned again.</p>
     <label>Reviewer scope
       <select name="reviewer_scope">
         <option value="group">This group</option>
@@ -740,17 +876,27 @@ function openAssignModal(){
     <div id="assign-user-list"><span class="muted">Loading members…</span></div>
   `, async () => {
     const form = $('tf-modal-form');
-    const ids = [...form.querySelectorAll('input[name="assignee"]:checked')].map(el => Number(el.value));
-    if (!ids.length) throw new Error('Select at least one assignee');
-    await TeamFormsApi.assignForm(builderForm.id, {
+    const me = Number(getUser()?.id);
+    const ids = [...form.querySelectorAll('input[name="assignee"]:checked:not(:disabled)')]
+      .map(el => Number(el.value))
+      .filter(id => id && id !== me);
+    if (!ids.length) throw new Error('Select at least one new assignee');
+    const res = await TeamFormsApi.assignForm(builderForm.id, {
       assignee_ids: ids,
       reviewer_scope: form.reviewer_scope.value,
     });
-    toast(`Assigned to ${ids.length} user(s)`);
+    const n = Number(res.count ?? ids.length);
+    toast(n ? `Assigned to ${n} user(s)` : 'No new assignees (already assigned)');
   });
-  TeamFormsApi.listMembers(builderForm.group_id).then(data => {
+  Promise.all([
+    TeamFormsApi.listMembers(builderForm.group_id),
+    TeamFormsApi.listFormAssignments(builderForm.id),
+  ]).then(([membersData, assignData]) => {
     const el = $('assign-user-list');
-    const members = data.members || [];
+    const members = membersData.members || [];
+    const openIds = new Set(
+      (assignData.assignee_ids || []).map(id => Number(id))
+    );
     // unique users
     const seen = new Set();
     const unique = [];
@@ -763,10 +909,28 @@ function openAssignModal(){
       el.innerHTML = '<span class="muted">No group members to assign.</span>';
       return;
     }
-    el.innerHTML = unique.map(m =>
-      `<label class="tf-check-row"><input type="checkbox" name="assignee" value="${m.user_id}">
-        <span>${escapeHtml(m.display_name)}</span></label>`
-    ).join('');
+    const me = Number(getUser()?.id);
+    el.innerHTML = unique.map(m => {
+      const already = openIds.has(Number(m.user_id));
+      const isSelf = Number(m.user_id) === me;
+      let extraClass = '';
+      let checked = '';
+      let disabled = '';
+      let note = '';
+      if (isSelf) {
+        extraClass = ' is-self';
+        disabled = ' disabled';
+        note = ' <span class="muted">(you cannot assign this to yourself)</span>';
+      } else if (already) {
+        extraClass = ' is-assigned';
+        checked = ' checked';
+        disabled = ' disabled';
+        note = ' <span class="muted">(already assigned)</span>';
+      }
+      return `<label class="tf-check-row${extraClass}">
+        <input type="checkbox" name="assignee" value="${m.user_id}"${checked}${disabled}>
+        <span>${escapeHtml(m.display_name)}${note}</span></label>`;
+    }).join('');
   }).catch(err => {
     $('assign-user-list').textContent = err.message || 'Could not load members';
   });
@@ -819,10 +983,14 @@ function renderReviewBoard(tasks){
 
 /* —— Task detail —— */
 async function openTask(taskId, backView = 'workspace'){
+  if (currentTask && Number(currentTask.id) !== Number(taskId)) {
+    try { await flushTaskAutosave(); } catch { /* keep navigating */ }
+  }
   taskBackView = backView;
   try {
     const data = await TeamFormsApi.getTask(taskId);
     currentTask = data.task;
+    resetTaskFieldSearch();
     showView('task', {hash: false});
     renderTask();
   } catch (err) {
@@ -843,6 +1011,13 @@ function canEditTaskAnswers(task){
   const u = getUser();
   if (!u) return false;
   if (task.status === 'approved' || task.status === 'closed') return false;
+  return u.is_super || Number(u.id) === Number(task.assignee_id);
+}
+
+function canAssigneeSetStatus(task){
+  const u = getUser();
+  if (!u) return false;
+  if (!['pending', 'in_progress', 'rework'].includes(task.status)) return false;
   return u.is_super || Number(u.id) === Number(task.assignee_id);
 }
 
@@ -882,40 +1057,43 @@ function renderTask(){
   const actions = $('task-actions');
   actions.replaceChildren();
   const editable = canEditTaskAnswers(task);
-  if (editable) {
-    const save = document.createElement('button');
-    save.type = 'button';
-    save.className = 'secondary-button';
-    save.textContent = 'Save answers';
-    save.onclick = () => saveTaskAnswers();
-    const submit = document.createElement('button');
-    submit.type = 'button';
-    submit.className = 'primary-button';
-    submit.textContent = 'Submit';
-    submit.onclick = () => submitTask();
+  const statusWrap = document.createElement('div');
+  statusWrap.className = 'tf-status-control';
+  if (canAssigneeSetStatus(task)) {
+    const statusLab = document.createElement('label');
+    statusLab.className = 'tf-inline-label';
+    statusLab.textContent = 'Status';
     const statusSel = document.createElement('select');
     statusSel.id = 'task-status-select';
-    for (const s of ['pending', 'in_progress', 'submitted']) {
+    statusSel.setAttribute('aria-label', 'Task status');
+    const opts = [['pending', 'Pending'], ['in_progress', 'In progress']];
+    if (task.status === 'rework') opts.push(['rework', 'Rework']);
+    opts.push(['submitted', 'Completed']);
+    for (const [value, label] of opts) {
       const opt = document.createElement('option');
-      opt.value = s;
-      opt.textContent = statusLabel(s);
-      if (s === task.status || (task.status === 'rework' && s === 'in_progress')) opt.selected = true;
+      opt.value = value;
+      opt.textContent = label;
+      if (value === task.status) opt.selected = true;
       statusSel.append(opt);
     }
-    const setSt = document.createElement('button');
-    setSt.type = 'button';
-    setSt.className = 'text-button';
-    setSt.textContent = 'Set status';
-    setSt.onclick = async () => {
-      try {
-        const data = await TeamFormsApi.setStatus(task.id, statusSel.value);
-        currentTask = data.task;
-        renderTask();
-        toast('Status updated');
-      } catch (err) { toast(err.message || 'Status failed'); }
-    };
-    actions.append(statusSel, setSt, save, submit);
+    statusSel.addEventListener('change', () => onTaskStatusChange(statusSel));
+    statusLab.append(statusSel);
+    statusWrap.append(statusLab);
+  } else {
+    const badge = document.createElement('span');
+    badge.className = 'tf-status';
+    badge.id = 'task-status-badge';
+    badge.textContent = statusLabel(task.status);
+    statusWrap.append(badge);
   }
+  if (editable) {
+    const hint = document.createElement('span');
+    hint.id = 'task-save-hint';
+    hint.className = 'muted tf-save-hint';
+    hint.setAttribute('aria-live', 'polite');
+    statusWrap.append(hint);
+  }
+  actions.append(statusWrap);
   if (canReviewTask(task) && task.status !== 'closed') {
     const approve = document.createElement('button');
     approve.type = 'button';
@@ -1016,12 +1194,18 @@ function renderTask(){
     }
     input.dataset.fieldId = f.id;
     input.disabled = locked;
-    if (!locked && (f.field_type === 'number' || f.field_type === 'text' || f.field_type === 'textarea')) {
-      input.addEventListener('input', () => refreshCalculatedDom());
+    if (!locked) {
+      const liveCalc = f.field_type === 'number' || f.field_type === 'text' || f.field_type === 'textarea';
+      input.addEventListener('input', () => {
+        if (liveCalc) refreshCalculatedDom();
+        scheduleTaskAutosave();
+      });
+      input.addEventListener('change', () => scheduleTaskAutosave());
     }
     wrap.append(input);
     formMount.append(wrap);
   }
+  applyTaskFieldSearch({scroll: false});
 
   const cmt = $('task-comments');
   cmt.replaceChildren();
@@ -1035,6 +1219,62 @@ function renderTask(){
   if (!(task.comments || []).length) {
     cmt.innerHTML = '<p class="muted">No comments yet.</p>';
   }
+}
+
+function setTaskFieldSearchOpen(open){
+  const panel = $('task-search-panel');
+  const toggle = $('task-search-toggle');
+  const input = $('task-search-input');
+  panel?.classList.toggle('hidden', !open);
+  toggle?.setAttribute('aria-expanded', open ? 'true' : 'false');
+  if (open) {
+    input?.focus();
+    input?.select();
+  } else if (input) {
+    input.value = '';
+    applyTaskFieldSearch({scroll: false});
+    input.blur();
+  }
+}
+
+function toggleTaskFieldSearch(){
+  const open = !$('task-search-panel')?.classList.contains('hidden');
+  setTaskFieldSearchOpen(!open);
+}
+
+function resetTaskFieldSearch(){
+  setTaskFieldSearchOpen(false);
+}
+
+function applyTaskFieldSearch({scroll = false} = {}){
+  const q = ($('task-search-input')?.value || '').trim().toLowerCase();
+  const fields = [...document.querySelectorAll('#task-form .tf-form-field')];
+  const countEl = $('task-search-count');
+  if (!q) {
+    for (const el of fields) el.classList.remove('is-search-match', 'is-search-hide');
+    if (countEl) countEl.textContent = '';
+    return;
+  }
+  let n = 0;
+  let first = null;
+  for (const el of fields) {
+    const label = el.querySelector('span')?.textContent || '';
+    const input = el.querySelector('input, textarea, select');
+    let val = '';
+    if (input) {
+      if (input.type === 'checkbox') val = input.checked ? 'checked' : '';
+      else val = input.value || '';
+    }
+    const hit = `${label} ${val}`.toLowerCase().includes(q);
+    el.classList.toggle('is-search-match', hit);
+    el.classList.toggle('is-search-hide', !hit);
+    if (hit) {
+      n++;
+      if (!first) first = el;
+    }
+  }
+  if (countEl) countEl.textContent = n ? `${n} match${n === 1 ? '' : 'es'}` : 'No matches';
+  if (scroll && first) first.scrollIntoView({block: 'center', behavior: 'smooth'});
 }
 
 function collectAnswersFromDom(){
@@ -1072,27 +1312,98 @@ function refreshCalculatedDom(){
   }
 }
 
-async function saveTaskAnswers(){
-  try {
-    const data = await TeamFormsApi.saveAnswers(currentTask.id, collectAnswersFromDom());
+function setTaskSaveHint(text, isError = false){
+  const el = $('task-save-hint');
+  if (!el) return;
+  el.textContent = text;
+  el.classList.toggle('is-error', Boolean(isError));
+}
+
+function applyTaskProgress(task){
+  const prog = task.progress || {percent: 0, filled: 0, total: 0};
+  const progEl = $('task-progress');
+  if (!progEl) return;
+  progEl.classList.remove('hidden');
+  progEl.innerHTML = `Progress ${prog.filled}/${prog.total} (${prog.percent}%)
+    <div class="tf-progress-bar"><span style="width:${prog.percent}%"></span></div>`;
+}
+
+function applyTaskMeta(task){
+  const meta = $('task-meta');
+  if (!meta) return;
+  meta.textContent =
+    `${task.department_name} · ${task.group_name} · Assignee: ${task.assignee_name} · ${statusLabel(task.status)}`;
+}
+
+function scheduleTaskAutosave(){
+  if (!currentTask || !canEditTaskAnswers(currentTask)) return;
+  clearTimeout(taskSaveTimer);
+  taskSaveTimer = setTimeout(() => { flushTaskAutosave().catch(() => {}); }, 550);
+}
+
+async function flushTaskAutosave(){
+  clearTimeout(taskSaveTimer);
+  taskSaveTimer = null;
+  if (!currentTask || !canEditTaskAnswers(currentTask)) return;
+  if (taskSaveInFlight) {
+    try { await taskSaveInFlight; } catch { /* prior save error; still try latest */ }
+  }
+  if (!currentTask || !canEditTaskAnswers(currentTask)) return;
+  const answers = collectAnswersFromDom();
+  setTaskSaveHint('Saving…');
+  const run = (async () => {
+    const data = await TeamFormsApi.saveAnswers(currentTask.id, answers);
+    const prevStatus = currentTask.status;
     currentTask = data.task;
-    renderTask();
-    toast('Answers saved');
+    applyTaskProgress(currentTask);
+    applyTaskMeta(currentTask);
+    const sel = $('task-status-select');
+    if (sel && currentTask.status !== prevStatus && sel.value === prevStatus) {
+      sel.value = currentTask.status;
+    }
+    setTaskSaveHint('Saved');
+  })();
+  taskSaveInFlight = run;
+  try {
+    await run;
   } catch (err) {
-    toast(err.message || 'Save failed');
+    setTaskSaveHint(err.message || 'Save failed', true);
+    throw err;
+  } finally {
+    if (taskSaveInFlight === run) taskSaveInFlight = null;
   }
 }
 
-async function submitTask(){
+async function onTaskStatusChange(statusSel){
+  if (!currentTask) return;
+  const next = statusSel.value;
+  const prev = currentTask.status;
+  if (next === prev) return;
+  if (next === 'submitted') {
+    const ok = confirm('You are about to mark this task completed. Continue?');
+    if (!ok) {
+      statusSel.value = prev;
+      return;
+    }
+  }
+  statusSel.disabled = true;
   try {
-    const data = await TeamFormsApi.setStatus(currentTask.id, 'submitted', {
+    try {
+      await flushTaskAutosave();
+    } catch {
+      /* still attempt status + latest answers */
+    }
+    const data = await TeamFormsApi.setStatus(currentTask.id, next, {
       answers: collectAnswersFromDom(),
     });
     currentTask = data.task;
     renderTask();
-    toast('Submitted for review');
+    toast(next === 'submitted' ? 'Marked completed' : 'Status updated');
   } catch (err) {
-    toast(err.message || 'Submit failed');
+    statusSel.value = prev;
+    toast(err.message || 'Status failed');
+  } finally {
+    statusSel.disabled = false;
   }
 }
 
@@ -1200,9 +1511,24 @@ $('builder-refresh')?.addEventListener('click', () => refreshBuilder());
 $('builder-new-form')?.addEventListener('click', () => openNewForm());
 $('builder-add-field')?.addEventListener('click', () => openFieldModal(null));
 $('builder-assign')?.addEventListener('click', () => openAssignModal());
+$('builder-delete-form')?.addEventListener('click', () => deleteBuilderForm(builderForm));
 $('builder-group')?.addEventListener('change', () => loadBuilderForms());
 $('review-refresh')?.addEventListener('click', () => refreshReview());
 $('task-back')?.addEventListener('click', () => showView(taskBackView || 'workspace'));
+$('task-search-toggle')?.addEventListener('click', () => toggleTaskFieldSearch());
+$('task-search-input')?.addEventListener('input', () => applyTaskFieldSearch({scroll: true}));
+$('task-search-input')?.addEventListener('keydown', e => {
+  if (e.key === 'Escape') {
+    e.preventDefault();
+    const input = $('task-search-input');
+    if (input?.value) {
+      input.value = '';
+      applyTaskFieldSearch({scroll: false});
+    } else {
+      setTaskFieldSearchOpen(false);
+    }
+  }
+});
 $('task-comment-send')?.addEventListener('click', async () => {
   const body = $('task-comment-input').value.trim();
   if (!body || !currentTask) return;
@@ -1231,6 +1557,10 @@ async function boot(){
   mountNotifications({
     variant: 'chrome',
     onOpenAccessRequests: () => { location.href = appUrl('/admin/'); },
+    onTeamFormsTask: (meta) => {
+      if (meta?.task_id) openTask(meta.task_id, 'review');
+      else showView('review');
+    },
   });
 
   const hash = location.hash.slice(1);

@@ -453,6 +453,47 @@ function ll_tf_assert_form_creator(array $user, int $groupId): void
   }
 }
 
+function ll_tf_assert_can_delete_form(array $user, array $form): void
+{
+  if (!empty($user['is_super']) || ll_tf_can_manage_org($user)) {
+    return;
+  }
+  $createdBy = (int) ($form['created_by'] ?? 0);
+  if ($createdBy > 0 && $createdBy === (int) $user['id']) {
+    return;
+  }
+  ll_error('Only the form creator can delete this form', 403);
+}
+
+function ll_tf_delete_form_cascade(int $formId): void
+{
+  $pdo = ll_pdo();
+  $tidStmt = $pdo->prepare('SELECT id FROM form_tasks WHERE form_id = ?');
+  $tidStmt->execute([$formId]);
+  $taskIds = [];
+  foreach ($tidStmt->fetchAll() as $row) {
+    $taskIds[] = (int) $row['id'];
+  }
+  $fidStmt = $pdo->prepare('SELECT id FROM form_fields WHERE form_id = ?');
+  $fidStmt->execute([$formId]);
+  $fieldIds = [];
+  foreach ($fidStmt->fetchAll() as $row) {
+    $fieldIds[] = (int) $row['id'];
+  }
+  if ($taskIds) {
+    $ph = implode(',', array_fill(0, count($taskIds), '?'));
+    $pdo->prepare("DELETE FROM form_answers WHERE task_id IN ($ph)")->execute($taskIds);
+    $pdo->prepare("DELETE FROM form_comments WHERE task_id IN ($ph)")->execute($taskIds);
+    $pdo->prepare("DELETE FROM form_tasks WHERE id IN ($ph)")->execute($taskIds);
+  }
+  if ($fieldIds) {
+    $ph = implode(',', array_fill(0, count($fieldIds), '?'));
+    $pdo->prepare("DELETE FROM form_answers WHERE field_id IN ($ph)")->execute($fieldIds);
+    $pdo->prepare("DELETE FROM form_fields WHERE id IN ($ph)")->execute($fieldIds);
+  }
+  $pdo->prepare('DELETE FROM form_templates WHERE id = ?')->execute([$formId]);
+}
+
 function ll_tf_route_group_forms(array $user, int $groupId, string $method): void
 {
   $pdo = ll_pdo();
@@ -620,13 +661,24 @@ function ll_tf_route_forms(array $user, ?int $id, string $sub, ?int $subId, stri
   }
 
   if (($method === 'POST' && $sub === 'delete') || ($method === 'DELETE' && $sub === '')) {
-    ll_tf_assert_form_creator($user, (int) $form['group_id']);
-    $pdo->prepare('DELETE FROM form_templates WHERE id = ?')->execute([$id]);
+    ll_tf_assert_can_delete_form($user, $form);
+    $pdo->beginTransaction();
+    try {
+      ll_tf_delete_form_cascade($id);
+      $pdo->commit();
+    } catch (Throwable $e) {
+      $pdo->rollBack();
+      throw $e;
+    }
     ll_ok(['deleted' => true, 'id' => $id]);
   }
 
   if ($sub === 'fields') {
     ll_tf_route_fields($user, $form, $subId, $subVerb, $method);
+  }
+
+  if ($sub === 'assign' && $method === 'GET') {
+    ll_tf_list_open_assignments($user, $form);
   }
 
   if ($sub === 'assign' && $method === 'POST') {
@@ -646,11 +698,14 @@ function ll_tf_parse_field_body(array $body, ?array $existing = null): array
   if (!in_array($type, ll_tf_field_types(), true)) {
     ll_error('Invalid field_type');
   }
-  $key = trim((string) ($body['field_key'] ?? ($existing['field_key'] ?? '')));
-  if ($key === '') {
-    $key = ll_tf_slug_key($label);
+  // field_key is optional. Existing fields keep their key; new fields get a
+  // unique key allocated at insert time (never regenerate on update/reorder).
+  if ($existing !== null && !empty($existing['field_key'])) {
+    $key = (string) $existing['field_key'];
+  } else {
+    $key = trim((string) ($body['field_key'] ?? ''));
+    $key = $key !== '' ? ll_tf_slug_key($key) : '';
   }
-  $key = ll_tf_slug_key($key);
   $options = $body['options'] ?? ($existing['options'] ?? []);
   if (!is_array($options)) {
     $options = [];
@@ -725,20 +780,7 @@ function ll_tf_route_fields(array $user, array $form, ?int $fieldId, string $ver
       ll_ok(['fields' => ll_tf_load_fields($formId)]);
     }
     $parsed = ll_tf_parse_field_body($body);
-    // Unique key: append suffix if needed
-    $baseKey = $parsed['field_key'];
-    $key = $baseKey;
-    $n = 2;
-    $chk = $pdo->prepare('SELECT id FROM form_fields WHERE form_id = ? AND field_key = ?');
-    while (true) {
-      $chk->execute([$formId, $key]);
-      if (!$chk->fetch()) {
-        break;
-      }
-      $key = substr($baseKey, 0, 50) . '_' . $n;
-      $n++;
-    }
-    $parsed['field_key'] = $key;
+    $parsed['field_key'] = ll_tf_allocate_field_key($pdo, $formId, $parsed['label'], $parsed['field_key']);
     if (!array_key_exists('sort_order', $body)) {
       $stmtMax = $pdo->prepare('SELECT COALESCE(MAX(sort_order), -1) FROM form_fields WHERE form_id = ?');
       $stmtMax->execute([$formId]);
@@ -818,6 +860,34 @@ function ll_tf_route_fields(array $user, array $form, ?int $fieldId, string $ver
   ll_error('Not found', 404);
 }
 
+function ll_tf_list_open_assignments(array $user, array $form): void
+{
+  ll_tf_assert_form_creator($user, (int) $form['group_id']);
+  $stmt = ll_pdo()->prepare(
+    "SELECT t.id AS task_id, t.assignee_id, t.status,
+            ua.display_name, ua.username
+     FROM form_tasks t
+     INNER JOIN users ua ON ua.id = t.assignee_id
+     WHERE t.form_id = ? AND t.status <> 'closed'
+     ORDER BY ua.display_name ASC, ua.username ASC"
+  );
+  $stmt->execute([(int) $form['id']]);
+  $assignees = [];
+  foreach ($stmt->fetchAll() as $r) {
+    $assignees[] = [
+      'task_id' => (int) $r['task_id'],
+      'assignee_id' => (int) $r['assignee_id'],
+      'user_id' => (int) $r['assignee_id'],
+      'status' => (string) $r['status'],
+      'display_name' => (string) ($r['display_name'] ?: $r['username']),
+    ];
+  }
+  ll_ok([
+    'assignees' => $assignees,
+    'assignee_ids' => array_values(array_map(static fn ($a) => $a['assignee_id'], $assignees)),
+  ]);
+}
+
 function ll_tf_assign_tasks(array $user, array $form): void
 {
   ll_tf_assert_form_creator($user, (int) $form['group_id']);
@@ -835,21 +905,37 @@ function ll_tf_assign_tasks(array $user, array $form): void
   }
   $pdo = ll_pdo();
   $groupId = (int) $form['group_id'];
+  $formId = (int) $form['id'];
   $created = [];
+  $skipped = [];
+  $existingTaskIds = [];
   $ins = $pdo->prepare(
     'INSERT INTO form_tasks (form_id, assignee_id, assigned_by, reviewer_scope, status)
      VALUES (?, ?, ?, ?, \'pending\')'
   );
+  $findOpen = $pdo->prepare(
+    "SELECT id FROM form_tasks
+     WHERE form_id = ? AND assignee_id = ? AND status <> 'closed'
+     LIMIT 1"
+  );
   // Seed readonly answers
-  $fields = $form['fields'] ?? ll_tf_load_fields((int) $form['id']);
+  $fields = $form['fields'] ?? ll_tf_load_fields($formId);
   $ansIns = $pdo->prepare(
     'INSERT INTO form_answers (task_id, field_id, value_text) VALUES (?, ?, ?)
      ON DUPLICATE KEY UPDATE value_text = VALUES(value_text)'
   );
 
+  $actorId = (int) $user['id'];
+  $selfSkipped = [];
+  $seenAids = [];
   foreach ($assigneeIds as $aid) {
     $aid = (int) $aid;
-    if ($aid < 1) {
+    if ($aid < 1 || isset($seenAids[$aid])) {
+      continue;
+    }
+    $seenAids[$aid] = true;
+    if ($aid === $actorId) {
+      $selfSkipped[] = $aid;
       continue;
     }
     // Default: any member of the group (super / manage_org may still assign)
@@ -863,7 +949,26 @@ function ll_tf_assign_tasks(array $user, array $form): void
     if (!$u || (int) ($u['is_active'] ?? 0) !== 1) {
       ll_error("Assignee {$aid} not found or inactive");
     }
-    $ins->execute([(int) $form['id'], $aid, (int) $user['id'], $scope]);
+    $findOpen->execute([$formId, $aid]);
+    $open = $findOpen->fetch();
+    if ($open) {
+      $skipped[] = $aid;
+      $existingTaskIds[] = (int) $open['id'];
+      continue;
+    }
+    try {
+      $ins->execute([$formId, $aid, (int) $user['id'], $scope]);
+    } catch (PDOException $e) {
+      // Race / unique open-assignee guard: treat as already assigned
+      $findOpen->execute([$formId, $aid]);
+      $open = $findOpen->fetch();
+      if ($open) {
+        $skipped[] = $aid;
+        $existingTaskIds[] = (int) $open['id'];
+        continue;
+      }
+      throw $e;
+    }
     $taskId = (int) $pdo->lastInsertId();
     foreach ($fields as $f) {
       if (($f['field_type'] ?? '') === 'readonly') {
@@ -872,10 +977,20 @@ function ll_tf_assign_tasks(array $user, array $form): void
     }
     $created[] = $taskId;
   }
-  if (!$created) {
+  if (!$created && !$skipped) {
+    if ($selfSkipped) {
+      ll_error('Cannot assign a task to yourself');
+    }
     ll_error('No valid assignees');
   }
-  ll_ok(['task_ids' => $created, 'count' => count($created)], 201);
+  ll_ok([
+    'task_ids' => $created,
+    'skipped_assignee_ids' => $skipped,
+    'self_assignee_ids' => $selfSkipped,
+    'existing_task_ids' => $existingTaskIds,
+    'count' => count($created),
+    'skipped_count' => count($skipped),
+  ], $created ? 201 : 200);
 }
 
 function ll_tf_can_review_task(array $user, array $taskRow): bool
@@ -904,6 +1019,7 @@ function ll_tf_load_task(int $taskId): ?array
 {
   $stmt = ll_pdo()->prepare(
     "SELECT t.*, f.title AS form_title, f.group_id, f.description AS form_description,
+            f.created_by AS form_created_by,
             g.name AS group_name, g.department_id, d.name AS department_name,
             ua.display_name AS assignee_name, ua.username AS assignee_username,
             ub.display_name AS assigned_by_name
@@ -965,6 +1081,7 @@ function ll_tf_load_task(int $taskId): ?array
     'form_id' => (int) $r['form_id'],
     'form_title' => (string) $r['form_title'],
     'form_description' => $r['form_description'] !== null ? (string) $r['form_description'] : null,
+    'form_created_by' => $r['form_created_by'] !== null ? (int) $r['form_created_by'] : null,
     'group_id' => (int) $r['group_id'],
     'group_name' => (string) $r['group_name'],
     'department_id' => (int) $r['department_id'],
@@ -1165,6 +1282,9 @@ function ll_tf_task_set_status(array $user, array $task, array $body): void
 {
   $uid = (int) $user['id'];
   $status = (string) ($body['status'] ?? '');
+  if ($status === 'completed') {
+    $status = 'submitted';
+  }
   if (!in_array($status, ['pending', 'in_progress', 'submitted'], true)) {
     ll_error('Assignees may set status to pending, in_progress, or submitted');
   }
@@ -1211,6 +1331,14 @@ function ll_tf_task_set_status(array $user, array $task, array $body): void
     $pdo->prepare(
       "UPDATE form_tasks SET status = 'submitted', submitted_at = UTC_TIMESTAMP() WHERE id = ?"
     )->execute([(int) $task['id']]);
+    if ($task['status'] !== 'submitted') {
+      try {
+        $fresh = ll_tf_load_task((int) $task['id']);
+        ll_tf_notify_task_completed($fresh ?? $task, $user);
+      } catch (Throwable $e) {
+        // Task is submitted; notification failure must not fail the status change.
+      }
+    }
   } else {
     $pdo->prepare('UPDATE form_tasks SET status = ? WHERE id = ?')
       ->execute([$status, (int) $task['id']]);

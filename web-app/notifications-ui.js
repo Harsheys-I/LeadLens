@@ -1,8 +1,8 @@
 /**
  * Shared notifications bell + drawer for LeadLens shells (home, Admin, TeleCaller Audit).
  */
-import {NotifApi} from './api-client.js?v=7.0.0.dev';
-import {appUrl, isHomePath} from './app-base.js?v=7.0.0.dev';
+import {NotifApi} from './api-client.js?v=7.0.1.dev';
+import {appUrl, isHomePath} from './app-base.js?v=7.0.1.dev';
 
 const BELL_SVG = `<svg class="notif-bell-icon" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
   <path d="M15 17h5l-1.4-1.4A2 2 0 0 1 18 14.2V11a6 6 0 1 0-12 0v3.2c0 .5-.2 1-.6 1.4L4 17h5"/>
@@ -22,6 +22,11 @@ function typeIcon(type){
   if (type === 'access_request') {
     return `<span class="notif-type-icon notif-type-access" aria-hidden="true">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M19 8v6M22 11h-6"/></svg>
+    </span>`;
+  }
+  if (type === 'team_forms_task') {
+    return `<span class="notif-type-icon notif-type-generic" aria-hidden="true">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
     </span>`;
   }
   return `<span class="notif-type-icon notif-type-generic" aria-hidden="true">
@@ -79,7 +84,7 @@ function openPerfDashboardFromNotification(opts){
 }
 
 /**
- * @param {{onOpenAccessRequests?: () => void, onDashboardUpdate?: () => void, onPerfDashboardUpdate?: () => void, variant?: 'sidebar'|'chrome'}} opts
+ * @param {{onOpenAccessRequests?: () => void, onDashboardUpdate?: () => void, onPerfDashboardUpdate?: () => void, onTeamFormsTask?: (meta: object) => void, variant?: 'sidebar'|'chrome'}} opts
  */
 export function mountNotifications(opts = {}){
   const bell = document.getElementById('notif-bell');
@@ -124,6 +129,12 @@ export function mountNotifications(opts = {}){
       for (const n of items) {
         const row = document.createElement('div');
         row.className = 'notif-item' + (n.is_read ? '' : ' unread');
+        row.dataset.id = String(n.id ?? '');
+        row.dataset.type = String(n.type || '');
+        row.dataset.read = n.is_read ? '1' : '0';
+        if (n.meta && typeof n.meta === 'object') {
+          row.dataset.meta = JSON.stringify(n.meta);
+        }
         const when = formatWhen(n.created_at);
         row.innerHTML = `${typeIcon(n.type)}
           <span class="notif-item-body">
@@ -134,30 +145,7 @@ export function mountNotifications(opts = {}){
             <span class="notif-item-copy">${escapeHtml(n.body || '')}</span>
             ${when ? `<span class="notif-item-time">${escapeHtml(when)}</span>` : ''}
           </span>
-          <button type="button" class="notif-dismiss" aria-label="Clear notification" title="Clear">×</button>`;
-        row.addEventListener('click', async (e) => {
-          if (e.target.closest('.notif-dismiss')) return;
-          if (!n.is_read) {
-            try { await NotifApi.markRead(n.id); } catch { /* ignore */ }
-          }
-          drawer.classList.add('hidden');
-          if (n.type === 'access_request' && typeof opts.onOpenAccessRequests === 'function') {
-            opts.onOpenAccessRequests();
-          } else if (n.type === 'access_request' && (isHomeShell() || isAdminShell())) {
-            location.href = appUrl('/admin/');
-          } else if (n.type === 'dashboard_update') {
-            openDashboardFromNotification(opts);
-          } else if (n.type === 'perf_dashboard_update') {
-            openPerfDashboardFromNotification(opts);
-          }
-          refresh();
-        });
-        row.querySelector('.notif-dismiss')?.addEventListener('click', async (e) => {
-          e.preventDefault();
-          e.stopPropagation();
-          try { await NotifApi.clearOne(n.id); } catch { /* ignore */ }
-          refresh();
-        });
+          <button type="button" class="notif-dismiss" data-notif-id="${escapeHtml(n.id)}" aria-label="Clear notification" title="Clear">×</button>`;
         list.append(row);
       }
     } catch {
@@ -177,13 +165,45 @@ export function mountNotifications(opts = {}){
     else closeDrawer();
   }
 
+  async function openNotification(row){
+    const id = Number(row?.dataset?.id || 0);
+    const type = row?.dataset?.type || '';
+    const isRead = row?.dataset?.read === '1';
+    if (id && !isRead) {
+      try { await NotifApi.markRead(id); } catch { /* ignore */ }
+    }
+    closeDrawer();
+    if (type === 'access_request' && typeof opts.onOpenAccessRequests === 'function') {
+      opts.onOpenAccessRequests();
+    } else if (type === 'access_request' && (isHomeShell() || isAdminShell())) {
+      location.href = appUrl('/admin/');
+    } else if (type === 'dashboard_update') {
+      openDashboardFromNotification(opts);
+    } else if (type === 'perf_dashboard_update') {
+      openPerfDashboardFromNotification(opts);
+    } else if (type === 'team_forms_task') {
+      let meta = {};
+      try { meta = row?.dataset?.meta ? JSON.parse(row.dataset.meta) : {}; } catch { meta = {}; }
+      if (typeof opts.onTeamFormsTask === 'function') {
+        opts.onTeamFormsTask(meta);
+      } else {
+        location.href = appUrl('/TeamForms/#review');
+      }
+    }
+    refresh();
+  }
+
   bell.addEventListener('click', toggleDrawer, {signal: ac.signal});
   closeBtn?.addEventListener('click', closeDrawer, {signal: ac.signal});
-  markAll?.addEventListener('click', async () => {
+  markAll?.addEventListener('click', async (e) => {
+    e.preventDefault();
+    e.stopPropagation();
     try { await NotifApi.markAllRead(); } catch { /* ignore */ }
     refresh();
   }, {signal: ac.signal});
-  clearAll?.addEventListener('click', async () => {
+  clearAll?.addEventListener('click', async (e) => {
+    e.preventDefault();
+    e.stopPropagation();
     if (!confirm('Clear all notifications?')) return;
     try {
       await NotifApi.clearAll();
@@ -191,8 +211,26 @@ export function mountNotifications(opts = {}){
     } catch { /* ignore */ }
     refresh();
   }, {signal: ac.signal});
-  drawer.addEventListener('click', (e) => {
-    if (e.target === drawer) closeDrawer();
+  drawer.addEventListener('click', async (e) => {
+    if (e.target === drawer) {
+      closeDrawer();
+      return;
+    }
+    const el = e.target?.nodeType === 1 ? e.target : e.target?.parentElement;
+    const dismiss = el?.closest?.('.notif-dismiss');
+    if (dismiss) {
+      e.preventDefault();
+      e.stopPropagation();
+      const id = Number(dismiss.dataset.notifId || dismiss.closest('.notif-item')?.dataset.id || 0);
+      if (!id) return;
+      try { await NotifApi.clearOne(id); } catch { /* ignore */ }
+      refresh();
+      return;
+    }
+    const row = el?.closest?.('.notif-item');
+    if (row && list.contains(row)) {
+      openNotification(row);
+    }
   }, {signal: ac.signal});
 
   refresh();

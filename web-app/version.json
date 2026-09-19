@@ -1,5 +1,5 @@
 {
-  "version": "7.0.0.dev",
+  "version": "7.0.1.dev",
   "name": "GPP AI",
-  "notes": "v7.0.0.dev: Team Forms module - departments/groups, form builder, assign & review workflow."
+  "notes": "v7.0.1.dev: Team Forms UX - live auto-save, no self-assign, creator delete/reorder, auto field keys, org accordion."
 }
