@@ -1,5 +1,5 @@
 /**
- * Sales Graph module â€” Upload (Leads + Visits + Booked) + published Dashboard.
+ * Sales Graph module - Upload (Leads + Visits + Booked) + published Dashboard.
  */
 import {APP_VERSION} from "./audit.js?v=8.0.0.stable";
 import {requireAuth, logout, hasPermission, getUser, changePassword, updateProfile} from "./auth.js?v=8.0.0.stable";
@@ -9,7 +9,7 @@ import {appUrl, homePath} from "./app-base.js?v=8.0.0.stable";
 import {initTheme} from "./theme.js?v=8.0.0.stable";
 import {setStorageUserId, storageKey} from "./db.js?v=8.0.0.stable";
 import {parseSalesGraphSheet, buildSalesGraphPayload} from "./sales-graph-parse.js?v=8.0.0.stable";
-import {renderSalesGraphDashboard, destroySalesGraphCharts} from "./sales-graph-dashboard.js?v=8.0.0.stable";
+import {renderSalesGraphDashboard, destroySalesGraphCharts} from "./sales-graph-dashboard.js?v=8.0.1.kpi-fix";
 
 const $ = id => document.getElementById(id);
 const ids = [
@@ -40,6 +40,14 @@ function toast(message) {
   els.toast.classList.add("show");
   clearTimeout(toast.timer);
   toast.timer = setTimeout(() => els.toast.classList.remove("show"), 3200);
+}
+
+function formatPublishedWhen(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  const match = raw.match(/^(\d{4}-\d{2}-\d{2})[T ](\d{2}:\d{2}:\d{2})/);
+  if (match) return `${match[1]} ${match[2]}`;
+  return raw.replace("T", " ").replace(/[+-]\d{2}:\d{2}$/, "").replace(/Z$/, "");
 }
 
 function canClearBoard() {
@@ -91,7 +99,7 @@ function setValidation(messages, isError = false) {
   box.classList.remove("hidden");
   box.classList.toggle("error", Boolean(isError));
   box.classList.toggle("warn", !isError);
-  box.textContent = messages.join(" Â· ");
+  box.textContent = messages.join(" | ");
 }
 
 function renderFileList() {
@@ -100,13 +108,13 @@ function renderFileList() {
   list.replaceChildren();
   const items = [];
   if (leadsParsed) {
-    items.push(`Leads: ${leadsParsed.fileName || "workbook"}${leadsParsed.ok ? ` Â· ${leadsParsed.rows?.length || 0} rows` : " Â· error"}`);
+    items.push(`Leads: ${leadsParsed.fileName || "workbook"}${leadsParsed.ok ? ` | ${leadsParsed.rows?.length || 0} rows` : " | error"}`);
   }
   if (visitsParsed) {
-    items.push(`Visits: ${visitsParsed.fileName || "workbook"}${visitsParsed.ok ? ` Â· ${visitsParsed.rows?.length || 0} rows` : " Â· error"}`);
+    items.push(`Visits: ${visitsParsed.fileName || "workbook"}${visitsParsed.ok ? ` | ${visitsParsed.rows?.length || 0} rows` : " | error"}`);
   }
   if (bookedParsed) {
-    items.push(`Booked: ${bookedParsed.fileName || "workbook"}${bookedParsed.ok ? ` Â· ${bookedParsed.rows?.length || 0} rows` : " Â· error"}`);
+    items.push(`Booked: ${bookedParsed.fileName || "workbook"}${bookedParsed.ok ? ` | ${bookedParsed.rows?.length || 0} rows` : " | error"}`);
   }
   if (!items.length) {
     list.classList.add("hidden");
@@ -138,7 +146,7 @@ function syncCreateState() {
     (visitsParsed && !visitsParsed.ok) ||
     (bookedParsed && !bookedParsed.ok)
   );
-  if (ready) setValidation(["Ready â€” Create Dashboard for a local preview."], false);
+  if (ready) setValidation(["Ready - Create Dashboard for a local preview."], false);
   else setValidation(msgs, hasError);
 }
 
@@ -226,7 +234,7 @@ async function refreshPublishedDashboard() {
     }
     return;
   }
-  if (metaEl) metaEl.textContent = "Loadingâ€¦";
+  if (metaEl) metaEl.textContent = "Loading...";
   try {
     const data = await SalesGraphApi.latest();
     const payload = data?.payload || null;
@@ -244,8 +252,9 @@ async function refreshPublishedDashboard() {
     if (metaEl) {
       const bits = [dash?.title || payload.title || "Sales Graph"];
       if (meta?.uploaded_by_name || dash?.uploaded_by_name) bits.push(`by ${meta?.uploaded_by_name || dash?.uploaded_by_name}`);
-      if (dash?.updated_at || meta?.uploaded_at) bits.push(String(dash?.updated_at || meta?.uploaded_at));
-      metaEl.textContent = bits.join(" Â· ");
+      const when = formatPublishedWhen(dash?.updated_at || meta?.uploaded_at);
+      if (when) bits.push(when);
+      metaEl.textContent = bits.join(" | ");
     }
     renderSalesGraphDashboard(mount, payload, {meta: {...(meta || {}), uploaded_by_name: meta?.uploaded_by_name || dash?.uploaded_by_name}});
   } catch (err) {
@@ -358,7 +367,7 @@ async function checkForUpdate() {
   } catch { /* offline */ }
 }
 
-// â€”â€” events â€”â€”
+// ---- events ----
 document.querySelectorAll(".nav-item").forEach(button => {
   button.addEventListener("click", () => showView(button.dataset.view));
 });
@@ -386,7 +395,7 @@ els["shell-account"]?.addEventListener("click", () => {
   if (!user || !modal) return;
   document.getElementById("account-username").value = user.username || "";
   document.getElementById("account-display").value = user.display_name || "";
-  document.getElementById("account-telecaller").value = user.telecaller_name || "â€” set by Admin only â€”";
+  document.getElementById("account-telecaller").value = user.telecaller_name || "- set by Admin only -";
   document.getElementById("account-pw-current").value = "";
   document.getElementById("account-pw-new").value = "";
   document.getElementById("account-pw-confirm").value = "";
@@ -399,7 +408,7 @@ document.getElementById("account-cancel")?.addEventListener("click", () => {
 document.getElementById("account-save")?.addEventListener("click", async () => {
   const msg = document.getElementById("account-message");
   if (!msg) return;
-  msg.textContent = "Savingâ€¦";
+  msg.textContent = "Saving...";
   try {
     const user = await updateProfile({
       username: document.getElementById("account-username").value.trim(),
