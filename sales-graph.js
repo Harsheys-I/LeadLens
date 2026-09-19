@@ -1,15 +1,15 @@
 /**
  * Sales Graph module — Upload (Leads + Visits + Booked) + published Dashboard.
  */
-import {APP_VERSION} from "./audit.js?v=6.3.3.stable";
-import {requireAuth, logout, hasPermission, getUser, changePassword, updateProfile} from "./auth.js?v=6.3.3.stable";
-import {SalesGraphApi} from "./api-client.js?v=6.3.3.stable";
-import {mountNotifications} from "./notifications-ui.js?v=6.3.3.stable";
-import {appUrl, homePath} from "./app-base.js?v=6.3.3.stable";
-import {initTheme} from "./theme.js?v=6.3.3.stable";
-import {setStorageUserId, storageKey} from "./db.js?v=6.3.3.stable";
-import {parseSalesGraphSheet, buildSalesGraphPayload} from "./sales-graph-parse.js?v=6.3.3.stable";
-import {renderSalesGraphDashboard, destroySalesGraphCharts} from "./sales-graph-dashboard.js?v=6.3.3.stable";
+import {APP_VERSION} from "./audit.js?v=6.3.4.stable";
+import {requireAuth, logout, hasPermission, getUser, changePassword, updateProfile} from "./auth.js?v=6.3.4.stable";
+import {SalesGraphApi} from "./api-client.js?v=6.3.4.stable";
+import {mountNotifications} from "./notifications-ui.js?v=6.3.4.stable";
+import {appUrl, homePath} from "./app-base.js?v=6.3.4.stable";
+import {initTheme} from "./theme.js?v=6.3.4.stable";
+import {setStorageUserId, storageKey} from "./db.js?v=6.3.4.stable";
+import {parseSalesGraphSheet, buildSalesGraphPayload} from "./sales-graph-parse.js?v=6.3.4.stable";
+import {renderSalesGraphDashboard, destroySalesGraphCharts} from "./sales-graph-dashboard.js?v=6.3.4.stable";
 
 const $ = id => document.getElementById(id);
 const ids = [
@@ -27,7 +27,7 @@ const els = Object.fromEntries(ids.map(id => [id, $(id)]));
 if (els["sidebar-version"]) els["sidebar-version"].textContent = `v${APP_VERSION}`;
 
 const titles = {upload: "Upload", dashboard: "Dashboard"};
-const RELEASE_NOTES = "v6.3.3.stable: ERP Sync keep-alive recommended every 1 minute so idle sessions last overnight.";
+const RELEASE_NOTES = "v6.3.4.stable: TeleCaller Performance overdue now compares Next Followup Date against tomorrow (NFD today counts as overdue).";
 
 let leadsParsed = null;
 let visitsParsed = null;

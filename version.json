@@ -1,5 +1,5 @@
 {
-  "version": "6.3.3.stable",
+  "version": "6.3.4.stable",
   "name": "GPP AI",
-  "notes": "v6.3.3.stable: History Excel no longer requires Lead Registration Date; Master still does. Cache-bust so clients load the fix."
+  "notes": "v6.3.4.stable: TeleCaller Performance overdue now compares Next Followup Date against tomorrow (NFD today counts as overdue)."
 }
