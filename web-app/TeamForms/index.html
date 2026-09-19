@@ -7,12 +7,12 @@
   <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#0f2d22">
   <meta name="description" content="GPP AI Team Forms">
   <title>GPP AI · Team Forms</title>
-  <meta name="app-version" content="7.0.1.dev">
-  <script src="../theme-boot.js?v=7.0.1.dev"></script>
-  <script src="../motion.js?v=7.0.1.dev"></script>
+  <meta name="app-version" content="7.0.2.dev">
+  <script src="../theme-boot.js?v=7.0.2.dev"></script>
+  <script src="../motion.js?v=7.0.2.dev"></script>
   <link rel="manifest" href="../manifest.webmanifest">
-  <link rel="stylesheet" href="../styles.css?v=7.0.1.dev">
-  <script type="module" src="../team-forms.js?v=7.0.1.dev"></script>
+  <link rel="stylesheet" href="../styles.css?v=7.0.2.dev">
+  <script type="module" src="../team-forms.js?v=7.0.2.dev"></script>
 </head>
 <body>
   <div id="update-banner" class="update-banner hidden" role="status">
@@ -238,7 +238,15 @@
     .tf-group-card .tf-members{margin-top:10px;padding-top:8px;border-top:1px solid var(--line)}
     .tf-field-row{display:grid;gap:8px;padding:12px 0;border-bottom:1px solid var(--line)}
     .tf-field-row:last-child{border-bottom:0}
+    .tf-field-row.is-dragging{opacity:.55}
+    .tf-field-row.drop-before{box-shadow:inset 0 2px 0 var(--accent,#2f6f5e)}
+    .tf-field-row.drop-after{box-shadow:inset 0 -2px 0 var(--accent,#2f6f5e)}
     .tf-field-head{display:flex;justify-content:space-between;gap:10px;align-items:center;flex-wrap:wrap}
+    .tf-field-meta{flex:1;min-width:0}
+    .tf-drag-handle{flex:0 0 auto;display:inline-flex;align-items:center;justify-content:center;width:32px;height:32px;margin:0;padding:0;border:0;border-radius:8px;background:transparent;color:var(--muted);cursor:grab;user-select:none;touch-action:none}
+    .tf-drag-handle:hover{background:var(--soft-3);color:var(--ink)}
+    .tf-drag-handle:active,.tf-field-row.is-dragging .tf-drag-handle{cursor:grabbing}
+    .tf-drag-handle:focus-visible{outline:2px solid var(--accent,#2f6f5e);outline-offset:2px}
     .tf-progress{margin-bottom:14px;font-size:13px;color:var(--muted)}
     .tf-progress-bar{height:8px;border-radius:999px;background:var(--soft-3);overflow:hidden;margin-top:6px}
     .tf-progress-bar > span{display:block;height:100%;background:var(--accent,#2f6f5e);width:0}
@@ -251,8 +259,8 @@
     .tf-form-field input,.tf-form-field textarea,.tf-form-field select{width:100%;border:1px solid var(--input-border);border-radius:9px;background:var(--input-bg);padding:10px 11px;color:var(--ink);font-weight:400}
     .tf-form-field.readonly,.tf-form-field.calculated{opacity:.92}
     .tf-check-row{display:flex;align-items:center;gap:8px;font-weight:500}
-    .tf-check-row.is-assigned,.tf-check-row.is-self{opacity:.72}
-    .tf-check-row.is-assigned input,.tf-check-row.is-self input{cursor:not-allowed}
+    .tf-check-row.is-assigned{opacity:.72}
+    .tf-check-row.is-assigned input{cursor:not-allowed}
     .tf-status-control{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
     .tf-status-control .tf-inline-label{min-width:140px}
     .tf-save-hint{font-size:12px;min-width:4.5em}

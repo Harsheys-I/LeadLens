@@ -1,5 +1,5 @@
 {
-  "version": "7.0.1.dev",
+  "version": "7.0.2.dev",
   "name": "GPP AI",
-  "notes": "v7.0.1.dev: Team Forms UX - live auto-save, no self-assign, creator delete/reorder, auto field keys, org accordion."
+  "notes": "v7.0.2.dev: Team Forms UX - drag-reorder fields (no Up/Down), 1-based calculated picker labels, hide self from Assign list."
 }

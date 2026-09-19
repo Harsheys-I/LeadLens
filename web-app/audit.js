@@ -1,9 +1,9 @@
-import {buildTelecallerDashboardBlob} from "./dashboard-export.js?v=7.0.1.dev";
-import {buildDashboardModel} from "./dashboard-metrics.js?v=7.0.1.dev";
-import {STATUS_HISTORY_PROMPT} from "./debug-prompts.js?v=7.0.1.dev";
-import {apiBase} from "./app-base.js?v=7.0.1.dev";
+import {buildTelecallerDashboardBlob} from "./dashboard-export.js?v=7.0.2.dev";
+import {buildDashboardModel} from "./dashboard-metrics.js?v=7.0.2.dev";
+import {STATUS_HISTORY_PROMPT} from "./debug-prompts.js?v=7.0.2.dev";
+import {apiBase} from "./app-base.js?v=7.0.2.dev";
 
-export const APP_VERSION = "7.0.1.dev";
+export const APP_VERSION = "7.0.2.dev";
 /** Sentinel: use server OpenAI proxy (no raw key in the browser). */
 export const SERVER_API_KEY = "__server__";
 /** Bump when default AI rules / field defaults must refresh existing localStorage settings. */
