@@ -60,4 +60,5 @@ The API fell back to `config.example.php` because live `config.local.php` is mis
 
 ## ERP Sync (live + `/dev`)
 
-Fetch ERP report → store raw JSON → hand off to Bucket 1 Audit (primary). Optional session keep-alive cron (`*/30 * * * *` → `erp-sync/keepalive`) and server OpenAI audit are advanced. Super User only. See **[ERP-SYNC.md](./ERP-SYNC.md)**.
+- **Manual:** Fetch ERP → store raw JSON → hand off to Bucket 1 Audit.
+- **Unattended daily:** Hostinger cron at **6:00 AM IST** (`30 0 * * *` UTC) → `POST /api/erp-sync/daily` (fetch + server AI audit + cron auto-publish). Plus continue every 10 min (`*/10 * * * *` → `erp-sync/continue`, idle no-op) and keep-alive every 30 min (`erp-sync/keepalive`). Super User only. See **[ERP-SYNC.md](./ERP-SYNC.md)**.

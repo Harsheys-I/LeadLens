@@ -1,8 +1,8 @@
 /**
  * /dev Super User ERP Sync panel — fetch ERP → store raw → hand off to main Audit UI.
  */
-import {api} from './api-client.js?v=6.3.0.stable';
-import {getUser} from './auth.js?v=6.3.0.stable';
+import {api} from './api-client.js?v=6.3.1.stable';
+import {getUser} from './auth.js?v=6.3.1.stable';
 
 const FIELD_IDS = [
   'mobile', 'project', 'registration', 'telecaller', 'source', 'update',
@@ -141,6 +141,38 @@ function writeKeepaliveStatus(ka) {
     : '';
 }
 
+function formatDailyLine(daily) {
+  if (!daily || typeof daily !== 'object') return 'Last scheduled run: never.';
+  const when = daily.at ? String(daily.at) : '—';
+  if (daily.session_expired) {
+    return `Last scheduled run: session expired at ${when} — refresh Cookie; no publish.`;
+  }
+  if (daily.ok === false) {
+    return `Last scheduled run: failed at ${when} — ${daily.error || daily.phase || 'error'}`;
+  }
+  if (daily.needs_continue || daily.partial) {
+    const done = daily.done ?? daily.audited ?? 0;
+    const total = daily.total ?? daily.lead_count ?? '?';
+    return `Last scheduled run: auditing ${done}/${total} at ${when} (continue cron will resume)`;
+  }
+  if (daily.phase === 'published' || daily.auto_publish) {
+    return `Last scheduled run: published ${daily.published_count ?? 0} dashboard(s) at ${when}`;
+  }
+  if (daily.complete || daily.phase === 'ready') {
+    return `Last scheduled run: audit complete at ${when}${daily.message ? ` — ${daily.message}` : ''}`;
+  }
+  return `Last scheduled run: ${daily.phase || 'ok'} at ${when}${daily.message ? ` — ${daily.message}` : ''}`;
+}
+
+function writeDailyStatus(daily) {
+  const el = $('erp-sync-daily-status');
+  if (!el) return;
+  el.textContent = formatDailyLine(daily);
+  el.style.color = (daily?.ok === false || daily?.session_expired)
+    ? 'var(--danger, #b42318)'
+    : '';
+}
+
 function applyConfig(config) {
   if (!$('erp-sync-url')) return;
   $('erp-sync-url').value = config.report_url || '';
@@ -156,12 +188,22 @@ function applyConfig(config) {
     ? JSON.stringify(headers, null, 2)
     : '';
   $('erp-sync-rows-path').value = config.rows_path || '';
-  $('erp-sync-enabled').checked = Boolean(config.enabled);
+  const dailyOn = Boolean(config.daily_enabled ?? config.enabled);
+  if ($('erp-sync-daily')) {
+    $('erp-sync-daily').checked = dailyOn;
+  }
+  // Legacy id kept if present in older HTML caches.
+  if ($('erp-sync-enabled')) {
+    $('erp-sync-enabled').checked = dailyOn;
+  }
   if ($('erp-sync-keepalive')) {
     $('erp-sync-keepalive').checked = Boolean(config.keepalive_enabled);
   }
   if ($('erp-sync-keepalive-url')) {
     $('erp-sync-keepalive-url').value = config.keepalive_url || '';
+  }
+  if ($('erp-sync-cron-auto-publish')) {
+    $('erp-sync-cron-auto-publish').checked = config.cron_auto_publish !== false;
   }
   $('erp-sync-auto-publish').checked = Boolean(config.auto_publish);
   $('erp-sync-batch-size').value = String(config.batch_size ?? 10);
@@ -171,14 +213,19 @@ function applyConfig(config) {
     ? 'Cron secret is set. Paste a new value only to rotate it.'
     : 'Set a cron secret before enabling Hostinger cron.';
   writeKeepaliveStatus(config.last_keepalive);
+  writeDailyStatus(config.last_daily_status);
   renderFieldMap(config.field_map || DEFAULT_ALIASES);
 }
 
 function formatStatus(payload) {
   const last = payload?.last_status || payload?.config?.last_status;
   const ka = payload?.last_keepalive || payload?.config?.last_keepalive;
+  const daily = payload?.last_daily_status || payload?.config?.last_daily_status;
   const job = payload?.job;
   const lines = [];
+  if (daily) {
+    lines.push('Scheduled: ' + JSON.stringify(daily, null, 2));
+  }
   if (ka) {
     lines.push('Keep-alive: ' + JSON.stringify(ka, null, 2));
   }
@@ -258,6 +305,7 @@ function statusElWrite(payload) {
   const statusEl = $('erp-sync-status');
   if (statusEl) statusEl.textContent = formatStatus(payload);
   writeKeepaliveStatus(payload?.last_keepalive || payload?.config?.last_keepalive);
+  writeDailyStatus(payload?.last_daily_status || payload?.config?.last_daily_status);
 }
 
 /** Super User only — available on production `/` and `/dev`. */
@@ -309,14 +357,22 @@ export async function loadErpSyncPanel() {
 
 function buildConfigBody() {
   const extra_headers = parseExtraHeaders();
+  const dailyEnabled = Boolean(
+    $('erp-sync-daily')?.checked
+    ?? $('erp-sync-enabled')?.checked
+  );
   const body = {
     report_url: $('erp-sync-url')?.value?.trim() || '',
     http_method: $('erp-sync-method')?.value || 'GET',
     extra_headers,
     rows_path: $('erp-sync-rows-path')?.value?.trim() || '',
-    enabled: Boolean($('erp-sync-enabled')?.checked),
+    daily_enabled: dailyEnabled,
+    enabled: dailyEnabled,
     keepalive_enabled: Boolean($('erp-sync-keepalive')?.checked),
     keepalive_url: $('erp-sync-keepalive-url')?.value?.trim() || '',
+    cron_auto_publish: $('erp-sync-cron-auto-publish')
+      ? Boolean($('erp-sync-cron-auto-publish').checked)
+      : true,
     auto_publish: Boolean($('erp-sync-auto-publish')?.checked),
     batch_size: Number($('erp-sync-batch-size')?.value || 10),
     max_leads_per_run: Number($('erp-sync-max-leads')?.value || 40),
