@@ -311,6 +311,16 @@ function ll_erp_sync_extract_bearer(): ?string
       return $raw;
     }
   }
+  // Hostinger "Fetch URL" cron cannot set headers — allow ?cron_secret= as last resort.
+  foreach (['cron_secret', 'secret'] as $key) {
+    if (!isset($_GET[$key])) {
+      continue;
+    }
+    $q = trim((string) $_GET[$key]);
+    if ($q !== '') {
+      return $q;
+    }
+  }
   return null;
 }
 
@@ -339,6 +349,49 @@ function ll_erp_sync_set_last_keepalive(array $status): void
   if ($json !== false) {
     ll_setting_set(LL_ERP_SYNC_CONFIG_KEY, $json, null);
   }
+}
+
+/**
+ * Client-facing keep-alive health for the ERP Sync panel.
+ * @param array<string, mixed> $cfg
+ * @return array<string, mixed>
+ */
+function ll_erp_sync_keepalive_diagnostics(array $cfg): array
+{
+  $enabled = !empty($cfg['keepalive_enabled']);
+  $ka = is_array($cfg['last_keepalive'] ?? null) ? $cfg['last_keepalive'] : null;
+  $at = is_array($ka) ? (string) ($ka['at'] ?? '') : '';
+  $ageSec = null;
+  if ($at !== '') {
+    $ts = strtotime($at);
+    if ($ts !== false) {
+      $ageSec = max(0, time() - $ts);
+    }
+  }
+  $source = is_array($ka) ? (string) ($ka['source'] ?? '') : '';
+  $cronSilent = $enabled && ($source !== 'cron' || ($ageSec !== null && $ageSec > 180));
+  $hint = '';
+  if (!$enabled) {
+    $hint = 'Keep-alive is off. Enable the checkbox, Save, and set Hostinger cron to */1.';
+  } elseif (!$cfg['cron_secret_configured']) {
+    $hint = 'Set a Cron bearer secret and Save before Hostinger cron can authenticate.';
+  } elseif ($ka === null) {
+    $hint = 'No keep-alive ping recorded yet. Use Ping keep-alive now, then confirm hPanel cron hits production /api/erp-sync/keepalive.';
+  } elseif ($cronSilent) {
+    $hint = 'Enabled, but no recent cron ping (last was '
+      . ($source !== '' ? $source : 'unknown')
+      . '). Save alone does not schedule pings — Hostinger must call production https://ai.gurupunvaanii.com/api/erp-sync/keepalive every minute.';
+  } elseif (!empty($ka['session_expired'])) {
+    $hint = 'Session expired after keep-alive — paste a fresh Cookie and Save.';
+  }
+  return [
+    'enabled' => $enabled,
+    'cron_secret_configured' => !empty($cfg['cron_secret_configured']),
+    'last' => $ka,
+    'age_seconds' => $ageSec,
+    'cron_silent' => $cronSilent,
+    'hint' => $hint,
+  ];
 }
 
 /** @param array<string, mixed> $status */
@@ -564,10 +617,12 @@ function ll_erp_sync_http_ping(string $url, ?string $cookie, array $extraHeaders
  * Ping ERP with saved Cookie so idle sessions may last longer.
  * Updates last_keepalive only — never runs Audit / publish / stores payloads.
  *
+ * @param 'manual'|'cron' $source
  * @return array<string, mixed>
  */
-function ll_erp_sync_keepalive(): array
+function ll_erp_sync_keepalive(string $source = 'manual'): array
 {
+  $source = $source === 'cron' ? 'cron' : 'manual';
   $cfg = ll_erp_sync_load_config();
   $url = trim((string) ($cfg['keepalive_url'] ?? ''));
   if ($url === '') {
@@ -579,6 +634,7 @@ function ll_erp_sync_keepalive(): array
       'ok' => false,
       'result' => 'error',
       'error' => 'No keep-alive or report URL configured',
+      'source' => $source,
       'at' => gmdate('c'),
     ];
     ll_erp_sync_set_last_keepalive($status);
@@ -588,8 +644,9 @@ function ll_erp_sync_keepalive(): array
     $status = [
       'ok' => false,
       'result' => 'session_expired',
-      'error' => 'Cookie not configured — paste Cookie header in /dev ERP Sync',
+      'error' => 'Cookie not configured — paste Cookie header in ERP Sync',
       'session_expired' => true,
+      'source' => $source,
       'at' => gmdate('c'),
     ];
     ll_erp_sync_set_last_keepalive($status);
@@ -611,6 +668,7 @@ function ll_erp_sync_keepalive(): array
       'http_status' => $ping['status'],
       'bytes' => $ping['bytes'] ?? 0,
       'url_host' => (string) (parse_url($url, PHP_URL_HOST) ?: ''),
+      'source' => $source,
       'at' => gmdate('c'),
     ];
     ll_erp_sync_set_last_keepalive($status);
@@ -624,6 +682,7 @@ function ll_erp_sync_keepalive(): array
       'http_status' => $ping['status'],
       'bytes' => $ping['bytes'] ?? 0,
       'url_host' => (string) (parse_url($url, PHP_URL_HOST) ?: ''),
+      'source' => $source,
       'at' => gmdate('c'),
     ];
     ll_erp_sync_set_last_keepalive($status);
@@ -637,6 +696,7 @@ function ll_erp_sync_keepalive(): array
     'bytes' => $ping['bytes'] ?? 0,
     'content_type' => $ping['content_type'] ?? '',
     'url_host' => (string) (parse_url($url, PHP_URL_HOST) ?: ''),
+    'source' => $source,
     'at' => gmdate('c'),
   ];
   ll_erp_sync_set_last_keepalive($status);
