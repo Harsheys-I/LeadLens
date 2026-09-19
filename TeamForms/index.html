@@ -7,12 +7,12 @@
   <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#0f2d22">
   <meta name="description" content="GPP AI Team Forms">
   <title>GPP AI · Team Forms</title>
-  <meta name="app-version" content="7.0.3.stable">
-  <script src="../theme-boot.js?v=7.0.3.stable"></script>
-  <script src="../motion.js?v=7.0.3.stable"></script>
+  <meta name="app-version" content="7.2.1.dev">
+  <script src="../theme-boot.js?v=7.2.1.dev"></script>
+  <script src="../motion.js?v=7.2.1.dev"></script>
   <link rel="manifest" href="../manifest.webmanifest">
-  <link rel="stylesheet" href="../styles.css?v=7.0.3.stable">
-  <script type="module" src="../team-forms.js?v=7.0.3.stable"></script>
+  <link rel="stylesheet" href="../styles.css?v=7.2.1.dev">
+  <script type="module" src="../team-forms.js?v=7.2.1.dev"></script>
 </head>
 <body>
   <div id="update-banner" class="update-banner hidden" role="status">
@@ -26,6 +26,7 @@
         <button class="nav-item active" data-view="workspace"><span>◎</span>My workspace</button>
         <button class="nav-item hidden" data-view="org" data-perm="team_forms.manage_org"><span>▣</span>Org</button>
         <button class="nav-item" data-view="builder"><span>✎</span>Form builder</button>
+        <button class="nav-item" data-view="task-builder"><span>＋</span>Task builder</button>
         <button class="nav-item" data-view="review"><span>▦</span>Review board</button>
         <button class="nav-item hidden" data-view="task"><span>·</span>Task</button>
       </nav>
@@ -56,7 +57,7 @@
         </div>
         <div id="ws-memberships" class="tf-panel"></div>
         <div class="section-head" style="margin-top:28px">
-          <div><h2>Assigned to me</h2><p>Open a task to fill fields, update status, and comment.</p></div>
+          <div><h2>Assigned to me</h2><p>Your tasks (not templates). Open one to view filled fields, update status, and comment.</p></div>
         </div>
         <div id="ws-tasks" class="admin-table-wrap"></div>
       </section>
@@ -79,10 +80,10 @@
         <div class="section-head">
           <div>
             <h2>Form builder</h2>
-            <p>Create forms for groups where you are a Form Creator. Add fields, then assign.</p>
+            <p>Build reusable templates (title, description, fields). Creating a task is a separate action in Task builder.</p>
           </div>
           <div class="inline-actions">
-            <button id="builder-new-form" type="button" class="primary-button">New form</button>
+            <button id="builder-new-form" type="button" class="primary-button">New template</button>
             <button id="builder-refresh" type="button" class="secondary-button">Refresh</button>
           </div>
         </div>
@@ -96,16 +97,50 @@
           <div id="builder-editor" class="tf-panel hidden">
             <div class="section-head">
               <div>
-                <h3 id="builder-form-title">Form</h3>
+                <h3 id="builder-form-title">Template</h3>
                 <p id="builder-form-meta" class="muted"></p>
               </div>
               <div class="inline-actions">
                 <button id="builder-add-field" type="button" class="secondary-button">Add field</button>
-                <button id="builder-assign" type="button" class="primary-button">Assign</button>
                 <button id="builder-delete-form" type="button" class="text-button hidden">Delete form</button>
               </div>
             </div>
             <div id="builder-fields"></div>
+          </div>
+        </div>
+      </section>
+
+      <section id="view-task-builder" class="view">
+        <div class="section-head">
+          <div>
+            <h2>Task builder</h2>
+            <p>Choose a template, create the task, fill the fields, then assign. Assignees view answers, update status, and comment — they cannot edit fields.</p>
+          </div>
+          <div class="inline-actions">
+            <button id="task-builder-refresh" type="button" class="secondary-button">Refresh</button>
+          </div>
+        </div>
+        <ol class="tf-wizard-steps" id="task-builder-steps" aria-label="Task builder steps">
+          <li data-step="pick">1. Form</li>
+          <li data-step="fill">2. Fill fields</li>
+          <li data-step="assign">3. Assign</li>
+        </ol>
+        <div class="tf-builder-layout" id="task-builder-layout">
+          <div id="task-builder-pick">
+            <label class="tf-inline-label">Group
+              <select id="task-builder-group"></select>
+            </label>
+            <div id="task-builder-forms" class="admin-table-wrap" style="margin-top:12px"></div>
+          </div>
+          <div id="task-builder-editor" class="tf-panel hidden">
+            <div class="section-head">
+              <div>
+                <h3 id="task-builder-form-title">Template</h3>
+                <p id="task-builder-form-meta" class="muted"></p>
+              </div>
+            </div>
+            <div id="task-builder-fields"></div>
+            <div id="task-builder-create" class="tf-task-builder-create"></div>
           </div>
         </div>
       </section>
@@ -142,14 +177,8 @@
           </div>
         </div>
         <div id="task-form" class="tf-panel"></div>
-        <div class="tf-panel" style="margin-top:16px">
-          <h3>Comments</h3>
-          <div id="task-comments"></div>
-          <div class="inline-actions" style="margin-top:12px">
-            <input id="task-comment-input" type="text" placeholder="Add a comment" style="flex:1;min-width:180px">
-            <button id="task-comment-send" type="button" class="secondary-button">Send</button>
-          </div>
-        </div>
+        <div class="tf-panel tf-comments-panel" id="task-comments-panel" style="margin-top:16px"></div>
+        <div class="tf-panel tf-history-panel" id="task-history-panel" style="margin-top:16px"></div>
       </section>
     </main>
   </div>
@@ -252,11 +281,35 @@
     .tf-progress-bar > span{display:block;height:100%;background:var(--accent,#2f6f5e);width:0}
     .tf-status{display:inline-block;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;padding:2px 8px;border-radius:6px;border:1px solid var(--line)}
     .tf-comment{padding:8px 0;border-bottom:1px solid var(--line);font-size:13px}
-    .tf-comment strong{display:block;font-size:12px}
+    .tf-comment strong{display:flex;flex-wrap:wrap;align-items:center;gap:6px 10px;font-size:12px}
+    .tf-comment-meta{display:inline-flex;align-items:center;gap:8px;font-weight:400}
+    .tf-comment-meta .tf-status{font-size:10px}
     .tf-comment time{color:var(--muted);font-size:11px;font-weight:400}
-    #task-comment-input{border:1px solid var(--input-border);border-radius:9px;background:var(--input-bg);padding:10px 11px;color:var(--ink)}
+    .tf-comment-body{margin-top:4px;font-weight:400}
+    .tf-comment-atts{display:flex;flex-direction:column;gap:4px;margin-top:6px}
+    .tf-comment-att{font-weight:400;font-size:12px;word-break:break-all}
+    .tf-comment-composer{display:grid;gap:8px;margin-top:12px}
+    .tf-comment-composer textarea{width:100%;min-height:64px;border:1px solid var(--input-border);border-radius:9px;background:var(--input-bg);padding:10px 11px;color:var(--ink);font:inherit;font-weight:400;resize:vertical}
+    .tf-comment-tools{flex-wrap:wrap}
+    .tf-comment-link-input{flex:1;min-width:160px;border:1px solid var(--input-border);border-radius:9px;background:var(--input-bg);padding:10px 11px;color:var(--ink)}
+    .tf-comment-pending{display:flex;flex-wrap:wrap;gap:6px}
+    .tf-comment-chip{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:500;padding:4px 8px;border-radius:999px;border:1px solid var(--line);background:var(--soft-3);max-width:100%}
+    .tf-comment-chip span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:220px}
+    .tf-comment-chip button{border:0;background:transparent;color:var(--muted);cursor:pointer;font-size:14px;line-height:1;padding:0}
+    .tf-comments-embed{margin-top:18px;padding-top:16px;border-top:1px solid var(--line)}
+    .tf-comment-time-spent{color:var(--muted);font-size:11px;font-weight:600}
+    .tf-time-spent-row{max-width:220px}
+    .tf-time-spent-row input{width:100%;border:1px solid var(--input-border);border-radius:9px;background:var(--input-bg);padding:10px 11px;color:var(--ink);font-weight:400}
+    .tf-history-list{display:grid;gap:0}
+    .tf-history-item{display:grid;gap:2px;padding:8px 0;border-bottom:1px solid var(--line);font-size:13px}
+    .tf-history-item:last-child{border-bottom:0}
+    .tf-history-what{font-weight:650}
+    .tf-history-meta{color:var(--muted);font-size:12px}
     .tf-form-field{display:grid;gap:6px;margin:12px 0;font-size:13px;font-weight:650}
     .tf-form-field input,.tf-form-field textarea,.tf-form-field select{width:100%;border:1px solid var(--input-border);border-radius:9px;background:var(--input-bg);padding:10px 11px;color:var(--ink);font-weight:400}
+    .tf-form-field input[type="number"]{-moz-appearance:textfield}
+    .tf-form-field input[type="number"]::-webkit-outer-spin-button,
+    .tf-form-field input[type="number"]::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
     .tf-form-field.readonly,.tf-form-field.calculated{opacity:.92}
     .tf-check-row{display:flex;align-items:center;gap:8px;font-weight:500}
     .tf-check-row.is-assigned{opacity:.72}
@@ -271,6 +324,16 @@
     #task-search-input{flex:1;min-width:160px;border:1px solid var(--input-border);border-radius:9px;background:var(--input-bg);padding:10px 11px;color:var(--ink)}
     .tf-form-field.is-search-hide{display:none}
     .tf-form-field.is-search-match{outline:2px solid var(--accent,#2f6f5e);outline-offset:4px;border-radius:8px}
+    .tf-task-builder-create{margin-top:18px;padding-top:16px;border-top:1px solid var(--line);display:grid;gap:12px}
+    .tf-wizard-steps{display:flex;gap:8px;flex-wrap:wrap;margin:0 0 16px;padding:0;list-style:none}
+    .tf-wizard-steps li{font-size:13px;font-weight:650;padding:6px 12px;border-radius:999px;border:1px solid var(--line);color:var(--muted);background:transparent}
+    .tf-wizard-steps li.is-current{border-color:var(--accent,#2f6f5e);color:var(--ink);background:var(--soft-3)}
+    .tf-wizard-steps li.is-done{color:var(--ink)}
+    .tf-builder-layout.is-wizard-focus{grid-template-columns:1fr}
+    .tf-builder-layout.is-wizard-focus #task-builder-pick{display:none}
+    .tf-snapshot-row{padding:10px 0;border-bottom:1px solid var(--line)}
+    .tf-snapshot-row:last-child{border-bottom:0}
+    .tf-forms-table tr.is-selected td{background:var(--soft-3)}
   </style>
 </body>
 </html>

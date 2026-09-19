@@ -70,6 +70,7 @@ function ll_tf_route_workspace(array $user): void
 
   $stmt = ll_pdo()->prepare(
     "SELECT t.id, t.form_id, t.status, t.reviewer_scope, t.updated_at, t.submitted_at,
+            t.title AS task_title, t.due_on,
             f.title AS form_title, g.id AS group_id, g.name AS group_name,
             d.id AS department_id, d.name AS department_name
      FROM form_tasks t
@@ -77,7 +78,7 @@ function ll_tf_route_workspace(array $user): void
      INNER JOIN org_groups g ON g.id = f.group_id
      INNER JOIN departments d ON d.id = g.department_id
      WHERE t.assignee_id = ? AND t.status <> 'closed'
-     ORDER BY FIELD(t.status, 'rework', 'in_progress', 'pending', 'submitted', 'approved'), t.updated_at DESC"
+     ORDER BY FIELD(t.status, 'rework', 'in_progress', 'pending', 'completed', 'submitted', 'approved'), t.updated_at DESC"
   );
   $stmt->execute([$uid]);
   $assigned = [];
@@ -85,7 +86,9 @@ function ll_tf_route_workspace(array $user): void
     $assigned[] = [
       'id' => (int) $row['id'],
       'form_id' => (int) $row['form_id'],
-      'form_title' => (string) $row['form_title'],
+      'form_title' => ll_tf_task_display_title($row['task_title'] ?? null, $row['form_title'] ?? null),
+      'template_title' => (string) $row['form_title'],
+      'due_on' => $row['due_on'] ?? null,
       'status' => (string) $row['status'],
       'reviewer_scope' => (string) $row['reviewer_scope'],
       'group_id' => (int) $row['group_id'],
@@ -481,9 +484,22 @@ function ll_tf_delete_form_cascade(int $formId): void
     $fieldIds[] = (int) $row['id'];
   }
   if ($taskIds) {
+    foreach ($taskIds as $tid) {
+      ll_tf_doc_delete_task_dir($tid);
+    }
     $ph = implode(',', array_fill(0, count($taskIds), '?'));
     $pdo->prepare("DELETE FROM form_answers WHERE task_id IN ($ph)")->execute($taskIds);
     $pdo->prepare("DELETE FROM form_comments WHERE task_id IN ($ph)")->execute($taskIds);
+    try {
+      $pdo->prepare("DELETE FROM form_task_events WHERE task_id IN ($ph)")->execute($taskIds);
+    } catch (Throwable $e) {
+      /* table may not exist yet */
+    }
+    try {
+      $pdo->prepare("DELETE FROM form_task_reviewers WHERE task_id IN ($ph)")->execute($taskIds);
+    } catch (Throwable $e) {
+      /* table may not exist yet */
+    }
     $pdo->prepare("DELETE FROM form_tasks WHERE id IN ($ph)")->execute($taskIds);
   }
   if ($fieldIds) {
@@ -551,6 +567,7 @@ function ll_tf_route_group_forms(array $user, int $groupId, string $method): voi
        VALUES (?, ?, ?, ?, 1)'
     )->execute([$groupId, $title, $desc !== '' ? $desc : null, (int) $user['id']]);
     $newId = (int) $pdo->lastInsertId();
+    ll_tf_ensure_system_fields($newId);
     ll_ok(['form' => ll_tf_load_form($newId)], 201);
   }
 
@@ -582,6 +599,7 @@ function ll_tf_load_form(int $formId): ?array
   if (!$r) {
     return null;
   }
+  ll_tf_ensure_system_fields($formId);
   return [
     'id' => (int) $r['id'],
     'group_id' => (int) $r['group_id'],
@@ -685,6 +703,10 @@ function ll_tf_route_forms(array $user, ?int $id, string $sub, ?int $subId, stri
     ll_tf_assign_tasks($user, $form);
   }
 
+  if ($sub === 'create-tasks' && $method === 'POST') {
+    ll_tf_assign_tasks($user, $form);
+  }
+
   ll_error('Not found', 404);
 }
 
@@ -697,6 +719,12 @@ function ll_tf_parse_field_body(array $body, ?array $existing = null): array
   $type = (string) ($body['field_type'] ?? ($existing['field_type'] ?? 'text'));
   if (!in_array($type, ll_tf_field_types(), true)) {
     ll_error('Invalid field_type');
+  }
+  if ($existing === null && in_array($type, ll_tf_system_field_types(), true)) {
+    ll_error('System fields cannot be added manually');
+  }
+  if ($existing !== null && ll_tf_is_system_field($existing)) {
+    $type = (string) $existing['field_type'];
   }
   // field_key is optional. Existing fields keep their key; new fields get a
   // unique key allocated at insert time (never regenerate on update/reorder).
@@ -819,6 +847,16 @@ function ll_tf_route_fields(array $user, array $form, ?int $fieldId, string $ver
     $existing = ll_tf_row_field($existingRow);
 
     if (($method === 'POST' && $verb === 'update') || $method === 'PATCH' || $method === 'PUT') {
+      if (ll_tf_is_system_field($existing)) {
+        $body = ll_read_json_body();
+        if (array_key_exists('sort_order', $body)) {
+          $pdo->prepare('UPDATE form_fields SET sort_order = ? WHERE id = ? AND form_id = ?')
+            ->execute([(int) $body['sort_order'], $fieldId, $formId]);
+        }
+        $stmt = $pdo->prepare('SELECT * FROM form_fields WHERE id = ?');
+        $stmt->execute([$fieldId]);
+        ll_ok(['field' => ll_tf_row_field($stmt->fetch())]);
+      }
       $parsed = ll_tf_parse_field_body(ll_read_json_body(), $existing);
       $pdo->prepare(
         'UPDATE form_fields SET field_key = ?, label = ?, field_type = ?, options_json = ?,
@@ -844,6 +882,10 @@ function ll_tf_route_fields(array $user, array $form, ?int $fieldId, string $ver
     }
 
     if ($method === 'DELETE' || ($method === 'POST' && $verb === 'delete')) {
+      if (ll_tf_is_system_field($existing)) {
+        ll_error('System fields cannot be deleted');
+      }
+      ll_tf_doc_cleanup_field($fieldId);
       $pdo->prepare('DELETE FROM form_fields WHERE id = ? AND form_id = ?')->execute([$fieldId, $formId]);
       ll_ok(['deleted' => true, 'id' => $fieldId]);
     }
@@ -851,6 +893,10 @@ function ll_tf_route_fields(array $user, array $form, ?int $fieldId, string $ver
     if ($method === 'POST' && $verb === '') {
       $body = ll_read_json_body();
       if (($body['action'] ?? '') === 'delete' || !empty($body['delete'])) {
+        if (ll_tf_is_system_field($existing)) {
+          ll_error('System fields cannot be deleted');
+        }
+        ll_tf_doc_cleanup_field($fieldId);
         $pdo->prepare('DELETE FROM form_fields WHERE id = ? AND form_id = ?')->execute([$fieldId, $formId]);
         ll_ok(['deleted' => true, 'id' => $fieldId]);
       }
@@ -888,109 +934,310 @@ function ll_tf_list_open_assignments(array $user, array $form): void
   ]);
 }
 
-function ll_tf_assign_tasks(array $user, array $form): void
+/** @return list<int> */
+function ll_tf_normalize_assignee_ids($raw, array $body = []): array
 {
-  ll_tf_assert_form_creator($user, (int) $form['group_id']);
-  if (empty($form['is_active'])) {
-    ll_error('Cannot assign an inactive form');
+  if ((!is_array($raw) || !$raw) && isset($body['assignee_id'])) {
+    $raw = [(int) $body['assignee_id']];
   }
-  $body = ll_read_json_body();
-  $assigneeIds = $body['assignee_ids'] ?? $body['assignees'] ?? [];
-  if (!is_array($assigneeIds) || !$assigneeIds) {
-    ll_error('assignee_ids array is required');
+  if (!is_array($raw)) {
+    $raw = [];
   }
-  $scope = (string) ($body['reviewer_scope'] ?? 'group');
-  if (!in_array($scope, ['group', 'department'], true)) {
-    ll_error('reviewer_scope must be group or department');
+  $out = [];
+  $seen = [];
+  foreach ($raw as $aid) {
+    $aid = (int) $aid;
+    if ($aid < 1 || isset($seen[$aid])) {
+      continue;
+    }
+    $seen[$aid] = true;
+    $out[] = $aid;
+  }
+  return $out;
+}
+
+/** @param list<int> $assigneeIds */
+/** @param list<int> $reviewerIds */
+function ll_tf_assert_assignment_people(array $user, int $groupId, array $assigneeIds, array $reviewerIds): void
+{
+  $actorId = (int) $user['id'];
+  if (!$assigneeIds) {
+    ll_error('Assign To is required');
+  }
+  if (!$reviewerIds) {
+    ll_error('At least one reviewer is required');
   }
   $pdo = ll_pdo();
-  $groupId = (int) $form['group_id'];
-  $formId = (int) $form['id'];
-  $created = [];
-  $skipped = [];
-  $existingTaskIds = [];
-  $ins = $pdo->prepare(
-    'INSERT INTO form_tasks (form_id, assignee_id, assigned_by, reviewer_scope, status)
-     VALUES (?, ?, ?, ?, \'pending\')'
-  );
-  $findOpen = $pdo->prepare(
-    "SELECT id FROM form_tasks
-     WHERE form_id = ? AND assignee_id = ? AND status <> 'closed'
-     LIMIT 1"
-  );
-  // Seed readonly answers
-  $fields = $form['fields'] ?? ll_tf_load_fields($formId);
-  $ansIns = $pdo->prepare(
-    'INSERT INTO form_answers (task_id, field_id, value_text) VALUES (?, ?, ?)
-     ON DUPLICATE KEY UPDATE value_text = VALUES(value_text)'
-  );
-
-  $actorId = (int) $user['id'];
-  $selfSkipped = [];
-  $seenAids = [];
+  $mem = $pdo->prepare('SELECT id FROM group_members WHERE group_id = ? AND user_id = ? LIMIT 1');
   foreach ($assigneeIds as $aid) {
-    $aid = (int) $aid;
-    if ($aid < 1 || isset($seenAids[$aid])) {
-      continue;
-    }
-    $seenAids[$aid] = true;
     if ($aid === $actorId) {
-      $selfSkipped[] = $aid;
-      continue;
+      ll_error('Cannot assign a task to yourself');
     }
-    // Default: any member of the group (super / manage_org may still assign)
-    $mem = $pdo->prepare('SELECT id FROM group_members WHERE group_id = ? AND user_id = ? LIMIT 1');
+    if (in_array($aid, $reviewerIds, true)) {
+      ll_error('Reviewer cannot be the same person as Assign To');
+    }
     $mem->execute([$groupId, $aid]);
-    $isMember = (bool) $mem->fetch();
-    if (!$isMember && empty($user['is_super']) && !ll_tf_can_manage_org($user)) {
+    if (!$mem->fetch() && empty($user['is_super']) && !ll_tf_can_manage_org($user)) {
       ll_error("User {$aid} is not a member of this group");
     }
     $u = ll_find_user_by_id($aid);
     if (!$u || (int) ($u['is_active'] ?? 0) !== 1) {
       ll_error("Assignee {$aid} not found or inactive");
     }
-    $findOpen->execute([$formId, $aid]);
-    $open = $findOpen->fetch();
-    if ($open) {
-      $skipped[] = $aid;
-      $existingTaskIds[] = (int) $open['id'];
-      continue;
+  }
+  foreach ($reviewerIds as $rid) {
+    if ($rid === $actorId) {
+      ll_error('You cannot assign yourself as a reviewer');
     }
-    try {
-      $ins->execute([$formId, $aid, (int) $user['id'], $scope]);
-    } catch (PDOException $e) {
-      // Race / unique open-assignee guard: treat as already assigned
-      $findOpen->execute([$formId, $aid]);
-      $open = $findOpen->fetch();
-      if ($open) {
-        $skipped[] = $aid;
-        $existingTaskIds[] = (int) $open['id'];
-        continue;
-      }
-      throw $e;
+    $mem->execute([$groupId, $rid]);
+    if (!$mem->fetch() && empty($user['is_super']) && !ll_tf_can_manage_org($user)) {
+      ll_error('Reviewer must be a member of this group');
     }
+    $revUser = ll_find_user_by_id($rid);
+    if (!$revUser || (int) ($revUser['is_active'] ?? 0) !== 1) {
+      ll_error('Reviewer not found or inactive');
+    }
+  }
+}
+
+function ll_tf_assign_tasks(array $user, array $form): void
+{
+  ll_tf_assert_form_creator($user, (int) $form['group_id']);
+  if (empty($form['is_active'])) {
+    ll_error('Cannot create a task from an inactive template');
+  }
+  $body = ll_read_json_body();
+  $draftTaskId = (int) ($body['task_id'] ?? $body['draft_task_id'] ?? 0);
+  if ($draftTaskId > 0) {
+    $existing = ll_tf_load_task($draftTaskId);
+    if (!$existing || (int) $existing['form_id'] !== (int) $form['id']) {
+      ll_error('Task not found', 404);
+    }
+    ll_tf_finalize_task_assignment($user, $existing, $body);
+  }
+  $assigneeIds = ll_tf_normalize_assignee_ids($body['assignee_ids'] ?? $body['assignees'] ?? [], $body);
+  if (!$assigneeIds || !empty($body['draft'])) {
+    ll_tf_create_draft_task($user, $form, $body);
+  }
+  $reviewerIds = ll_tf_read_reviewer_ids($body);
+  $status = (string) ($body['status'] ?? 'pending');
+  if ($status === 'submitted') {
+    $status = 'completed';
+  }
+  if (!in_array($status, ['pending', 'in_progress', 'completed'], true)) {
+    ll_error('Status must be pending, in progress, or completed');
+  }
+  $scope = (string) ($body['reviewer_scope'] ?? 'group');
+  if (!in_array($scope, ['group', 'department'], true)) {
+    $scope = 'group';
+  }
+  $taskTitle = trim((string) ($body['title'] ?? $body['task_title'] ?? ''));
+  if (strlen($taskTitle) > 200) {
+    $taskTitle = substr($taskTitle, 0, 200);
+  }
+  $dueOn = trim((string) ($body['due_on'] ?? $body['due_at'] ?? ''));
+  if ($dueOn === '') {
+    $dueOn = null;
+  } elseif (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $dueOn)) {
+    ll_error('due_on must be YYYY-MM-DD');
+  }
+  $pdo = ll_pdo();
+  $groupId = (int) $form['group_id'];
+  $formId = (int) $form['id'];
+  ll_tf_assert_assignment_people($user, $groupId, $assigneeIds, $reviewerIds);
+  ll_tf_ensure_system_fields($formId);
+  $fields = ll_tf_load_fields($formId);
+  $snapshot = json_encode(ll_tf_fields_snapshot($fields), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+  $reviewerId = $reviewerIds[0];
+  $created = [];
+  $ins = $pdo->prepare(
+    'INSERT INTO form_tasks
+      (form_id, assignee_id, assigned_by, reviewer_id, reviewer_scope, status, title, due_on, field_snapshot_json)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
+  );
+  $ansIns = $pdo->prepare(
+    'INSERT INTO form_answers (task_id, field_id, value_text) VALUES (?, ?, ?)
+     ON DUPLICATE KEY UPDATE value_text = VALUES(value_text)'
+  );
+
+  $actorId = (int) $user['id'];
+  foreach ($assigneeIds as $aid) {
+    $ins->execute([
+      $formId,
+      $aid,
+      $actorId,
+      $reviewerId,
+      $scope,
+      $status,
+      $taskTitle !== '' ? $taskTitle : null,
+      $dueOn,
+      $snapshot,
+    ]);
     $taskId = (int) $pdo->lastInsertId();
     foreach ($fields as $f) {
       if (($f['field_type'] ?? '') === 'readonly') {
         $ansIns->execute([$taskId, (int) $f['id'], (string) ($f['readonly_value'] ?? '')]);
       }
     }
+    ll_tf_replace_task_reviewers($taskId, $reviewerIds);
+    $assignee = ll_find_user_by_id($aid);
+    ll_tf_log_task_event($taskId, $actorId, 'created', null, $status);
+    ll_tf_log_task_event($taskId, $actorId, 'assigned', null, $status, ll_tf_user_display_name($assignee) ?: null);
     $created[] = $taskId;
   }
-  if (!$created && !$skipped) {
-    if ($selfSkipped) {
-      ll_error('Cannot assign a task to yourself');
-    }
-    ll_error('No valid assignees');
+  if (!$created) {
+    ll_error('Assign To is required');
   }
   ll_ok([
     'task_ids' => $created,
-    'skipped_assignee_ids' => $skipped,
-    'self_assignee_ids' => $selfSkipped,
-    'existing_task_ids' => $existingTaskIds,
+    'task' => count($created) === 1 ? ll_tf_load_task($created[0]) : null,
     'count' => count($created),
-    'skipped_count' => count($skipped),
-  ], $created ? 201 : 200);
+  ], 201);
+}
+
+function ll_tf_create_draft_task(array $user, array $form, array $body): void
+{
+  $status = (string) ($body['status'] ?? 'pending');
+  if ($status === 'submitted') {
+    $status = 'completed';
+  }
+  if (!in_array($status, ['pending', 'in_progress', 'completed'], true)) {
+    $status = 'pending';
+  }
+  $pdo = ll_pdo();
+  $formId = (int) $form['id'];
+  $actorId = (int) $user['id'];
+  $existingDraft = $pdo->prepare(
+    'SELECT id FROM form_tasks
+     WHERE form_id = ? AND assigned_by = ? AND assignee_id IS NULL
+     ORDER BY id DESC LIMIT 1'
+  );
+  $existingDraft->execute([$formId, $actorId]);
+  $draftId = (int) ($existingDraft->fetchColumn() ?: 0);
+  if ($draftId > 0) {
+    $task = ll_tf_load_task($draftId);
+    if ($task) {
+      ll_ok([
+        'task_ids' => [$draftId],
+        'task' => $task,
+        'count' => 1,
+        'draft' => true,
+      ], 201);
+    }
+  }
+  ll_tf_ensure_system_fields($formId);
+  $fields = ll_tf_load_fields($formId);
+  $snapshot = json_encode(ll_tf_fields_snapshot($fields), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+  $pdo->prepare(
+    'INSERT INTO form_tasks
+      (form_id, assignee_id, assigned_by, reviewer_id, reviewer_scope, status, title, due_on, field_snapshot_json)
+     VALUES (?, NULL, ?, NULL, \'group\', ?, NULL, NULL, ?)'
+  )->execute([$formId, (int) $user['id'], $status, $snapshot]);
+  $taskId = (int) $pdo->lastInsertId();
+  $ansIns = $pdo->prepare(
+    'INSERT INTO form_answers (task_id, field_id, value_text) VALUES (?, ?, ?)
+     ON DUPLICATE KEY UPDATE value_text = VALUES(value_text)'
+  );
+  foreach ($fields as $f) {
+    if (($f['field_type'] ?? '') === 'readonly') {
+      $ansIns->execute([$taskId, (int) $f['id'], (string) ($f['readonly_value'] ?? '')]);
+    }
+  }
+  ll_tf_log_task_event($taskId, (int) $user['id'], 'created', null, $status);
+  $task = ll_tf_load_task($taskId);
+  ll_ok([
+    'task_ids' => [$taskId],
+    'task' => $task,
+    'count' => 1,
+    'draft' => true,
+  ], 201);
+}
+
+function ll_tf_copy_task_answers(int $fromTaskId, int $toTaskId): void
+{
+  $pdo = ll_pdo();
+  $rows = $pdo->prepare('SELECT field_id, value_text FROM form_answers WHERE task_id = ?');
+  $rows->execute([$fromTaskId]);
+  $ins = $pdo->prepare(
+    'INSERT INTO form_answers (task_id, field_id, value_text) VALUES (?, ?, ?)
+     ON DUPLICATE KEY UPDATE value_text = VALUES(value_text)'
+  );
+  foreach ($rows->fetchAll() as $row) {
+    $ins->execute([$toTaskId, (int) $row['field_id'], $row['value_text']]);
+  }
+}
+
+function ll_tf_finalize_task_assignment(array $user, array $task, array $body): void
+{
+  if (!empty($task['assignee_id'])) {
+    ll_error('This task is already assigned');
+  }
+  $assigneeIds = ll_tf_normalize_assignee_ids($body['assignee_ids'] ?? $body['assignees'] ?? null, $body);
+  $reviewerIds = ll_tf_read_reviewer_ids($body);
+  $scope = (string) ($body['reviewer_scope'] ?? 'group');
+  if (!in_array($scope, ['group', 'department'], true)) {
+    $scope = 'group';
+  }
+  $pdo = ll_pdo();
+  $groupId = (int) $task['group_id'];
+  $formId = (int) $task['form_id'];
+  $actorId = (int) $user['id'];
+  ll_tf_assert_assignment_people($user, $groupId, $assigneeIds, $reviewerIds);
+  $reviewerId = $reviewerIds[0];
+  $first = $assigneeIds[0];
+  $pdo->prepare(
+    'UPDATE form_tasks SET assignee_id = ?, reviewer_id = ?, reviewer_scope = ?, assigned_by = COALESCE(assigned_by, ?)
+     WHERE id = ?'
+  )->execute([$first, $reviewerId, $scope, $actorId, (int) $task['id']]);
+  ll_tf_replace_task_reviewers((int) $task['id'], $reviewerIds);
+  $assignee = ll_find_user_by_id($first);
+  ll_tf_log_task_event(
+    (int) $task['id'],
+    $actorId,
+    'assigned',
+    null,
+    (string) ($task['status'] ?? 'pending'),
+    ll_tf_user_display_name($assignee) ?: null
+  );
+  $created = [(int) $task['id']];
+  $extras = array_slice($assigneeIds, 1);
+  if ($extras) {
+    $ins = $pdo->prepare(
+      'INSERT INTO form_tasks
+        (form_id, assignee_id, assigned_by, reviewer_id, reviewer_scope, status, title, due_on, field_snapshot_json)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
+    );
+    $snapshot = $pdo->prepare('SELECT field_snapshot_json, status, title, due_on FROM form_tasks WHERE id = ?');
+    $snapshot->execute([(int) $task['id']]);
+    $src = $snapshot->fetch() ?: [];
+    $cloneStatus = (string) ($src['status'] ?? $task['status'] ?? 'pending');
+    foreach ($extras as $aid) {
+      $ins->execute([
+        $formId,
+        $aid,
+        $actorId,
+        $reviewerId,
+        $scope,
+        $cloneStatus,
+        $src['title'] ?? $task['task_title'] ?? null,
+        $src['due_on'] ?? $task['due_on'] ?? null,
+        $src['field_snapshot_json'] ?? null,
+      ]);
+      $cloneId = (int) $pdo->lastInsertId();
+      ll_tf_copy_task_answers((int) $task['id'], $cloneId);
+      ll_tf_replace_task_reviewers($cloneId, $reviewerIds);
+      $cloneAssignee = ll_find_user_by_id($aid);
+      ll_tf_log_task_event($cloneId, $actorId, 'created', null, $cloneStatus);
+      ll_tf_log_task_event($cloneId, $actorId, 'assigned', null, $cloneStatus, ll_tf_user_display_name($cloneAssignee) ?: null);
+      $created[] = $cloneId;
+    }
+  }
+  $fresh = ll_tf_load_task((int) $task['id']);
+  ll_ok([
+    'task' => $fresh,
+    'task_ids' => $created,
+    'count' => count($created),
+  ]);
 }
 
 function ll_tf_can_review_task(array $user, array $taskRow): bool
@@ -999,6 +1246,18 @@ function ll_tf_can_review_task(array $user, array $taskRow): bool
     return true;
   }
   $uid = (int) $user['id'];
+  $reviewerIds = $taskRow['reviewer_ids'] ?? null;
+  if (!is_array($reviewerIds)) {
+    $reviewerIds = ll_tf_task_reviewer_id_list((int) ($taskRow['id'] ?? 0));
+  }
+  $reviewerIds = array_values(array_filter(array_map('intval', $reviewerIds ?: [])));
+  if ($reviewerIds) {
+    return in_array($uid, $reviewerIds, true);
+  }
+  $designated = (int) ($taskRow['reviewer_id'] ?? 0);
+  if ($designated > 0) {
+    return $uid === $designated;
+  }
   $groupId = (int) $taskRow['group_id'];
   $deptId = (int) $taskRow['department_id'];
   $scope = (string) $taskRow['reviewer_scope'];
@@ -1022,13 +1281,15 @@ function ll_tf_load_task(int $taskId): ?array
             f.created_by AS form_created_by,
             g.name AS group_name, g.department_id, d.name AS department_name,
             ua.display_name AS assignee_name, ua.username AS assignee_username,
-            ub.display_name AS assigned_by_name
+            ub.display_name AS assigned_by_name,
+            ur.display_name AS reviewer_name, ur.username AS reviewer_username
      FROM form_tasks t
      INNER JOIN form_templates f ON f.id = t.form_id
      INNER JOIN org_groups g ON g.id = f.group_id
      INNER JOIN departments d ON d.id = g.department_id
-     INNER JOIN users ua ON ua.id = t.assignee_id
+     LEFT JOIN users ua ON ua.id = t.assignee_id
      LEFT JOIN users ub ON ub.id = t.assigned_by
+     LEFT JOIN users ur ON ur.id = t.reviewer_id
      WHERE t.id = ? LIMIT 1"
   );
   $stmt->execute([$taskId]);
@@ -1036,7 +1297,20 @@ function ll_tf_load_task(int $taskId): ?array
   if (!$r) {
     return null;
   }
-  $fields = ll_tf_load_fields((int) $r['form_id']);
+  $fields = ll_tf_fields_from_snapshot($r['field_snapshot_json'] ?? null);
+  if (!$fields) {
+    $fields = ll_tf_load_fields((int) $r['form_id']);
+    if ($fields) {
+      try {
+        ll_pdo()->prepare('UPDATE form_tasks SET field_snapshot_json = ? WHERE id = ?')->execute([
+          json_encode(ll_tf_fields_snapshot($fields), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
+          $taskId,
+        ]);
+      } catch (Throwable $e) {
+        /* snapshot column may be mid-migrate */
+      }
+    }
+  }
   $ansStmt = ll_pdo()->prepare('SELECT field_id, value_text FROM form_answers WHERE task_id = ?');
   $ansStmt->execute([$taskId]);
   $answersByFieldId = [];
@@ -1057,39 +1331,81 @@ function ll_tf_load_task(int $taskId): ?array
       'value' => $answersByFieldId[$f['id']] ?? null,
     ];
   }
-  $cmt = ll_pdo()->prepare(
-    'SELECT c.id, c.task_id, c.user_id, c.body, c.created_at, u.display_name, u.username
-     FROM form_comments c INNER JOIN users u ON u.id = c.user_id
-     WHERE c.task_id = ? ORDER BY c.created_at ASC'
-  );
-  $cmt->execute([$taskId]);
+  try {
+    $cmt = ll_pdo()->prepare(
+      'SELECT c.id, c.task_id, c.user_id, c.body, c.created_at, c.status_at_time, c.attachments_json,
+              c.time_spent_minutes,
+              u.display_name, u.username
+       FROM form_comments c INNER JOIN users u ON u.id = c.user_id
+       WHERE c.task_id = ? ORDER BY c.created_at ASC'
+    );
+    $cmt->execute([$taskId]);
+    $commentRows = $cmt->fetchAll();
+  } catch (Throwable $e) {
+    $cmt = ll_pdo()->prepare(
+      'SELECT c.id, c.task_id, c.user_id, c.body, c.created_at, c.status_at_time, c.attachments_json,
+              u.display_name, u.username
+       FROM form_comments c INNER JOIN users u ON u.id = c.user_id
+       WHERE c.task_id = ? ORDER BY c.created_at ASC'
+    );
+    $cmt->execute([$taskId]);
+    $commentRows = $cmt->fetchAll();
+  }
   $comments = array_map(static function ($c) {
+    $statusAt = $c['status_at_time'] ?? null;
+    $statusAt = is_string($statusAt) && $statusAt !== '' ? $statusAt : null;
+    $spent = $c['time_spent_minutes'] ?? null;
     return [
       'id' => (int) $c['id'],
       'task_id' => (int) $c['task_id'],
       'user_id' => (int) $c['user_id'],
       'body' => (string) $c['body'],
       'created_at' => $c['created_at'],
+      'status_at_time' => $statusAt,
+      'time_spent_minutes' => $spent !== null && $spent !== '' ? (int) $spent : null,
+      'attachments' => ll_tf_comment_attachments_public($c['attachments_json'] ?? null),
       'display_name' => (string) ($c['display_name'] ?: $c['username']),
     ];
-  }, $cmt->fetchAll());
+  }, $commentRows);
 
   $progress = ll_tf_progress($fields, $answersByFieldId);
+  $reviewers = ll_tf_load_task_reviewers($taskId);
+  if (!$reviewers && isset($r['reviewer_id']) && (int) $r['reviewer_id'] > 0) {
+    $reviewers[] = [
+      'id' => (int) $r['reviewer_id'],
+      'display_name' => (string) ($r['reviewer_name'] ?: ($r['reviewer_username'] ?? '')),
+    ];
+  }
+  $reviewerIds = array_values(array_map(static fn ($rev) => (int) $rev['id'], $reviewers));
+  $reviewerNames = array_values(array_filter(array_map(
+    static fn ($rev) => trim((string) ($rev['display_name'] ?? '')),
+    $reviewers
+  )));
 
   return [
     'id' => (int) $r['id'],
     'form_id' => (int) $r['form_id'],
-    'form_title' => (string) $r['form_title'],
+    'form_title' => ll_tf_task_display_title($r['title'] ?? null, $r['form_title'] ?? null),
+    'template_title' => (string) $r['form_title'],
+    'task_title' => trim((string) ($r['title'] ?? '')) !== '' ? trim((string) $r['title']) : null,
+    'due_on' => $r['due_on'] ?? null,
     'form_description' => $r['form_description'] !== null ? (string) $r['form_description'] : null,
     'form_created_by' => $r['form_created_by'] !== null ? (int) $r['form_created_by'] : null,
     'group_id' => (int) $r['group_id'],
     'group_name' => (string) $r['group_name'],
     'department_id' => (int) $r['department_id'],
     'department_name' => (string) $r['department_name'],
-    'assignee_id' => (int) $r['assignee_id'],
-    'assignee_name' => (string) ($r['assignee_name'] ?: $r['assignee_username']),
+    'assignee_id' => $r['assignee_id'] !== null && (int) $r['assignee_id'] > 0 ? (int) $r['assignee_id'] : null,
+    'assignee_name' => ($r['assignee_id'] !== null && (int) $r['assignee_id'] > 0)
+      ? (string) ($r['assignee_name'] ?: $r['assignee_username'])
+      : null,
+    'is_draft' => $r['assignee_id'] === null || (int) $r['assignee_id'] < 1,
     'assigned_by' => $r['assigned_by'] !== null ? (int) $r['assigned_by'] : null,
     'assigned_by_name' => $r['assigned_by_name'] ?? null,
+    'reviewer_id' => $reviewerIds[0] ?? (isset($r['reviewer_id']) && $r['reviewer_id'] !== null ? (int) $r['reviewer_id'] : null),
+    'reviewer_ids' => $reviewerIds,
+    'reviewers' => $reviewers,
+    'reviewer_name' => $reviewerNames ? implode(', ', $reviewerNames) : null,
     'reviewer_scope' => (string) $r['reviewer_scope'],
     'status' => (string) $r['status'],
     'submitted_at' => $r['submitted_at'],
@@ -1100,6 +1416,7 @@ function ll_tf_load_task(int $taskId): ?array
     'fields' => $fields,
     'answers' => $answers,
     'comments' => $comments,
+    'events' => ll_tf_load_task_events($taskId),
     'progress' => $progress,
   ];
 }
@@ -1110,7 +1427,10 @@ function ll_tf_assert_task_access(array $user, array $task): void
   if (!empty($user['is_super']) || ll_tf_can_manage_org($user)) {
     return;
   }
-  if ($uid === (int) $task['assignee_id']) {
+  if ((int) ($task['assignee_id'] ?? 0) > 0 && $uid === (int) $task['assignee_id']) {
+    return;
+  }
+  if (ll_tf_is_task_form_creator($user, $task)) {
     return;
   }
   if (ll_tf_can_review_task($user, $task)) {
@@ -1135,6 +1455,7 @@ function ll_tf_route_tasks(array $user, ?int $id, string $sub): void
 
     if ($mine) {
       $sql = "SELECT t.id, t.form_id, t.status, t.reviewer_scope, t.updated_at, t.submitted_at,
+                     t.title AS task_title, t.due_on,
                      f.title AS form_title, g.id AS group_id, g.name AS group_name,
                      d.id AS department_id, d.name AS department_name
               FROM form_tasks t
@@ -1182,27 +1503,41 @@ function ll_tf_route_tasks(array $user, ?int $id, string $sub): void
     ll_tf_task_save_answers($user, $task, ll_read_json_body());
   }
 
+  if ($method === 'POST' && $sub === 'files') {
+    ll_tf_task_upload_file($user, $task);
+  }
+
+  if ($method === 'GET' && $sub === 'file') {
+    ll_tf_task_download_file($user, $task);
+  }
+
+  if ($method === 'GET' && $sub === 'comment-file') {
+    ll_tf_comment_download_file($user, $task);
+  }
+
   if ($method === 'POST' && $sub === 'comments') {
-    $body = ll_read_json_body();
-    $text = trim((string) ($body['body'] ?? ''));
-    if ($text === '') {
-      ll_error('body is required');
-    }
-    $pdo->prepare('INSERT INTO form_comments (task_id, user_id, body) VALUES (?, ?, ?)')
-      ->execute([$id, (int) $user['id'], $text]);
-    ll_ok(['task' => ll_tf_load_task($id)], 201);
+    ll_tf_task_add_comment($user, $task);
+  }
+
+  if ($method === 'POST' && $sub === 'submit') {
+    ll_tf_task_submit($user, $task);
   }
 
   if ($method === 'POST' && $sub === 'approve') {
+    if (ll_tf_user_is_assignee($user, $task)) {
+      ll_error('You cannot approve your own assignment', 403);
+    }
     if (!ll_tf_can_review_task($user, $task)) {
       ll_error('Reviewer role required', 403);
     }
     if (!in_array($task['status'], ['submitted', 'in_progress', 'rework'], true)) {
       ll_error('Task cannot be approved from status ' . $task['status']);
     }
+    $from = (string) $task['status'];
     $pdo->prepare(
       "UPDATE form_tasks SET status = 'approved', approved_at = UTC_TIMESTAMP() WHERE id = ?"
     )->execute([$id]);
+    ll_tf_log_task_event((int) $id, (int) $user['id'], 'approved', $from, 'approved');
     ll_ok(['task' => ll_tf_load_task($id)]);
   }
 
@@ -1212,17 +1547,21 @@ function ll_tf_route_tasks(array $user, ?int $id, string $sub): void
     }
     $body = ll_read_json_body();
     $note = trim((string) ($body['body'] ?? $body['note'] ?? ''));
+    $from = (string) $task['status'];
     $pdo->prepare(
       "UPDATE form_tasks SET status = 'rework', submitted_at = NULL, approved_at = NULL WHERE id = ?"
     )->execute([$id]);
     if ($note !== '') {
-      $pdo->prepare('INSERT INTO form_comments (task_id, user_id, body) VALUES (?, ?, ?)')
-        ->execute([$id, (int) $user['id'], $note]);
+      ll_tf_insert_comment((int) $id, (int) $user['id'], $note, 'rework');
     }
+    ll_tf_log_task_event((int) $id, (int) $user['id'], 'rework', $from, 'rework');
     ll_ok(['task' => ll_tf_load_task($id)]);
   }
 
   if ($method === 'POST' && $sub === 'close') {
+    if (ll_tf_user_is_assignee($user, $task)) {
+      ll_error('You cannot close your own assignment', 403);
+    }
     $uid = (int) $user['id'];
     $canClose = !empty($user['is_super'])
       || ll_tf_can_manage_org($user)
@@ -1236,12 +1575,17 @@ function ll_tf_route_tasks(array $user, ?int $id, string $sub): void
     $pdo->prepare(
       "UPDATE form_tasks SET status = 'closed', closed_at = UTC_TIMESTAMP() WHERE id = ?"
     )->execute([$id]);
+    ll_tf_log_task_event((int) $id, (int) $user['id'], 'closed', 'approved', 'closed');
     ll_ok(['task' => ll_tf_load_task($id)]);
   }
 
   // PATCH-style update via POST update
   if (($method === 'POST' && $sub === 'update') || ($method === 'PATCH' && $sub === '')) {
     $body = ll_read_json_body();
+    if (isset($body['assignee_ids']) || isset($body['assignee_id']) || isset($body['assignees'])) {
+      ll_tf_assert_form_creator($user, (int) $task['group_id']);
+      ll_tf_finalize_task_assignment($user, $task, $body);
+    }
     if (isset($body['status'])) {
       ll_tf_task_set_status($user, $task, $body);
     }
@@ -1259,7 +1603,9 @@ function ll_tf_task_list_row(array $row): array
   return [
     'id' => (int) $row['id'],
     'form_id' => (int) $row['form_id'],
-    'form_title' => (string) ($row['form_title'] ?? ''),
+    'form_title' => ll_tf_task_display_title($row['task_title'] ?? null, $row['form_title'] ?? null),
+    'template_title' => (string) ($row['form_title'] ?? ''),
+    'due_on' => $row['due_on'] ?? null,
     'status' => (string) $row['status'],
     'reviewer_scope' => (string) ($row['reviewer_scope'] ?? 'group'),
     'group_id' => (int) ($row['group_id'] ?? 0),
@@ -1278,79 +1624,149 @@ function ll_tf_task_list_row(array $row): array
   ];
 }
 
+function ll_tf_assert_required_fields_filled(array $task, array $answersById): void
+{
+  foreach ($task['fields'] as $f) {
+    if (empty($f['required'])) {
+      continue;
+    }
+    if (in_array($f['field_type'], ['readonly', 'calculated'], true) || ll_tf_is_system_field($f)) {
+      continue;
+    }
+    $val = $answersById[(int) $f['id']] ?? null;
+    if ($val === null || trim((string) $val) === '') {
+      ll_error('Required field missing: ' . $f['label']);
+    }
+  }
+}
+
 function ll_tf_task_set_status(array $user, array $task, array $body): void
 {
-  $uid = (int) $user['id'];
   $status = (string) ($body['status'] ?? '');
-  if ($status === 'completed') {
-    $status = 'submitted';
-  }
-  if (!in_array($status, ['pending', 'in_progress', 'submitted'], true)) {
-    ll_error('Assignees may set status to pending, in_progress, or submitted');
-  }
-  if ($uid !== (int) $task['assignee_id'] && empty($user['is_super'])) {
-    ll_error('Only the assignee can change this status', 403);
-  }
-  if (in_array($task['status'], ['approved', 'closed'], true)) {
-    ll_error('Task is locked after approval');
-  }
-  $pdo = ll_pdo();
   if ($status === 'submitted') {
-    // Validate required fields
+    ll_tf_task_submit($user, $task, $body);
+    return;
+  }
+  if (!in_array($status, ['pending', 'in_progress', 'completed'], true)) {
+    ll_error('Assignees may set status to pending, in_progress, or completed');
+  }
+  if (!ll_tf_can_set_task_status($user, $task)) {
+    ll_error('Only the assignee or form creator can change this status', 403);
+  }
+  if (in_array($task['status'], ['submitted', 'approved', 'closed'], true)) {
+    ll_error('Task is locked after submit');
+  }
+  if (is_array($body['answers'] ?? null) && ll_tf_can_edit_task_answers($user, $task)) {
+    ll_tf_task_save_answers($user, $task, ['answers' => $body['answers']], false);
+    $task = ll_tf_load_task((int) $task['id']) ?? $task;
+  }
+  $from = (string) ($task['status'] ?? '');
+  if ($from !== $status) {
+    ll_pdo()->prepare('UPDATE form_tasks SET status = ? WHERE id = ?')
+      ->execute([$status, (int) $task['id']]);
+    ll_tf_log_task_event((int) $task['id'], (int) $user['id'], 'status_changed', $from, $status);
+  }
+  ll_ok(['task' => ll_tf_load_task((int) $task['id'])]);
+}
+
+function ll_tf_task_submit(array $user, array $task, ?array $jsonBody = null): void
+{
+  if (!ll_tf_can_set_task_status($user, $task)) {
+    ll_error('Only the assignee or form creator can submit this task', 403);
+  }
+  if (($task['status'] ?? '') !== 'completed') {
+    ll_error('Complete the task before submitting');
+  }
+
+  $answersById = [];
+  foreach ($task['answers'] as $a) {
+    $answersById[(int) $a['field_id']] = $a['value'] ?? null;
+  }
+  if (is_array($jsonBody['answers'] ?? null) && ll_tf_can_edit_task_answers($user, $task)) {
+    ll_tf_task_save_answers($user, $task, ['answers' => $jsonBody['answers']], false);
+    $task = ll_tf_load_task((int) $task['id']) ?? $task;
     $answersById = [];
     foreach ($task['answers'] as $a) {
       $answersById[(int) $a['field_id']] = $a['value'] ?? null;
     }
-    // Merge incoming answers if provided
-    if (is_array($body['answers'] ?? null)) {
-      foreach ($body['answers'] as $a) {
-        $fid = (int) ($a['field_id'] ?? 0);
-        if ($fid > 0) {
-          $answersById[$fid] = $a['value'] ?? null;
-        }
-      }
-      ll_tf_task_save_answers($user, $task, ['answers' => $body['answers']], false);
-      $task = ll_tf_load_task((int) $task['id']) ?? $task;
-      $answersById = [];
-      foreach ($task['answers'] as $a) {
-        $answersById[(int) $a['field_id']] = $a['value'] ?? null;
-      }
-    }
-    foreach ($task['fields'] as $f) {
-      if (empty($f['required'])) {
-        continue;
-      }
-      if (in_array($f['field_type'], ['readonly', 'calculated'], true)) {
-        continue;
-      }
-      $val = $answersById[(int) $f['id']] ?? null;
-      if ($val === null || trim((string) $val) === '') {
-        ll_error('Required field missing: ' . $f['label']);
-      }
-    }
-    $pdo->prepare(
-      "UPDATE form_tasks SET status = 'submitted', submitted_at = UTC_TIMESTAMP() WHERE id = ?"
-    )->execute([(int) $task['id']]);
-    if ($task['status'] !== 'submitted') {
-      try {
-        $fresh = ll_tf_load_task((int) $task['id']);
-        ll_tf_notify_task_completed($fresh ?? $task, $user);
-      } catch (Throwable $e) {
-        // Task is submitted; notification failure must not fail the status change.
-      }
-    }
-  } else {
-    $pdo->prepare('UPDATE form_tasks SET status = ? WHERE id = ?')
-      ->execute([$status, (int) $task['id']]);
   }
-  ll_ok(['task' => ll_tf_load_task((int) $task['id'])]);
+  ll_tf_assert_required_fields_filled($task, $answersById);
+
+  $ct = strtolower((string) ($_SERVER['CONTENT_TYPE'] ?? $_SERVER['HTTP_CONTENT_TYPE'] ?? ''));
+  $multipart = str_contains($ct, 'multipart/form-data');
+  $text = '';
+  $linksIn = [];
+  if ($multipart) {
+    $text = trim((string) ($_POST['body'] ?? ''));
+    $rawLinks = $_POST['links'] ?? [];
+    if (is_string($rawLinks)) {
+      $decoded = json_decode($rawLinks, true);
+      $linksIn = is_array($decoded) ? $decoded : [];
+    } elseif (is_array($rawLinks)) {
+      $linksIn = $rawLinks;
+    }
+  } elseif (is_array($jsonBody)) {
+    $text = trim((string) ($jsonBody['body'] ?? ''));
+    $linksIn = $jsonBody['links'] ?? [];
+  }
+  $links = ll_tf_normalize_comment_links($linksIn);
+  $uploads = $multipart ? ll_tf_collect_upload_files() : [];
+  if (count($uploads) > 8) {
+    ll_error('At most 8 files per comment');
+  }
+  $acceptedAll = [];
+  foreach ($uploads as $file) {
+    $acceptedAll[] = ll_tf_accept_upload($file);
+  }
+
+  $taskId = (int) $task['id'];
+  $stored = [];
+  $attachments = [];
+  try {
+    foreach ($acceptedAll as $accepted) {
+      $storedName = 'cmt_' . bin2hex(random_bytes(8)) . '.' . $accepted['ext'];
+      $rel = ll_tf_store_task_file($taskId, $storedName, $accepted['tmp']);
+      $stored[] = $rel;
+      $attachments[] = [
+        'type' => 'file',
+        'name' => $accepted['safe_name'],
+        'size' => $accepted['size'],
+        'mime' => $accepted['mime'],
+        'stored' => $rel,
+      ];
+    }
+    foreach ($links as $link) {
+      $attachments[] = $link;
+    }
+    if ($text !== '' || $attachments) {
+      ll_tf_insert_comment($taskId, (int) $user['id'], $text, 'submitted', $attachments);
+    }
+  } catch (Throwable $e) {
+    foreach ($stored as $rel) {
+      ll_tf_doc_unlink_stored($rel);
+    }
+    throw $e;
+  }
+
+  $from = (string) $task['status'];
+  ll_pdo()->prepare(
+    "UPDATE form_tasks SET status = 'submitted', submitted_at = UTC_TIMESTAMP() WHERE id = ?"
+  )->execute([$taskId]);
+  ll_tf_log_task_event($taskId, (int) $user['id'], 'submitted', $from, 'submitted');
+  try {
+    $fresh = ll_tf_load_task($taskId);
+    ll_tf_notify_task_completed($fresh ?? $task, $user);
+  } catch (Throwable $e) {
+    // Task is submitted; notification failure must not fail the status change.
+  }
+  ll_ok(['task' => ll_tf_load_task($taskId)]);
 }
 
 function ll_tf_task_save_answers(array $user, array $task, array $body, bool $respond = true): void
 {
   $uid = (int) $user['id'];
-  if ($uid !== (int) $task['assignee_id'] && empty($user['is_super'])) {
-    ll_error('Only the assignee can edit answers', 403);
+  if (!ll_tf_can_edit_task_answers($user, $task)) {
+    ll_error('Only the form creator can edit answers', 403);
   }
   if (in_array($task['status'], ['approved', 'closed'], true)) {
     ll_error('Answers are locked after approval');
@@ -1378,16 +1794,20 @@ function ll_tf_task_save_answers(array $user, array $task, array $body, bool $re
       continue;
     }
     $f = $fieldsById[$fid];
-    if (in_array($f['field_type'], ['readonly', 'calculated'], true)) {
-      continue; // ignore client writes
-    }
     $val = $a['value'] ?? null;
     if ($val !== null && !is_scalar($val)) {
       $val = json_encode($val);
     }
     $valStr = $val === null ? null : (string) $val;
-    if ($f['field_type'] === 'number' && $valStr !== null && $valStr !== '' && !is_numeric($valStr)) {
+    if (in_array($f['field_type'], ['number', 'calculated'], true)
+        && !ll_tf_is_valid_number_answer($valStr)) {
       ll_error('Invalid number for field: ' . $f['label']);
+    }
+    if ($f['field_type'] === 'url' && !ll_tf_is_valid_url_answer($valStr)) {
+      ll_error('Invalid URL for field: ' . $f['label']);
+    }
+    if (in_array($f['field_type'], ['readonly', 'calculated', 'document', 'assign_to', 'status', 'reviewer'], true)) {
+      continue; // ignore client writes; calculated is recomputed; documents via /files
     }
     $upsert->execute([(int) $task['id'], $fid, $valStr]);
     $answersByFieldId[$fid] = $valStr;
@@ -1402,13 +1822,19 @@ function ll_tf_task_save_answers(array $user, array $task, array $body, bool $re
   $answersByFieldId = ll_tf_apply_calculated($task['fields'], $answersByFieldId);
   foreach ($task['fields'] as $f) {
     if ($f['field_type'] === 'calculated') {
-      $upsert->execute([(int) $task['id'], $f['id'], $answersByFieldId[$f['id']] ?? null]);
+      $computed = $answersByFieldId[$f['id']] ?? null;
+      if (!ll_tf_is_valid_number_answer($computed)) {
+        $computed = null;
+        $answersByFieldId[$f['id']] = null;
+      }
+      $upsert->execute([(int) $task['id'], $f['id'], $computed]);
     }
   }
   // Auto move pending → in_progress on first save
   if ($task['status'] === 'pending') {
     $pdo->prepare("UPDATE form_tasks SET status = 'in_progress' WHERE id = ?")
       ->execute([(int) $task['id']]);
+    ll_tf_log_task_event((int) $task['id'], (int) $user['id'], 'status_changed', 'pending', 'in_progress');
   } else {
     $pdo->prepare('UPDATE form_tasks SET updated_at = UTC_TIMESTAMP() WHERE id = ?')
       ->execute([(int) $task['id']]);
@@ -1416,6 +1842,209 @@ function ll_tf_task_save_answers(array $user, array $task, array $body, bool $re
   if ($respond) {
     ll_ok(['task' => ll_tf_load_task((int) $task['id'])]);
   }
+}
+
+function ll_tf_task_add_comment(array $user, array $task): void
+{
+  $ct = strtolower((string) ($_SERVER['CONTENT_TYPE'] ?? $_SERVER['HTTP_CONTENT_TYPE'] ?? ''));
+  $multipart = str_contains($ct, 'multipart/form-data');
+  $text = '';
+  $linksIn = [];
+  $timeSpent = null;
+  if ($multipart) {
+    $text = trim((string) ($_POST['body'] ?? ''));
+    $rawLinks = $_POST['links'] ?? [];
+    if (is_string($rawLinks)) {
+      $decoded = json_decode($rawLinks, true);
+      $linksIn = is_array($decoded) ? $decoded : [];
+    } elseif (is_array($rawLinks)) {
+      $linksIn = $rawLinks;
+    }
+    $timeSpent = ll_tf_parse_time_spent_minutes($_POST['time_spent_minutes'] ?? $_POST['time_spent'] ?? null);
+  } else {
+    $body = ll_read_json_body();
+    $text = trim((string) ($body['body'] ?? ''));
+    $linksIn = $body['links'] ?? [];
+    $timeSpent = ll_tf_parse_time_spent_minutes($body['time_spent_minutes'] ?? $body['time_spent'] ?? null);
+  }
+  $links = ll_tf_normalize_comment_links($linksIn);
+  $uploads = $multipart ? ll_tf_collect_upload_files() : [];
+  if (count($uploads) > 8) {
+    ll_error('At most 8 files per comment');
+  }
+  $acceptedAll = [];
+  foreach ($uploads as $file) {
+    $acceptedAll[] = ll_tf_accept_upload($file);
+  }
+  if ($text === '' && !$links && !$acceptedAll) {
+    ll_error('Comment text, file, or link is required');
+  }
+
+  $taskId = (int) $task['id'];
+  $stored = [];
+  $attachments = [];
+  try {
+    foreach ($acceptedAll as $accepted) {
+      $storedName = 'cmt_' . bin2hex(random_bytes(8)) . '.' . $accepted['ext'];
+      $rel = ll_tf_store_task_file($taskId, $storedName, $accepted['tmp']);
+      $stored[] = $rel;
+      $attachments[] = [
+        'type' => 'file',
+        'name' => $accepted['safe_name'],
+        'size' => $accepted['size'],
+        'mime' => $accepted['mime'],
+        'stored' => $rel,
+      ];
+    }
+    foreach ($links as $link) {
+      $attachments[] = $link;
+    }
+    ll_tf_insert_comment($taskId, (int) $user['id'], $text, (string) ($task['status'] ?? ''), $attachments, $timeSpent);
+  } catch (Throwable $e) {
+    foreach ($stored as $rel) {
+      ll_tf_doc_unlink_stored($rel);
+    }
+    throw $e;
+  }
+  ll_ok(['task' => ll_tf_load_task($taskId)], 201);
+}
+
+function ll_tf_comment_download_file(array $user, array $task): void
+{
+  $commentId = (int) ($_GET['comment_id'] ?? 0);
+  $index = (int) ($_GET['i'] ?? -1);
+  if ($commentId < 1 || $index < 0) {
+    ll_error('File not found', 404);
+  }
+  $stmt = ll_pdo()->prepare(
+    'SELECT id, attachments_json FROM form_comments WHERE id = ? AND task_id = ? LIMIT 1'
+  );
+  $stmt->execute([$commentId, (int) $task['id']]);
+  $row = $stmt->fetch();
+  if (!$row) {
+    ll_error('File not found', 404);
+  }
+  $atts = ll_tf_parse_comment_attachments($row['attachments_json'] ?? null);
+  $att = $atts[$index] ?? null;
+  if (!$att || ($att['type'] ?? '') !== 'file') {
+    ll_error('File not found', 404);
+  }
+  $abs = ll_tf_doc_abs_path((string) ($att['stored'] ?? ''));
+  if (!$abs || !is_file($abs)) {
+    ll_error('File not found', 404);
+  }
+  $downloadName = (string) ($att['name'] ?? 'document');
+  $downloadName = str_replace(['"', "\r", "\n"], '', $downloadName);
+  $mime = (string) (($att['mime'] ?? '') !== '' ? $att['mime'] : 'application/octet-stream');
+  $inline = str_starts_with($mime, 'image/') || $mime === 'application/pdf' || str_starts_with($mime, 'text/');
+  header('Content-Type: ' . $mime);
+  header('X-Content-Type-Options: nosniff');
+  header('Cache-Control: private, no-store');
+  header('Content-Length: ' . (string) filesize($abs));
+  header(
+    ($inline ? 'Content-Disposition: inline' : 'Content-Disposition: attachment')
+    . '; filename="' . $downloadName . '"'
+  );
+  readfile($abs);
+  exit;
+}
+
+function ll_tf_task_upload_file(array $user, array $task): void
+{
+  if (!ll_tf_can_edit_task_answers($user, $task)) {
+    ll_error('Only the form creator can upload files', 403);
+  }
+  if (in_array($task['status'], ['approved', 'closed'], true)) {
+    ll_error('Answers are locked after approval');
+  }
+  $fid = (int) ($_POST['field_id'] ?? 0);
+  $fieldsById = [];
+  foreach ($task['fields'] as $f) {
+    $fieldsById[(int) $f['id']] = $f;
+  }
+  if ($fid < 1 || !isset($fieldsById[$fid]) || ($fieldsById[$fid]['field_type'] ?? '') !== 'document') {
+    ll_error('Document field not found');
+  }
+  if (empty($_FILES['file']) || !is_array($_FILES['file'])) {
+    ll_error('file is required');
+  }
+  $accepted = ll_tf_accept_upload($_FILES['file']);
+  $taskId = (int) $task['id'];
+  $storedName = $fid . '_' . bin2hex(random_bytes(8)) . '.' . $accepted['ext'];
+  $stored = ll_tf_store_task_file($taskId, $storedName, $accepted['tmp']);
+  $size = $accepted['size'];
+  $mime = $accepted['mime'];
+  $safeName = $accepted['safe_name'];
+  foreach ($task['answers'] as $a) {
+    if ((int) ($a['field_id'] ?? 0) === $fid) {
+      $prev = ll_tf_parse_document_answer($a['value'] ?? null);
+      if ($prev && ($prev['stored'] ?? '') !== $stored) {
+        ll_tf_doc_unlink_stored($prev['stored']);
+      }
+      break;
+    }
+  }
+  $payload = json_encode([
+    'name' => $safeName,
+    'size' => $size,
+    'mime' => $mime,
+    'stored' => $stored,
+  ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+  $pdo = ll_pdo();
+  $pdo->prepare(
+    'INSERT INTO form_answers (task_id, field_id, value_text) VALUES (?, ?, ?)
+     ON DUPLICATE KEY UPDATE value_text = VALUES(value_text)'
+  )->execute([$taskId, $fid, $payload]);
+  if ($task['status'] === 'pending') {
+    $pdo->prepare("UPDATE form_tasks SET status = 'in_progress' WHERE id = ?")
+      ->execute([$taskId]);
+    ll_tf_log_task_event($taskId, (int) $user['id'], 'status_changed', 'pending', 'in_progress');
+  } else {
+    $pdo->prepare('UPDATE form_tasks SET updated_at = UTC_TIMESTAMP() WHERE id = ?')
+      ->execute([$taskId]);
+  }
+  ll_ok(['task' => ll_tf_load_task($taskId)]);
+}
+
+function ll_tf_task_download_file(array $user, array $task): void
+{
+  $fid = (int) ($_GET['field_id'] ?? 0);
+  $fieldsById = [];
+  foreach ($task['fields'] as $f) {
+    $fieldsById[(int) $f['id']] = $f;
+  }
+  if ($fid < 1 || !isset($fieldsById[$fid]) || ($fieldsById[$fid]['field_type'] ?? '') !== 'document') {
+    ll_error('Document field not found', 404);
+  }
+  $value = null;
+  foreach ($task['answers'] as $a) {
+    if ((int) ($a['field_id'] ?? 0) === $fid) {
+      $value = $a['value'] ?? null;
+      break;
+    }
+  }
+  $meta = ll_tf_parse_document_answer($value);
+  if (!$meta) {
+    ll_error('File not found', 404);
+  }
+  $abs = ll_tf_doc_abs_path($meta['stored']);
+  if (!$abs || !is_file($abs)) {
+    ll_error('File not found', 404);
+  }
+  $downloadName = $meta['name'] !== '' ? $meta['name'] : 'document';
+  $downloadName = str_replace(['"', "\r", "\n"], '', $downloadName);
+  $mime = $meta['mime'] !== '' ? $meta['mime'] : 'application/octet-stream';
+  $inline = str_starts_with($mime, 'image/') || $mime === 'application/pdf' || str_starts_with($mime, 'text/');
+  header('Content-Type: ' . $mime);
+  header('X-Content-Type-Options: nosniff');
+  header('Cache-Control: private, no-store');
+  header('Content-Length: ' . (string) filesize($abs));
+  header(
+    ($inline ? 'Content-Disposition: inline' : 'Content-Disposition: attachment')
+    . '; filename="' . $downloadName . '"'
+  );
+  readfile($abs);
+  exit;
 }
 
 function ll_tf_route_review(array $user, ?int $id, string $sub): void
@@ -1436,6 +2065,7 @@ function ll_tf_route_review_list(array $user, string $since = ''): void
 
   if ($isAll) {
     $sql = "SELECT t.id, t.form_id, t.status, t.reviewer_scope, t.updated_at, t.submitted_at,
+                   t.title AS task_title, t.due_on,
                    t.assignee_id, ua.display_name AS assignee_name,
                    f.title AS form_title, g.id AS group_id, g.name AS group_name,
                    d.id AS department_id, d.name AS department_name
@@ -1450,11 +2080,12 @@ function ll_tf_route_review_list(array $user, string $since = ''): void
       $sql .= ' AND t.updated_at > ?';
       $params[] = $since;
     }
-    $sql .= ' ORDER BY FIELD(t.status, \'submitted\', \'rework\', \'in_progress\', \'pending\', \'approved\'), t.updated_at DESC';
+    $sql .= ' ORDER BY FIELD(t.status, \'submitted\', \'rework\', \'completed\', \'in_progress\', \'pending\', \'approved\'), t.updated_at DESC';
     $stmt = $pdo->prepare($sql);
     $stmt->execute($params);
   } else {
     $sql = "SELECT DISTINCT t.id, t.form_id, t.status, t.reviewer_scope, t.updated_at, t.submitted_at,
+                   t.title AS task_title, t.due_on,
                    t.assignee_id, ua.display_name AS assignee_name,
                    f.title AS form_title, g.id AS group_id, g.name AS group_name,
                    d.id AS department_id, d.name AS department_name
@@ -1463,19 +2094,29 @@ function ll_tf_route_review_list(array $user, string $since = ''): void
             INNER JOIN org_groups g ON g.id = f.group_id
             INNER JOIN departments d ON d.id = g.department_id
             INNER JOIN users ua ON ua.id = t.assignee_id
-            INNER JOIN group_members gm ON gm.user_id = ? AND gm.role = 'reviewer'
-            INNER JOIN org_groups rg ON rg.id = gm.group_id
+            LEFT JOIN form_task_reviewers ftr ON ftr.task_id = t.id AND ftr.user_id = ?
+            LEFT JOIN group_members gm ON gm.user_id = ? AND gm.role = 'reviewer'
+            LEFT JOIN org_groups rg ON rg.id = gm.group_id
             WHERE t.status <> 'closed'
               AND (
-                (t.reviewer_scope = 'group' AND g.id = gm.group_id)
-                OR (t.reviewer_scope = 'department' AND g.department_id = rg.department_id)
+                ftr.user_id IS NOT NULL
+                OR t.reviewer_id = ?
+                OR (
+                  t.reviewer_id IS NULL
+                  AND NOT EXISTS (SELECT 1 FROM form_task_reviewers x WHERE x.task_id = t.id)
+                  AND gm.id IS NOT NULL
+                  AND (
+                    (t.reviewer_scope = 'group' AND g.id = gm.group_id)
+                    OR (t.reviewer_scope = 'department' AND g.department_id = rg.department_id)
+                  )
+                )
               )";
-    $params = [$uid];
+    $params = [$uid, $uid, $uid];
     if ($since !== '') {
       $sql .= ' AND t.updated_at > ?';
       $params[] = $since;
     }
-    $sql .= ' ORDER BY FIELD(t.status, \'submitted\', \'rework\', \'in_progress\', \'pending\', \'approved\'), t.updated_at DESC';
+    $sql .= ' ORDER BY FIELD(t.status, \'submitted\', \'rework\', \'completed\', \'in_progress\', \'pending\', \'approved\'), t.updated_at DESC';
     $stmt = $pdo->prepare($sql);
     $stmt->execute($params);
   }

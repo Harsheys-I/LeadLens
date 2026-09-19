@@ -1,8 +1,8 @@
-import {requireAuth, logout, getUser, hasPermission, requirePermission, changePassword, updateProfile} from '../auth.js?v=7.0.3.stable';
-import {AdminApi, DashboardApi} from '../api-client.js?v=7.0.3.stable';
-import {mountNotifications} from '../notifications-ui.js?v=7.0.3.stable';
-import {appUrl, homePath} from '../app-base.js?v=7.0.3.stable';
-import {initTheme} from '../theme.js?v=7.0.3.stable';
+import {requireAuth, logout, getUser, hasPermission, requirePermission, changePassword, updateProfile} from '../auth.js?v=7.2.1.dev';
+import {AdminApi, DashboardApi, TeamFormsApi} from '../api-client.js?v=7.2.1.dev';
+import {mountNotifications} from '../notifications-ui.js?v=7.2.1.dev';
+import {appUrl, homePath} from '../app-base.js?v=7.2.1.dev';
+import {initTheme} from '../theme.js?v=7.2.1.dev';
 
 const $ = id => document.getElementById(id);
 const titles = {users: 'User creation', roles: 'Roles'};
@@ -11,6 +11,9 @@ let catalog = [];
 let editingRole = null;
 let telecallerNames = [];
 let notifCtl = null;
+let orgDepartments = [];
+let orgGroups = [];
+let canAssignOrg = false;
 
 function toast(msg){
   const el = $('toast');
@@ -204,6 +207,30 @@ async function loadTelecallerNames(){
   }
 }
 
+async function loadOrgCatalog(){
+  canAssignOrg = Boolean(getUser()?.is_super || hasPermission('team_forms.manage_org'));
+  try {
+    const data = await AdminApi.orgCatalog();
+    orgDepartments = data.departments || [];
+    orgGroups = data.groups || [];
+    if (typeof data.can_assign_org === 'boolean') canAssignOrg = data.can_assign_org;
+    return;
+  } catch {
+    // Fall back to Team Forms GET departments + groups when Admin org catalog is unavailable.
+  }
+  try {
+    const [deptData, groupData] = await Promise.all([
+      TeamFormsApi.listDepartments(),
+      TeamFormsApi.listGroups(),
+    ]);
+    orgDepartments = deptData.departments || [];
+    orgGroups = groupData.groups || [];
+  } catch {
+    orgDepartments = [];
+    orgGroups = [];
+  }
+}
+
 async function loadRolesCache(){
   const data = await AdminApi.listRoles();
   rolesCache = data.roles || [];
@@ -219,6 +246,7 @@ async function refreshUsers(){
     ]);
     renderAccessQueue(reqData.requests || []);
     renderUsersTable(usersData.users || []);
+    if (typeof usersData.can_assign_org === 'boolean') canAssignOrg = usersData.can_assign_org;
   } catch (err) {
     toast(err.message || 'Could not load users');
     mount.innerHTML = `<div class="empty-card">Could not load users. ${escapeHtml(err.message || '')}</div>`;
@@ -304,7 +332,154 @@ function renderUsersTable(users){
   mount.replaceChildren(table);
 }
 
-function openUserModal(user = null){
+function userOrgIds(user){
+  const groupIds = new Set();
+  const deptIds = new Set();
+  for (const id of user?.group_ids || []) groupIds.add(Number(id));
+  for (const id of user?.department_ids || []) deptIds.add(Number(id));
+  for (const m of user?.org_memberships || []) {
+    if (m?.group_id != null) groupIds.add(Number(m.group_id));
+    if (m?.department_id != null) deptIds.add(Number(m.department_id));
+  }
+  for (const g of orgGroups) {
+    if (groupIds.has(Number(g.id))) deptIds.add(Number(g.department_id));
+  }
+  return {groupIds, deptIds};
+}
+
+function appendOrgCheck(mount, {value, label, checked, disabled, departmentId}){
+  const row = document.createElement('label');
+  row.className = 'check-row';
+  const input = document.createElement('input');
+  input.type = 'checkbox';
+  input.value = String(value);
+  input.checked = Boolean(checked);
+  input.disabled = Boolean(disabled);
+  if (departmentId != null) input.dataset.departmentId = String(departmentId);
+  row.append(input, Object.assign(document.createElement('span'), {textContent: label}));
+  mount.append(row);
+  return input;
+}
+
+function selectedOrgDepartmentIds(){
+  return [...document.querySelectorAll('#user-departments input[type=checkbox]:checked')].map(i => Number(i.value));
+}
+
+function collectOrgGroupIds(){
+  const selectedDepts = new Set(selectedOrgDepartmentIds());
+  return [...document.querySelectorAll('#user-groups input[type=checkbox]:checked')]
+    .filter(i => selectedDepts.has(Number(i.dataset.departmentId)))
+    .map(i => Number(i.value));
+}
+
+function syncOrgGroupVisibility(){
+  const selected = new Set(selectedOrgDepartmentIds());
+  const section = $('user-groups-section');
+  let visible = 0;
+  document.querySelectorAll('#user-groups [data-org-group-block]').forEach(block => {
+    const show = selected.has(Number(block.dataset.departmentId));
+    block.classList.toggle('hidden', !show);
+    if (show) visible += 1;
+  });
+  const empty = $('user-groups-empty');
+  if (empty) {
+    const noGroupsForSelected = selected.size > 0 && visible === 0;
+    empty.classList.toggle('hidden', !noGroupsForSelected);
+    if (noGroupsForSelected) empty.textContent = 'No groups in the selected departments.';
+  }
+  section?.classList.toggle('hidden', selected.size === 0 && visible === 0);
+}
+
+function onOrgDepartmentToggle(input){
+  const deptId = Number(input.value);
+  if (!input.checked) {
+    document.querySelectorAll(`#user-groups input[data-department-id="${deptId}"]`).forEach(cb => {
+      cb.checked = false;
+    });
+  }
+  syncOrgGroupVisibility();
+}
+
+function renderUserOrgChecks(user = null){
+  const wrap = $('user-org-wrap');
+  const hint = $('user-org-hint');
+  const deptMount = $('user-departments');
+  const groupMount = $('user-groups');
+  const section = $('user-groups-section');
+  if (!wrap || !deptMount || !groupMount) return;
+
+  const editable = canAssignOrg;
+  hint.textContent = editable
+    ? 'Membership is per group. Checking a department only reveals its groups.'
+    : 'Org assignment is read-only. Super User or Manage org permission is required to change it.';
+  wrap.classList.toggle('is-readonly', !editable);
+
+  const {groupIds, deptIds} = userOrgIds(user);
+  deptMount.replaceChildren();
+  if (!orgDepartments.length) {
+    const names = (user?.org_memberships || []).map(m => {
+      const dept = m.department_name || 'Department';
+      const group = m.group_name || 'Group';
+      return `${dept} · ${group}`;
+    }).filter(Boolean);
+    deptMount.innerHTML = names.length
+      ? `<p class="muted">Current groups: ${escapeHtml(names.join(', '))}</p>`
+      : '<p class="muted">No departments yet. Create them in Team Forms.</p>';
+  } else {
+    for (const dept of orgDepartments) {
+      const input = appendOrgCheck(deptMount, {
+        value: dept.id,
+        label: dept.name,
+        checked: deptIds.has(Number(dept.id)),
+        disabled: !editable,
+      });
+      if (editable) {
+        input.addEventListener('change', () => onOrgDepartmentToggle(input));
+      }
+    }
+  }
+
+  groupMount.replaceChildren();
+  const empty = document.createElement('p');
+  empty.id = 'user-groups-empty';
+  empty.className = 'muted hidden';
+  empty.textContent = 'Select a department to see its groups.';
+  groupMount.append(empty);
+
+  const byDept = new Map();
+  for (const g of orgGroups) {
+    const did = Number(g.department_id);
+    if (!byDept.has(did)) byDept.set(did, []);
+    byDept.get(did).push(g);
+  }
+  for (const dept of orgDepartments) {
+    const groups = byDept.get(Number(dept.id)) || [];
+    if (!groups.length) continue;
+    const block = document.createElement('div');
+    block.className = 'perm-group user-org-dept-groups';
+    block.dataset.orgGroupBlock = '1';
+    block.dataset.departmentId = String(dept.id);
+    block.append(Object.assign(document.createElement('strong'), {textContent: dept.name}));
+    for (const g of groups) {
+      appendOrgCheck(block, {
+        value: g.id,
+        label: g.name,
+        checked: groupIds.has(Number(g.id)),
+        disabled: !editable,
+        departmentId: dept.id,
+      });
+    }
+    groupMount.append(block);
+  }
+  if (!orgGroups.length && orgDepartments.length) {
+    empty.textContent = 'No groups yet. Create them in Team Forms.';
+    empty.classList.remove('hidden');
+  }
+  syncOrgGroupVisibility();
+  if (section && !orgDepartments.length) section.classList.add('hidden');
+}
+
+async function openUserModal(user = null){
   const actor = getUser();
   if (user && !canEditUserRow(user)) {
     toast('You cannot edit this user');
@@ -326,6 +501,15 @@ function openUserModal(user = null){
   $('user-form-message').textContent = editingSelf
     ? 'Your own role is locked — ask a higher-rank account to change it.'
     : '';
+  await loadOrgCatalog();
+  let detail = user;
+  if (user?.id) {
+    try {
+      const data = await AdminApi.getUser(user.id);
+      if (data?.user) detail = {...user, ...data.user};
+    } catch { /* list payload is enough to prefill */ }
+  }
+  renderUserOrgChecks(detail);
   $('user-modal').classList.remove('hidden');
 }
 
@@ -481,6 +665,7 @@ $('user-form').onsubmit = async (e) => {
   if (!editingSelf) body.role_id = Number($('user-role').value);
   const pw = $('user-password').value;
   if (pw) body.password = pw;
+  if (canAssignOrg) body.group_ids = collectOrgGroupIds();
   try {
     if (id) await AdminApi.updateUser(Number(id), body);
     else {
@@ -616,7 +801,7 @@ $('account-save')?.addEventListener('click', async () => {
   });
 
   try {
-    await Promise.all([loadRolesCache(), loadTelecallerNames()]);
+    await Promise.all([loadRolesCache(), loadTelecallerNames(), loadOrgCatalog()]);
   } catch (err) {
     toast(err.message || 'Could not load admin data');
   }

@@ -1,8 +1,8 @@
 /**
  * /dev Super User ERP Sync panel — fetch ERP → store raw → hand off to main Audit UI.
  */
-import {api} from './api-client.js?v=7.0.3.stable';
-import {getUser} from './auth.js?v=7.0.3.stable';
+import {api} from './api-client.js?v=7.2.1.dev';
+import {getUser} from './auth.js?v=7.2.1.dev';
 
 const FIELD_IDS = [
   'mobile', 'project', 'registration', 'telecaller', 'source', 'update',
@@ -194,7 +194,7 @@ function formatDailyLine(daily) {
   if (daily.needs_continue || daily.partial) {
     const done = daily.done ?? daily.audited ?? 0;
     const total = daily.total ?? daily.lead_count ?? '?';
-    return `Last scheduled run: auditing ${done}/${total} at ${when} (continue cron will resume)`;
+    return `Last scheduled run: auditing ${done}/${total} at ${when} (self-chain continues)`;
   }
   if (daily.phase === 'published' || daily.auto_publish) {
     return `Last scheduled run: published ${daily.published_count ?? 0} dashboard(s) at ${when}`;
@@ -251,8 +251,8 @@ function applyConfig(config, diag = null) {
   $('erp-sync-max-leads').value = String(config.max_leads_per_run ?? 40);
   $('erp-sync-cron-secret').value = '';
   $('erp-sync-cron-hint').textContent = config.cron_secret_configured
-    ? 'Cron secret is set. Paste a new value only to rotate it.'
-    : 'Set a cron secret before enabling Hostinger cron.';
+    ? 'Cron secret is set. Paste a new value only to rotate it. Daily/self-chain is primary; continue-every-10m cron is optional backup.'
+    : 'Set a cron secret before enabling Hostinger cron (daily + keep-alive; continue cron optional).';
   const keepaliveDiag = diag || null;
   writeKeepaliveStatus(config.last_keepalive, keepaliveDiag);
   writeDailyStatus(config.last_daily_status);

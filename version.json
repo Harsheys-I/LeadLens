@@ -1,5 +1,5 @@
 {
-  "version": "7.0.3.stable",
+  "version": "7.2.1.dev",
   "name": "GPP AI",
-  "notes": "v7.0.3.stable: ERP Sync keep-alive diagnostics (manual vs cron), IST timestamps, GET/cron_secret for Hostinger, clearer hPanel setup."
+  "notes": "v7.2.1.dev: ERP Sync daily/continue self-chains audit batches (in-request loop + fire-and-forget continue) so progress does not wait on the 10-minute cron; continue cron is optional backup."
 }

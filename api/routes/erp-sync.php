@@ -11,8 +11,8 @@ require_once __DIR__ . '/../lib/erp-sync.php';
  *   POST erp-sync/fetch-for-audit  (primary: fetch → store → map → latest-leads)
  *   GET  erp-sync/latest-leads
  *   POST erp-sync/run             (optional advanced: server OpenAI audit loop)
- *   POST erp-sync/daily           (cron: fresh fetch + audit + publish)
- *   POST erp-sync/continue        (cron: resume audit only if job needs_continue)
+ *   POST erp-sync/daily           (cron: fresh fetch + audit + self-chain + publish)
+ *   POST erp-sync/continue        (resume audit if needs_continue; self-chains; idle no-op)
  *   POST|GET erp-sync/keepalive|ping  (session keep-alive; cron or Super User)
  *   POST erp-sync/publish
  *   GET erp-sync/status
