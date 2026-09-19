@@ -30,6 +30,7 @@ const BUSY_DISABLE_IDS = [
   'erp-sync-test',
   'erp-sync-fetch-audit',
   'erp-sync-ping',
+  'erp-sync-run-daily',
   'erp-sync-run-server',
   'erp-sync-publish'
 ];
@@ -182,33 +183,60 @@ function writeKeepaliveStatus(ka, diag = null) {
     : '';
 }
 
-function formatDailyLine(daily) {
-  if (!daily || typeof daily !== 'object') return 'Last scheduled run: never.';
-  const when = formatIst(daily.at);
-  if (daily.session_expired) {
-    return `Last scheduled run: session expired at ${when} — refresh Cookie; no publish.`;
-  }
-  if (daily.ok === false) {
-    return `Last scheduled run: failed at ${when} — ${daily.error || daily.phase || 'error'}`;
-  }
-  if (daily.needs_continue || daily.partial) {
-    const done = daily.done ?? daily.audited ?? 0;
-    const total = daily.total ?? daily.lead_count ?? '?';
-    return `Last scheduled run: auditing ${done}/${total} at ${when} (self-chain continues)`;
-  }
-  if (daily.phase === 'published' || daily.auto_publish) {
-    return `Last scheduled run: published ${daily.published_count ?? 0} dashboard(s) at ${when}`;
-  }
-  if (daily.complete || daily.phase === 'ready') {
-    return `Last scheduled run: audit complete at ${when}${daily.message ? ` — ${daily.message}` : ''}`;
-  }
-  return `Last scheduled run: ${daily.phase || 'ok'} at ${when}${daily.message ? ` — ${daily.message}` : ''}`;
+function istMinutesFromIso(iso) {
+  const d = new Date(String(iso));
+  if (Number.isNaN(d.getTime())) return null;
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Asia/Kolkata',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false
+  }).formatToParts(d);
+  const hour = Number(parts.find((p) => p.type === 'hour')?.value);
+  const minute = Number(parts.find((p) => p.type === 'minute')?.value);
+  if (!Number.isFinite(hour) || !Number.isFinite(minute)) return null;
+  return hour * 60 + minute;
 }
 
-function writeDailyStatus(daily) {
+function formatDailyLine(daily, schedule = null) {
+  if (!daily || typeof daily !== 'object') {
+    const next = schedule?.next_at ? ` Next window ${formatIst(schedule.next_at)}.` : '';
+    return `Last scheduled run: never.${next}`;
+  }
+  const when = formatIst(daily.at);
+  let line;
+  if (daily.skipped_window || daily.status === 'outside_ist_window') {
+    line = `Last scheduled run: ignored at ${when} (outside 6:00 AM IST window)`;
+  } else if (daily.session_expired) {
+    line = `Last scheduled run: session expired at ${when} — refresh Cookie; no publish.`;
+  } else if (daily.ok === false) {
+    line = `Last scheduled run: failed at ${when} — ${daily.error || daily.phase || 'error'}`;
+  } else if (daily.needs_continue || daily.partial) {
+    const done = daily.done ?? daily.audited ?? 0;
+    const total = daily.total ?? daily.lead_count ?? '?';
+    line = `Last scheduled run: auditing ${done}/${total} at ${when} (self-chain continues)`;
+  } else if (daily.phase === 'published' || daily.auto_publish) {
+    line = `Last scheduled run: published ${daily.published_count ?? 0} dashboard(s) at ${when}`;
+  } else if (daily.complete || daily.phase === 'ready') {
+    line = `Last scheduled run: audit complete at ${when}${daily.message ? ` — ${daily.message}` : ''}`;
+  } else {
+    line = `Last scheduled run: ${daily.phase || 'ok'} at ${when}${daily.message ? ` — ${daily.message}` : ''}`;
+  }
+  return line;
+}
+
+function writeDailyStatus(daily, schedule = null) {
   const el = $('erp-sync-daily-status');
   if (!el) return;
-  el.textContent = formatDailyLine(daily);
+  const lines = [formatDailyLine(daily, schedule)];
+  if (schedule?.next_at) {
+    lines.push(`Next 6:00 AM IST window: ${formatIst(schedule.next_at)} — keep-alive starts it (Hostinger /daily outside that window is ignored).`);
+  }
+  const mins = daily?.at ? istMinutesFromIso(daily.at) : null;
+  if (mins != null && (mins < (5 * 60 + 55) || mins > (6 * 60 + 45)) && daily.ok === false) {
+    lines.push('That failure was not at 6:00 AM IST. After this deploy, the 4pm Hostinger hit will no-op and keep-alive will kick off at 6:00 AM IST.');
+  }
+  el.textContent = lines.join('\n');
   el.style.color = (daily?.ok === false || daily?.session_expired)
     ? 'var(--danger, #b42318)'
     : '';
@@ -354,7 +382,10 @@ function statusElWrite(payload) {
   if (statusEl) statusEl.textContent = formatStatus(payload);
   const ka = payload?.last_keepalive || payload?.config?.last_keepalive;
   writeKeepaliveStatus(ka, payload?.keepalive || null);
-  writeDailyStatus(payload?.last_daily_status || payload?.config?.last_daily_status);
+  writeDailyStatus(
+    payload?.last_daily_status || payload?.config?.last_daily_status,
+    payload?.daily_schedule || null
+  );
 }
 
 /** Super User only — available on production `/` and `/dev`. */
@@ -663,6 +694,57 @@ async function pingKeepalive() {
   }
 }
 
+/** Super User: start the same pipeline cron uses at 6:00 AM IST (bypass window). */
+async function runDailyNow() {
+  if (busy) return;
+  const signal = beginAbortableRequest();
+  setBusy(true, {activeId: 'erp-sync-run-daily', workingLabel: 'Daily…'});
+  setMsg('Starting daily pipeline (fetch + server audit + publish)…');
+  updateProgressUI({
+    label: 'Daily pipeline…',
+    percent: '…',
+    indeterminate: true,
+    detail: 'Fresh ERP fetch, then server AI audit. Self-chain continues until publish.'
+  });
+  try {
+    await saveConfigQuiet(signal);
+    const data = await api('erp-sync/daily', {method: 'POST', body: {}, signal});
+    if (data.ok === false) {
+      setMsg(data.error || 'Daily pipeline failed', true);
+      updateProgressUI({label: 'Error', percent: '—', width: '0%', detail: data.error || 'Failed', error: true});
+    } else if (data.partial || data.needs_continue) {
+      const done = data.audited ?? data.done ?? 0;
+      const total = data.total ?? data.lead_count ?? '?';
+      setMsg(`Daily audit ${done}/${total} — self-chain continues.`);
+      updateProgressUI({
+        label: `Daily audit ${done}/${total}`,
+        percent: total && Number(total) ? `${Math.round(done / Number(total) * 100)}%` : '…',
+        width: total && Number(total) ? `${Math.min(100, Math.round(done / Number(total) * 100))}%` : '35%',
+        detail: data.message || 'Self-chain continues in the background.'
+      });
+    } else {
+      setMsg(data.message || `Daily pipeline done (${data.result_count ?? data.audited ?? 0} results)`);
+      updateProgressUI({
+        label: data.phase === 'published' ? 'Published' : 'Daily complete',
+        percent: '100%',
+        width: '100%',
+        detail: data.message || 'Daily pipeline finished.'
+      });
+    }
+    await refreshStatus({signal});
+  } catch (err) {
+    if (isAbortError(err)) {
+      setMsg('Stopped.');
+    } else {
+      setMsg(err.message || 'Daily pipeline failed', true);
+      updateProgressUI({label: 'Error', percent: '—', width: '0%', detail: err.message || 'Failed', error: true});
+    }
+  } finally {
+    clearAbortController();
+    setBusy(false);
+  }
+}
+
 /** Optional advanced: server-side OpenAI audit (not the primary path). */
 async function runServerAuditOnce() {
   if (busy) return;
@@ -772,6 +854,7 @@ export function mountErpSyncPanel({toast, showView, loadErpIntoAudit} = {}) {
   $('erp-sync-test')?.addEventListener('click', () => testFetch());
   $('erp-sync-fetch-audit')?.addEventListener('click', () => fetchAndSendToAudit());
   $('erp-sync-ping')?.addEventListener('click', () => pingKeepalive());
+  $('erp-sync-run-daily')?.addEventListener('click', () => runDailyNow());
   $('erp-sync-run-server')?.addEventListener('click', () => runServerAuditOnce());
   $('erp-sync-publish')?.addEventListener('click', () => publishLast());
 

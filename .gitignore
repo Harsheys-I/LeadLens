@@ -4,6 +4,4 @@ web-app/api/storage/erp-sync/*.bin
 web-app/api/storage/erp-sync/*.meta.json
 web-app/api/storage/erp-sync/*-leads.json
 web-app/api/storage/erp-sync/latest-leads.json
-web-app/api/storage/team-forms/**
-!web-app/api/storage/team-forms/.gitkeep
 .cursor/

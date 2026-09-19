@@ -61,4 +61,4 @@ The API fell back to `config.example.php` because live `config.local.php` is mis
 ## ERP Sync (live + `/dev`)
 
 - **Manual:** Fetch ERP → store raw JSON → hand off to Bucket 1 Audit.
-- **Unattended daily:** Hostinger cron at **6:00 AM IST** (`30 0 * * *` UTC) → `POST /api/erp-sync/daily` (fetch + server AI audit + **self-chain** + cron auto-publish). Optional continue every 10 min (`*/10 * * * *` → `erp-sync/continue`) is a safety net only. Keep-alive every 1 min (`*/1 * * * *` → **production** `erp-sync/keepalive`, not `/dev/api`). UI Save does not schedule pings. Super User only. See **[ERP-SYNC.md](./ERP-SYNC.md)**.
+- **Unattended daily:** keep-alive every 1 min (`*/1 * * * *` → **production** `erp-sync/keepalive`) starts the pipeline at **6:00 AM IST**. Optional Hostinger `POST /api/erp-sync/daily` at `30 0 * * *` UTC is a backup; PHP ignores `/daily` outside 05:55–06:45 IST. Optional continue every 10 min (`*/10 * * * *` → `erp-sync/continue`) is a safety net only. Super User only. See **[ERP-SYNC.md](./ERP-SYNC.md)**.
