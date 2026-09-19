@@ -1,8 +1,8 @@
 /**
  * TeleCalling Performance — Excel parse, metrics engine, published dashboard UI.
  */
-import {PerfDashboardApi} from "./api-client.js?v=6.3.2.stable";
-import {downloadBlobFile} from "./audit.js?v=6.3.2.stable";
+import {PerfDashboardApi} from "./api-client.js?v=6.3.3.stable";
+import {downloadBlobFile} from "./audit.js?v=6.3.3.stable";
 
 const MASTER_FIELDS = [
   {id: "mobile", label: "Mobile", aliases: "mobile, mobile number, phone"},
@@ -15,7 +15,7 @@ const MASTER_FIELDS = [
 ];
 
 const HISTORY_FIELDS = [
-  ...MASTER_FIELDS.filter(f => f.id !== "next"),
+  ...MASTER_FIELDS.filter(f => f.id !== "next" && f.id !== "registration"),
   {id: "update", label: "Lead Update Date", aliases: "lead update date, call date, update date, lead update"},
 ];
 
