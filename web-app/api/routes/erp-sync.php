@@ -11,6 +11,8 @@ require_once __DIR__ . '/../lib/erp-sync.php';
  *   POST erp-sync/fetch-for-audit  (primary: fetch → store → map → latest-leads)
  *   GET  erp-sync/latest-leads
  *   POST erp-sync/run             (optional advanced: server OpenAI audit loop)
+ *   POST erp-sync/daily           (cron: fresh fetch + audit + publish)
+ *   POST erp-sync/continue        (cron: resume audit only if job needs_continue)
  *   POST erp-sync/keepalive|ping  (session keep-alive; cron or Super User)
  *   POST erp-sync/publish
  *   GET erp-sync/status
@@ -33,6 +35,12 @@ function ll_route_erp_sync(string $action): void
       break;
     case 'run':
       ll_erp_sync_route_run();
+      break;
+    case 'daily':
+      ll_erp_sync_route_daily();
+      break;
+    case 'continue':
+      ll_erp_sync_route_continue();
       break;
     case 'keepalive':
     case 'ping':
@@ -216,13 +224,44 @@ function ll_erp_sync_route_run(): void
   $forceFetch = !empty($body['force_fetch']);
   $dryRun = !empty($body['dry_run']);
   $cfg = ll_erp_sync_load_config();
-  if ($actor['username'] === 'erp-sync-cron' && empty($cfg['enabled'])) {
+  if ($actor['username'] === 'erp-sync-cron' && !ll_erp_sync_daily_is_enabled($cfg)) {
     ll_ok(['ok' => false, 'error' => 'ERP sync is disabled', 'status' => 'disabled']);
   }
   try {
-    $result = ll_erp_sync_run($actor, $forceFetch, $dryRun);
+    $result = ll_erp_sync_run($actor, $forceFetch, $dryRun, [
+      'auto_publish_key' => 'auto_publish',
+      'skip_enabled_check' => true,
+    ]);
   } catch (Throwable $e) {
     ll_error('ERP sync failed: ' . $e->getMessage(), 500);
+  }
+  ll_ok($result);
+}
+
+function ll_erp_sync_route_daily(): void
+{
+  ll_require_method('POST');
+  $actor = ll_erp_sync_require_actor(true);
+  $cfg = ll_erp_sync_load_config();
+  if ($actor['username'] === 'erp-sync-cron' && !ll_erp_sync_daily_is_enabled($cfg)) {
+    ll_ok(['ok' => false, 'error' => 'Daily ERP pipeline is disabled', 'status' => 'disabled']);
+  }
+  try {
+    $result = ll_erp_sync_daily_kickoff($actor);
+  } catch (Throwable $e) {
+    ll_error('ERP daily pipeline failed: ' . $e->getMessage(), 500);
+  }
+  ll_ok($result);
+}
+
+function ll_erp_sync_route_continue(): void
+{
+  ll_require_method('POST');
+  $actor = ll_erp_sync_require_actor(true);
+  try {
+    $result = ll_erp_sync_continue_job($actor);
+  } catch (Throwable $e) {
+    ll_error('ERP continue failed: ' . $e->getMessage(), 500);
   }
   ll_ok($result);
 }
@@ -313,6 +352,7 @@ function ll_erp_sync_route_status(): void
     'config' => $cfg,
     'last_status' => $cfg['last_status'] ?? null,
     'last_keepalive' => $cfg['last_keepalive'] ?? null,
+    'last_daily_status' => $cfg['last_daily_status'] ?? null,
     'job' => $jobMeta,
     'progress' => $progress,
   ]);
