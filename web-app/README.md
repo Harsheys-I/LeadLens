@@ -2,7 +2,7 @@
 
 Login-gated multi-module app for Hostinger (PHP + MySQL) with browser-side AI audits.
 
-**Current version:** see `version.json` (7.2.0.dev).
+**Current version:** see `version.json` (7.2.1.dev).
 
 ## Routes
 

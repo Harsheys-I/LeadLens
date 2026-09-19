@@ -1,16 +1,16 @@
 /**
  * Team Forms — org, form builder, task builder, assignee workspace, review board.
  */
-import {APP_VERSION} from './audit.js?v=7.2.0.dev';
-import {requireAuth, logout, hasPermission, getUser, changePassword, updateProfile} from './auth.js?v=7.2.0.dev';
-import {TeamFormsApi} from './api-client.js?v=7.2.0.dev';
-import {mountNotifications} from './notifications-ui.js?v=7.2.0.dev';
-import {appUrl, homePath} from './app-base.js?v=7.2.0.dev';
-import {initTheme} from './theme.js?v=7.2.0.dev';
-import {setStorageUserId, storageKey} from './db.js?v=7.2.0.dev';
+import {APP_VERSION} from './audit.js?v=7.2.1.dev';
+import {requireAuth, logout, hasPermission, getUser, changePassword, updateProfile} from './auth.js?v=7.2.1.dev';
+import {TeamFormsApi} from './api-client.js?v=7.2.1.dev';
+import {mountNotifications} from './notifications-ui.js?v=7.2.1.dev';
+import {appUrl, homePath} from './app-base.js?v=7.2.1.dev';
+import {initTheme} from './theme.js?v=7.2.1.dev';
+import {setStorageUserId, storageKey} from './db.js?v=7.2.1.dev';
 
 const $ = id => document.getElementById(id);
-const VERSION = APP_VERSION || '7.2.0.dev';
+const VERSION = APP_VERSION || '7.2.1.dev';
 const POLL_MS = 7000;
 
 const titles = {
@@ -880,6 +880,7 @@ function renderAssignedTasks(tasks){
     btn.textContent = 'Open';
     btn.onclick = () => openTask(t.id, 'workspace');
     tr.lastElementChild.append(btn);
+    appendTaskDeleteButton(tr.lastElementChild, t, {onDeleted: refreshWorkspace});
     tbody.append(tr);
   }
   table.append(tbody);
@@ -1907,9 +1908,11 @@ function renderTaskBuilderFill(task){
   mount.innerHTML = `<div class="inline-actions">
       <button type="button" id="task-builder-back-pick" class="text-button">← Templates</button>
       <button type="button" id="task-builder-to-assign" class="primary-button">Continue to assign</button>
+      ${canDeleteTask(task) ? '<button type="button" id="task-builder-delete" class="text-button">Delete</button>' : ''}
       <span id="task-builder-save-hint" class="muted tf-save-hint" aria-live="polite"></span>
       <span id="task-builder-message" class="form-message"></span>
     </div>`;
+  $('task-builder-delete')?.addEventListener('click', () => deleteTaskFromBuilder(task));
   $('task-builder-back-pick')?.addEventListener('click', async () => {
     try { await flushTaskAutosave(); } catch { /* keep navigating */ }
     setTaskBuilderStep('pick');
@@ -1944,9 +1947,11 @@ function renderTaskBuilderAssign(form, task){
     <div class="inline-actions">
       <button type="button" id="task-builder-back-fill" class="text-button">← Fill fields</button>
       <button type="button" id="task-builder-submit" class="primary-button">Save assignment</button>
+      ${canDeleteTask(task) ? '<button type="button" id="task-builder-delete" class="text-button">Delete</button>' : ''}
       <span id="task-builder-message" class="form-message"></span>
     </div>`;
   fillCreateTaskAssignUi(mount, form, $('task-builder-assign-list'));
+  $('task-builder-delete')?.addEventListener('click', () => deleteTaskFromBuilder(task));
   $('task-builder-back-fill')?.addEventListener('click', () => renderTaskBuilderFill(taskBuilderTask || task));
   $('task-builder-submit')?.addEventListener('click', async () => {
     const msg = $('task-builder-message');
@@ -2015,6 +2020,7 @@ function renderReviewBoard(tasks){
     btn.textContent = 'Open';
     btn.onclick = () => openTask(t.id, 'review');
     tr.lastElementChild.append(btn);
+    appendTaskDeleteButton(tr.lastElementChild, t, {onDeleted: () => refreshReview()});
     tbody.append(tr);
   }
   table.append(tbody);

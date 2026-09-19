@@ -1,5 +1,5 @@
 {
-  "version": "7.2.0.dev",
+  "version": "7.2.1.dev",
   "name": "GPP AI",
-  "notes": "v7.2.0.dev: Team Forms Task Builder wizard (form → create → fill → assign), assignee read-only answers, comment status snapshot with attachments and time spent, Submit after Completed, Task History, and assign/reviewer rules (no self-assign, no self-approve/close, assignee ≠ reviewer, multiple reviewers)."
+  "notes": "v7.2.1.dev: ERP Sync daily/continue self-chains audit batches (in-request loop + fire-and-forget continue) so progress does not wait on the 10-minute cron; continue cron is optional backup."
 }

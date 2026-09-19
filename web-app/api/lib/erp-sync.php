@@ -14,6 +14,12 @@ const LL_ERP_SYNC_MAX_BYTES = 25_000_000;
 const LL_ERP_SYNC_TIMEOUT = 90;
 const LL_ERP_SYNC_KEEPALIVE_TIMEOUT = 20;
 const LL_ERP_SYNC_KEEPALIVE_MAX_BYTES = 65_536;
+/** Seconds of headroom before max_execution_time when in-request chaining. */
+const LL_ERP_SYNC_CHAIN_SAFETY_BUFFER = 18;
+/** Stale running lock age (seconds) — allow takeover if a worker died. */
+const LL_ERP_SYNC_RUNNING_STALE_SEC = 210;
+/** Chain token TTL for fire-and-forget self-continue. */
+const LL_ERP_SYNC_CHAIN_TOKEN_TTL = 600;
 
 /** @return array<string, list<string>> */
 function ll_erp_sync_default_field_map(): array
@@ -271,6 +277,18 @@ function ll_erp_sync_verify_cron_secret(string $candidate): bool
 function ll_erp_sync_require_actor(bool $allowCron = false): array
 {
   if ($allowCron) {
+    $chain = ll_erp_sync_extract_chain_token();
+    if ($chain !== null && $chain !== '') {
+      if (!ll_erp_sync_verify_chain_token($chain)) {
+        ll_error('Invalid or expired chain token', 401);
+      }
+      return [
+        'id' => 0,
+        'display_name' => 'ERP Sync Self-Chain',
+        'username' => 'erp-sync-cron',
+        'is_super' => true,
+      ];
+    }
     $secret = ll_erp_sync_extract_bearer();
     if ($secret !== null && $secret !== '') {
       if (!ll_erp_sync_verify_cron_secret($secret)) {
@@ -289,6 +307,30 @@ function ll_erp_sync_require_actor(bool $allowCron = false): array
     ll_error('Only Super User can manage ERP sync', 403);
   }
   return $user;
+}
+
+/** One-time self-chain token (header only — never logged). */
+function ll_erp_sync_extract_chain_token(): ?string
+{
+  $raw = trim((string) ($_SERVER['HTTP_X_ERP_SYNC_CHAIN'] ?? ''));
+  return $raw !== '' ? $raw : null;
+}
+
+function ll_erp_sync_verify_chain_token(string $candidate): bool
+{
+  $job = ll_erp_sync_load_job();
+  if (!is_array($job) || ($job['status'] ?? '') !== 'auditing') {
+    return false;
+  }
+  $expected = (string) ($job['chain_token'] ?? '');
+  if ($expected === '' || !hash_equals($expected, $candidate)) {
+    return false;
+  }
+  $at = (int) ($job['chain_token_at'] ?? 0);
+  if ($at <= 0 || (time() - $at) > LL_ERP_SYNC_CHAIN_TOKEN_TTL) {
+    return false;
+  }
+  return true;
 }
 
 function ll_erp_sync_extract_bearer(): ?string
@@ -1755,14 +1797,170 @@ function ll_erp_sync_save_job(?array $job): void
 }
 
 /**
+ * Wall-clock deadline for this PHP request (max_execution_time − safety buffer).
+ */
+function ll_erp_sync_request_deadline(int $startedAt): int
+{
+  $maxExec = (int) ini_get('max_execution_time');
+  if ($maxExec <= 0) {
+    $maxExec = 240;
+  }
+  // Honor set_time_limit(240) used by run — use the larger of ini / 240 when unlimited is false.
+  $budget = max(30, min($maxExec, 240));
+  return $startedAt + $budget - LL_ERP_SYNC_CHAIN_SAFETY_BUFFER;
+}
+
+/**
+ * @param array<string, mixed> $job
+ * @return array{ok:bool,job:array<string,mixed>,busy?:bool,message?:string}
+ */
+function ll_erp_sync_acquire_run_lock(array $job, string $ownerToken): array
+{
+  $running = !empty($job['running']);
+  $since = (int) ($job['running_since'] ?? 0);
+  $existing = (string) ($job['running_token'] ?? '');
+  if ($running && $since > 0 && (time() - $since) < LL_ERP_SYNC_RUNNING_STALE_SEC) {
+    if ($existing !== '' && hash_equals($existing, $ownerToken)) {
+      return ['ok' => true, 'job' => $job];
+    }
+    return [
+      'ok' => false,
+      'busy' => true,
+      'job' => $job,
+      'message' => 'Audit already in progress',
+    ];
+  }
+  $job['running'] = true;
+  $job['running_since'] = time();
+  $job['running_token'] = $ownerToken;
+  // Consume chain token once a worker starts (prevents replay stampede).
+  unset($job['chain_token'], $job['chain_token_at']);
+  ll_erp_sync_save_job($job);
+  return ['ok' => true, 'job' => $job];
+}
+
+/** @param array<string, mixed> $job */
+function ll_erp_sync_release_run_lock(array $job, string $ownerToken): array
+{
+  $existing = (string) ($job['running_token'] ?? '');
+  if ($existing !== '' && !hash_equals($existing, $ownerToken)) {
+    return $job;
+  }
+  unset($job['running'], $job['running_since'], $job['running_token']);
+  ll_erp_sync_save_job($job);
+  return $job;
+}
+
+/** Build same-host continue URL (/api or /dev/api). */
+function ll_erp_sync_continue_self_url(): string
+{
+  $https = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off')
+    || ((int) ($_SERVER['SERVER_PORT'] ?? 0) === 443)
+    || (strtolower((string) ($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? '')) === 'https');
+  $scheme = $https ? 'https' : 'http';
+  $host = (string) ($_SERVER['HTTP_HOST'] ?? 'localhost');
+  $prefix = ll_is_dev_request() ? '/dev/api' : '/api';
+  return $scheme . '://' . $host . $prefix . '/erp-sync/continue';
+}
+
+/**
+ * Fire-and-forget POST continue with one-time chain token.
+ * Does not wait for audit work; cron remains a safety net if this fails.
+ */
+function ll_erp_sync_fire_self_chain_continue(): bool
+{
+  $job = ll_erp_sync_load_job();
+  if (!is_array($job) || ($job['status'] ?? '') !== 'auditing') {
+    return false;
+  }
+  try {
+    $token = bin2hex(random_bytes(16));
+  } catch (Throwable $e) {
+    $token = sha1(uniqid('erp-chain', true));
+  }
+  $job['chain_token'] = $token;
+  $job['chain_token_at'] = time();
+  unset($job['running'], $job['running_since'], $job['running_token']);
+  ll_erp_sync_save_job($job);
+
+  $url = ll_erp_sync_continue_self_url();
+  $parts = parse_url($url);
+  if (!is_array($parts) || empty($parts['host'])) {
+    return false;
+  }
+  $host = (string) $parts['host'];
+  $port = (int) ($parts['port'] ?? ((string) ($parts['scheme'] ?? 'https') === 'https' ? 443 : 80));
+  $path = (string) ($parts['path'] ?? '/api/erp-sync/continue');
+  if (!empty($parts['query'])) {
+    $path .= '?' . $parts['query'];
+  }
+  $ssl = ((string) ($parts['scheme'] ?? '')) === 'https';
+  $body = '{}';
+  $req = "POST {$path} HTTP/1.1\r\n";
+  $req .= "Host: {$host}\r\n";
+  $req .= "Content-Type: application/json\r\n";
+  $req .= 'X-ERP-Sync-Chain: ' . $token . "\r\n";
+  $req .= 'Content-Length: ' . strlen($body) . "\r\n";
+  $req .= "Connection: Close\r\n\r\n";
+  $req .= $body;
+
+  $errno = 0;
+  $errstr = '';
+  $remote = ($ssl ? 'ssl://' : 'tcp://') . $host . ':' . $port;
+  $ctx = null;
+  if ($ssl) {
+    $ctx = stream_context_create([
+      'ssl' => [
+        'verify_peer' => true,
+        'verify_peer_name' => true,
+        'SNI_enabled' => true,
+        'peer_name' => $host,
+      ],
+    ]);
+  }
+  $fp = @stream_socket_client($remote, $errno, $errstr, 1.5, STREAM_CLIENT_CONNECT, $ctx ?: stream_context_create());
+  if (is_resource($fp)) {
+    stream_set_timeout($fp, 1);
+    @fwrite($fp, $req);
+    // Do not wait for the response body — next PHP worker continues the audit.
+    @fclose($fp);
+    return true;
+  }
+
+  if (function_exists('curl_init')) {
+    $ch = curl_init($url);
+    if ($ch === false) {
+      return false;
+    }
+    curl_setopt_array($ch, [
+      CURLOPT_POST => true,
+      CURLOPT_POSTFIELDS => $body,
+      CURLOPT_HTTPHEADER => [
+        'Content-Type: application/json',
+        'X-ERP-Sync-Chain: ' . $token,
+      ],
+      CURLOPT_RETURNTRANSFER => true,
+      CURLOPT_TIMEOUT => 1,
+      CURLOPT_CONNECTTIMEOUT => 1,
+      CURLOPT_NOSIGNAL => 1,
+    ]);
+    @curl_exec($ch);
+    curl_close($ch);
+    return true;
+  }
+  return false;
+}
+
+/**
  * Full or resumable pipeline: fetch → parse → audit → optional publish.
  *
- * @param array{auto_publish_key?:string,record_daily?:bool,continue_only?:bool,skip_enabled_check?:bool} $opts
+ * @param array{auto_publish_key?:string,record_daily?:bool,continue_only?:bool,skip_enabled_check?:bool,self_chain?:bool} $opts
  * @return array<string, mixed>
  */
 function ll_erp_sync_run(array $actor, bool $forceFetch = false, bool $dryRun = false, array $opts = []): array
 {
   @set_time_limit(240);
+  @ignore_user_abort(true);
   $cfg = ll_erp_sync_load_config();
   $autoPublishKey = (string) ($opts['auto_publish_key'] ?? 'auto_publish');
   if ($autoPublishKey !== 'cron_auto_publish') {
@@ -1770,6 +1968,14 @@ function ll_erp_sync_run(array $actor, bool $forceFetch = false, bool $dryRun = 
   }
   $recordDaily = !empty($opts['record_daily']);
   $continueOnly = !empty($opts['continue_only']);
+  $selfChain = !empty($opts['self_chain']);
+  $runStartedAt = time();
+  $deadline = ll_erp_sync_request_deadline($runStartedAt);
+  try {
+    $ownerToken = bin2hex(random_bytes(8));
+  } catch (Throwable $e) {
+    $ownerToken = sha1(uniqid('erp-run', true));
+  }
 
   if (
     empty($opts['skip_enabled_check'])
@@ -1968,51 +2174,121 @@ function ll_erp_sync_run(array $actor, bool $forceFetch = false, bool $dryRun = 
   $leads = $job['leads'];
   $cursor = (int) ($job['cursor'] ?? 0);
   $results = is_array($job['results'] ?? null) ? $job['results'] : [];
-  $processedThisRun = 0;
 
-  while ($cursor < count($leads) && $processedThisRun < $maxPerRun) {
-    $batch = array_slice($leads, $cursor, $batchSize);
-    try {
-      $batchResults = ll_erp_sync_audit_batch($batch, $settings);
-    } catch (Throwable $e) {
-      $job['status'] = 'error';
-      $job['error'] = $e->getMessage();
+  $lock = ll_erp_sync_acquire_run_lock($job, $ownerToken);
+  if (empty($lock['ok'])) {
+    return [
+      'ok' => true,
+      'busy' => true,
+      'idle' => true,
+      'needs_continue' => true,
+      'status' => 'busy',
+      'message' => $lock['message'] ?? 'Audit already in progress',
+      'done' => count($results),
+      'total' => count($leads),
+    ];
+  }
+  $job = $lock['job'];
+
+  $chunksThisRequest = 0;
+  $hitTimeLimit = false;
+
+  try {
+    while ($cursor < count($leads)) {
+      if ($selfChain && time() >= $deadline) {
+        $hitTimeLimit = true;
+        break;
+      }
+
+      $processedThisRun = 0;
+      while ($cursor < count($leads) && $processedThisRun < $maxPerRun) {
+        if ($selfChain && time() >= $deadline) {
+          $hitTimeLimit = true;
+          break 2;
+        }
+        $batch = array_slice($leads, $cursor, $batchSize);
+        try {
+          $batchResults = ll_erp_sync_audit_batch($batch, $settings);
+        } catch (Throwable $e) {
+          $job['status'] = 'error';
+          $job['error'] = $e->getMessage();
+          $job['cursor'] = $cursor;
+          $job['results'] = $results;
+          $job = ll_erp_sync_release_run_lock($job, $ownerToken);
+          ll_erp_sync_save_job($job);
+          $fail = [
+            'ok' => false,
+            'phase' => 'audit',
+            'error' => $e->getMessage(),
+            'cursor' => $cursor,
+            'lead_count' => count($leads),
+            'at' => gmdate('c'),
+          ];
+          ll_erp_sync_set_last_status($fail);
+          if ($recordDaily) {
+            ll_erp_sync_set_last_daily_status(array_merge($fail, ['source' => 'daily']));
+          }
+          return [
+            'ok' => false,
+            'error' => $e->getMessage(),
+            'phase' => 'audit',
+            'cursor' => $cursor,
+            'lead_count' => count($leads),
+            'done' => count($results),
+          ];
+        }
+        foreach ($batchResults as $row) {
+          $results[] = $row;
+        }
+        $cursor += count($batch);
+        $processedThisRun += count($batch);
+        $job['cursor'] = $cursor;
+        $job['results'] = $results;
+        $job['status'] = $cursor >= count($leads) ? 'audited' : 'auditing';
+        ll_erp_sync_save_job($job);
+      }
+
+      $chunksThisRequest++;
+
+      if ($cursor >= count($leads)) {
+        break;
+      }
+
+      // One maxPerRun chunk done; without self-chain, stop (manual advanced /run).
+      if (!$selfChain) {
+        break;
+      }
+
+      // Deadline already includes safety buffer — stop and HTTP-handoff when hit.
+      if (time() >= $deadline) {
+        $hitTimeLimit = true;
+        break;
+      }
+    }
+  } finally {
+    $fresh = ll_erp_sync_load_job();
+    if (is_array($fresh)) {
+      $job = $fresh;
       $job['cursor'] = $cursor;
       $job['results'] = $results;
-      ll_erp_sync_save_job($job);
-      $fail = [
-        'ok' => false,
-        'phase' => 'audit',
-        'error' => $e->getMessage(),
-        'cursor' => $cursor,
-        'lead_count' => count($leads),
-        'at' => gmdate('c'),
-      ];
-      ll_erp_sync_set_last_status($fail);
-      if ($recordDaily) {
-        ll_erp_sync_set_last_daily_status(array_merge($fail, ['source' => 'daily']));
+      $job['status'] = $cursor >= count($leads) ? ($job['status'] ?? 'audited') : 'auditing';
+      if ($cursor < count($leads)) {
+        $job['status'] = 'auditing';
       }
-      return [
-        'ok' => false,
-        'error' => $e->getMessage(),
-        'phase' => 'audit',
-        'cursor' => $cursor,
-        'lead_count' => count($leads),
-        'done' => count($results),
-      ];
+      $job = ll_erp_sync_release_run_lock($job, $ownerToken);
     }
-    foreach ($batchResults as $row) {
-      $results[] = $row;
-    }
-    $cursor += count($batch);
-    $processedThisRun += count($batch);
-    $job['cursor'] = $cursor;
-    $job['results'] = $results;
-    $job['status'] = $cursor >= count($leads) ? 'audited' : 'auditing';
-    ll_erp_sync_save_job($job);
   }
 
   if ($cursor < count($leads)) {
+    $selfChained = false;
+    if ($selfChain) {
+      $selfChained = ll_erp_sync_fire_self_chain_continue();
+    }
+    $resumeHint = $selfChained
+      ? 'self-chain queued next batch'
+      : ($selfChain
+        ? 'self-chain handoff failed — continue cron will resume'
+        : 'call continue (or run) again');
     $partial = [
       'ok' => true,
       'phase' => 'audit',
@@ -2024,17 +2300,20 @@ function ll_erp_sync_run(array $actor, bool $forceFetch = false, bool $dryRun = 
       'done' => count($results),
       'audited' => count($results),
       'total' => count($leads),
+      'chunks_this_request' => $chunksThisRequest,
+      'self_chained' => $selfChained,
+      'time_limit_handoff' => $hitTimeLimit,
       'at' => gmdate('c'),
     ];
     ll_erp_sync_set_last_status($partial);
     if ($recordDaily) {
       ll_erp_sync_set_last_daily_status(array_merge($partial, [
         'source' => 'daily',
-        'message' => 'Audited ' . count($results) . ' / ' . count($leads) . ' — continue cron will resume',
+        'message' => 'Audited ' . count($results) . ' / ' . count($leads) . ' — ' . $resumeHint,
       ]));
     }
     return array_merge($partial, [
-      'message' => 'Audited ' . count($results) . ' / ' . count($leads) . ' leads — call continue (or run) again',
+      'message' => 'Audited ' . count($results) . ' / ' . count($leads) . ' leads — ' . $resumeHint,
     ]);
   }
 
@@ -2054,6 +2333,7 @@ function ll_erp_sync_run(array $actor, bool $forceFetch = false, bool $dryRun = 
       ? 'dry_run'
       : (!$autoPublish ? ($autoPublishKey === 'cron_auto_publish' ? 'cron_auto_publish_off' : 'auto_publish_off') : 'no_dashboards');
   }
+  unset($job['chain_token'], $job['chain_token_at'], $job['running'], $job['running_since'], $job['running_token']);
   ll_erp_sync_save_job($job);
 
   $status = [
@@ -2106,11 +2386,13 @@ function ll_erp_sync_daily_kickoff(array $actor): array
     'auto_publish_key' => 'cron_auto_publish',
     'record_daily' => true,
     'skip_enabled_check' => true,
+    'self_chain' => true,
   ]);
 }
 
 /**
  * Resume in-progress daily/server audit only. No-ops when idle.
+ * Self-chains to the next batch when incomplete (cron every-10m is backup only).
  * @return array<string, mixed>
  */
 function ll_erp_sync_continue_job(array $actor): array
@@ -2137,6 +2419,7 @@ function ll_erp_sync_continue_job(array $actor): array
     'record_daily' => $recordDaily,
     'continue_only' => true,
     'skip_enabled_check' => true,
+    'self_chain' => true,
   ]);
 }
 

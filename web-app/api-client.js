@@ -1,7 +1,7 @@
 /**
  * Thin fetch wrapper for LeadLens PHP API (same-origin, session cookie).
  */
-import {apiBase} from './app-base.js?v=7.2.0.dev';
+import {apiBase} from './app-base.js?v=7.2.1.dev';
 
 function resolveApiBase(){
   return apiBase();
@@ -173,6 +173,7 @@ export const TeamFormsApi = {
   reworkTask: (id, note = '') =>
     api(`team-forms/tasks/${id}/rework`, {method: 'POST', body: {body: note}}),
   closeTask: (id) => api(`team-forms/tasks/${id}/close`, {method: 'POST', body: {}}),
+  deleteTask: (id) => api(`team-forms/tasks/${id}/delete`, {method: 'POST', body: {}}),
 };
 
 export const SettingsApi = {

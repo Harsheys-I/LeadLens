@@ -37,15 +37,19 @@ When Test fetch / Fetch / keep-alive / daily run shows **session expired**:
    - Leave **Cron auto-publish dashboards when daily audit completes** **on** (default) so TeleCaller boards upload when audit finishes
    - Check **Enable session keep-alive** and set a **Cron bearer secret**
 2. Save settings.
-3. Add Hostinger cron jobs (see below): daily kickoff + continue + keep-alive.
-4. Watch **Last scheduled run** on the ERP Sync panel after 6 AM (or after a manual Super User `POST …/daily`).
+3. Add Hostinger cron jobs (see below): **daily kickoff** + **keep-alive**. Continue-every-10m is optional backup (self-chain is primary).
+4. Watch **Last scheduled run** on the ERP Sync panel after 6 AM (or after a manual Super User `POST …/daily`). Progress should climb without waiting for the continue cron.
 
-### Resume / Hostinger time limits
+### Resume / self-chain (Hostinger time limits)
 
-Each PHP invocation audits a limited batch (`Max leads / invocation`, default 40). Large reports need **continue**:
+Each PHP request audits in chunks (`Max leads / invocation`, default 40). After each chunk:
 
-- **Daily cron (6:00 AM IST)** → `POST /api/erp-sync/daily` — always starts a **fresh fetch** and begins audit.
-- **Continue cron (every 10 minutes)** → `POST /api/erp-sync/continue` — resumes only if a job is `auditing` (`needs_continue`); **no-ops when idle**.
+1. **In-request loop** — if wall-clock time still has ~18s headroom before `max_execution_time`, the same request starts the next chunk immediately.
+2. **Fire-and-forget self-HTTP** — when about to hit the limit and the job is still incomplete, PHP POSTs `erp-sync/continue` on the same host with a one-time chain token (`X-ERP-Sync-Chain`). A running lock prevents stampede (cron + self-chain overlap → busy no-op).
+3. **Continue cron (optional backup)** — every 10 minutes still works if a self-chain handoff fails; idle no-ops are harmless.
+
+- **Daily cron (6:00 AM IST)** → `POST /api/erp-sync/daily` — always starts a **fresh fetch**, begins audit, and **self-chains** until complete (or session expired / error).
+- **Continue cron (every 10 minutes)** → `POST /api/erp-sync/continue` — safety net only; resumes if a job is still `auditing`. You can keep or remove this cron once self-chain is confirmed working.
 
 ## API (Super User session or cron bearer where noted)
 
@@ -56,8 +60,8 @@ Each PHP invocation audits a limited batch (`Max leads / invocation`, default 40
 | GET | `erp-sync/latest-leads?meta=1` | Counts only |
 | POST | `erp-sync/test-fetch` | Preview without Audit handoff |
 | POST | `erp-sync/keepalive` | Session keep-alive ping (also `erp-sync/ping`) |
-| POST | `erp-sync/daily` | **Cron daily:** fetch + server AI audit + cron auto-publish |
-| POST | `erp-sync/continue` | **Cron continue:** resume audit if in progress; idle no-op |
+| POST | `erp-sync/daily` | **Cron daily:** fetch + server AI audit + self-chain + cron auto-publish |
+| POST | `erp-sync/continue` | **Resume / self-chain target:** continue audit if in progress; idle no-op |
 | POST | `erp-sync/run` | Advanced/manual server OpenAI loop (uses `auto_publish`, not cron flag) |
 | POST | `erp-sync/publish` | Publish last **server-audit** results |
 | GET | `erp-sync/status` | Config + last_status + last_daily_status + job progress |
@@ -80,7 +84,9 @@ curl -sS -X POST -H "Authorization: Bearer YOUR_CRON_SECRET" -H "Content-Type: a
   "https://ai.gurupunvaanii.com/api/erp-sync/daily"
 ```
 
-## Hostinger cron — continue incomplete audits (every 10 minutes)
+## Hostinger cron — continue incomplete audits (optional backup, every 10 minutes)
+
+Self-chain is the primary resume path. Keep this cron only as a safety net (or remove it after verifying daily runs finish without it):
 
 ```bash
 # every 10 minutes →  */10 * * * *
@@ -88,7 +94,7 @@ curl -sS -X POST -H "Authorization: Bearer YOUR_CRON_SECRET" -H "Content-Type: a
   "https://ai.gurupunvaanii.com/api/erp-sync/continue"
 ```
 
-Idle response is harmless (`idle: true`). Only runs audit work when a job needs continue.
+Idle response is harmless (`idle: true`). Only runs audit work when a job needs continue. Concurrent self-chain + cron returns `busy` instead of double-auditing.
 
 ## Hostinger cron — session keep-alive (every 1 minute)
 
@@ -113,6 +119,8 @@ Notes:
 
 - Replace `YOUR_CRON_SECRET` with the secret saved in ERP Sync.
 - Daily / continue are ignored while **Enable daily auto pipeline** is off.
+- Self-chain uses a short-lived job token (not the cron secret hash) and never logs cookies/secrets.
+- Session expired at fetch → clear error, **no self-chain**, **no publish**.
 - Keep-alive is ignored while **Enable session keep-alive** is off (cron still records `result: disabled` so the UI shows the hit).
 - Status line shows **IST** times and whether the last ping was **manual** vs **cron**.
 - Alternative header if `Authorization` is stripped: `-H "X-ERP-Sync-Secret: YOUR_CRON_SECRET"`.
