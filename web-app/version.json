@@ -1,5 +1,5 @@
 {
-  "version": "7.1.0.dev",
+  "version": "7.1.1.dev",
   "name": "GPP AI",
-  "notes": "v7.1.0.dev: Team Forms templates vs snapshot tasks, Assign To/Status/Reviewer system fields, URL/document uploads, number-only fields, Admin user dept/group checkboxes."
+  "notes": "v7.1.1.dev: Team Forms Task Builder under Form Builder — pick a template and create snapshot tasks (Assign To, Status, Reviewer + custom fields)."
 }
