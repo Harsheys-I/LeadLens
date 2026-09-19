@@ -1,7 +1,7 @@
 /**
  * Thin fetch wrapper for LeadLens PHP API (same-origin, session cookie).
  */
-import {apiBase} from './app-base.js?v=7.0.0.dev';
+import {apiBase} from './app-base.js?v=7.0.1.dev';
 
 function resolveApiBase(){
   return apiBase();
@@ -62,10 +62,12 @@ export const AdminApi = {
 
 export const NotifApi = {
   list: () => api('notifications'),
-  markRead: (id) => api(`notifications/read/${id}`, {method: 'POST', body: {}}),
-  markAllRead: () => api('notifications/read-all', {method: 'POST', body: {}}),
-  clearAll: () => api('notifications/clear-all', {method: 'POST', body: {}}),
-  clearOne: (id) => api(`notifications/clear/${id}`, {method: 'POST', body: {}}),
+  // POST to /notifications with action in body — extra path segments and DELETE/PUT
+  // are unreliable on Hostinger/LiteSpeed (rewrite truncation / method blocks).
+  markRead: (id) => api('notifications', {method: 'POST', body: {action: 'read', id}}),
+  markAllRead: () => api('notifications', {method: 'POST', body: {action: 'read-all'}}),
+  clearAll: () => api('notifications', {method: 'POST', body: {action: 'clear-all'}}),
+  clearOne: (id) => api('notifications', {method: 'POST', body: {action: 'clear', id}}),
 };
 
 export const DashboardApi = {
@@ -121,6 +123,7 @@ export const TeamFormsApi = {
   reorderFields: (formId, order) =>
     api(`team-forms/forms/${formId}/fields`, {method: 'POST', body: {action: 'reorder', order}}),
   assignForm: (formId, body) => api(`team-forms/forms/${formId}/assign`, {method: 'POST', body}),
+  listFormAssignments: (formId) => api(`team-forms/forms/${formId}/assign`),
   myTasks: (since) => api(`team-forms/tasks?mine=1${since ? `&since=${encodeURIComponent(since)}` : ''}`),
   reviewTasks: (since) =>
     api(`team-forms/review/tasks${since ? `?since=${encodeURIComponent(since)}` : ''}`),

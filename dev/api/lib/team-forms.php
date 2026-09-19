@@ -129,6 +129,8 @@ function ll_team_forms_ensure_tables(): void
     CONSTRAINT fk_form_tasks_assigned_by FOREIGN KEY (assigned_by) REFERENCES users(id) ON DELETE SET NULL
   ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
 
+  ll_tf_ensure_form_tasks_open_assignee_unique($pdo);
+
   $pdo->exec("CREATE TABLE IF NOT EXISTS form_answers (
     id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     task_id INT UNSIGNED NOT NULL,
@@ -151,6 +153,41 @@ function ll_team_forms_ensure_tables(): void
     CONSTRAINT fk_form_comments_task FOREIGN KEY (task_id) REFERENCES form_tasks(id) ON DELETE CASCADE,
     CONSTRAINT fk_form_comments_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
   ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+}
+
+/**
+ * Existing installs: one open task per form+assignee (closed tasks may repeat).
+ * Dedupes open duplicates then adds generated column + unique key when missing.
+ */
+function ll_tf_ensure_form_tasks_open_assignee_unique(PDO $pdo): void
+{
+  try {
+    $hasCol = $pdo->query("SHOW COLUMNS FROM form_tasks LIKE 'open_assignee_guard'")->fetch();
+    if ($hasCol) {
+      return;
+    }
+    // Keep oldest open task; close newer duplicates so the unique key can apply.
+    $pdo->exec(
+      "UPDATE form_tasks t
+       INNER JOIN (
+         SELECT form_id, assignee_id, MIN(id) AS keep_id
+         FROM form_tasks
+         WHERE status <> 'closed'
+         GROUP BY form_id, assignee_id
+         HAVING COUNT(*) > 1
+       ) d ON t.form_id = d.form_id AND t.assignee_id = d.assignee_id
+         AND t.id <> d.keep_id AND t.status <> 'closed'
+       SET t.status = 'closed', t.closed_at = UTC_TIMESTAMP()"
+    );
+    $pdo->exec(
+      "ALTER TABLE form_tasks
+       ADD COLUMN open_assignee_guard TINYINT UNSIGNED
+         GENERATED ALWAYS AS (CASE WHEN status = 'closed' THEN NULL ELSE 1 END) STORED,
+       ADD UNIQUE KEY uq_form_tasks_open_assignee (form_id, assignee_id, open_assignee_guard)"
+    );
+  } catch (Throwable $e) {
+    // Older MySQL or concurrent migrate — assign path still enforces via SELECT.
+  }
 }
 
 function ll_tf_can_manage_org(array $user): bool
@@ -233,6 +270,28 @@ function ll_tf_slug_key(string $label, string $fallback = 'field'): string
     $key = $fallback;
   }
   return substr($key, 0, 60);
+}
+
+/** Allocate a unique, stable field_key for a form (label slug + short random suffix). */
+function ll_tf_allocate_field_key(\PDO $pdo, int $formId, string $label, string $preferred = ''): string
+{
+  $base = $preferred !== '' ? ll_tf_slug_key($preferred) : ll_tf_slug_key($label);
+  $chk = $pdo->prepare('SELECT id FROM form_fields WHERE form_id = ? AND field_key = ?');
+  for ($i = 0; $i < 16; $i++) {
+    $suffix = bin2hex(random_bytes(3));
+    $key = substr($base, 0, 72) . '_' . $suffix;
+    $key = substr($key, 0, 80);
+    $chk->execute([$formId, $key]);
+    if (!$chk->fetch()) {
+      return $key;
+    }
+  }
+  $fallback = 'f_' . bin2hex(random_bytes(8));
+  $chk->execute([$formId, $fallback]);
+  if (!$chk->fetch()) {
+    return $fallback;
+  }
+  return 'f_' . bin2hex(random_bytes(10));
 }
 
 function ll_tf_eval_calc(string $op, $left, $right): ?string
@@ -375,4 +434,95 @@ function ll_tf_progress(array $fields, array $answersByFieldId): array
   }
   $pct = $writable > 0 ? (int) round(($filled / $writable) * 100) : 0;
   return ['filled' => $filled, 'total' => $writable, 'percent' => $pct];
+}
+
+/**
+ * Reviewers who can see this task on the review board (group or department scope).
+ *
+ * @return list<int>
+ */
+function ll_tf_reviewer_user_ids_for_task(array $task): array
+{
+  $scope = (string) ($task['reviewer_scope'] ?? 'group');
+  $groupId = (int) ($task['group_id'] ?? 0);
+  $deptId = (int) ($task['department_id'] ?? 0);
+  $pdo = ll_pdo();
+  if ($scope === 'department' && $deptId > 0) {
+    $stmt = $pdo->prepare(
+      'SELECT DISTINCT gm.user_id
+       FROM group_members gm
+       INNER JOIN org_groups g ON g.id = gm.group_id
+       INNER JOIN users u ON u.id = gm.user_id
+       WHERE gm.role = \'reviewer\' AND g.department_id = ? AND u.is_active = 1'
+    );
+    $stmt->execute([$deptId]);
+  } else {
+    $stmt = $pdo->prepare(
+      'SELECT DISTINCT gm.user_id
+       FROM group_members gm
+       INNER JOIN users u ON u.id = gm.user_id
+       WHERE gm.role = \'reviewer\' AND gm.group_id = ? AND u.is_active = 1'
+    );
+    $stmt->execute([$groupId]);
+  }
+  $ids = [];
+  foreach ($stmt->fetchAll() as $row) {
+    $ids[] = (int) $row['user_id'];
+  }
+  return $ids;
+}
+
+/**
+ * In-app notifications when an assignee marks a task completed (submitted).
+ * Recipients: scoped reviewers + form template creator. Never the assignee.
+ */
+function ll_tf_notify_task_completed(array $task, array $actor): void
+{
+  $assigneeId = (int) ($task['assignee_id'] ?? 0);
+  $actorId = (int) ($actor['id'] ?? 0);
+  $recipients = [];
+
+  foreach (ll_tf_reviewer_user_ids_for_task($task) as $uid) {
+    if ($uid > 0) {
+      $recipients[$uid] = true;
+    }
+  }
+
+  $createdBy = (int) ($task['form_created_by'] ?? 0);
+  if ($createdBy > 0) {
+    $creator = ll_find_user_by_id($createdBy);
+    if ($creator && (int) ($creator['is_active'] ?? 0) === 1) {
+      $recipients[$createdBy] = true;
+    }
+  }
+
+  unset($recipients[$assigneeId], $recipients[$actorId]);
+  if (!$recipients) {
+    return;
+  }
+
+  $formTitle = trim((string) ($task['form_title'] ?? ''));
+  if ($formTitle === '') {
+    $formTitle = 'a team form';
+  }
+  $assigneeName = trim((string) ($task['assignee_name'] ?? ''));
+  if ($assigneeName === '') {
+    $assigneeName = 'An assignee';
+  }
+  $title = 'Team form completed';
+  $body = $assigneeName . ' marked "' . $formTitle . '" completed';
+  $meta = json_encode([
+    'kind' => 'task_completed',
+    'task_id' => (int) ($task['id'] ?? 0),
+    'form_id' => (int) ($task['form_id'] ?? 0),
+    'assignee_id' => $assigneeId,
+  ], JSON_UNESCAPED_UNICODE);
+
+  $ins = ll_pdo()->prepare(
+    'INSERT INTO notifications (user_id, type, title, body, meta, is_read)
+     VALUES (?, \'team_forms_task\', ?, ?, ?, 0)'
+  );
+  foreach (array_keys($recipients) as $uid) {
+    $ins->execute([$uid, $title, $body, $meta]);
+  }
 }

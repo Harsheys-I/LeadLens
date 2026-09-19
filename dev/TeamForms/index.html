@@ -7,12 +7,12 @@
   <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#0f2d22">
   <meta name="description" content="GPP AI Team Forms">
   <title>GPP AI · Team Forms</title>
-  <meta name="app-version" content="7.0.0.dev">
-  <script src="../theme-boot.js?v=7.0.0.dev"></script>
-  <script src="../motion.js?v=7.0.0.dev"></script>
+  <meta name="app-version" content="7.0.1.dev">
+  <script src="../theme-boot.js?v=7.0.1.dev"></script>
+  <script src="../motion.js?v=7.0.1.dev"></script>
   <link rel="manifest" href="../manifest.webmanifest">
-  <link rel="stylesheet" href="../styles.css?v=7.0.0.dev">
-  <script type="module" src="../team-forms.js?v=7.0.0.dev"></script>
+  <link rel="stylesheet" href="../styles.css?v=7.0.1.dev">
+  <script type="module" src="../team-forms.js?v=7.0.1.dev"></script>
 </head>
 <body>
   <div id="update-banner" class="update-banner hidden" role="status">
@@ -102,6 +102,7 @@
               <div class="inline-actions">
                 <button id="builder-add-field" type="button" class="secondary-button">Add field</button>
                 <button id="builder-assign" type="button" class="primary-button">Assign</button>
+                <button id="builder-delete-form" type="button" class="text-button hidden">Delete form</button>
               </div>
             </div>
             <div id="builder-fields"></div>
@@ -133,6 +134,13 @@
           <div class="inline-actions" id="task-actions"></div>
         </div>
         <div id="task-progress" class="tf-progress hidden"></div>
+        <div id="task-search" class="tf-task-search">
+          <button type="button" id="task-search-toggle" class="secondary-button" aria-expanded="false" aria-controls="task-search-panel">Search</button>
+          <div id="task-search-panel" class="tf-task-search-panel hidden">
+            <input id="task-search-input" type="search" placeholder="Find a field or answer" autocomplete="off" aria-label="Search fields">
+            <span id="task-search-count" class="muted"></span>
+          </div>
+        </div>
         <div id="task-form" class="tf-panel"></div>
         <div class="tf-panel" style="margin-top:16px">
           <h3>Comments</h3>
@@ -217,9 +225,17 @@
     .tf-inline-label select,.tf-inline-label input{width:100%;border:1px solid var(--input-border);border-radius:9px;background:var(--input-bg);padding:10px 11px;color:var(--ink)}
     .tf-role-chip{display:inline-block;font-size:11px;font-weight:650;padding:2px 8px;border-radius:999px;border:1px solid var(--line);background:var(--soft-3);margin:0 4px 4px 0}
     .tf-dept-block{margin-bottom:22px}
-    .tf-dept-block h3{margin:0 0 8px;font-size:18px;font-family:Georgia,serif;font-weight:500}
+    .tf-dept-block h3{margin:0 0 4px;font-size:18px;font-family:Georgia,serif;font-weight:500}
+    .tf-accordion-toggle{display:flex;align-items:flex-start;gap:10px;border:0;background:transparent;padding:0;margin:0;cursor:pointer;text-align:left;color:inherit;font:inherit;flex:1;min-width:0}
+    .tf-accordion-toggle:hover .tf-accordion-label h3,
+    .tf-accordion-toggle:hover .tf-accordion-label strong{text-decoration:underline}
+    .tf-accordion-caret{flex-shrink:0;margin-top:5px;color:var(--muted);font-size:12px;line-height:1.2;width:1em}
+    .tf-accordion-label{min-width:0}
+    .tf-accordion-label .muted{margin:0}
     .tf-group-card{border:1px solid var(--line);border-radius:10px;padding:12px 14px;margin:10px 0;background:var(--soft-3)}
+    .tf-group-head{margin-bottom:4px}
     .tf-group-card .inline-actions{margin-top:8px;flex-wrap:wrap}
+    .tf-group-card .tf-members{margin-top:10px;padding-top:8px;border-top:1px solid var(--line)}
     .tf-field-row{display:grid;gap:8px;padding:12px 0;border-bottom:1px solid var(--line)}
     .tf-field-row:last-child{border-bottom:0}
     .tf-field-head{display:flex;justify-content:space-between;gap:10px;align-items:center;flex-wrap:wrap}
@@ -235,6 +251,18 @@
     .tf-form-field input,.tf-form-field textarea,.tf-form-field select{width:100%;border:1px solid var(--input-border);border-radius:9px;background:var(--input-bg);padding:10px 11px;color:var(--ink);font-weight:400}
     .tf-form-field.readonly,.tf-form-field.calculated{opacity:.92}
     .tf-check-row{display:flex;align-items:center;gap:8px;font-weight:500}
+    .tf-check-row.is-assigned,.tf-check-row.is-self{opacity:.72}
+    .tf-check-row.is-assigned input,.tf-check-row.is-self input{cursor:not-allowed}
+    .tf-status-control{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+    .tf-status-control .tf-inline-label{min-width:140px}
+    .tf-save-hint{font-size:12px;min-width:4.5em}
+    .tf-save-hint.is-error{color:var(--warn-ink,#8a531a)}
+    .tf-task-search{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:0 0 12px}
+    .tf-task-search-panel{display:flex;align-items:center;gap:8px;flex:1;min-width:200px}
+    .tf-task-search-panel.hidden{display:none}
+    #task-search-input{flex:1;min-width:160px;border:1px solid var(--input-border);border-radius:9px;background:var(--input-bg);padding:10px 11px;color:var(--ink)}
+    .tf-form-field.is-search-hide{display:none}
+    .tf-form-field.is-search-match{outline:2px solid var(--accent,#2f6f5e);outline-offset:4px;border-radius:8px}
   </style>
 </body>
 </html>
