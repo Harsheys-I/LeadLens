@@ -1,13 +1,14 @@
-import {APP_VERSION,DEFAULT_SETTINGS,DEFAULT_OUTPUT_FIELDS,SETTINGS_SEED,MAX_BATCH_SIZE,MAX_CONCURRENCY,normalizeSettings,normalizeInputFields,slugFieldId,parseWorkbook,parseAuditedWorkbook,auditBatch,downloadWorkbook,downloadReviewPack,downloadReviewPdf,splitLeadsByTelecaller,splitResultsByTelecaller,validateApiKey,HIGH_SEVERITY_ERRORS,SERVER_API_KEY} from "./audit.js?v=6.0.0.dev";
-import {getJob,getJobs,loadSettings,saveSettings,getApiKey,apiKeyIsRemembered,saveApiKey,forgetApiKey,setStorageUserId,storageKey} from "./db.js?v=6.0.0.dev";
-import {renderReviewDashboard,destroyReviewDashboard} from "./dashboard-view.js?v=6.0.0.dev";
-import {requireAuth,logout,hasPermission,getUser,changePassword,updateProfile} from "./auth.js?v=6.0.0.dev";
-import {DashboardApi,SettingsApi} from "./api-client.js?v=6.0.0.dev";
-import {mountNotifications} from "./notifications-ui.js?v=6.0.0.dev";
-import {persistJob,removeJobSynced,clearJobsSynced,pullJobsFromServer} from "./jobs-sync.js?v=6.0.0.dev";
-import {mountPerfReportUpload,mountPerfPublishedDashboard,refreshPerfPublished} from "./perf-dashboard.js?v=6.0.0.dev";
-import {appUrl, homePath} from "./app-base.js?v=6.0.0.dev";
-import {initTheme} from "./theme.js?v=6.0.0.dev";
+import {APP_VERSION,DEFAULT_SETTINGS,DEFAULT_OUTPUT_FIELDS,SETTINGS_SEED,MAX_BATCH_SIZE,MAX_CONCURRENCY,normalizeSettings,normalizeInputFields,slugFieldId,parseWorkbook,parseAuditedWorkbook,auditBatch,downloadWorkbook,downloadReviewPack,downloadReviewPdf,splitLeadsByTelecaller,splitResultsByTelecaller,validateApiKey,HIGH_SEVERITY_ERRORS,SERVER_API_KEY} from "./audit.js?v=6.3.0.stable";
+import {getJob,getJobs,loadSettings,saveSettings,getApiKey,apiKeyIsRemembered,saveApiKey,forgetApiKey,setStorageUserId,storageKey} from "./db.js?v=6.3.0.stable";
+import {renderReviewDashboard,destroyReviewDashboard} from "./dashboard-view.js?v=6.3.0.stable";
+import {requireAuth,logout,hasPermission,getUser,changePassword,updateProfile} from "./auth.js?v=6.3.0.stable";
+import {DashboardApi,SettingsApi} from "./api-client.js?v=6.3.0.stable";
+import {mountNotifications} from "./notifications-ui.js?v=6.3.0.stable";
+import {persistJob,removeJobSynced,clearJobsSynced,pullJobsFromServer} from "./jobs-sync.js?v=6.3.0.stable";
+import {mountPerfReportUpload,mountPerfPublishedDashboard,refreshPerfPublished} from "./perf-dashboard.js?v=6.3.0.stable";
+import {appUrl, homePath} from "./app-base.js?v=6.3.0.stable";
+import {initTheme} from "./theme.js?v=6.3.0.stable";
+import {mountErpSyncPanel, loadErpSyncPanel, canShowErpSync, applyErpSyncNavVisibility} from "./erp-sync.js?v=6.3.0.stable";
 
 const $=id=>document.getElementById(id);
 const ids=["page-title","key-state","run-name","pause-run","download-result","progress-label","progress-percent","progress-bar","metric-leads","metric-excel-rows","metric-calls","metric-batch","metric-completed","metric-status","metric-input-tokens","metric-cached-tokens","metric-output-tokens","metric-duration","metric-cost","live-log","clear-console","history-list","clear-history","api-key","remember-key","toggle-key","save-key","forget-key","key-message","batch-size","concurrency","model","input-field-config","add-input-field","ai-field-config","output-field-config","yes-values","no-values","input-price","cached-price","output-price","save-settings","reset-settings","settings-message","toast","mobile-menu","active-job-switch","sort-field","sort-direction","app-version","export-settings","import-settings","import-settings-file","update-banner","update-banner-text","reload-app","key-modal","onboard-key","onboard-toggle","onboard-remember","onboard-message","onboard-save","onboard-skip","sidebar-version","sidebar-notes","review-drop-zone","review-file-input","review-drop-hint","review-file-list","review-validation","start-review","review-run-panel","review-aggregate","review-cards","review-dashboard-panel","review-dashboard-mount","download-review-excel","review-open-console","review-precounts","review-live-progress","review-progress-label","review-progress-percent","review-progress-bar","review-post-actions","create-review-dashboard","export-dashboard-pdf","upload-dashboard-btn","upload-dashboard-modal","upload-telecaller-list","upload-dash-message","upload-dash-confirm","upload-dash-cancel","published-list","refresh-published","published-dashboard-panel","published-dash-title","published-dash-meta","published-dash-actions","published-dashboard-mount","shell-user-label","shell-logout","shell-account"];
@@ -15,7 +16,7 @@ const els=Object.fromEntries(ids.map(id=>[id,$(id)]));
 // Paint running build immediately so stale HTML never flashes for seconds during auth/boot.
 if(els["sidebar-version"])els["sidebar-version"].textContent=`v${APP_VERSION}`;
 if(els["app-version"])els["app-version"].textContent=APP_VERSION;
-const titles={review:"Bucket 1 Followup Review",console:"Run console",published:"Dashboard",history:"History",settings:"Settings","perf-report":"TeleCalling Performance","perf-dashboard":"Performance Dashboard","perf-settings":"Performance Settings"};
+const titles={review:"Bucket 1 Followup Review",console:"Run console",published:"Dashboard",history:"History",settings:"Settings","erp-sync":"ERP Sync","perf-report":"TeleCalling Performance","perf-dashboard":"Performance Dashboard","perf-settings":"Performance Settings"};
 /** When false, completed audits do not auto-render charts until Create Dashboard. */
 let reviewDashboardRequested=false;
 let lastReadyReviewJobs=[];
@@ -223,6 +224,10 @@ function expandNavGroupForView(name){
 function showView(name){
   const btn=document.querySelector(`.nav-item[data-view="${name}"]:not(.hidden)`)
     ||document.querySelector(`.nav-item[data-view="${name}"]`);
+  if(name==="erp-sync"&&!canShowErpSync()){
+    toast("ERP Sync is only available on /dev for Super User.");
+    return;
+  }
   if(btn?.dataset.perm&&!hasPermission(btn.dataset.perm)){
     toast("You do not have permission for this screen.");
     return;
@@ -246,6 +251,7 @@ function showView(name){
   if(name==="review")renderReviewProgress();
   if(name==="published")refreshPublishedDashboards();
   if(name==="perf-dashboard")refreshPerfPublished();
+  if(name==="erp-sync")loadErpSyncPanel();
 }
 function toast(message){els.toast.textContent=message;els.toast.classList.add("show");clearTimeout(toast.timer);toast.timer=setTimeout(()=>els.toast.classList.remove("show"),3200);}
 function updateKeyState(){
@@ -989,6 +995,35 @@ function setReviewFormat(format){
   reviewParsedFiles=[];
   renderReviewFileList();
   updateReviewValidation();
+}
+
+/**
+ * Hand off ERP-mapped leads into Bucket 1 Audit (same path as Excel RAW upload).
+ * Does not auto-start — user clicks Start Audit → for progress / Stop / Publish.
+ * @param {object} entry parseWorkbook-shaped object with leads[]
+ */
+function loadErpIntoAudit(entry){
+  if(!entry?.leads?.length){
+    toast("No ERP leads to load.");
+    return;
+  }
+  reviewFormat="raw";
+  document.querySelectorAll("[data-review-format]").forEach(button=>{
+    button.classList.toggle("active",button.dataset.reviewFormat==="raw");
+  });
+  if(els["review-drop-hint"]){
+    els["review-drop-hint"].textContent="ERP Sync fetch · mapped leads ready · click Start Audit → (same as Excel RAW)";
+  }
+  const packed={
+    ...entry,
+    sourceFormat:"raw",
+    splitPreview:splitLeadsByTelecaller(entry.leads||[])
+  };
+  reviewParsedFiles=[packed];
+  renderReviewFileList();
+  updateReviewValidation();
+  showView("review");
+  toast(`${entry.leads.length.toLocaleString()} ERP leads ready — click Start Audit →`);
 }
 
 function scheduleReviewProgress(){
@@ -2174,21 +2209,14 @@ async function bootTeleCallerAudit(){
     return;
   }
 
-  setStorageUserId(user.id);
-  clearInMemoryJobs();
-  reloadUserSettings();
-  applySidebarCollapsed(readSidebarCollapsedPref(),{persist:false});
-  await loadServerSettingsAndKey();
-  loadReviewSessionIds();
-  renderSettings();
-  await renderHistory();
-
   if(els["shell-user-label"])els["shell-user-label"].textContent=user.display_name||user.username;
 
+  // Nav chrome as soon as role is known — Sync must not wait on settings/history/restore.
   document.querySelectorAll(".nav-item[data-perm]").forEach(btn=>{
     const perm=btn.dataset.perm;
     if(perm&&!hasPermission(perm))btn.classList.add("hidden");
   });
+  applyErpSyncNavVisibility();
   setupTelecallerDashboardsNav();
   document.querySelectorAll(".nav-group").forEach(group=>{
     if(group.classList.contains("hidden"))return;
@@ -2211,12 +2239,23 @@ async function bootTeleCallerAudit(){
     els["review-open-console"].classList.add("hidden");
   }
 
+  setStorageUserId(user.id);
+  clearInMemoryJobs();
+  reloadUserSettings();
+  applySidebarCollapsed(readSidebarCollapsedPref(),{persist:false});
+  await loadServerSettingsAndKey();
+  loadReviewSessionIds();
+  renderSettings();
+  await renderHistory();
+
   const hashView=location.hash.slice(1);
   if(hashView==="published"&&hasPermission("telecaller.dashboard"))showView("published");
   else if(hashView==="perf-dashboard"&&hasPermission("telecaller.perf_dashboard"))showView("perf-dashboard");
   else if(hashView==="perf-report"&&hasPermission("telecaller.perf_report"))showView("perf-report");
   else if(hashView==="perf-settings"&&hasPermission("telecaller.perf_settings"))showView("perf-settings");
-  else{
+  else if(hashView==="erp-sync"&&canShowErpSync()){
+    /* shown after mountErpSyncPanel */
+  }else{
     const firstVisible=[...document.querySelectorAll(".nav-item[data-view]:not(.hidden)")][0];
     showView(firstVisible?.dataset.view||"review");
   }
@@ -2225,6 +2264,11 @@ async function bootTeleCallerAudit(){
   if(hasPermission("telecaller.bucket1")||hasPermission("telecaller.settings"))maybePromptForApiKey();
   mountPerfReportUpload({hasPermission,toast,showView});
   mountPerfPublishedDashboard({hasPermission,canViewAll:canSeeComparativeKpis});
+  mountErpSyncPanel({toast,showView,loadErpIntoAudit});
+  if(canShowErpSync()&&location.hash==="#erp-sync"){
+    await loadErpSyncPanel();
+    showView("erp-sync");
+  }
   mountNotifications({
     variant:"chrome",
     onOpenAccessRequests:()=>{location.href=appUrl("/admin/");},

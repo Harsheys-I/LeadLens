@@ -1,7 +1,7 @@
 /**
  * Thin fetch wrapper for LeadLens PHP API (same-origin, session cookie).
  */
-import {apiBase} from './app-base.js?v=6.0.0.dev';
+import {apiBase} from './app-base.js?v=6.3.0.stable';
 
 function resolveApiBase(){
   return apiBase();
@@ -103,6 +103,18 @@ export const SettingsApi = {
   saveOpenaiKey: (api_key) => api('settings/openai-key', {method: 'POST', body: {api_key}}),
   // POST clear — Hostinger/shared hosts often block DELETE
   clearOpenaiKey: () => api('settings/openai-key', {method: 'POST', body: {clear: true}}),
+};
+
+export const ErpSyncApi = {
+  status: () => api('erp-sync/status'),
+  getConfig: () => api('erp-sync/config'),
+  saveConfig: (body) => api('erp-sync/config', {method: 'POST', body}),
+  testFetch: () => api('erp-sync/test-fetch', {method: 'POST', body: {}}),
+  fetchForAudit: () => api('erp-sync/fetch-for-audit', {method: 'POST', body: {}}),
+  latestLeads: (meta = false) => api(`erp-sync/latest-leads${meta ? '?meta=1' : ''}`),
+  run: (body = {}) => api('erp-sync/run', {method: 'POST', body}),
+  publish: () => api('erp-sync/publish', {method: 'POST', body: {}}),
+  job: (full = false) => api(`erp-sync/job${full ? '?full=1' : ''}`),
 };
 
 export const JobsApi = {

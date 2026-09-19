@@ -6,16 +6,17 @@
   <meta name="theme-color" media="(prefers-color-scheme: light)" content="#12372a">
   <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#0f2d22">
   <meta name="description" content="GPP AI · LeadLens">
+  <meta name="app-version" content="6.3.0.stable">
   <title>GPP AI · LeadLens</title>
-  <script src="../theme-boot.js?v=6.0.0.dev"></script>
-  <script src="../motion.js?v=6.0.0.dev"></script>
+  <script src="../theme-boot.js?v=6.3.0.stable"></script>
+  <script src="../motion.js?v=6.3.0.stable"></script>
   <link rel="manifest" href="../manifest.webmanifest">
-  <link rel="stylesheet" href="../styles.css?v=6.0.0.dev">
+  <link rel="stylesheet" href="../styles.css?v=6.3.0.stable">
   <script defer src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js"></script>
-  <script type="module" src="../app.js?v=6.0.0.dev"></script>
+  <script type="module" src="../app.js?v=6.3.0.stable"></script>
 </head>
 <body>
   <div id="update-banner" class="update-banner hidden" role="status">
@@ -46,6 +47,7 @@
             <button class="nav-item nav-item-child" data-view="published" data-perm="telecaller.dashboard" data-label-flat="Bucket 1"><span>▦</span>Dashboard</button>
             <button class="nav-item nav-item-child" data-view="history" data-perm="telecaller.history"><span>◷</span>History</button>
             <button class="nav-item nav-item-child" data-view="settings" data-perm="telecaller.settings"><span>⚙</span>Settings</button>
+            <button class="nav-item nav-item-child hidden" data-view="erp-sync" id="nav-erp-sync" data-super-only="1"><span>⟳</span>ERP Sync</button>
           </div>
         </div>
         <div class="nav-group is-collapsed" data-nav-group="perf">
@@ -59,7 +61,7 @@
           </div>
         </div>
       </nav>
-      <div class="privacy-note"><strong id="sidebar-version">v6.0.0.dev</strong><span id="sidebar-notes">v6.0.0.dev: Sales Graph module — Leads/Visits Excel upload, MySQL publish, multi-chart gallery (bar, line, doughnut, stacked, heatmaps, MoM).</span></div>
+      <div class="privacy-note"><strong id="sidebar-version">v6.3.0.stable</strong><span id="sidebar-notes">v6.3.0.stable: ERP Sync on live for Super User — first-load nav, Fetch→Audit handoff, session keep-alive.</span></div>
     </aside>
 
     <main>
@@ -219,6 +221,86 @@
                 <button id="import-settings" type="button" class="secondary-button">Import settings JSON</button>
                 <input id="import-settings-file" type="file" accept="application/json,.json" hidden>
               </div>
+            </section>
+          </div>
+        </div>
+      </section>
+
+      <section id="view-erp-sync" class="view">
+        <div class="settings-page">
+          <div class="settings-toolbar" role="toolbar" aria-label="ERP Sync actions">
+            <div class="settings-toolbar-copy">
+              <strong>ERP Sync</strong>
+              <span>Super User. Fetch ERP report once → store raw JSON → load into Bucket 1 Audit (same Start Audit / progress / Stop as Excel RAW).</span>
+            </div>
+            <div class="inline-actions settings-toolbar-actions">
+              <button id="erp-sync-save" type="button" class="primary-button">Save settings</button>
+              <span id="erp-sync-message" class="form-message" aria-live="polite"></span>
+            </div>
+          </div>
+
+          <div id="erp-sync-progress" class="review-live-progress" aria-live="polite">
+            <div class="progress-copy">
+              <strong id="erp-sync-progress-label">Idle</strong>
+              <span id="erp-sync-progress-percent">0%</span>
+            </div>
+            <div class="progress-track">
+              <div id="erp-sync-progress-bar" class="progress-bar" style="width:0%"></div>
+            </div>
+            <p id="erp-sync-progress-detail" class="muted form-message" style="margin:0.65rem 0 0">Configure URL + Cookie, Save, then Fetch &amp; send to Audit.</p>
+          </div>
+
+          <div class="settings-sections">
+            <section class="settings-card">
+              <div class="card-title"><h2>1 · Report request</h2><p>Paste the authenticated report URL and Cookie header from a working browser cURL. Never share cookies outside Super User.</p></div>
+              <label>Report URL<input id="erp-sync-url" type="url" autocomplete="off" placeholder="https://…/getFunction.do?…"></label>
+              <label>HTTP method
+                <select id="erp-sync-method">
+                  <option value="GET">GET</option>
+                  <option value="POST">POST</option>
+                </select>
+              </label>
+              <label>Cookie header<textarea id="erp-sync-cookie" rows="3" autocomplete="off" placeholder="JSESSIONID=…; other=…"></textarea></label>
+              <p id="erp-sync-cookie-hint" class="muted form-message"></p>
+              <label>Extra headers (JSON object, optional)<textarea id="erp-sync-headers" rows="3" placeholder='{"Accept":"application/json"}'></textarea></label>
+              <label>JSON rows path (optional)<input id="erp-sync-rows-path" type="text" placeholder="data.rows — leave blank to auto-detect"></label>
+            </section>
+
+            <section class="settings-card">
+              <div class="card-title"><h2>2 · Field map</h2><p>Comma-separated ERP column aliases per LeadLens field. After Test fetch, match keys from the preview.</p></div>
+              <div id="erp-sync-field-map" class="config-list"></div>
+              <div class="inline-actions" style="margin-top:0.75rem">
+                <button id="erp-sync-test" type="button" class="secondary-button">Test fetch</button>
+              </div>
+              <div id="erp-sync-preview" class="muted form-message" style="white-space:pre-wrap;margin-top:0.75rem"></div>
+            </section>
+
+            <section class="settings-card">
+              <div class="card-title"><h2>3 · Fetch → Audit</h2><p>Primary path: fetch the full ERP report, store it under <code>api/storage/erp-sync/</code>, map leads, then open Bucket 1 so you run Audit with the normal progress bar / Stop / Publish flow.</p></div>
+              <div class="inline-actions" style="margin-top:0.75rem;flex-wrap:wrap">
+                <button id="erp-sync-fetch-audit" type="button" class="primary-button">Fetch &amp; send to Audit</button>
+              </div>
+            </section>
+
+            <section class="settings-card">
+              <div class="card-title"><h2>4 · Cron &amp; advanced (optional)</h2><p>Cron / server OpenAI audit is optional and can get stuck on Hostinger time limits. Prefer Fetch &amp; send to Audit. Publish here only applies to results from the advanced server audit path.</p></div>
+              <div class="field-grid run-grid">
+                <label class="check-row"><input id="erp-sync-enabled" type="checkbox"><span>Enable cron / scheduled runs</span></label>
+                <label class="check-row"><input id="erp-sync-keepalive" type="checkbox"><span>Enable session keep-alive (cron every 30 min)</span></label>
+                <label class="check-row"><input id="erp-sync-auto-publish" type="checkbox"><span>Auto-publish after server audit</span></label>
+                <label>Batch size<input id="erp-sync-batch-size" type="number" min="1" max="20" value="10"></label>
+                <label>Max leads / invocation<input id="erp-sync-max-leads" type="number" min="1" max="200" value="40"></label>
+              </div>
+              <label>Keep-alive URL (optional)<input id="erp-sync-keepalive-url" type="url" autocomplete="off" placeholder="Defaults to Report URL — use a lighter same-host page if preferred"></label>
+              <label>Cron bearer secret<input id="erp-sync-cron-secret" type="password" autocomplete="new-password" placeholder="Set a long random secret"></label>
+              <p id="erp-sync-cron-hint" class="muted form-message"></p>
+              <p id="erp-sync-keepalive-status" class="muted form-message" aria-live="polite"></p>
+              <div class="inline-actions" style="margin-top:0.75rem;flex-wrap:wrap">
+                <button id="erp-sync-ping" type="button" class="secondary-button">Ping keep-alive now</button>
+                <button id="erp-sync-run-server" type="button" class="secondary-button">Server audit (advanced)</button>
+                <button id="erp-sync-publish" type="button" class="secondary-button">Publish last server results</button>
+              </div>
+              <pre id="erp-sync-status" class="muted" style="margin-top:0.75rem;white-space:pre-wrap;font-size:0.85rem"></pre>
             </section>
           </div>
         </div>

@@ -355,6 +355,10 @@ body.auth-body.home-mode{display:block;padding:0;place-items:unset}
 .review-precounts span{display:block;font-size:12px;color:var(--muted)}
 .review-precounts strong{font-size:20px}
 .review-live-progress{padding:16px 18px;background:var(--panel);border:1px solid var(--line);border-radius:14px;box-shadow:var(--shadow)}
+#view-erp-sync #erp-sync-progress{margin:0 0 18px}
+#view-erp-sync .progress-bar.is-indeterminate{width:35%!important;animation:erp-sync-indeterminate 1.1s ease-in-out infinite}
+@keyframes erp-sync-indeterminate{0%{transform:translateX(-120%)}100%{transform:translateX(320%)}}
+#view-erp-sync .progress-track{overflow:hidden}
 .review-post-actions{display:flex;flex-wrap:wrap;gap:12px;justify-content:flex-end}
 .published-list{display:grid;gap:12px;margin-top:20px}
 .published-card{display:grid;gap:4px;text-align:left;padding:16px 18px;background:var(--panel);border:1px solid var(--line);border-radius:12px;cursor:pointer;font:inherit;color:inherit}
@@ -696,6 +700,7 @@ body .sg-booked-callout{
   color:var(--muted);font-size:13px;background:var(--soft-2)
 }
 body .sg-preview-banner,body .sg-meta-line{margin:0 0 12px;color:var(--muted);font-size:13px}
+body .sg-export-bar{margin:0 0 12px;justify-content:flex-end}
 /* Contain wide hero canvases: ancestors must not size to max-content. */
 body .shell{max-width:100%;overflow-x:hidden}
 body .shell:not(.sidebar-collapsed){grid-template-columns:248px minmax(0,1fr)}
@@ -737,13 +742,20 @@ body .sg-chart-slicers,body .sg-slicer-bar{
 body .sg-chart-scroll{
   display:block;box-sizing:border-box;
   width:100%;max-width:100%;min-width:0;
-  overflow-x:scroll;overflow-y:hidden;
+  overflow-x:auto;overflow-y:hidden;
+  /* Chromium overlays the X bar on the canvas when overflow-y is hidden.
+     JS sets --sg-hscroll-gutter to the bar thickness only in that case. */
+  padding-bottom:var(--sg-hscroll-gutter,0px);
   /* Contain horizontal overscroll only — vertical page scroll must pass through. */
   overscroll-behavior-x:contain;
   overscroll-behavior-y:auto;
   -webkit-overflow-scrolling:touch;
   touch-action:pan-x pan-y;
   border-radius:8px
+}
+/* First paint on Blink/WebKit: reserve a gutter before JS measures overflow. */
+@supports selector(::-webkit-scrollbar){
+  body .sg-chart-scroll{--sg-hscroll-gutter:18px}
 }
 /* Hero L/V/B: viewport-friendly height; doughnuts/heatmaps keep their own card heights. */
 body .sg-chart-card--hero .sg-chart-scroll{height:min(560px,62vh)}
@@ -755,7 +767,6 @@ body .sg-chart-scroll .dashboard-chart-canvas canvas{
 }
 @media(max-width:850px){
   body .sg-chart-card--hero .sg-chart-scroll{height:min(420px,55vh)}
-  body .sg-chart-card--hero .sg-chart-scroll .dashboard-chart-canvas,
   body .sg-chart-card--hero .dashboard-chart-canvas{height:min(420px,55vh)}
 }
 body .sg-slicer{position:relative;font-size:12px}

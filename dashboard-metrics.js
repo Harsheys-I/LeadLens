@@ -3,7 +3,7 @@
  * Reuses mapResultsToRawDataRows for severity / overdue / error labels.
  */
 
-import {mapResultsToRawDataRows} from "./dashboard-export.js?v=6.0.0.dev";
+import {mapResultsToRawDataRows} from "./dashboard-export.js?v=6.3.0.stable";
 
 const MONTHS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
 
