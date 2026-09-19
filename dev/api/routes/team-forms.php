@@ -70,7 +70,7 @@ function ll_tf_route_workspace(array $user): void
 
   $stmt = ll_pdo()->prepare(
     "SELECT t.id, t.form_id, t.status, t.reviewer_scope, t.updated_at, t.submitted_at,
-            t.title AS task_title, t.due_on,
+            t.title AS task_title, t.due_on, t.assigned_by,
             f.title AS form_title, g.id AS group_id, g.name AS group_name,
             d.id AS department_id, d.name AS department_name
      FROM form_tasks t
@@ -95,6 +95,7 @@ function ll_tf_route_workspace(array $user): void
       'group_name' => (string) $row['group_name'],
       'department_id' => (int) $row['department_id'],
       'department_name' => (string) $row['department_name'],
+      'assigned_by' => $row['assigned_by'] !== null ? (int) $row['assigned_by'] : null,
       'updated_at' => $row['updated_at'],
       'submitted_at' => $row['submitted_at'],
     ];
@@ -741,6 +742,9 @@ function ll_tf_parse_field_body(array $body, ?array $existing = null): array
   $required = array_key_exists('required', $body)
     ? !empty($body['required'])
     : !empty($existing['required']);
+  $creatorOnly = array_key_exists('creator_only', $body)
+    ? !empty($body['creator_only'])
+    : !empty($existing['creator_only']);
   $readonly = array_key_exists('readonly_value', $body)
     ? (string) $body['readonly_value']
     : ($existing['readonly_value'] ?? null);
@@ -772,6 +776,9 @@ function ll_tf_parse_field_body(array $body, ?array $existing = null): array
   if ($type === 'select' && empty($options)) {
     // Allow empty; UI can fill later
   }
+  if ($existing !== null && ll_tf_is_system_field($existing)) {
+    $creatorOnly = true;
+  }
 
   return [
     'field_key' => $key,
@@ -783,6 +790,7 @@ function ll_tf_parse_field_body(array $body, ?array $existing = null): array
     'calc_left_field_id' => $type === 'calculated' ? $calcLeft : null,
     'calc_right_field_id' => $type === 'calculated' ? $calcRight : null,
     'required' => $required ? 1 : 0,
+    'creator_only' => $creatorOnly ? 1 : 0,
     'sort_order' => $sort,
   ];
 }
@@ -816,8 +824,8 @@ function ll_tf_route_fields(array $user, array $form, ?int $fieldId, string $ver
     }
     $pdo->prepare(
       'INSERT INTO form_fields
-       (form_id, field_key, label, field_type, options_json, readonly_value, calc_op, calc_left_field_id, calc_right_field_id, required, sort_order)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+       (form_id, field_key, label, field_type, options_json, readonly_value, calc_op, calc_left_field_id, calc_right_field_id, required, creator_only, sort_order)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
     )->execute([
       $formId,
       $parsed['field_key'],
@@ -829,6 +837,7 @@ function ll_tf_route_fields(array $user, array $form, ?int $fieldId, string $ver
       $parsed['calc_left_field_id'],
       $parsed['calc_right_field_id'],
       $parsed['required'],
+      $parsed['creator_only'],
       $parsed['sort_order'],
     ]);
     $newId = (int) $pdo->lastInsertId();
@@ -861,7 +870,7 @@ function ll_tf_route_fields(array $user, array $form, ?int $fieldId, string $ver
       $pdo->prepare(
         'UPDATE form_fields SET field_key = ?, label = ?, field_type = ?, options_json = ?,
          readonly_value = ?, calc_op = ?, calc_left_field_id = ?, calc_right_field_id = ?,
-         required = ?, sort_order = ? WHERE id = ? AND form_id = ?'
+         required = ?, creator_only = ?, sort_order = ? WHERE id = ? AND form_id = ?'
       )->execute([
         $parsed['field_key'],
         $parsed['label'],
@@ -872,6 +881,7 @@ function ll_tf_route_fields(array $user, array $form, ?int $fieldId, string $ver
         $parsed['calc_left_field_id'],
         $parsed['calc_right_field_id'],
         $parsed['required'],
+        $parsed['creator_only'],
         $parsed['sort_order'],
         $fieldId,
         $formId,
@@ -1097,13 +1107,8 @@ function ll_tf_assign_tasks(array $user, array $form): void
 
 function ll_tf_create_draft_task(array $user, array $form, array $body): void
 {
-  $status = (string) ($body['status'] ?? 'pending');
-  if ($status === 'submitted') {
-    $status = 'completed';
-  }
-  if (!in_array($status, ['pending', 'in_progress', 'completed'], true)) {
-    $status = 'pending';
-  }
+  // Task Builder create always starts Pending; assignee updates status later.
+  $status = 'pending';
   $pdo = ll_pdo();
   $formId = (int) $form['id'];
   $actorId = (int) $user['id'];
@@ -1455,7 +1460,7 @@ function ll_tf_route_tasks(array $user, ?int $id, string $sub): void
 
     if ($mine) {
       $sql = "SELECT t.id, t.form_id, t.status, t.reviewer_scope, t.updated_at, t.submitted_at,
-                     t.title AS task_title, t.due_on,
+                     t.title AS task_title, t.due_on, t.assigned_by,
                      f.title AS form_title, g.id AS group_id, g.name AS group_name,
                      d.id AS department_id, d.name AS department_name
               FROM form_tasks t
@@ -1493,6 +1498,10 @@ function ll_tf_route_tasks(array $user, ?int $id, string $sub): void
 
   if ($method === 'GET' && $sub === '') {
     ll_ok(['task' => $task]);
+  }
+
+  if ($method === 'POST' && $sub === 'delete') {
+    ll_tf_task_delete($user, $task);
   }
 
   if ($method === 'POST' && $sub === 'status') {
@@ -1598,6 +1607,15 @@ function ll_tf_route_tasks(array $user, ?int $id, string $sub): void
   ll_error('Not found', 404);
 }
 
+function ll_tf_task_delete(array $user, array $task): void
+{
+  if (!ll_tf_can_delete_task($user, $task)) {
+    ll_error('Only the person who created this task can delete it', 403);
+  }
+  ll_tf_delete_task_cascade((int) $task['id']);
+  ll_ok(['deleted' => true, 'id' => (int) $task['id']]);
+}
+
 function ll_tf_task_list_row(array $row): array
 {
   return [
@@ -1614,6 +1632,7 @@ function ll_tf_task_list_row(array $row): array
     'department_name' => (string) ($row['department_name'] ?? ''),
     'assignee_id' => isset($row['assignee_id']) ? (int) $row['assignee_id'] : null,
     'assignee_name' => $row['assignee_name'] ?? null,
+    'assigned_by' => isset($row['assigned_by']) && $row['assigned_by'] !== null ? (int) $row['assigned_by'] : null,
     'updated_at' => $row['updated_at'] ?? null,
     'submitted_at' => $row['submitted_at'] ?? null,
     'progress' => isset($row['progress_percent']) ? [
@@ -1766,7 +1785,7 @@ function ll_tf_task_save_answers(array $user, array $task, array $body, bool $re
 {
   $uid = (int) $user['id'];
   if (!ll_tf_can_edit_task_answers($user, $task)) {
-    ll_error('Only the form creator can edit answers', 403);
+    ll_error('You cannot edit answers on this task', 403);
   }
   if (in_array($task['status'], ['approved', 'closed'], true)) {
     ll_error('Answers are locked after approval');
@@ -1788,12 +1807,16 @@ function ll_tf_task_save_answers(array $user, array $task, array $body, bool $re
   foreach ($task['answers'] as $a) {
     $answersByFieldId[(int) $a['field_id']] = $a['value'] ?? null;
   }
+  $wrote = false;
   foreach ($answers as $a) {
     $fid = (int) ($a['field_id'] ?? 0);
     if ($fid < 1 || !isset($fieldsById[$fid])) {
       continue;
     }
     $f = $fieldsById[$fid];
+    if (!ll_tf_can_edit_field_answer($user, $task, $f)) {
+      continue;
+    }
     $val = $a['value'] ?? null;
     if ($val !== null && !is_scalar($val)) {
       $val = json_encode($val);
@@ -1811,6 +1834,7 @@ function ll_tf_task_save_answers(array $user, array $task, array $body, bool $re
     }
     $upsert->execute([(int) $task['id'], $fid, $valStr]);
     $answersByFieldId[$fid] = $valStr;
+    $wrote = true;
   }
   // Recompute calculated
   foreach ($task['fields'] as $f) {
@@ -1830,8 +1854,8 @@ function ll_tf_task_save_answers(array $user, array $task, array $body, bool $re
       $upsert->execute([(int) $task['id'], $f['id'], $computed]);
     }
   }
-  // Auto move pending → in_progress on first save
-  if ($task['status'] === 'pending') {
+  // Assignee working the task: pending → in_progress. Creator fill in Task Builder stays Pending.
+  if ($wrote && $task['status'] === 'pending' && ll_tf_user_is_assignee($user, $task)) {
     $pdo->prepare("UPDATE form_tasks SET status = 'in_progress' WHERE id = ?")
       ->execute([(int) $task['id']]);
     ll_tf_log_task_event((int) $task['id'], (int) $user['id'], 'status_changed', 'pending', 'in_progress');
@@ -1952,7 +1976,7 @@ function ll_tf_comment_download_file(array $user, array $task): void
 function ll_tf_task_upload_file(array $user, array $task): void
 {
   if (!ll_tf_can_edit_task_answers($user, $task)) {
-    ll_error('Only the form creator can upload files', 403);
+    ll_error('You cannot upload files on this task', 403);
   }
   if (in_array($task['status'], ['approved', 'closed'], true)) {
     ll_error('Answers are locked after approval');
@@ -1964,6 +1988,9 @@ function ll_tf_task_upload_file(array $user, array $task): void
   }
   if ($fid < 1 || !isset($fieldsById[$fid]) || ($fieldsById[$fid]['field_type'] ?? '') !== 'document') {
     ll_error('Document field not found');
+  }
+  if (!ll_tf_can_edit_field_answer($user, $task, $fieldsById[$fid])) {
+    ll_error('This document field is only editable in Task Builder', 403);
   }
   if (empty($_FILES['file']) || !is_array($_FILES['file'])) {
     ll_error('file is required');
@@ -1995,7 +2022,7 @@ function ll_tf_task_upload_file(array $user, array $task): void
     'INSERT INTO form_answers (task_id, field_id, value_text) VALUES (?, ?, ?)
      ON DUPLICATE KEY UPDATE value_text = VALUES(value_text)'
   )->execute([$taskId, $fid, $payload]);
-  if ($task['status'] === 'pending') {
+  if ($task['status'] === 'pending' && ll_tf_user_is_assignee($user, $task)) {
     $pdo->prepare("UPDATE form_tasks SET status = 'in_progress' WHERE id = ?")
       ->execute([$taskId]);
     ll_tf_log_task_event($taskId, (int) $user['id'], 'status_changed', 'pending', 'in_progress');
@@ -2065,7 +2092,7 @@ function ll_tf_route_review_list(array $user, string $since = ''): void
 
   if ($isAll) {
     $sql = "SELECT t.id, t.form_id, t.status, t.reviewer_scope, t.updated_at, t.submitted_at,
-                   t.title AS task_title, t.due_on,
+                   t.title AS task_title, t.due_on, t.assigned_by,
                    t.assignee_id, ua.display_name AS assignee_name,
                    f.title AS form_title, g.id AS group_id, g.name AS group_name,
                    d.id AS department_id, d.name AS department_name
@@ -2085,7 +2112,7 @@ function ll_tf_route_review_list(array $user, string $since = ''): void
     $stmt->execute($params);
   } else {
     $sql = "SELECT DISTINCT t.id, t.form_id, t.status, t.reviewer_scope, t.updated_at, t.submitted_at,
-                   t.title AS task_title, t.due_on,
+                   t.title AS task_title, t.due_on, t.assigned_by,
                    t.assignee_id, ua.display_name AS assignee_name,
                    f.title AS form_title, g.id AS group_id, g.name AS group_name,
                    d.id AS department_id, d.name AS department_name

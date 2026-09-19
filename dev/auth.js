@@ -1,8 +1,8 @@
 /**
  * Session helpers + permission checks for LeadLens shells.
  */
-import {AuthApi} from './api-client.js?v=7.2.1.dev';
-import {appUrl, homePath, isHomePath} from './app-base.js?v=7.2.1.dev';
+import {AuthApi} from './api-client.js?v=7.2.2.stable';
+import {appUrl, homePath, isHomePath, isDevHost} from './app-base.js?v=7.2.2.stable';
 
 let currentUser = null;
 
@@ -114,6 +114,7 @@ export function moduleTilesForUser(user = currentUser){
       title: 'DeBug Mode',
       href: appUrl('/DeBugMode/'),
       superOnly: true,
+      devOnly: true,
       soon: false,
       desc: 'SuperUser CSV prompt auditor — custom prompt + Structured Outputs',
       icon: `<svg viewBox="0 0 96 96" fill="none" aria-hidden="true">
@@ -166,6 +167,7 @@ export function moduleTilesForUser(user = currentUser){
     },
   ];
   return tiles.filter(t => {
+    if (t.devOnly && !isDevHost()) return false;
     if (t.superOnly) return Boolean(user.is_super);
     if (user.is_super) return true;
     return hasPermission(t.perm);

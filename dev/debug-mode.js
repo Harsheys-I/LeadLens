@@ -16,25 +16,25 @@ import {
   sortResults,
   validateApiKey,
   SERVER_API_KEY,
-} from "./audit.js?v=7.2.1.dev";
-import {getApiKey,apiKeyIsRemembered,saveApiKey,forgetApiKey,setStorageUserId,storageKey} from "./db.js?v=7.2.1.dev";
-import {requireAuth,logout,getUser,changePassword,updateProfile} from "./auth.js?v=7.2.1.dev";
-import {SettingsApi} from "./api-client.js?v=7.2.1.dev";
-import {mountNotifications} from "./notifications-ui.js?v=7.2.1.dev";
-import {appUrl, homePath} from "./app-base.js?v=7.2.1.dev";
-import {initTheme} from "./theme.js?v=7.2.1.dev";
+} from "./audit.js?v=7.2.2.stable";
+import {getApiKey,apiKeyIsRemembered,saveApiKey,forgetApiKey,setStorageUserId,storageKey} from "./db.js?v=7.2.2.stable";
+import {requireAuth,logout,getUser,changePassword,updateProfile} from "./auth.js?v=7.2.2.stable";
+import {SettingsApi} from "./api-client.js?v=7.2.2.stable";
+import {mountNotifications} from "./notifications-ui.js?v=7.2.2.stable";
+import {appUrl, homePath, isDevHost} from "./app-base.js?v=7.2.2.stable";
+import {initTheme} from "./theme.js?v=7.2.2.stable";
 import {
   debugAuditBatch,
   telecallerAuditBatch,
   compareDebugVsTelecaller,
   activePromptsReady,
   normalizeActiveErrorTypes,
-} from "./debug-engine.js?v=7.2.1.dev";
+} from "./debug-engine.js?v=7.2.2.stable";
 import {
   LAB_ERROR_TYPES,
   STATUS_HISTORY_PROMPT,
   emptyErrorPrompts,
-} from "./debug-prompts.js?v=7.2.1.dev";
+} from "./debug-prompts.js?v=7.2.2.stable";
 
 const $=id=>document.getElementById(id);
 const ids=[
@@ -2179,6 +2179,10 @@ els["reload-app"]?.addEventListener("click",()=>location.reload());
 
 async function bootDeBugMode(){
   initTheme();
+  if(!isDevHost()){
+    location.href=homePath();
+    return;
+  }
   const user=await requireAuth({loginPath:homePath()});
   if(!user?.is_super){
     location.href=homePath();
