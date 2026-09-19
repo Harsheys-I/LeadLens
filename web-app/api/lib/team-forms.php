@@ -10,7 +10,7 @@ function ll_tf_roles(): array
 
 function ll_tf_task_statuses(): array
 {
-  return ['pending', 'in_progress', 'submitted', 'approved', 'rework', 'closed'];
+  return ['pending', 'in_progress', 'completed', 'submitted', 'approved', 'rework', 'closed'];
 }
 
 function ll_tf_field_types(): array
@@ -232,6 +232,493 @@ function ll_tf_doc_cleanup_field(int $fieldId): void
   }
 }
 
+/**
+ * Hostinger DBs created before comment snapshots/attachments.
+ */
+function ll_tf_ensure_comment_schema(PDO $pdo): void
+{
+  $add = [
+    'status_at_time' => 'VARCHAR(40) NULL',
+    'attachments_json' => 'LONGTEXT NULL',
+    'time_spent_minutes' => 'INT UNSIGNED NULL',
+  ];
+  foreach ($add as $name => $ddl) {
+    try {
+      $has = $pdo->query('SHOW COLUMNS FROM form_comments LIKE ' . $pdo->quote($name))->fetch();
+      if (!$has) {
+        $pdo->exec("ALTER TABLE form_comments ADD COLUMN `$name` $ddl");
+      }
+    } catch (Throwable $e) {
+      /* concurrent migrate */
+    }
+  }
+}
+
+/**
+ * Validate one $_FILES entry (same rules as document fields).
+ *
+ * @return array{tmp:string,orig:string,ext:string,mime:string,size:int,safe_name:string}
+ */
+function ll_tf_accept_upload(array $file): array
+{
+  $err = (int) ($file['error'] ?? UPLOAD_ERR_NO_FILE);
+  if ($err === UPLOAD_ERR_INI_SIZE || $err === UPLOAD_ERR_FORM_SIZE) {
+    ll_error('File must be 10 MB or smaller');
+  }
+  if ($err !== UPLOAD_ERR_OK) {
+    ll_error('Upload failed');
+  }
+  $size = (int) ($file['size'] ?? 0);
+  if ($size < 1) {
+    ll_error('File is empty');
+  }
+  if ($size > LL_TF_DOC_MAX_BYTES) {
+    ll_error('File must be 10 MB or smaller');
+  }
+  $tmp = (string) ($file['tmp_name'] ?? '');
+  if ($tmp === '' || !is_uploaded_file($tmp)) {
+    ll_error('Upload failed');
+  }
+  $orig = (string) ($file['name'] ?? 'document');
+  $origBase = basename(str_replace('\\', '/', $orig));
+  $ext = strtolower(pathinfo($origBase, PATHINFO_EXTENSION));
+  $allowed = ll_tf_doc_allowed_map();
+  if ($ext === '' || !isset($allowed[$ext])) {
+    ll_error('File type not allowed');
+  }
+  $mime = '';
+  if (class_exists('finfo')) {
+    $finfo = new finfo(FILEINFO_MIME_TYPE);
+    $detected = $finfo->file($tmp);
+    $mime = is_string($detected) ? strtolower($detected) : '';
+  }
+  if ($mime === '' || $mime === 'application/octet-stream') {
+    $mime = $allowed[$ext][0];
+  } elseif (!in_array($mime, $allowed[$ext], true)) {
+    ll_error('File type not allowed');
+  }
+  $safeName = preg_replace('/[^\w.\- ()]+/u', '_', $origBase) ?: ('document.' . $ext);
+  if (strlen($safeName) > 180) {
+    $safeName = substr($safeName, 0, 160) . '.' . $ext;
+  }
+  return [
+    'tmp' => $tmp,
+    'orig' => $origBase,
+    'ext' => $ext,
+    'mime' => $mime,
+    'size' => $size,
+    'safe_name' => $safeName,
+  ];
+}
+
+/**
+ * @return list<array{name:string,type:string,tmp_name:string,error:int,size:int}>
+ */
+function ll_tf_collect_upload_files(): array
+{
+  $out = [];
+  if (!empty($_FILES['files']) && is_array($_FILES['files'])) {
+    $bag = $_FILES['files'];
+    if (is_array($bag['name'] ?? null)) {
+      $n = count($bag['name']);
+      for ($i = 0; $i < $n; $i++) {
+        $out[] = [
+          'name' => (string) ($bag['name'][$i] ?? ''),
+          'type' => (string) ($bag['type'][$i] ?? ''),
+          'tmp_name' => (string) ($bag['tmp_name'][$i] ?? ''),
+          'error' => (int) ($bag['error'][$i] ?? UPLOAD_ERR_NO_FILE),
+          'size' => (int) ($bag['size'][$i] ?? 0),
+        ];
+      }
+    } else {
+      $out[] = $bag;
+    }
+  }
+  if (!empty($_FILES['file']) && is_array($_FILES['file']) && is_string($_FILES['file']['name'] ?? null)) {
+    $out[] = $_FILES['file'];
+  }
+  return array_values(array_filter($out, static function ($f) {
+    return (int) ($f['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_NO_FILE;
+  }));
+}
+
+function ll_tf_store_task_file(int $taskId, string $storedName, string $tmp): string
+{
+  $dir = ll_tf_doc_storage_dir() . '/' . $taskId;
+  if (!is_dir($dir) && !@mkdir($dir, 0750, true)) {
+    ll_error('Could not store file', 500);
+  }
+  $dest = $dir . '/' . $storedName;
+  if (!move_uploaded_file($tmp, $dest)) {
+    ll_error('Could not store file', 500);
+  }
+  return $taskId . '/' . $storedName;
+}
+
+/**
+ * @param mixed $links
+ * @return list<array{type:string,url:string,label:string}>
+ */
+function ll_tf_normalize_comment_links($links): array
+{
+  if (!is_array($links)) {
+    return [];
+  }
+  $out = [];
+  foreach ($links as $item) {
+    if (count($out) >= 10) {
+      break;
+    }
+    $url = '';
+    $label = '';
+    if (is_string($item)) {
+      $url = trim($item);
+    } elseif (is_array($item)) {
+      $url = trim((string) ($item['url'] ?? $item['href'] ?? ''));
+      $label = trim((string) ($item['label'] ?? $item['name'] ?? ''));
+    }
+    if ($url === '' || !ll_tf_is_valid_url_answer($url)) {
+      continue;
+    }
+    if (strlen($label) > 200) {
+      $label = substr($label, 0, 200);
+    }
+    $out[] = [
+      'type' => 'link',
+      'url' => $url,
+      'label' => $label,
+    ];
+  }
+  return $out;
+}
+
+/**
+ * @return list<array<string,mixed>>
+ */
+function ll_tf_parse_comment_attachments($json): array
+{
+  if ($json === null || $json === '') {
+    return [];
+  }
+  $decoded = is_array($json) ? $json : json_decode((string) $json, true);
+  if (!is_array($decoded)) {
+    return [];
+  }
+  $out = [];
+  foreach ($decoded as $raw) {
+    if (!is_array($raw)) {
+      continue;
+    }
+    $type = (string) ($raw['type'] ?? '');
+    if ($type === 'file') {
+      $stored = trim((string) ($raw['stored'] ?? ''));
+      $name = trim((string) ($raw['name'] ?? ''));
+      if ($stored === '' || $name === '') {
+        continue;
+      }
+      $out[] = [
+        'type' => 'file',
+        'name' => $name,
+        'size' => (int) ($raw['size'] ?? 0),
+        'mime' => (string) ($raw['mime'] ?? ''),
+        'stored' => $stored,
+      ];
+      continue;
+    }
+    if ($type === 'link') {
+      $url = trim((string) ($raw['url'] ?? ''));
+      if ($url === '' || !ll_tf_is_valid_url_answer($url)) {
+        continue;
+      }
+      $out[] = [
+        'type' => 'link',
+        'url' => $url,
+        'label' => trim((string) ($raw['label'] ?? '')),
+      ];
+    }
+  }
+  return $out;
+}
+
+/**
+ * Public attachment payload — no stored path.
+ *
+ * @return list<array<string,mixed>>
+ */
+function ll_tf_comment_attachments_public($json): array
+{
+  $out = [];
+  foreach (ll_tf_parse_comment_attachments($json) as $i => $att) {
+    if (($att['type'] ?? '') === 'file') {
+      $out[] = [
+        'type' => 'file',
+        'index' => $i,
+        'name' => (string) $att['name'],
+        'size' => (int) ($att['size'] ?? 0),
+        'mime' => (string) ($att['mime'] ?? ''),
+      ];
+      continue;
+    }
+    if (($att['type'] ?? '') === 'link') {
+      $out[] = [
+        'type' => 'link',
+        'index' => $i,
+        'url' => (string) $att['url'],
+        'label' => (string) ($att['label'] ?? ''),
+      ];
+    }
+  }
+  return $out;
+}
+
+function ll_tf_parse_time_spent_minutes($raw): ?int
+{
+  if ($raw === null || $raw === '' || is_bool($raw)) {
+    return null;
+  }
+  if (is_int($raw) || is_float($raw)) {
+    $mins = (int) round((float) $raw);
+  } else {
+    $s = trim((string) $raw);
+    if ($s === '') {
+      return null;
+    }
+    if (preg_match('/^(\d+)\s*:\s*(\d{1,2})$/', $s, $m)) {
+      $minutes = (int) $m[2];
+      if ($minutes > 59) {
+        return null;
+      }
+      $mins = ((int) $m[1]) * 60 + $minutes;
+    } elseif (preg_match('/^\d+$/', $s)) {
+      $mins = (int) $s;
+    } elseif (preg_match('/^\d+\.\d+$/', $s)) {
+      $mins = (int) round(((float) $s) * 60);
+    } else {
+      return null;
+    }
+  }
+  if ($mins < 1 || $mins > 10080) {
+    return null;
+  }
+  return $mins;
+}
+
+function ll_tf_insert_comment(
+  int $taskId,
+  int $userId,
+  string $body,
+  ?string $statusAtTime,
+  array $attachments = [],
+  ?int $timeSpentMinutes = null
+): void {
+  if ($statusAtTime !== null && $statusAtTime !== '' && !in_array($statusAtTime, ll_tf_task_statuses(), true)) {
+    $statusAtTime = null;
+  }
+  if ($statusAtTime === '') {
+    $statusAtTime = null;
+  }
+  if ($timeSpentMinutes !== null && ($timeSpentMinutes < 1 || $timeSpentMinutes > 10080)) {
+    $timeSpentMinutes = null;
+  }
+  $json = $attachments
+    ? json_encode(array_values($attachments), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)
+    : null;
+  ll_pdo()->prepare(
+    'INSERT INTO form_comments (task_id, user_id, body, status_at_time, attachments_json, time_spent_minutes)
+     VALUES (?, ?, ?, ?, ?, ?)'
+  )->execute([$taskId, $userId, $body, $statusAtTime, $json, $timeSpentMinutes]);
+}
+
+function ll_tf_log_task_event(
+  int $taskId,
+  ?int $userId,
+  string $type,
+  ?string $fromStatus = null,
+  ?string $toStatus = null,
+  ?string $detail = null
+): void {
+  if ($taskId < 1 || $type === '') {
+    return;
+  }
+  try {
+    ll_pdo()->prepare(
+      'INSERT INTO form_task_events (task_id, user_id, event_type, from_status, to_status, detail)
+       VALUES (?, ?, ?, ?, ?, ?)'
+    )->execute([
+      $taskId,
+      $userId && $userId > 0 ? $userId : null,
+      $type,
+      $fromStatus !== '' ? $fromStatus : null,
+      $toStatus !== '' ? $toStatus : null,
+      $detail !== '' ? $detail : null,
+    ]);
+  } catch (Throwable $e) {
+    /* history must not fail the primary action */
+  }
+}
+
+/** @return list<array<string,mixed>> */
+function ll_tf_load_task_events(int $taskId): array
+{
+  if ($taskId < 1) {
+    return [];
+  }
+  try {
+    $stmt = ll_pdo()->prepare(
+      'SELECT e.id, e.task_id, e.user_id, e.event_type, e.from_status, e.to_status, e.detail, e.created_at,
+              u.display_name, u.username
+       FROM form_task_events e
+       LEFT JOIN users u ON u.id = e.user_id
+       WHERE e.task_id = ?
+       ORDER BY e.created_at ASC, e.id ASC'
+    );
+    $stmt->execute([$taskId]);
+  } catch (Throwable $e) {
+    return [];
+  }
+  $out = [];
+  foreach ($stmt->fetchAll() as $row) {
+    $out[] = [
+      'id' => (int) $row['id'],
+      'task_id' => (int) $row['task_id'],
+      'user_id' => $row['user_id'] !== null ? (int) $row['user_id'] : null,
+      'event_type' => (string) $row['event_type'],
+      'from_status' => $row['from_status'] !== null && $row['from_status'] !== '' ? (string) $row['from_status'] : null,
+      'to_status' => $row['to_status'] !== null && $row['to_status'] !== '' ? (string) $row['to_status'] : null,
+      'detail' => $row['detail'] !== null && $row['detail'] !== '' ? (string) $row['detail'] : null,
+      'created_at' => $row['created_at'],
+      'display_name' => (string) (($row['display_name'] ?? '') !== '' ? $row['display_name'] : ($row['username'] ?? 'System')),
+    ];
+  }
+  return $out;
+}
+
+/** @return list<int> */
+function ll_tf_read_reviewer_ids(array $body): array
+{
+  $raw = $body['reviewer_ids'] ?? $body['reviewers'] ?? null;
+  $ids = [];
+  if (is_array($raw)) {
+    foreach ($raw as $item) {
+      if (is_array($item)) {
+        $ids[] = (int) ($item['id'] ?? $item['user_id'] ?? 0);
+      } else {
+        $ids[] = (int) $item;
+      }
+    }
+  }
+  $single = (int) ($body['reviewer_id'] ?? 0);
+  if ($single > 0) {
+    array_unshift($ids, $single);
+  }
+  $out = [];
+  $seen = [];
+  foreach ($ids as $id) {
+    if ($id < 1 || isset($seen[$id])) {
+      continue;
+    }
+    $seen[$id] = true;
+    $out[] = $id;
+  }
+  return $out;
+}
+
+/** @return list<int> */
+function ll_tf_task_reviewer_id_list(int $taskId): array
+{
+  if ($taskId < 1) {
+    return [];
+  }
+  try {
+    $stmt = ll_pdo()->prepare('SELECT user_id FROM form_task_reviewers WHERE task_id = ? ORDER BY user_id ASC');
+    $stmt->execute([$taskId]);
+    return array_values(array_map('intval', $stmt->fetchAll(PDO::FETCH_COLUMN)));
+  } catch (Throwable $e) {
+    return [];
+  }
+}
+
+/** @return list<array{id:int,display_name:string}> */
+function ll_tf_load_task_reviewers(int $taskId): array
+{
+  if ($taskId < 1) {
+    return [];
+  }
+  try {
+    $stmt = ll_pdo()->prepare(
+      'SELECT r.user_id, u.display_name, u.username
+       FROM form_task_reviewers r
+       INNER JOIN users u ON u.id = r.user_id
+       WHERE r.task_id = ?
+       ORDER BY u.display_name ASC, u.username ASC'
+    );
+    $stmt->execute([$taskId]);
+  } catch (Throwable $e) {
+    return [];
+  }
+  $out = [];
+  foreach ($stmt->fetchAll() as $row) {
+    $out[] = [
+      'id' => (int) $row['user_id'],
+      'display_name' => (string) ($row['display_name'] ?: $row['username']),
+    ];
+  }
+  return $out;
+}
+
+/** @param list<int> $reviewerIds */
+function ll_tf_replace_task_reviewers(int $taskId, array $reviewerIds): void
+{
+  if ($taskId < 1) {
+    return;
+  }
+  $pdo = ll_pdo();
+  try {
+    $pdo->prepare('DELETE FROM form_task_reviewers WHERE task_id = ?')->execute([$taskId]);
+    $ins = $pdo->prepare('INSERT INTO form_task_reviewers (task_id, user_id) VALUES (?, ?)');
+    foreach ($reviewerIds as $uid) {
+      $uid = (int) $uid;
+      if ($uid > 0) {
+        $ins->execute([$taskId, $uid]);
+      }
+    }
+  } catch (Throwable $e) {
+    /* table may be mid-migrate */
+  }
+  $first = null;
+  foreach ($reviewerIds as $uid) {
+    $uid = (int) $uid;
+    if ($uid > 0) {
+      $first = $uid;
+      break;
+    }
+  }
+  try {
+    $pdo->prepare('UPDATE form_tasks SET reviewer_id = ? WHERE id = ?')->execute([$first, $taskId]);
+  } catch (Throwable $e) {
+    /* reviewer_id still optional */
+  }
+}
+
+function ll_tf_user_is_assignee(array $user, array $task): bool
+{
+  $uid = (int) ($user['id'] ?? 0);
+  $aid = (int) ($task['assignee_id'] ?? 0);
+  return $uid > 0 && $aid > 0 && $uid === $aid;
+}
+
+function ll_tf_user_display_name(?array $user): string
+{
+  if (!$user) {
+    return '';
+  }
+  $name = trim((string) ($user['display_name'] ?? ''));
+  if ($name !== '') {
+    return $name;
+  }
+  return trim((string) ($user['username'] ?? ''));
+}
+
 /** Empty is allowed; reject letters / scientific notation / non-finite values. */
 function ll_tf_is_valid_number_answer($value): bool
 {
@@ -349,7 +836,7 @@ function ll_team_forms_ensure_tables(): void
     assigned_by INT UNSIGNED NULL,
     reviewer_id INT UNSIGNED NULL,
     reviewer_scope ENUM('group','department') NOT NULL DEFAULT 'group',
-    status ENUM('pending','in_progress','submitted','approved','rework','closed') NOT NULL DEFAULT 'pending',
+    status ENUM('pending','in_progress','completed','submitted','approved','rework','closed') NOT NULL DEFAULT 'pending',
     title VARCHAR(200) NULL,
     due_on DATE NULL,
     field_snapshot_json LONGTEXT NULL,
@@ -385,13 +872,20 @@ function ll_team_forms_ensure_tables(): void
     task_id INT UNSIGNED NOT NULL,
     user_id INT UNSIGNED NOT NULL,
     body TEXT NOT NULL,
+    status_at_time VARCHAR(40) NULL,
+    attachments_json LONGTEXT NULL,
+    time_spent_minutes INT UNSIGNED NULL,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     KEY idx_form_comments_task (task_id, created_at),
     CONSTRAINT fk_form_comments_task FOREIGN KEY (task_id) REFERENCES form_tasks(id) ON DELETE CASCADE,
     CONSTRAINT fk_form_comments_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
   ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
 
+  ll_tf_ensure_comment_schema($pdo);
   ll_tf_ensure_task_instance_schema($pdo);
+  ll_tf_ensure_completed_status($pdo);
+  ll_tf_ensure_task_events_schema($pdo);
+  ll_tf_ensure_task_reviewers_schema($pdo);
 }
 
 /**
@@ -472,6 +966,106 @@ function ll_tf_ensure_task_instance_schema(PDO $pdo): void
     ll_tf_backfill_task_field_snapshots($pdo);
   } catch (Throwable $e) {
     /* first-hit migrate should not block the module */
+  }
+  ll_tf_ensure_draft_assignee_nullable($pdo);
+}
+
+/** Draft tasks exist before Assign To is chosen. */
+function ll_tf_ensure_draft_assignee_nullable(PDO $pdo): void
+{
+  try {
+    $col = $pdo->query("SHOW COLUMNS FROM form_tasks LIKE 'assignee_id'")->fetch();
+    if (!$col || strtoupper((string) ($col['Null'] ?? '')) === 'YES') {
+      return;
+    }
+    try {
+      $pdo->exec('ALTER TABLE form_tasks DROP FOREIGN KEY fk_form_tasks_assignee');
+    } catch (Throwable $e) {
+      /* constraint name may differ */
+    }
+    $pdo->exec('ALTER TABLE form_tasks MODIFY assignee_id INT UNSIGNED NULL');
+    try {
+      $pdo->exec(
+        'ALTER TABLE form_tasks
+         ADD CONSTRAINT fk_form_tasks_assignee FOREIGN KEY (assignee_id) REFERENCES users(id) ON DELETE CASCADE'
+      );
+    } catch (Throwable $e) {
+      /* column is usable without the FK */
+    }
+  } catch (Throwable $e) {
+    /* first-hit migrate should not block the module */
+  }
+}
+
+function ll_tf_ensure_completed_status(PDO $pdo): void
+{
+  try {
+    $col = $pdo->query("SHOW COLUMNS FROM form_tasks LIKE 'status'")->fetch();
+    if (!$col) {
+      return;
+    }
+    $type = strtolower((string) ($col['Type'] ?? ''));
+    if (str_contains($type, "'completed'")) {
+      return;
+    }
+    if (str_starts_with($type, 'enum(')) {
+      $pdo->exec(
+        "ALTER TABLE form_tasks MODIFY status ENUM('pending','in_progress','completed','submitted','approved','rework','closed') NOT NULL DEFAULT 'pending'"
+      );
+    }
+  } catch (Throwable $e) {
+    /* concurrent migrate */
+  }
+}
+
+function ll_tf_ensure_task_events_schema(PDO $pdo): void
+{
+  try {
+    $pdo->exec(
+      "CREATE TABLE IF NOT EXISTS form_task_events (
+        id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+        task_id INT UNSIGNED NOT NULL,
+        user_id INT UNSIGNED NULL,
+        event_type VARCHAR(40) NOT NULL,
+        from_status VARCHAR(40) NULL,
+        to_status VARCHAR(40) NULL,
+        detail VARCHAR(255) NULL,
+        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        KEY idx_form_task_events_task (task_id, created_at, id),
+        CONSTRAINT fk_form_task_events_task FOREIGN KEY (task_id) REFERENCES form_tasks(id) ON DELETE CASCADE,
+        CONSTRAINT fk_form_task_events_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
+    );
+  } catch (Throwable $e) {
+    /* concurrent migrate */
+  }
+}
+
+function ll_tf_ensure_task_reviewers_schema(PDO $pdo): void
+{
+  try {
+    $pdo->exec(
+      "CREATE TABLE IF NOT EXISTS form_task_reviewers (
+        task_id INT UNSIGNED NOT NULL,
+        user_id INT UNSIGNED NOT NULL,
+        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (task_id, user_id),
+        KEY idx_form_task_reviewers_user (user_id),
+        CONSTRAINT fk_form_task_reviewers_task FOREIGN KEY (task_id) REFERENCES form_tasks(id) ON DELETE CASCADE,
+        CONSTRAINT fk_form_task_reviewers_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
+    );
+  } catch (Throwable $e) {
+    /* concurrent migrate */
+  }
+  try {
+    $pdo->exec(
+      'INSERT IGNORE INTO form_task_reviewers (task_id, user_id)
+       SELECT id, reviewer_id FROM form_tasks
+       WHERE reviewer_id IS NOT NULL AND reviewer_id > 0'
+    );
+  } catch (Throwable $e) {
+    /* backfill is best-effort */
   }
 }
 
@@ -575,6 +1169,51 @@ function ll_tf_task_display_title(?string $taskTitle, ?string $templateTitle): s
 function ll_tf_can_manage_org(array $user): bool
 {
   return !empty($user['is_super']) || ll_user_has_permission($user, 'team_forms.manage_org');
+}
+
+/** Form creator of this task instance, template created_by, or super. */
+function ll_tf_is_task_form_creator(array $user, array $task): bool
+{
+  if (!empty($user['is_super'])) {
+    return true;
+  }
+  $uid = (int) ($user['id'] ?? 0);
+  if ($uid < 1) {
+    return false;
+  }
+  $assignedBy = (int) ($task['assigned_by'] ?? 0);
+  if ($assignedBy > 0 && $uid === $assignedBy) {
+    return true;
+  }
+  $createdBy = (int) ($task['form_created_by'] ?? 0);
+  if ($createdBy > 0 && $uid === $createdBy) {
+    return true;
+  }
+  return false;
+}
+
+function ll_tf_can_edit_task_answers(array $user, array $task): bool
+{
+  if (in_array((string) ($task['status'] ?? ''), ['approved', 'closed'], true)) {
+    return false;
+  }
+  return ll_tf_is_task_form_creator($user, $task);
+}
+
+function ll_tf_can_set_task_status(array $user, array $task): bool
+{
+  if (in_array((string) ($task['status'] ?? ''), ['submitted', 'approved', 'closed'], true)) {
+    return false;
+  }
+  if (!empty($user['is_super'])) {
+    return true;
+  }
+  $uid = (int) ($user['id'] ?? 0);
+  $assigneeId = (int) ($task['assignee_id'] ?? 0);
+  if ($assigneeId > 0 && $uid === $assigneeId) {
+    return true;
+  }
+  return ll_tf_is_task_form_creator($user, $task);
 }
 
 function ll_tf_require_module(array $user): void
@@ -999,6 +1638,24 @@ function ll_tf_progress(array $fields, array $answersByFieldId): array
  */
 function ll_tf_reviewer_user_ids_for_task(array $task): array
 {
+  $taskId = (int) ($task['id'] ?? 0);
+  $fromTable = $taskId > 0 ? ll_tf_task_reviewer_id_list($taskId) : [];
+  if ($fromTable) {
+    return $fromTable;
+  }
+  $fromPayload = $task['reviewer_ids'] ?? null;
+  if (is_array($fromPayload) && $fromPayload) {
+    $ids = [];
+    foreach ($fromPayload as $id) {
+      $id = (int) $id;
+      if ($id > 0) {
+        $ids[] = $id;
+      }
+    }
+    if ($ids) {
+      return array_values(array_unique($ids));
+    }
+  }
   $designated = (int) ($task['reviewer_id'] ?? 0);
   if ($designated > 0) {
     return [$designated];

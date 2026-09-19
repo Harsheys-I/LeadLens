@@ -1,7 +1,7 @@
 /**
  * Thin fetch wrapper for LeadLens PHP API (same-origin, session cookie).
  */
-import {apiBase} from './app-base.js?v=7.1.1.dev';
+import {apiBase} from './app-base.js?v=7.2.0.dev';
 
 function resolveApiBase(){
   return apiBase();
@@ -135,6 +135,7 @@ export const TeamFormsApi = {
   reviewTasks: (since) =>
     api(`team-forms/review/tasks${since ? `?since=${encodeURIComponent(since)}` : ''}`),
   getTask: (id) => api(`team-forms/tasks/${id}`),
+  assignTask: (id, body) => api(`team-forms/tasks/${id}/update`, {method: 'POST', body}),
   saveAnswers: (id, answers) => api(`team-forms/tasks/${id}/answers`, {method: 'POST', body: {answers}}),
   uploadTaskFile: (id, fieldId, file) => {
     const fd = new FormData();
@@ -146,7 +147,28 @@ export const TeamFormsApi = {
     `${resolveApiBase()}team-forms/tasks/${id}/file?field_id=${encodeURIComponent(fieldId)}`,
   setStatus: (id, status, extra = {}) =>
     api(`team-forms/tasks/${id}/status`, {method: 'POST', body: {status, ...extra}}),
-  addComment: (id, body) => api(`team-forms/tasks/${id}/comments`, {method: 'POST', body: {body}}),
+  addComment: (id, bodyOrOpts) => {
+    const opts = typeof bodyOrOpts === 'string' || bodyOrOpts == null
+      ? {body: bodyOrOpts || ''}
+      : bodyOrOpts;
+    const fd = new FormData();
+    fd.append('body', String(opts.body ?? ''));
+    fd.append('links', JSON.stringify(Array.isArray(opts.links) ? opts.links : []));
+    if (opts.time_spent_minutes != null && opts.time_spent_minutes !== '') {
+      fd.append('time_spent_minutes', String(opts.time_spent_minutes));
+    }
+    for (const file of opts.files || []) fd.append('files[]', file);
+    return api(`team-forms/tasks/${id}/comments`, {method: 'POST', body: fd});
+  },
+  submitTask: (id, opts = {}) => {
+    const fd = new FormData();
+    fd.append('body', String(opts.body ?? ''));
+    fd.append('links', JSON.stringify(Array.isArray(opts.links) ? opts.links : []));
+    for (const file of opts.files || []) fd.append('files[]', file);
+    return api(`team-forms/tasks/${id}/submit`, {method: 'POST', body: fd});
+  },
+  commentFileUrl: (id, commentId, index) =>
+    `${resolveApiBase()}team-forms/tasks/${id}/comment-file?comment_id=${encodeURIComponent(commentId)}&i=${encodeURIComponent(index)}`,
   approveTask: (id) => api(`team-forms/tasks/${id}/approve`, {method: 'POST', body: {}}),
   reworkTask: (id, note = '') =>
     api(`team-forms/tasks/${id}/rework`, {method: 'POST', body: {body: note}}),
