@@ -1,8 +1,8 @@
 /**
  * TeleCalling Performance — Excel parse, metrics engine, published dashboard UI.
  */
-import {PerfDashboardApi} from "./api-client.js?v=7.2.2.stable";
-import {downloadBlobFile} from "./audit.js?v=7.2.2.stable";
+import {PerfDashboardApi} from "./api-client.js?v=8.0.0.stable";
+import {downloadBlobFile} from "./audit.js?v=8.0.0.stable";
 
 const MASTER_FIELDS = [
   {id: "mobile", label: "Mobile", aliases: "mobile, mobile number, phone"},

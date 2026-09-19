@@ -1,16 +1,16 @@
 /**
  * Team Forms — org, form builder, task builder, assignee workspace, review board.
  */
-import {APP_VERSION} from './audit.js?v=7.2.2.stable';
-import {requireAuth, logout, hasPermission, getUser, changePassword, updateProfile} from './auth.js?v=7.2.2.stable';
-import {TeamFormsApi} from './api-client.js?v=7.2.2.stable';
-import {mountNotifications} from './notifications-ui.js?v=7.2.2.stable';
-import {appUrl, homePath} from './app-base.js?v=7.2.2.stable';
-import {initTheme} from './theme.js?v=7.2.2.stable';
-import {setStorageUserId, storageKey} from './db.js?v=7.2.2.stable';
+import {APP_VERSION} from './audit.js?v=8.0.0.stable';
+import {requireAuth, logout, hasPermission, getUser, changePassword, updateProfile} from './auth.js?v=8.0.0.stable';
+import {TeamFormsApi} from './api-client.js?v=8.0.0.stable';
+import {mountNotifications} from './notifications-ui.js?v=8.0.0.stable';
+import {appUrl, homePath} from './app-base.js?v=8.0.0.stable';
+import {initTheme} from './theme.js?v=8.0.0.stable';
+import {setStorageUserId, storageKey} from './db.js?v=8.0.0.stable';
 
 const $ = id => document.getElementById(id);
-const VERSION = APP_VERSION || '7.2.2.stable';
+const VERSION = APP_VERSION || '8.0.0.stable';
 const POLL_MS = 7000;
 
 const titles = {

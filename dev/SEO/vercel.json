@@ -1,0 +1,35 @@
+{
+  "version": 2,
+  "builds": [
+    {
+      "src": "api/*.py",
+      "use": "@vercel/python"
+    },
+    {
+      "src": "*.{html,css,js,json,xlsx,png,jpg,jpeg,svg,webp,ico}",
+      "use": "@vercel/static"
+    }
+  ],
+  "routes": [
+    {
+      "src": "/api/audit",
+      "dest": "/api/audit.py"
+    },
+    {
+      "src": "/api/data",
+      "dest": "/api/data.py"
+    },
+    {
+      "src": "/api/gsc",
+      "dest": "/api/gsc.py"
+    },
+    {
+      "src": "/api/ga4",
+      "dest": "/api/ga4.py"
+    },
+    {
+      "src": "/(.*)",
+      "dest": "/$1"
+    }
+  ]
+}

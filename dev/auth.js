@@ -1,8 +1,8 @@
 /**
  * Session helpers + permission checks for LeadLens shells.
  */
-import {AuthApi} from './api-client.js?v=7.2.2.stable';
-import {appUrl, homePath, isHomePath, isDevHost} from './app-base.js?v=7.2.2.stable';
+import {AuthApi} from './api-client.js?v=8.0.0.stable';
+import {appUrl, homePath, isHomePath, isDevHost} from './app-base.js?v=8.0.0.stable';
 
 let currentUser = null;
 
@@ -150,6 +150,20 @@ export function moduleTilesForUser(user = currentUser){
         <rect x="22" y="18" width="52" height="60" rx="8" stroke="currentColor" stroke-width="3.5"/>
         <path d="M34 34h28M34 46h28M34 58h16" stroke="currentColor" stroke-width="3" stroke-linecap="round"/>
         <path d="M58 64l6 6 10-12" stroke="currentColor" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>`
+    },
+    {
+      id: 'seo',
+      title: 'SEO',
+      href: appUrl('/SEO/'),
+      perm: 'module.seo',
+      soon: false,
+      desc: 'Technical SEO audit, live scanner, schema studio & action plan',
+      icon: `<svg viewBox="0 0 96 96" fill="none" aria-hidden="true">
+        <circle cx="42" cy="42" r="18" stroke="currentColor" stroke-width="3.5"/>
+        <path d="M55 55l18 18" stroke="currentColor" stroke-width="3.5" stroke-linecap="round"/>
+        <path d="M34 38h16M34 46h10" stroke="currentColor" stroke-width="3" stroke-linecap="round"/>
+        <path d="M68 28c4 2 8 6 10 10" stroke="currentColor" stroke-width="3" stroke-linecap="round"/>
       </svg>`
     },
     {

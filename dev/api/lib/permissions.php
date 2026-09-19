@@ -9,6 +9,7 @@ function ll_permission_catalog(): array
     ['id' => 'module.telecaller_audit', 'label' => 'Module · LeadLens', 'group' => 'Modules'],
     ['id' => 'module.sales_graph', 'label' => 'Module · Sales Graph', 'group' => 'Modules'],
     ['id' => 'module.team_forms', 'label' => 'Module · Team Forms', 'group' => 'Modules'],
+    ['id' => 'module.seo', 'label' => 'Module · SEO', 'group' => 'Modules'],
     ['id' => 'module.admin', 'label' => 'Module · Admin', 'group' => 'Modules'],
     ['id' => 'module.crm', 'label' => 'Module · CRM (coming soon)', 'group' => 'Modules'],
     ['id' => 'module.hr', 'label' => 'Module · HR (coming soon)', 'group' => 'Modules'],
