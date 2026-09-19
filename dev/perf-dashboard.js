@@ -1,8 +1,8 @@
 /**
  * TeleCalling Performance — Excel parse, metrics engine, published dashboard UI.
  */
-import {PerfDashboardApi} from "./api-client.js?v=6.3.3.stable";
-import {downloadBlobFile} from "./audit.js?v=6.3.3.stable";
+import {PerfDashboardApi} from "./api-client.js?v=7.0.0.dev";
+import {downloadBlobFile} from "./audit.js?v=7.0.0.dev";
 
 const MASTER_FIELDS = [
   {id: "mobile", label: "Mobile", aliases: "mobile, mobile number, phone"},
@@ -207,6 +207,12 @@ function formatDisplayDate(iso) {
 function todayStart() {
   const d = new Date();
   d.setHours(0, 0, 0, 0);
+  return d;
+}
+
+function tomorrowStart() {
+  const d = todayStart();
+  d.setDate(d.getDate() + 1);
   return d;
 }
 
@@ -826,7 +832,7 @@ export function reconcilePerf(masterRows, historyRows) {
   const allMasterKeys = new Set();
   const allHistoryKeys = new Set();
   const allHistoryLeadKeys = new Set();
-  const today = todayStart();
+  const tomorrow = tomorrowStart();
 
   for (const row of historyFilled) {
     const key = leadIdentityKey(row);
@@ -856,7 +862,7 @@ export function reconcilePerf(masterRows, historyRows) {
         pushBucketDetailOnce(bucket, "notFollowupLeads", row, key);
       }
     }
-    if (row.nextDate && row.nextDate < today) {
+    if (row.nextDate && row.nextDate < tomorrow) {
       for (const {map, resolve} of resolvers) {
         const bucket = map[resolve(row)];
         bucket._overdueKeys.add(key);

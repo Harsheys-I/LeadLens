@@ -1,5 +1,5 @@
 {
-  "version": "6.3.3.stable",
+  "version": "7.0.0.dev",
   "name": "GPP AI",
-  "notes": "v6.3.3.stable: History Excel no longer requires Lead Registration Date; Master still does. Cache-bust so clients load the fix."
+  "notes": "v7.0.0.dev: Team Forms module - departments/groups, form builder, assign & review workflow."
 }
