@@ -12,6 +12,8 @@ const LL_ERP_SYNC_CRON_KEY = 'erp_sync_cron_secret_hash';
 const LL_ERP_SYNC_JOB_KEY = 'erp_sync_job';
 const LL_ERP_SYNC_MAX_BYTES = 25_000_000;
 const LL_ERP_SYNC_TIMEOUT = 90;
+const LL_ERP_SYNC_KEEPALIVE_TIMEOUT = 20;
+const LL_ERP_SYNC_KEEPALIVE_MAX_BYTES = 65_536;
 
 /** @return array<string, list<string>> */
 function ll_erp_sync_default_field_map(): array
@@ -54,6 +56,8 @@ function ll_erp_sync_default_config(): array
     'http_method' => 'GET',
     'extra_headers' => new stdClass(),
     'enabled' => false,
+    'keepalive_enabled' => false,
+    'keepalive_url' => '',
     'auto_publish' => false,
     'batch_size' => 10,
     'max_leads_per_run' => 40,
@@ -62,6 +66,7 @@ function ll_erp_sync_default_config(): array
     'cookie_configured' => false,
     'cron_secret_configured' => false,
     'last_status' => null,
+    'last_keepalive' => null,
   ];
 }
 
@@ -148,6 +153,12 @@ function ll_erp_sync_save_config(array $body, int $userId): array
   }
   if (array_key_exists('enabled', $body)) {
     $next['enabled'] = (bool) $body['enabled'];
+  }
+  if (array_key_exists('keepalive_enabled', $body)) {
+    $next['keepalive_enabled'] = (bool) $body['keepalive_enabled'];
+  }
+  if (array_key_exists('keepalive_url', $body)) {
+    $next['keepalive_url'] = trim((string) $body['keepalive_url']);
   }
   if (array_key_exists('auto_publish', $body)) {
     $next['auto_publish'] = (bool) $body['auto_publish'];
@@ -292,6 +303,19 @@ function ll_erp_sync_set_last_status(array $status): void
   }
 }
 
+/** @param array<string, mixed> $status */
+function ll_erp_sync_set_last_keepalive(array $status): void
+{
+  $cfg = ll_erp_sync_load_config();
+  unset($status['cookie'], $status['request_headers'], $status['body']);
+  $cfg['last_keepalive'] = $status;
+  unset($cfg['cookie_configured'], $cfg['cron_secret_configured']);
+  $json = json_encode($cfg, JSON_UNESCAPED_UNICODE);
+  if ($json !== false) {
+    ll_setting_set(LL_ERP_SYNC_CONFIG_KEY, $json, null);
+  }
+}
+
 /**
  * @return array{ok:bool,status:int,content_type:string,body:string,bytes:int,error?:string,session_expired?:bool}
  */
@@ -378,6 +402,182 @@ function ll_erp_sync_looks_like_login(string $body, string $contentType, int $st
     return true;
   }
   return false;
+}
+
+/**
+ * Lightweight session ping: short timeout, follow redirects, truncate body.
+ * Does not store payloads or run Audit.
+ *
+ * @return array{ok:bool,status:int,content_type:string,bytes:int,error?:string,session_expired?:bool,method?:string}
+ */
+function ll_erp_sync_http_ping(string $url, ?string $cookie, array $extraHeaders): array
+{
+  if (!function_exists('curl_init')) {
+    return ['ok' => false, 'status' => 0, 'content_type' => '', 'bytes' => 0, 'error' => 'cURL required'];
+  }
+  if ($url === '' || !preg_match('#^https?://#i', $url)) {
+    return ['ok' => false, 'status' => 0, 'content_type' => '', 'bytes' => 0, 'error' => 'Invalid keep-alive URL'];
+  }
+
+  $headers = ['Accept: text/html, application/json, */*'];
+  foreach ($extraHeaders as $k => $v) {
+    $name = trim((string) $k);
+    $lk = strtolower($name);
+    if ($name === '' || $lk === 'cookie' || $lk === 'authorization') {
+      continue;
+    }
+    $headers[] = $name . ': ' . trim((string) $v);
+  }
+  if ($cookie !== null && $cookie !== '') {
+    $headers[] = 'Cookie: ' . $cookie;
+  }
+
+  $body = '';
+  $bytesRead = 0;
+  $truncated = false;
+  $ch = curl_init($url);
+  curl_setopt_array($ch, [
+    CURLOPT_RETURNTRANSFER => false,
+    CURLOPT_FOLLOWLOCATION => true,
+    CURLOPT_MAXREDIRS => 5,
+    CURLOPT_TIMEOUT => LL_ERP_SYNC_KEEPALIVE_TIMEOUT,
+    CURLOPT_CONNECTTIMEOUT => 10,
+    CURLOPT_HTTPGET => true,
+    CURLOPT_HTTPHEADER => $headers,
+    CURLOPT_USERAGENT => 'LeadLens-ERP-KeepAlive/1.0',
+    CURLOPT_SSL_VERIFYPEER => true,
+    CURLOPT_HEADER => false,
+    CURLOPT_WRITEFUNCTION => static function ($ch, string $chunk) use (&$body, &$bytesRead, &$truncated): int {
+      $len = strlen($chunk);
+      if ($bytesRead >= LL_ERP_SYNC_KEEPALIVE_MAX_BYTES) {
+        $truncated = true;
+        return 0;
+      }
+      $remain = LL_ERP_SYNC_KEEPALIVE_MAX_BYTES - $bytesRead;
+      $take = min($len, $remain);
+      $body .= substr($chunk, 0, $take);
+      $bytesRead += $take;
+      if ($take < $len || $bytesRead >= LL_ERP_SYNC_KEEPALIVE_MAX_BYTES) {
+        $truncated = true;
+        return 0;
+      }
+      return $len;
+    },
+  ]);
+  $okExec = curl_exec($ch);
+  $status = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
+  $contentType = (string) curl_getinfo($ch, CURLINFO_CONTENT_TYPE);
+  $err = curl_error($ch);
+  curl_close($ch);
+
+  // Intentional early abort after sampling body is OK (avoids downloading full reports).
+  if ($okExec === false && !($truncated && $status > 0)) {
+    return [
+      'ok' => false,
+      'status' => $status,
+      'content_type' => $contentType,
+      'bytes' => $bytesRead,
+      'error' => $err ?: 'keep-alive ping failed',
+      'method' => 'GET',
+    ];
+  }
+
+  $sessionExpired = ll_erp_sync_looks_like_login($body, $contentType, $status);
+  $ok = $status >= 200 && $status < 400 && !$sessionExpired;
+  return [
+    'ok' => $ok,
+    'status' => $status,
+    'content_type' => $contentType,
+    'bytes' => $bytesRead,
+    'session_expired' => $sessionExpired,
+    'method' => 'GET',
+    'error' => $sessionExpired
+      ? 'ERP session expired — refresh Cookie in /dev ERP Sync'
+      : ($ok ? null : ('HTTP ' . $status)),
+  ];
+}
+
+/**
+ * Ping ERP with saved Cookie so idle sessions may last longer.
+ * Updates last_keepalive only — never runs Audit / publish / stores payloads.
+ *
+ * @return array<string, mixed>
+ */
+function ll_erp_sync_keepalive(): array
+{
+  $cfg = ll_erp_sync_load_config();
+  $url = trim((string) ($cfg['keepalive_url'] ?? ''));
+  if ($url === '') {
+    $url = trim((string) ($cfg['report_url'] ?? ''));
+  }
+  $cookie = ll_erp_sync_cookie_plaintext();
+  if ($url === '') {
+    $status = [
+      'ok' => false,
+      'result' => 'error',
+      'error' => 'No keep-alive or report URL configured',
+      'at' => gmdate('c'),
+    ];
+    ll_erp_sync_set_last_keepalive($status);
+    return $status;
+  }
+  if ($cookie === null) {
+    $status = [
+      'ok' => false,
+      'result' => 'session_expired',
+      'error' => 'Cookie not configured — paste Cookie header in /dev ERP Sync',
+      'session_expired' => true,
+      'at' => gmdate('c'),
+    ];
+    ll_erp_sync_set_last_keepalive($status);
+    return $status;
+  }
+
+  $extra = $cfg['extra_headers'] ?? [];
+  if ($extra instanceof stdClass) {
+    $extra = (array) $extra;
+  }
+  $ping = ll_erp_sync_http_ping($url, $cookie, (array) $extra);
+
+  if (!empty($ping['session_expired'])) {
+    $status = [
+      'ok' => false,
+      'result' => 'session_expired',
+      'error' => $ping['error'] ?? 'session_expired',
+      'session_expired' => true,
+      'http_status' => $ping['status'],
+      'bytes' => $ping['bytes'] ?? 0,
+      'url_host' => (string) (parse_url($url, PHP_URL_HOST) ?: ''),
+      'at' => gmdate('c'),
+    ];
+    ll_erp_sync_set_last_keepalive($status);
+    return $status;
+  }
+  if (empty($ping['ok'])) {
+    $status = [
+      'ok' => false,
+      'result' => 'error',
+      'error' => $ping['error'] ?? 'keep-alive failed',
+      'http_status' => $ping['status'],
+      'bytes' => $ping['bytes'] ?? 0,
+      'url_host' => (string) (parse_url($url, PHP_URL_HOST) ?: ''),
+      'at' => gmdate('c'),
+    ];
+    ll_erp_sync_set_last_keepalive($status);
+    return $status;
+  }
+
+  $status = [
+    'ok' => true,
+    'result' => 'ok',
+    'http_status' => $ping['status'],
+    'bytes' => $ping['bytes'] ?? 0,
+    'content_type' => $ping['content_type'] ?? '',
+    'url_host' => (string) (parse_url($url, PHP_URL_HOST) ?: ''),
+    'at' => gmdate('c'),
+  ];
+  ll_erp_sync_set_last_keepalive($status);
+  return $status;
 }
 
 function ll_erp_sync_store_payload(string $body, string $contentType): string
