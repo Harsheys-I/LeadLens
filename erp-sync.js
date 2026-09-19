@@ -1,8 +1,8 @@
 /**
  * /dev Super User ERP Sync panel — fetch ERP → store raw → hand off to main Audit UI.
  */
-import {api} from './api-client.js?v=6.3.4.stable';
-import {getUser} from './auth.js?v=6.3.4.stable';
+import {api} from './api-client.js?v=7.0.3.stable';
+import {getUser} from './auth.js?v=7.0.3.stable';
 
 const FIELD_IDS = [
   'mobile', 'project', 'registration', 'telecaller', 'source', 'update',
@@ -118,32 +118,73 @@ function parseExtraHeaders() {
   return parsed;
 }
 
-function formatKeepaliveLine(ka) {
-  if (!ka || typeof ka !== 'object') return 'Keep-alive: never run.';
+/** Display server UTC timestamps in Asia/Kolkata (IST). */
+function formatIst(iso) {
+  if (!iso) return '—';
+  const d = new Date(String(iso));
+  if (Number.isNaN(d.getTime())) return String(iso);
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Asia/Kolkata',
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false
+  }).formatToParts(d);
+  const get = (type) => parts.find((p) => p.type === type)?.value || '';
+  const month = get('month').replace(/\./g, '');
+  return `${get('day')} ${month} ${get('year')}, ${get('hour')}:${get('minute')}:${get('second')} IST`;
+}
+
+function formatAgeSeconds(ageSec) {
+  if (ageSec == null || !Number.isFinite(ageSec)) return '';
+  if (ageSec < 60) return `${ageSec}s ago`;
+  if (ageSec < 3600) return `${Math.floor(ageSec / 60)}m ago`;
+  if (ageSec < 86400) return `${Math.floor(ageSec / 3600)}h ago`;
+  return `${Math.floor(ageSec / 86400)}d ago`;
+}
+
+function formatKeepaliveLine(ka, diag = null) {
+  if (!ka || typeof ka !== 'object') {
+    if (diag?.enabled) {
+      return 'Keep-alive: enabled, but never run. Cron must be set in hPanel to */1 — Save alone does not ping on a schedule.';
+    }
+    return 'Keep-alive: never run.';
+  }
   const result = ka.result || (ka.session_expired ? 'session_expired' : (ka.ok ? 'ok' : 'error'));
-  const when = ka.at ? String(ka.at) : '—';
+  const when = formatIst(ka.at);
+  const source = ka.source === 'cron' ? 'cron' : (ka.source === 'manual' ? 'manual' : '');
+  const sourceBit = source ? ` via ${source}` : '';
+  const ageBit = diag?.age_seconds != null ? ` (${formatAgeSeconds(diag.age_seconds)})` : '';
+  if (result === 'disabled') {
+    return `Keep-alive: cron hit but disabled at ${when}${ageBit} — enable checkbox and Save.`;
+  }
   if (result === 'session_expired' || ka.session_expired) {
-    return `Keep-alive: session_expired at ${when} — refresh Cookie and Save.`;
+    return `Keep-alive: session_expired at ${when}${sourceBit}${ageBit} — refresh Cookie and Save.`;
   }
   if (result === 'ok' && ka.ok) {
     const http = ka.http_status != null ? ` HTTP ${ka.http_status}` : '';
-    return `Keep-alive: ok at ${when}${http}`;
+    return `Keep-alive: ok at ${when}${sourceBit}${ageBit}${http}`;
   }
-  return `Keep-alive: ${result} at ${when}${ka.error ? ` — ${ka.error}` : ''}`;
+  return `Keep-alive: ${result} at ${when}${sourceBit}${ageBit}${ka.error ? ` — ${ka.error}` : ''}`;
 }
 
-function writeKeepaliveStatus(ka) {
+function writeKeepaliveStatus(ka, diag = null) {
   const el = $('erp-sync-keepalive-status');
   if (!el) return;
-  el.textContent = formatKeepaliveLine(ka);
-  el.style.color = (ka?.session_expired || ka?.result === 'session_expired')
+  const lines = [formatKeepaliveLine(ka, diag)];
+  if (diag?.hint) lines.push(diag.hint);
+  el.textContent = lines.join('\n');
+  el.style.color = (ka?.session_expired || ka?.result === 'session_expired' || diag?.cron_silent)
     ? 'var(--danger, #b42318)'
     : '';
 }
 
 function formatDailyLine(daily) {
   if (!daily || typeof daily !== 'object') return 'Last scheduled run: never.';
-  const when = daily.at ? String(daily.at) : '—';
+  const when = formatIst(daily.at);
   if (daily.session_expired) {
     return `Last scheduled run: session expired at ${when} — refresh Cookie; no publish.`;
   }
@@ -173,7 +214,7 @@ function writeDailyStatus(daily) {
     : '';
 }
 
-function applyConfig(config) {
+function applyConfig(config, diag = null) {
   if (!$('erp-sync-url')) return;
   $('erp-sync-url').value = config.report_url || '';
   $('erp-sync-method').value = config.http_method === 'POST' ? 'POST' : 'GET';
@@ -212,7 +253,8 @@ function applyConfig(config) {
   $('erp-sync-cron-hint').textContent = config.cron_secret_configured
     ? 'Cron secret is set. Paste a new value only to rotate it.'
     : 'Set a cron secret before enabling Hostinger cron.';
-  writeKeepaliveStatus(config.last_keepalive);
+  const keepaliveDiag = diag || null;
+  writeKeepaliveStatus(config.last_keepalive, keepaliveDiag);
   writeDailyStatus(config.last_daily_status);
   renderFieldMap(config.field_map || DEFAULT_ALIASES);
 }
@@ -223,14 +265,20 @@ function formatStatus(payload) {
   const daily = payload?.last_daily_status || payload?.config?.last_daily_status;
   const job = payload?.job;
   const lines = [];
+  if (payload?.keepalive?.hint) {
+    lines.push('Keep-alive hint: ' + payload.keepalive.hint);
+  }
   if (daily) {
-    lines.push('Scheduled: ' + JSON.stringify(daily, null, 2));
+    const when = daily.at ? formatIst(daily.at) : '—';
+    lines.push(`Scheduled (${when}): ` + JSON.stringify({...daily, at_ist: when}, null, 2));
   }
   if (ka) {
-    lines.push('Keep-alive: ' + JSON.stringify(ka, null, 2));
+    const when = ka.at ? formatIst(ka.at) : '—';
+    lines.push(`Keep-alive (${when}): ` + JSON.stringify({...ka, at_ist: when}, null, 2));
   }
   if (last) {
-    lines.push('Last: ' + JSON.stringify(last, null, 2));
+    const when = last.at ? formatIst(last.at) : '—';
+    lines.push(`Last (${when}): ` + JSON.stringify({...last, at_ist: when}, null, 2));
   }
   if (job) {
     lines.push('Job: ' + JSON.stringify(job, null, 2));
@@ -304,7 +352,8 @@ function clearAbortController() {
 function statusElWrite(payload) {
   const statusEl = $('erp-sync-status');
   if (statusEl) statusEl.textContent = formatStatus(payload);
-  writeKeepaliveStatus(payload?.last_keepalive || payload?.config?.last_keepalive);
+  const ka = payload?.last_keepalive || payload?.config?.last_keepalive;
+  writeKeepaliveStatus(ka, payload?.keepalive || null);
   writeDailyStatus(payload?.last_daily_status || payload?.config?.last_daily_status);
 }
 
@@ -324,7 +373,7 @@ export async function loadErpSyncPanel() {
   if (!canShowErpSync()) return;
   try {
     const data = await api('erp-sync/status');
-    applyConfig(data.config || {});
+    applyConfig(data.config || {}, data.keepalive || null);
     statusElWrite(data);
     const last = data.last_status;
     if (last?.phase === 'ready-for-audit' && last.lead_count != null) {
@@ -368,8 +417,6 @@ function buildConfigBody() {
     rows_path: $('erp-sync-rows-path')?.value?.trim() || '',
     daily_enabled: dailyEnabled,
     enabled: dailyEnabled,
-    keepalive_enabled: Boolean($('erp-sync-keepalive')?.checked),
-    keepalive_url: $('erp-sync-keepalive-url')?.value?.trim() || '',
     cron_auto_publish: $('erp-sync-cron-auto-publish')
       ? Boolean($('erp-sync-cron-auto-publish').checked)
       : true,
@@ -378,6 +425,16 @@ function buildConfigBody() {
     max_leads_per_run: Number($('erp-sync-max-leads')?.value || 40),
     field_map: readFieldMapFromUi()
   };
+  // Only send keepalive flags when the controls exist — avoids wiping enabled
+  // state from quiet saves against a stale HTML cache missing the checkbox.
+  const kaEl = $('erp-sync-keepalive');
+  if (kaEl) {
+    body.keepalive_enabled = Boolean(kaEl.checked);
+  }
+  const kaUrl = $('erp-sync-keepalive-url');
+  if (kaUrl) {
+    body.keepalive_url = kaUrl.value?.trim() || '';
+  }
   const cookie = $('erp-sync-cookie')?.value?.trim() || '';
   if (cookie) body.cookie = cookie;
   const cron = $('erp-sync-cron-secret')?.value?.trim() || '';
@@ -399,7 +456,10 @@ async function saveConfig() {
   try {
     const data = await api('erp-sync/config', {method: 'POST', body});
     applyConfig(data.config || {});
-    setMsg(data.message || 'Saved');
+    const note = body.keepalive_enabled
+      ? 'Saved. Cron must be set in hPanel to */1 — Save alone does not ping on a schedule.'
+      : (data.message || 'Saved');
+    setMsg(note);
   } catch (err) {
     setMsg(err.message || 'Save failed', true);
   } finally {
@@ -571,12 +631,18 @@ async function pingKeepalive() {
   try {
     await saveConfigQuiet(signal);
     const data = await api('erp-sync/keepalive', {method: 'POST', body: {}, signal});
-    writeKeepaliveStatus(data);
+    writeKeepaliveStatus(data, {
+      age_seconds: 0,
+      enabled: true,
+      hint: data.source === 'manual'
+        ? 'Manual ping OK. For overnight sessions, hPanel cron must hit production /api/erp-sync/keepalive every minute (source will show “cron”).'
+        : ''
+    });
     if (data.session_expired || data.result === 'session_expired') {
       setMsg(data.error || 'ERP session expired — refresh Cookie', true);
       $('erp-sync-cookie-hint').textContent = 'Session expired — paste a fresh Cookie header and Save settings.';
     } else if (data.ok) {
-      setMsg('Keep-alive OK');
+      setMsg(`Keep-alive OK at ${formatIst(data.at)}`);
     } else {
       setMsg(data.error || 'Keep-alive failed', true);
     }
@@ -587,7 +653,7 @@ async function pingKeepalive() {
     } else {
       setMsg(err.message || 'Keep-alive failed', true);
       if (err.data?.session_expired) {
-        writeKeepaliveStatus({...err.data, result: 'session_expired', at: new Date().toISOString()});
+        writeKeepaliveStatus({...err.data, result: 'session_expired', at: err.data.at || new Date().toISOString(), source: 'manual'});
         $('erp-sync-cookie-hint').textContent = 'Session expired — paste a fresh Cookie header and Save settings.';
       }
     }

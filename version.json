@@ -1,5 +1,5 @@
 {
-  "version": "6.3.4.stable",
+  "version": "7.0.3.stable",
   "name": "GPP AI",
-  "notes": "v6.3.4.stable: TeleCaller Performance overdue now compares Next Followup Date against tomorrow (NFD today counts as overdue)."
+  "notes": "v7.0.3.stable: ERP Sync keep-alive diagnostics (manual vs cron), IST timestamps, GET/cron_secret for Hostinger, clearer hPanel setup."
 }

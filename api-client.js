@@ -1,7 +1,7 @@
 /**
  * Thin fetch wrapper for LeadLens PHP API (same-origin, session cookie).
  */
-import {apiBase} from './app-base.js?v=6.3.3.stable';
+import {apiBase} from './app-base.js?v=7.0.3.stable';
 
 function resolveApiBase(){
   return apiBase();
@@ -62,10 +62,12 @@ export const AdminApi = {
 
 export const NotifApi = {
   list: () => api('notifications'),
-  markRead: (id) => api(`notifications/read/${id}`, {method: 'POST', body: {}}),
-  markAllRead: () => api('notifications/read-all', {method: 'POST', body: {}}),
-  clearAll: () => api('notifications/clear-all', {method: 'POST', body: {}}),
-  clearOne: (id) => api(`notifications/clear/${id}`, {method: 'POST', body: {}}),
+  // POST to /notifications with action in body — extra path segments and DELETE/PUT
+  // are unreliable on Hostinger/LiteSpeed (rewrite truncation / method blocks).
+  markRead: (id) => api('notifications', {method: 'POST', body: {action: 'read', id}}),
+  markAllRead: () => api('notifications', {method: 'POST', body: {action: 'read-all'}}),
+  clearAll: () => api('notifications', {method: 'POST', body: {action: 'clear-all'}}),
+  clearOne: (id) => api('notifications', {method: 'POST', body: {action: 'clear', id}}),
 };
 
 export const DashboardApi = {
@@ -90,6 +92,50 @@ export const SalesGraphApi = {
   publish: (payload, {title, meta} = {}) =>
     api('sales-graph/publish', {method: 'POST', body: {payload, title, meta}}),
   removeAll: () => api('sales-graph/all', {method: 'DELETE'}),
+};
+
+export const TeamFormsApi = {
+  workspace: () => api('team-forms/workspace'),
+  listUsers: () => api('team-forms/users'),
+  listDepartments: () => api('team-forms/departments'),
+  createDepartment: (body) => api('team-forms/departments', {method: 'POST', body}),
+  updateDepartment: (id, body) => api(`team-forms/departments/${id}/update`, {method: 'POST', body}),
+  deleteDepartment: (id) => api(`team-forms/departments/${id}/delete`, {method: 'POST', body: {}}),
+  listGroups: (departmentId) =>
+    api(`team-forms/groups${departmentId ? `?department_id=${encodeURIComponent(departmentId)}` : ''}`),
+  createGroup: (body) => api('team-forms/groups', {method: 'POST', body}),
+  updateGroup: (id, body) => api(`team-forms/groups/${id}/update`, {method: 'POST', body}),
+  deleteGroup: (id) => api(`team-forms/groups/${id}/delete`, {method: 'POST', body: {}}),
+  listMembers: (groupId) => api(`team-forms/groups/${groupId}/members`),
+  addMember: (groupId, body) => api(`team-forms/groups/${groupId}/members`, {method: 'POST', body}),
+  removeMember: (groupId, body) =>
+    api(`team-forms/groups/${groupId}/members`, {method: 'POST', body: {...body, action: 'remove'}}),
+  listForms: (groupId) => api(`team-forms/groups/${groupId}/forms`),
+  createForm: (groupId, body) => api(`team-forms/groups/${groupId}/forms`, {method: 'POST', body}),
+  getForm: (id) => api(`team-forms/forms/${id}`),
+  updateForm: (id, body) => api(`team-forms/forms/${id}/update`, {method: 'POST', body}),
+  deleteForm: (id) => api(`team-forms/forms/${id}/delete`, {method: 'POST', body: {}}),
+  addField: (formId, body) => api(`team-forms/forms/${formId}/fields`, {method: 'POST', body}),
+  updateField: (formId, fieldId, body) =>
+    api(`team-forms/forms/${formId}/fields/${fieldId}/update`, {method: 'POST', body}),
+  deleteField: (formId, fieldId) =>
+    api(`team-forms/forms/${formId}/fields/${fieldId}/delete`, {method: 'POST', body: {action: 'delete'}}),
+  reorderFields: (formId, order) =>
+    api(`team-forms/forms/${formId}/fields`, {method: 'POST', body: {action: 'reorder', order}}),
+  assignForm: (formId, body) => api(`team-forms/forms/${formId}/assign`, {method: 'POST', body}),
+  listFormAssignments: (formId) => api(`team-forms/forms/${formId}/assign`),
+  myTasks: (since) => api(`team-forms/tasks?mine=1${since ? `&since=${encodeURIComponent(since)}` : ''}`),
+  reviewTasks: (since) =>
+    api(`team-forms/review/tasks${since ? `?since=${encodeURIComponent(since)}` : ''}`),
+  getTask: (id) => api(`team-forms/tasks/${id}`),
+  saveAnswers: (id, answers) => api(`team-forms/tasks/${id}/answers`, {method: 'POST', body: {answers}}),
+  setStatus: (id, status, extra = {}) =>
+    api(`team-forms/tasks/${id}/status`, {method: 'POST', body: {status, ...extra}}),
+  addComment: (id, body) => api(`team-forms/tasks/${id}/comments`, {method: 'POST', body: {body}}),
+  approveTask: (id) => api(`team-forms/tasks/${id}/approve`, {method: 'POST', body: {}}),
+  reworkTask: (id, note = '') =>
+    api(`team-forms/tasks/${id}/rework`, {method: 'POST', body: {body: note}}),
+  closeTask: (id) => api(`team-forms/tasks/${id}/close`, {method: 'POST', body: {}}),
 };
 
 export const SettingsApi = {

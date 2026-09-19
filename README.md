@@ -2,7 +2,7 @@
 
 Login-gated multi-module app for Hostinger (PHP + MySQL) with browser-side AI audits.
 
-**Current version:** see `version.json` (6.3.3.stable).
+**Current version:** see `version.json` (7.0.3.stable).
 
 ## Routes
 
@@ -11,6 +11,7 @@ Login-gated multi-module app for Hostinger (PHP + MySQL) with browser-side AI au
 | `/` | Login, request access, home module tiles |
 | `/TeleCallerAudit/` | Bucket 1 audit, Run console (permission), published dashboards, History, Settings |
 | `/SalesGraph/` | Sales Graph — Leads/Visits upload, published multi-chart dashboard |
+| `/TeamForms/` | Team Forms — departments/groups, form builder, assign & review workflow |
 | `/admin/` | Users, Roles, access-request queue, notifications |
 | `/api/` | PHP session auth, admin CRUD, published dashboards |
 

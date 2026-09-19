@@ -13,7 +13,7 @@ require_once __DIR__ . '/../lib/erp-sync.php';
  *   POST erp-sync/run             (optional advanced: server OpenAI audit loop)
  *   POST erp-sync/daily           (cron: fresh fetch + audit + publish)
  *   POST erp-sync/continue        (cron: resume audit only if job needs_continue)
- *   POST erp-sync/keepalive|ping  (session keep-alive; cron or Super User)
+ *   POST|GET erp-sync/keepalive|ping  (session keep-alive; cron or Super User)
  *   POST erp-sync/publish
  *   GET erp-sync/status
  *   GET erp-sync/job
@@ -268,19 +268,25 @@ function ll_erp_sync_route_continue(): void
 
 function ll_erp_sync_route_keepalive(): void
 {
-  ll_require_method('POST');
+  // Allow GET too — Hostinger cron "URL" jobs often cannot POST.
+  ll_require_method('POST', 'GET');
   $actor = ll_erp_sync_require_actor(true);
   $cfg = ll_erp_sync_load_config();
+  $source = ($actor['username'] === 'erp-sync-cron') ? 'cron' : 'manual';
   if ($actor['username'] === 'erp-sync-cron' && empty($cfg['keepalive_enabled'])) {
-    ll_ok([
+    $disabled = [
       'ok' => false,
       'result' => 'disabled',
-      'error' => 'ERP keep-alive is disabled',
+      'error' => 'ERP keep-alive is disabled — enable in UI and Save',
       'status' => 'disabled',
-    ]);
+      'source' => 'cron',
+      'at' => gmdate('c'),
+    ];
+    ll_erp_sync_set_last_keepalive($disabled);
+    ll_ok($disabled);
   }
   try {
-    $result = ll_erp_sync_keepalive();
+    $result = ll_erp_sync_keepalive($source);
   } catch (Throwable $e) {
     ll_error('ERP keep-alive failed: ' . $e->getMessage(), 500);
   }
@@ -353,6 +359,7 @@ function ll_erp_sync_route_status(): void
     'last_status' => $cfg['last_status'] ?? null,
     'last_keepalive' => $cfg['last_keepalive'] ?? null,
     'last_daily_status' => $cfg['last_daily_status'] ?? null,
+    'keepalive' => ll_erp_sync_keepalive_diagnostics($cfg),
     'job' => $jobMeta,
     'progress' => $progress,
   ]);

@@ -6,17 +6,17 @@
   <meta name="theme-color" media="(prefers-color-scheme: light)" content="#12372a">
   <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#0f2d22">
   <meta name="description" content="GPP AI · LeadLens">
-  <meta name="app-version" content="6.3.4.stable">
+  <meta name="app-version" content="7.0.3.stable">
   <title>GPP AI · LeadLens</title>
-  <script src="../theme-boot.js?v=6.3.4.stable"></script>
-  <script src="../motion.js?v=6.3.4.stable"></script>
+  <script src="../theme-boot.js?v=7.0.3.stable"></script>
+  <script src="../motion.js?v=7.0.3.stable"></script>
   <link rel="manifest" href="../manifest.webmanifest">
-  <link rel="stylesheet" href="../styles.css?v=6.3.4.stable">
+  <link rel="stylesheet" href="../styles.css?v=7.0.3.stable">
   <script defer src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js"></script>
-  <script type="module" src="../app.js?v=6.3.4.stable"></script>
+  <script type="module" src="../app.js?v=7.0.3.stable"></script>
 </head>
 <body>
   <div id="update-banner" class="update-banner hidden" role="status">
@@ -61,7 +61,7 @@
           </div>
         </div>
       </nav>
-      <div class="privacy-note"><strong id="sidebar-version">v6.3.4.stable</strong><span id="sidebar-notes">v6.3.4.stable: TeleCaller Performance overdue now compares Next Followup Date against tomorrow (NFD today counts as overdue).</span></div>
+      <div class="privacy-note"><strong id="sidebar-version">v7.0.3.stable</strong><span id="sidebar-notes">v7.0.3.stable: ERP Sync keep-alive diagnostics (manual vs cron), IST timestamps, GET/cron_secret for Hostinger, clearer hPanel setup.</span></div>
     </aside>
 
     <main>
@@ -295,7 +295,8 @@
               <label>Keep-alive URL (optional)<input id="erp-sync-keepalive-url" type="url" autocomplete="off" placeholder="Defaults to Report URL — use a lighter same-host page if preferred"></label>
               <label>Cron bearer secret<input id="erp-sync-cron-secret" type="password" autocomplete="new-password" placeholder="Set a long random secret"></label>
               <p id="erp-sync-cron-hint" class="muted form-message"></p>
-              <p id="erp-sync-keepalive-status" class="muted form-message" aria-live="polite"></p>
+              <p class="muted form-message" style="white-space:pre-wrap">Cron must be set in hPanel to */1 against <strong>production</strong> <code>https://ai.gurupunvaanii.com/api/erp-sync/keepalive</code> (not <code>/dev/api</code>). Save alone does not ping on a schedule. Prefer curl with Bearer; URL-only cron can use <code>?cron_secret=…</code>.</p>
+              <p id="erp-sync-keepalive-status" class="muted form-message" aria-live="polite" style="white-space:pre-wrap;font-weight:600"></p>
               <p id="erp-sync-daily-status" class="muted form-message" aria-live="polite"></p>
               <div class="inline-actions" style="margin-top:0.75rem;flex-wrap:wrap">
                 <button id="erp-sync-ping" type="button" class="secondary-button">Ping keep-alive now</button>

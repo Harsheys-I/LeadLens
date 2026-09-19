@@ -92,21 +92,32 @@ Idle response is harmless (`idle: true`). Only runs audit work when a job needs 
 
 ## Hostinger cron — session keep-alive (every 1 minute)
 
+**Use the production API URL** (`/api/…`), not `/dev/api/…`. Staging and live share the same DB, but cron should target live so production PHP handles the ping. Enabling the checkbox + Save does **not** start a schedule — hPanel cron must call the endpoint every minute.
+
 ```bash
 # every 1 minute →  */1 * * * *
+# Preferred: curl with Authorization (works for command-style cron)
 curl -sS -X POST -H "Authorization: Bearer YOUR_CRON_SECRET" \
   "https://ai.gurupunvaanii.com/api/erp-sync/keepalive"
 ```
 
-Staging: replace `/api/` with `/dev/api/`.
+If hPanel only supports a **Fetch URL** job (no headers), GET is allowed:
+
+```text
+https://ai.gurupunvaanii.com/api/erp-sync/keepalive?cron_secret=YOUR_CRON_SECRET
+```
+
+Staging (preview only): replace `/api/` with `/dev/api/`.
 
 Notes:
 
 - Replace `YOUR_CRON_SECRET` with the secret saved in ERP Sync.
 - Daily / continue are ignored while **Enable daily auto pipeline** is off.
-- Keep-alive is ignored while **Enable session keep-alive** is off.
+- Keep-alive is ignored while **Enable session keep-alive** is off (cron still records `result: disabled` so the UI shows the hit).
+- Status line shows **IST** times and whether the last ping was **manual** vs **cron**.
 - Alternative header if `Authorization` is stripped: `-H "X-ERP-Sync-Secret: YOUR_CRON_SECRET"`.
 - Cookies are never logged.
+- Keep-alive can slow absolute session TTL expiry but cannot defeat hard ERP logouts — refresh Cookie when status shows `session_expired`.
 
 ## Risk controls
 
