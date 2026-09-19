@@ -1,15 +1,15 @@
 /**
- * Sales Graph module — Upload (Leads + Visits + Booked) + published Dashboard.
+ * Sales Graph module â€” Upload (Leads + Visits + Booked) + published Dashboard.
  */
-import {APP_VERSION} from "./audit.js?v=7.2.1.dev";
-import {requireAuth, logout, hasPermission, getUser, changePassword, updateProfile} from "./auth.js?v=7.2.1.dev";
-import {SalesGraphApi} from "./api-client.js?v=7.2.1.dev";
-import {mountNotifications} from "./notifications-ui.js?v=7.2.1.dev";
-import {appUrl, homePath} from "./app-base.js?v=7.2.1.dev";
-import {initTheme} from "./theme.js?v=7.2.1.dev";
-import {setStorageUserId, storageKey} from "./db.js?v=7.2.1.dev";
-import {parseSalesGraphSheet, buildSalesGraphPayload} from "./sales-graph-parse.js?v=7.2.1.dev";
-import {renderSalesGraphDashboard, destroySalesGraphCharts} from "./sales-graph-dashboard.js?v=7.2.1.dev";
+import {APP_VERSION} from "./audit.js?v=7.2.2.stable";
+import {requireAuth, logout, hasPermission, getUser, changePassword, updateProfile} from "./auth.js?v=7.2.2.stable";
+import {SalesGraphApi} from "./api-client.js?v=7.2.2.stable";
+import {mountNotifications} from "./notifications-ui.js?v=7.2.2.stable";
+import {appUrl, homePath} from "./app-base.js?v=7.2.2.stable";
+import {initTheme} from "./theme.js?v=7.2.2.stable";
+import {setStorageUserId, storageKey} from "./db.js?v=7.2.2.stable";
+import {parseSalesGraphSheet, buildSalesGraphPayload} from "./sales-graph-parse.js?v=7.2.2.stable";
+import {renderSalesGraphDashboard, destroySalesGraphCharts} from "./sales-graph-dashboard.js?v=7.2.2.stable";
 
 const $ = id => document.getElementById(id);
 const ids = [
@@ -27,7 +27,7 @@ const els = Object.fromEntries(ids.map(id => [id, $(id)]));
 if (els["sidebar-version"]) els["sidebar-version"].textContent = `v${APP_VERSION}`;
 
 const titles = {upload: "Upload", dashboard: "Dashboard"};
-const RELEASE_NOTES = "v7.2.1.dev: Team Forms Task Builder wizard (form → create → fill → assign), assignee read-only answers, comment status snapshot with attachments and time spent, Submit after Completed, Task History, and assign/reviewer rules (no self-assign, no self-approve/close, assignee ≠ reviewer, multiple reviewers).";
+const RELEASE_NOTES = "v7.2.2.stable: Team Forms per-field Task Builder edit lock, two-column fill, hide Status/comments in Task Builder, Form Builder/Task Builder naming, creator delete + Pending lock on create.";
 
 let leadsParsed = null;
 let visitsParsed = null;
@@ -91,7 +91,7 @@ function setValidation(messages, isError = false) {
   box.classList.remove("hidden");
   box.classList.toggle("error", Boolean(isError));
   box.classList.toggle("warn", !isError);
-  box.textContent = messages.join(" · ");
+  box.textContent = messages.join(" Â· ");
 }
 
 function renderFileList() {
@@ -100,13 +100,13 @@ function renderFileList() {
   list.replaceChildren();
   const items = [];
   if (leadsParsed) {
-    items.push(`Leads: ${leadsParsed.fileName || "workbook"}${leadsParsed.ok ? ` · ${leadsParsed.rows?.length || 0} rows` : " · error"}`);
+    items.push(`Leads: ${leadsParsed.fileName || "workbook"}${leadsParsed.ok ? ` Â· ${leadsParsed.rows?.length || 0} rows` : " Â· error"}`);
   }
   if (visitsParsed) {
-    items.push(`Visits: ${visitsParsed.fileName || "workbook"}${visitsParsed.ok ? ` · ${visitsParsed.rows?.length || 0} rows` : " · error"}`);
+    items.push(`Visits: ${visitsParsed.fileName || "workbook"}${visitsParsed.ok ? ` Â· ${visitsParsed.rows?.length || 0} rows` : " Â· error"}`);
   }
   if (bookedParsed) {
-    items.push(`Booked: ${bookedParsed.fileName || "workbook"}${bookedParsed.ok ? ` · ${bookedParsed.rows?.length || 0} rows` : " · error"}`);
+    items.push(`Booked: ${bookedParsed.fileName || "workbook"}${bookedParsed.ok ? ` Â· ${bookedParsed.rows?.length || 0} rows` : " Â· error"}`);
   }
   if (!items.length) {
     list.classList.add("hidden");
@@ -138,7 +138,7 @@ function syncCreateState() {
     (visitsParsed && !visitsParsed.ok) ||
     (bookedParsed && !bookedParsed.ok)
   );
-  if (ready) setValidation(["Ready — Create Dashboard for a local preview."], false);
+  if (ready) setValidation(["Ready â€” Create Dashboard for a local preview."], false);
   else setValidation(msgs, hasError);
 }
 
@@ -226,7 +226,7 @@ async function refreshPublishedDashboard() {
     }
     return;
   }
-  if (metaEl) metaEl.textContent = "Loading…";
+  if (metaEl) metaEl.textContent = "Loadingâ€¦";
   try {
     const data = await SalesGraphApi.latest();
     const payload = data?.payload || null;
@@ -245,7 +245,7 @@ async function refreshPublishedDashboard() {
       const bits = [dash?.title || payload.title || "Sales Graph"];
       if (meta?.uploaded_by_name || dash?.uploaded_by_name) bits.push(`by ${meta?.uploaded_by_name || dash?.uploaded_by_name}`);
       if (dash?.updated_at || meta?.uploaded_at) bits.push(String(dash?.updated_at || meta?.uploaded_at));
-      metaEl.textContent = bits.join(" · ");
+      metaEl.textContent = bits.join(" Â· ");
     }
     renderSalesGraphDashboard(mount, payload, {meta: {...(meta || {}), uploaded_by_name: meta?.uploaded_by_name || dash?.uploaded_by_name}});
   } catch (err) {
@@ -358,7 +358,7 @@ async function checkForUpdate() {
   } catch { /* offline */ }
 }
 
-// —— events ——
+// â€”â€” events â€”â€”
 document.querySelectorAll(".nav-item").forEach(button => {
   button.addEventListener("click", () => showView(button.dataset.view));
 });
@@ -386,7 +386,7 @@ els["shell-account"]?.addEventListener("click", () => {
   if (!user || !modal) return;
   document.getElementById("account-username").value = user.username || "";
   document.getElementById("account-display").value = user.display_name || "";
-  document.getElementById("account-telecaller").value = user.telecaller_name || "— set by Admin only —";
+  document.getElementById("account-telecaller").value = user.telecaller_name || "â€” set by Admin only â€”";
   document.getElementById("account-pw-current").value = "";
   document.getElementById("account-pw-new").value = "";
   document.getElementById("account-pw-confirm").value = "";
@@ -399,7 +399,7 @@ document.getElementById("account-cancel")?.addEventListener("click", () => {
 document.getElementById("account-save")?.addEventListener("click", async () => {
   const msg = document.getElementById("account-message");
   if (!msg) return;
-  msg.textContent = "Saving…";
+  msg.textContent = "Savingâ€¦";
   try {
     const user = await updateProfile({
       username: document.getElementById("account-username").value.trim(),
@@ -445,7 +445,7 @@ els["reload-app"]?.addEventListener("click", async () => {
     }
     if (window.caches) {
       const keys = await caches.keys();
-      // Delete every Cache Storage entry — not only leadlens-* — so a stuck SW
+      // Delete every Cache Storage entry â€” not only leadlens-* â€” so a stuck SW
       // or third-party cache cannot keep serving stale modules.
       await Promise.all(keys.map(key => caches.delete(key)));
     }

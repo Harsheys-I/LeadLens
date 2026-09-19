@@ -1,23 +1,23 @@
 /**
  * Team Forms — org, form builder, task builder, assignee workspace, review board.
  */
-import {APP_VERSION} from './audit.js?v=7.2.1.dev';
-import {requireAuth, logout, hasPermission, getUser, changePassword, updateProfile} from './auth.js?v=7.2.1.dev';
-import {TeamFormsApi} from './api-client.js?v=7.2.1.dev';
-import {mountNotifications} from './notifications-ui.js?v=7.2.1.dev';
-import {appUrl, homePath} from './app-base.js?v=7.2.1.dev';
-import {initTheme} from './theme.js?v=7.2.1.dev';
-import {setStorageUserId, storageKey} from './db.js?v=7.2.1.dev';
+import {APP_VERSION} from './audit.js?v=7.2.2.stable';
+import {requireAuth, logout, hasPermission, getUser, changePassword, updateProfile} from './auth.js?v=7.2.2.stable';
+import {TeamFormsApi} from './api-client.js?v=7.2.2.stable';
+import {mountNotifications} from './notifications-ui.js?v=7.2.2.stable';
+import {appUrl, homePath} from './app-base.js?v=7.2.2.stable';
+import {initTheme} from './theme.js?v=7.2.2.stable';
+import {setStorageUserId, storageKey} from './db.js?v=7.2.2.stable';
 
 const $ = id => document.getElementById(id);
-const VERSION = APP_VERSION || '7.2.1.dev';
+const VERSION = APP_VERSION || '7.2.2.stable';
 const POLL_MS = 7000;
 
 const titles = {
   workspace: 'My workspace',
   org: 'Org',
-  builder: 'Form builder',
-  'task-builder': 'Task builder',
+  builder: 'Form Builder',
+  'task-builder': 'Task Builder',
   review: 'Review board',
   task: 'Task',
 };
@@ -462,11 +462,6 @@ function bindCommentComposer(root, task){
 }
 
 function refreshCommentsPanel(task){
-  if (currentView === 'task-builder') {
-    const mount = $('task-builder-comments');
-    if (mount) renderCommentsPanel(mount, task, {embedded: true});
-    return;
-  }
   const mount = $('task-comments-panel');
   if (mount) renderCommentsPanel(mount, task);
 }
@@ -742,11 +737,11 @@ function showView(name, {hash = true} = {}){
     return;
   }
   if (name === 'builder' && !isFormCreatorAnywhere()) {
-    toast('Form builder requires Form Creator membership.');
+    toast('Form Builder requires Form Creator membership.');
     return;
   }
   if (name === 'task-builder' && !isFormCreatorAnywhere()) {
-    toast('Task builder requires Form Creator membership.');
+    toast('Task Builder requires Form Creator membership.');
     return;
   }
   if (name === 'review' && !isReviewerAnywhere()) {
@@ -1160,7 +1155,7 @@ function openAddMember(g){
   });
 }
 
-/* —— Builder —— */
+/* —— Form Builder —— */
 async function refreshBuilder(){
   try {
     if (!workspaceData) workspaceData = await TeamFormsApi.workspace();
@@ -1184,7 +1179,7 @@ async function refreshBuilder(){
     builderGroupId = Number(sel.value);
     await loadBuilderForms();
   } catch (err) {
-    toast(err.message || 'Builder load failed');
+    toast(err.message || 'Form Builder load failed');
   }
 }
 
@@ -1294,6 +1289,8 @@ function renderBuilderFields(){
       detail += ` · ${escapeHtml(f.calc_op || '')} (${escapeHtml(builderFieldRefLabel(f.calc_left_field_id, false))} , ${escapeHtml(builderFieldRefLabel(f.calc_right_field_id, false))})`;
     }
     if (f.required && !system) detail += ' · required';
+    if (!system && f.creator_only) detail += ' · Task Builder only';
+    else if (!system) detail += ' · assignee can edit';
     row.innerHTML = `<div class="tf-field-head">
       <span class="tf-drag-handle" role="button" tabindex="0" draggable="true" aria-label="Reorder ${escapeHtml(f.label)}. Drag or use arrow keys." title="Drag to reorder">
         <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" fill="currentColor">
@@ -1491,6 +1488,8 @@ function openFieldModal(existing = null){
     <label>Label<input name="label" required value="${escapeHtml(existing?.label || '')}"></label>
     <label>Type<select name="field_type">${fieldTypeOptions(type)}</select></label>
     <label class="check-row"><input name="required" type="checkbox" ${existing?.required ? 'checked' : ''}><span>Required</span></label>
+    <label class="check-row"><input name="creator_only" type="checkbox" ${existing?.creator_only ? 'checked' : ''}><span>Only editable in Task Builder</span></label>
+    <p class="muted" style="margin:-4px 0 8px;font-size:12px">Unchecked: assignee can edit this field when working the task.</p>
     <label class="tf-opt-readonly">Readonly value<input name="readonly_value" value="${escapeHtml(existing?.readonly_value || '')}"></label>
     <label class="tf-opt-select">Select options (one per line)<textarea name="options_text" rows="3">${escapeHtml((existing?.options || []).join('\n'))}</textarea></label>
     <label class="tf-opt-calc">Operation<select name="calc_op">${calcOpOptions(existing?.calc_op || 'add')}</select></label>
@@ -1502,6 +1501,7 @@ function openFieldModal(existing = null){
       label: form.label.value.trim(),
       field_type: form.field_type.value,
       required: form.required.checked,
+      creator_only: form.creator_only.checked,
       readonly_value: form.readonly_value.value,
       options: form.options_text.value.split('\n').map(s => s.trim()).filter(Boolean),
       calc_op: form.calc_op.value,
@@ -1531,7 +1531,7 @@ function openNewForm(){
     return;
   }
   openModal('New template', `
-    <p class="muted">A reusable form. Creating it does not assign work — use Task builder when you are ready.</p>
+    <p class="muted">A reusable form. Creating it does not assign work — use Task Builder when you are ready.</p>
     <label>Title<input name="title" required></label>
     <label>Description<textarea name="description" rows="2"></textarea></label>
   `, async () => {
@@ -1718,7 +1718,7 @@ async function refreshTaskBuilder(){
     taskBuilderGroupId = Number(sel.value);
     await loadTaskBuilderForms();
   } catch (err) {
-    toast(err.message || 'Task builder load failed');
+    toast(err.message || 'Task Builder load failed');
   }
 }
 
@@ -1731,7 +1731,7 @@ async function loadTaskBuilderForms(){
     const forms = (data.forms || []).filter(f => f.is_active !== false);
     const mount = $('task-builder-forms');
     if (!forms.length) {
-      mount.innerHTML = '<div class="empty-card">No active templates in this group. Create one in Form builder.</div>';
+      mount.innerHTML = '<div class="empty-card">No active templates in this group. Create one in Form Builder.</div>';
       taskBuilderForm = null;
       $('task-builder-editor').classList.add('hidden');
       return;
@@ -1873,38 +1873,9 @@ function renderTaskBuilderFill(task){
   fields.replaceChildren();
   const intro = document.createElement('p');
   intro.className = 'muted';
-  intro.textContent = 'Fill the fields. Changes save as you type. Status can be set now; Assign comes next.';
+  intro.textContent = 'Fill the fields. Changes save as you type. Status stays Pending until the assignee updates it later.';
   fields.append(intro);
-  appendTaskFields(fields, task, {editable: canEditTaskAnswers(task), systemMode: 'status'});
-  if (!fields.querySelector('#task-status-select') && !fields.querySelector('#task-status-badge')) {
-    const wrap = document.createElement('label');
-    wrap.className = 'tf-form-field status';
-    const title = document.createElement('span');
-    title.textContent = 'Status';
-    wrap.append(title);
-    if (canSetTaskStatus(task)) {
-      const input = document.createElement('select');
-      input.id = 'task-status-select';
-      input.setAttribute('aria-label', 'Task status');
-      fillStatusSelect(input, task.status, {includeRework: true});
-      input.addEventListener('change', () => onTaskStatusChange(input));
-      wrap.append(input);
-    } else {
-      const badge = document.createElement('span');
-      badge.className = 'tf-status';
-      badge.textContent = statusLabel(task.status);
-      wrap.append(badge);
-    }
-    fields.append(wrap);
-  }
-  let commentsMount = $('task-builder-comments');
-  if (!commentsMount) {
-    commentsMount = document.createElement('div');
-    commentsMount.id = 'task-builder-comments';
-  }
-  commentsMount.className = 'tf-comments-panel tf-comments-embed';
-  fields.append(commentsMount);
-  renderCommentsPanel(commentsMount, task, {embedded: true});
+  appendTaskFields(fields, task, {systemMode: 'none', columns: 2});
   mount.innerHTML = `<div class="inline-actions">
       <button type="button" id="task-builder-back-pick" class="text-button">← Templates</button>
       <button type="button" id="task-builder-to-assign" class="primary-button">Continue to assign</button>
@@ -2062,10 +2033,27 @@ function isTaskFormCreator(task){
   return false;
 }
 
+function isCreatorOnlyField(f){
+  if (isSystemField(f)) return true;
+  return Boolean(f?.creator_only);
+}
+
+function canEditFieldAnswer(task, f){
+  if (!task || !f) return false;
+  if (task.status === 'approved' || task.status === 'closed') return false;
+  if (f.field_type === 'readonly' || f.field_type === 'calculated') return false;
+  if (isSystemField(f)) return false;
+  if (isTaskFormCreator(task)) return true;
+  if (isTaskAssignee(task)) return !isCreatorOnlyField(f);
+  return false;
+}
+
 function canEditTaskAnswers(task){
   if (!task) return false;
   if (task.status === 'approved' || task.status === 'closed') return false;
-  return isTaskFormCreator(task);
+  if (isTaskFormCreator(task)) return true;
+  if (!isTaskAssignee(task)) return false;
+  return (task.fields || []).some(f => canEditFieldAnswer(task, f));
 }
 
 function isTaskAssignee(task){
@@ -2115,6 +2103,86 @@ function canCloseTask(task){
   if (isTaskAssignee(task)) return false;
   if (task.status !== 'approved') return false;
   return u.is_super || canManageOrg() || myRolesInGroup(task.group_id).includes('form_creator');
+}
+
+function isTaskDraft(task){
+  return Boolean(task && (task.is_draft || !Number(task.assignee_id)));
+}
+
+function canDeleteTask(task){
+  const u = getUser();
+  if (!u || !task) return false;
+  if (u.is_super || canManageOrg()) return true;
+  return Number(task.assigned_by) > 0 && Number(u.id) === Number(task.assigned_by);
+}
+
+function confirmDeleteTask(task){
+  const title = task?.form_title || task?.task_title || 'this task';
+  const kind = isTaskDraft(task) ? 'draft task' : 'task';
+  return confirm(`Delete ${kind} “${title}”? Comments, answers, and files will be removed.`);
+}
+
+function appendTaskDeleteButton(parent, task, {onDeleted} = {}){
+  if (!parent || !canDeleteTask(task)) return;
+  const del = document.createElement('button');
+  del.type = 'button';
+  del.className = 'text-button';
+  del.textContent = 'Delete';
+  del.onclick = async (e) => {
+    e.stopPropagation();
+    if (!confirmDeleteTask(task)) return;
+    try {
+      await TeamFormsApi.deleteTask(task.id);
+      toast('Task deleted');
+      if (onDeleted) await onDeleted();
+    } catch (err) {
+      toast(err.message || 'Delete failed');
+    }
+  };
+  parent.append(del);
+}
+
+async function deleteTaskFromBuilder(task){
+  const target = task || taskBuilderTask;
+  if (!canDeleteTask(target)) {
+    toast('Only the person who created this task can delete it');
+    return;
+  }
+  if (!confirmDeleteTask(target)) return;
+  clearTimeout(taskSaveTimer);
+  taskSaveTimer = null;
+  try {
+    await TeamFormsApi.deleteTask(target.id);
+    toast('Task deleted');
+    currentTask = null;
+    resetTaskBuilderWizard();
+    if (taskBuilderForm) {
+      $('task-builder-editor')?.classList.remove('hidden');
+      renderTaskBuilderPick(taskBuilderForm);
+      markTaskBuilderFormSelected(taskBuilderForm.id);
+    }
+  } catch (err) {
+    toast(err.message || 'Delete failed');
+  }
+}
+
+async function deleteCurrentTask(task){
+  if (!canDeleteTask(task)) {
+    toast('Only the person who created this task can delete it');
+    return;
+  }
+  if (!confirmDeleteTask(task)) return;
+  try {
+    await TeamFormsApi.deleteTask(task.id);
+    toast('Task deleted');
+    currentTask = null;
+    const back = taskBackView || 'workspace';
+    showView(back);
+    if (back === 'workspace') await refreshWorkspace();
+    else if (back === 'review') await refreshReview();
+  } catch (err) {
+    toast(err.message || 'Delete failed');
+  }
 }
 
 function renderTask(){
@@ -2214,6 +2282,14 @@ function renderTask(){
     };
     actions.append(close);
   }
+  if (canDeleteTask(task)) {
+    const del = document.createElement('button');
+    del.type = 'button';
+    del.className = 'text-button';
+    del.textContent = 'Delete';
+    del.onclick = () => deleteCurrentTask(task);
+    actions.append(del);
+  }
 
   const formMount = $('task-form');
   formMount.replaceChildren();
@@ -2224,26 +2300,35 @@ function renderTask(){
     formMount.append(p);
   }
   const u = getUser();
-  if (!editable && Number(u?.id) === Number(task.assignee_id)) {
+  if (isTaskAssignee(task) && !isTaskFormCreator(task)) {
     const note = document.createElement('p');
     note.className = 'muted';
-    note.textContent = 'Fields are read-only. You can update status and add comments.';
+    const editableCount = (task.fields || []).filter(f => canEditFieldAnswer(task, f)).length;
+    note.textContent = editableCount
+      ? 'You can edit assignee fields, update status, and add comments. Fields marked Task Builder only are read-only.'
+      : 'Fields are read-only for you. You can update status and add comments.';
     formMount.append(note);
   }
-  appendTaskFields(formMount, task, {editable, systemMode: 'all'});
+  appendTaskFields(formMount, task, {systemMode: 'all'});
   applyTaskFieldSearch({scroll: false});
 
   renderCommentsPanel($('task-comments-panel'), task);
   renderTaskHistory($('task-history-panel'), task);
 }
 
-function appendTaskFields(formMount, task, {editable, systemMode = 'all'} = {}){
+function appendTaskFields(formMount, task, {systemMode = 'all', columns = 1} = {}){
   const values = taskAnswerMap(task);
+  let target = formMount;
+  if (columns === 2) {
+    target = document.createElement('div');
+    target.className = 'tf-fields-grid';
+    formMount.append(target);
+  }
   for (const f of task.fields || []) {
     if (systemMode === 'none' && isSystemField(f)) continue;
     if (systemMode === 'status' && isSystemField(f) && f.field_type !== 'status') continue;
     const val = values[f.id] ?? '';
-    const locked = !editable || f.field_type === 'readonly' || f.field_type === 'calculated';
+    const locked = !canEditFieldAnswer(task, f);
     const wrap = document.createElement(
       f.field_type === 'document'
       || f.field_type === 'assign_to'
@@ -2263,7 +2348,7 @@ function appendTaskFields(formMount, task, {editable, systemMode = 'all'} = {}){
       who.style.fontWeight = '400';
       who.textContent = task.assignee_name || '—';
       wrap.append(who);
-      formMount.append(wrap);
+      target.append(wrap);
       continue;
     } else if (f.field_type === 'reviewer') {
       const who = document.createElement('span');
@@ -2271,7 +2356,7 @@ function appendTaskFields(formMount, task, {editable, systemMode = 'all'} = {}){
       who.style.fontWeight = '400';
       who.textContent = reviewerNames(task) || '—';
       wrap.append(who);
-      formMount.append(wrap);
+      target.append(wrap);
       continue;
     } else if (f.field_type === 'status') {
       if (canSetTaskStatus(task)) {
@@ -2288,7 +2373,7 @@ function appendTaskFields(formMount, task, {editable, systemMode = 'all'} = {}){
         badge.textContent = statusLabel(task.status);
         wrap.append(badge);
       }
-      formMount.append(wrap);
+      target.append(wrap);
       continue;
     } else if (f.field_type === 'textarea') {
       input = document.createElement('textarea');
@@ -2333,7 +2418,7 @@ function appendTaskFields(formMount, task, {editable, systemMode = 'all'} = {}){
           empty.textContent = href || '—';
           wrap.append(empty);
         }
-        formMount.append(wrap);
+        target.append(wrap);
         continue;
       }
       input = document.createElement('input');
@@ -2368,7 +2453,7 @@ function appendTaskFields(formMount, task, {editable, systemMode = 'all'} = {}){
       }
       row.append(info);
       wrap.append(row);
-      formMount.append(wrap);
+      target.append(wrap);
       continue;
     } else {
       input = document.createElement('input');
@@ -2388,7 +2473,7 @@ function appendTaskFields(formMount, task, {editable, systemMode = 'all'} = {}){
       input.addEventListener('change', () => scheduleTaskAutosave());
     }
     wrap.append(input);
-    formMount.append(wrap);
+    target.append(wrap);
   }
 }
 
@@ -2451,7 +2536,7 @@ function applyTaskFieldSearch({scroll = false} = {}){
 function collectAnswersFromDom(){
   const answers = [];
   for (const f of currentTask.fields || []) {
-    if (f.field_type === 'readonly' || f.field_type === 'calculated' || f.field_type === 'document' || isSystemField(f)) continue;
+    if (!canEditFieldAnswer(currentTask, f) || f.field_type === 'document') continue;
     const input = taskFieldControl(f.id);
     if (!input) continue;
     let value;
@@ -2522,7 +2607,7 @@ function applyTaskMeta(task){
   if (meta) meta.textContent = taskMetaLine(task);
   if (currentView === 'task-builder' && taskBuilderForm && $('task-builder-form-meta')) {
     $('task-builder-form-meta').textContent =
-      `${taskBuilderForm.department_name} · ${taskBuilderForm.group_name} · ${statusLabel(task.status)}` +
+      `${taskBuilderForm.department_name} · ${taskBuilderForm.group_name}` +
       (taskBuilderForm.description ? ` — ${taskBuilderForm.description}` : '');
   }
 }

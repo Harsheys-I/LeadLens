@@ -1,5 +1,5 @@
-{
-  "version": "7.2.1.dev",
+﻿{
+  "version": "7.2.2.stable",
   "name": "GPP AI",
-  "notes": "v7.2.1.dev: ERP Sync daily/continue self-chains audit batches (in-request loop + fire-and-forget continue) so progress does not wait on the 10-minute cron; continue cron is optional backup."
+  "notes": "v7.2.2.stable: Team Forms per-field Task Builder edit lock, two-column fill, hide Status/comments in Task Builder, Form Builder/Task Builder naming, creator delete + Pending lock on create."
 }

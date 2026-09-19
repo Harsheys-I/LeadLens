@@ -7,12 +7,12 @@
   <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#0f2d22">
   <meta name="description" content="GPP AI Team Forms">
   <title>GPP AI · Team Forms</title>
-  <meta name="app-version" content="7.2.1.dev">
-  <script src="../theme-boot.js?v=7.2.1.dev"></script>
-  <script src="../motion.js?v=7.2.1.dev"></script>
+  <meta name="app-version" content="7.2.2.stable">
+  <script src="../theme-boot.js?v=7.2.2.stable"></script>
+  <script src="../motion.js?v=7.2.2.stable"></script>
   <link rel="manifest" href="../manifest.webmanifest">
-  <link rel="stylesheet" href="../styles.css?v=7.2.1.dev">
-  <script type="module" src="../team-forms.js?v=7.2.1.dev"></script>
+  <link rel="stylesheet" href="../styles.css?v=7.2.2.stable">
+  <script type="module" src="../team-forms.js?v=7.2.2.stable"></script>
 </head>
 <body>
   <div id="update-banner" class="update-banner hidden" role="status">
@@ -25,8 +25,8 @@
       <nav aria-label="Team Forms navigation">
         <button class="nav-item active" data-view="workspace"><span>◎</span>My workspace</button>
         <button class="nav-item hidden" data-view="org" data-perm="team_forms.manage_org"><span>▣</span>Org</button>
-        <button class="nav-item" data-view="builder"><span>✎</span>Form builder</button>
-        <button class="nav-item" data-view="task-builder"><span>＋</span>Task builder</button>
+        <button class="nav-item" data-view="builder"><span>✎</span>Form Builder</button>
+        <button class="nav-item" data-view="task-builder"><span>＋</span>Task Builder</button>
         <button class="nav-item" data-view="review"><span>▦</span>Review board</button>
         <button class="nav-item hidden" data-view="task"><span>·</span>Task</button>
       </nav>
@@ -79,8 +79,8 @@
       <section id="view-builder" class="view">
         <div class="section-head">
           <div>
-            <h2>Form builder</h2>
-            <p>Build reusable templates (title, description, fields). Creating a task is a separate action in Task builder.</p>
+            <h2>Form Builder</h2>
+            <p>Build reusable templates (title, description, fields). Creating a task is a separate action in Task Builder.</p>
           </div>
           <div class="inline-actions">
             <button id="builder-new-form" type="button" class="primary-button">New template</button>
@@ -113,14 +113,14 @@
       <section id="view-task-builder" class="view">
         <div class="section-head">
           <div>
-            <h2>Task builder</h2>
-            <p>Choose a template, create the task, fill the fields, then assign. Assignees view answers, update status, and comment — they cannot edit fields.</p>
+            <h2>Task Builder</h2>
+            <p>Choose a template, create the task, fill the fields, then assign. Assignees can edit fields you mark assignee-editable, update status, and comment.</p>
           </div>
           <div class="inline-actions">
             <button id="task-builder-refresh" type="button" class="secondary-button">Refresh</button>
           </div>
         </div>
-        <ol class="tf-wizard-steps" id="task-builder-steps" aria-label="Task builder steps">
+        <ol class="tf-wizard-steps" id="task-builder-steps" aria-label="Task Builder steps">
           <li data-step="pick">1. Form</li>
           <li data-step="fill">2. Fill fields</li>
           <li data-step="assign">3. Assign</li>
@@ -306,6 +306,9 @@
     .tf-history-what{font-weight:650}
     .tf-history-meta{color:var(--muted);font-size:12px}
     .tf-form-field{display:grid;gap:6px;margin:12px 0;font-size:13px;font-weight:650}
+    .tf-fields-grid{display:grid;gap:0 18px;grid-template-columns:1fr 1fr;align-items:start}
+    @media (max-width:700px){.tf-fields-grid{grid-template-columns:1fr}}
+    .tf-fields-grid .tf-form-field{margin:10px 0}
     .tf-form-field input,.tf-form-field textarea,.tf-form-field select{width:100%;border:1px solid var(--input-border);border-radius:9px;background:var(--input-bg);padding:10px 11px;color:var(--ink);font-weight:400}
     .tf-form-field input[type="number"]{-moz-appearance:textfield}
     .tf-form-field input[type="number"]::-webkit-outer-spin-button,
