@@ -1,0 +1,1263 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" media="(prefers-color-scheme: light)" content="#12372a">
+  <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#0f2d22">
+  <meta name="description" content="GPP AI · SEO Audit & Command Center">
+  <meta name="app-version" content="8.0.0.stable">
+  <title>GPP AI · SEO</title>
+  <script src="../theme-boot.js?v=8.0.0.stable"></script>
+  <script src="../motion.js?v=8.0.0.stable"></script>
+  <link rel="manifest" href="../manifest.webmanifest">
+  <link rel="stylesheet" href="styles.css?v=8.0.0.stable">
+  <link rel="stylesheet" href="seo-notif.css?v=8.0.0.stable">
+  <script type="module" src="seo-gate.js?v=8.0.0.stable"></script>
+</head>
+<body class="seo-auth-pending">
+  <div class="app-layout">
+    <!-- Sidebar Navigation -->
+    <aside class="sidebar">
+      <div class="brand-header">
+        <a class="brand-home-link" href="../">
+          <div class="brand-logo-wrapper">
+            <img src="../assets/gpp-ai-logo.png" alt="" class="brand-logo-img" width="48" height="28" />
+          </div>
+          <div class="brand-text">
+            <h1>GPP AI</h1>
+            <p>SEO</p>
+          </div>
+        </a>
+      </div>
+
+      <nav class="nav-menu">
+        <div class="nav-item active" data-target="view-scanner">
+          <span class="icon">⚡</span>
+          <span>Live URL Scanner</span>
+          <span class="nav-badge" style="background:rgba(239,68,68,0.15); color:#ef4444; font-weight:700;">LIVE</span>
+        </div>
+        <div class="nav-item" data-target="view-overview">
+          <span class="icon">📊</span>
+          <span>Command Center</span>
+          <span class="nav-badge" id="navBadgeP0">P0: 4</span>
+        </div>
+        <div class="nav-item" data-target="view-technical">
+          <span class="icon">⚙️</span>
+          <span>Technical SEO</span>
+          <span class="nav-badge blue" id="navBadgeUrls">93 URLs</span>
+        </div>
+        <div class="nav-item" data-target="view-onpage">
+          <span class="icon">📝</span>
+          <span>On-Page SEO</span>
+        </div>
+        <div class="nav-item" data-target="view-schema">
+          <span class="icon">🏷️</span>
+          <span>Schema Studio</span>
+          <span class="nav-badge" style="background:rgba(124,58,237,0.1); color:var(--accent-purple);">JSON-LD</span>
+        </div>
+        <div class="nav-item" data-target="view-offpage">
+          <span class="icon">🔗</span>
+          <span>Off-Page & Links</span>
+        </div>
+        <div class="nav-item" data-target="view-performance">
+          <span class="icon">⚡</span>
+          <span>Core Web Vitals</span>
+        </div>
+        <div class="nav-item" data-target="view-traffic">
+          <span class="icon">📈</span>
+          <span>Traffic & Keywords</span>
+          <span class="nav-badge" style="background:rgba(16,185,129,0.15); color:var(--accent-emerald);">SERP AI</span>
+        </div>
+        <div class="nav-item" data-target="view-local">
+          <span class="icon">📍</span>
+          <span>Real Estate Silos</span>
+        </div>
+        <div class="nav-item" data-target="view-roadmap">
+          <span class="icon">🎯</span>
+          <span>30-Day Action Plan</span>
+        </div>
+      </nav>
+
+      <div class="sidebar-footer">
+        <div class="target-badge">
+          <span>Target website</span>
+          <strong>gurupunvaanii.com</strong>
+        </div>
+        <div class="target-badge" style="margin-top:0.5rem;">
+          <span id="sidebar-version">v8.0.0.stable</span>
+          <strong style="font-family:var(--font-sans);font-weight:600;color:rgba(255,255,255,.72);">SEO audit command center</strong>
+        </div>
+      </div>
+    </aside>
+
+    <!-- Mobile Sidebar Backdrop Overlay -->
+    <div class="sidebar-backdrop" id="sidebarBackdrop" onclick="toggleMobileSidebar()"></div>
+
+    <!-- Main Wrapper -->
+    <main class="main-wrapper">
+      <!-- Top Action Bar -->
+      <header class="top-bar">
+        <div class="top-bar-left">
+          <button class="mobile-nav-toggle" id="mobileNavToggle" onclick="toggleMobileSidebar()" aria-label="Toggle Navigation Menu">
+            <span class="hamburger-bar"></span>
+            <span class="hamburger-bar"></span>
+            <span class="hamburger-bar"></span>
+          </button>
+          <div class="page-title-area">
+            <p class="eyebrow">SEO</p>
+            <h2 id="currentPageTitle">Live URL Scanner</h2>
+            <div id="liveReportClockBadge" style="display:flex; align-items:center; gap:0.45rem; font-size:0.75rem; color:var(--text-muted); margin-top:3px;">
+              <span style="display:inline-block; width:7px; height:7px; border-radius:50%; background:var(--accent-emerald);"></span>
+              <span>Report active: <strong id="liveCurrentTimeDisplay" style="font-family:var(--font-mono); color:var(--text-main); font-weight:600;">--:--:--</strong></span>
+            </div>
+          </div>
+        </div>
+        <div class="top-actions seo-shell-actions">
+          <span id="shell-user-label" class="seo-topbar-user"></span>
+          <button type="button" id="notif-bell" class="notif-bell notif-bell-chrome" title="Notifications" aria-label="Notifications">
+            <span id="notif-count" class="notif-count hidden">0</span>
+          </button>
+          <button class="btn-theme-toggle" id="themeToggleBtn" type="button" onclick="toggleTheme()">
+            <span id="themeIcon">☾</span> <span id="themeText">Dark</span>
+          </button>
+          <button type="button" id="shell-account" class="btn btn-outline">Account</button>
+          <button type="button" id="shell-logout" class="btn btn-outline">Sign out</button>
+          <button class="btn btn-primary" type="button" onclick="exportToMultiSheetExcel()">Export Excel</button>
+          <button class="btn btn-outline" type="button" onclick="exportTableToCSV()">CSV</button>
+          <button class="btn btn-outline" type="button" onclick="window.print()">Print</button>
+          <button class="btn btn-primary" type="button" onclick="document.querySelector('[data-target=\'view-scanner\']').click()">Live Scan</button>
+        </div>
+      </header>
+
+      <!-- Content Container -->
+      <div class="content-body">
+        
+        <!-- 1. LIVE URL SCANNER VIEW (DEFAULT ACTIVE) -->
+        <section id="view-scanner" class="view-section active">
+          <div class="scanner-hero">
+            <h3>⚡ Live URL Deep Diagnostic Scanner</h3>
+            <p>Run a real-time audit on any public web page, blog post, category archive, or XML Sitemap to test H1 hierarchy, description duplication, schemas, and Core Web Vitals.</p>
+            <div class="scan-input-group">
+              <input type="text" id="liveScanUrlInput" class="scan-input" placeholder="Enter single URL or comma-separated Sitemaps (e.g. https://gurupunvaanii.com/post-sitemap.xml, https://gurupunvaanii.com/page-sitemap.xml, https://gurupunvaanii.com/category-sitemap.xml)" value="https://gurupunvaanii.com/post-sitemap.xml, https://gurupunvaanii.com/page-sitemap.xml, https://gurupunvaanii.com/category-sitemap.xml" />
+              <button class="btn btn-primary" id="runScanBtn" onclick="runLiveAudit()">Audit URL(s)</button>
+            </div>
+            <!-- Quick Preset URLs & Sitemaps -->
+            <div style="display:flex; align-items:center; gap:0.5rem; flex-wrap:wrap; justify-content:center; margin-top:0.75rem;">
+              <span style="font-size:0.75rem; color:var(--text-muted); font-weight:600;">Sitemap Presets:</span>
+              <button class="btn btn-outline" style="padding:0.3rem 0.8rem; font-size:0.75rem; background:linear-gradient(135deg, rgba(99,102,241,0.25), rgba(6,182,212,0.25)); border-color:var(--accent-cyan); font-weight:700; color:var(--text-main);" onclick="setAndScan('https://gurupunvaanii.com/post-sitemap.xml, https://gurupunvaanii.com/page-sitemap.xml, https://gurupunvaanii.com/category-sitemap.xml')">🚀 Scan All 3 Sitemaps Unified (Post + Page + Category)</button>
+              <button class="btn btn-outline" style="padding:0.25rem 0.65rem; font-size:0.75rem; border-color:var(--accent-indigo);" onclick="setAndScan('https://gurupunvaanii.com/post-sitemap.xml')">📝 Post Sitemap (67 Blogs)</button>
+              <button class="btn btn-outline" style="padding:0.25rem 0.65rem; font-size:0.75rem; border-color:var(--accent-cyan);" onclick="setAndScan('https://gurupunvaanii.com/page-sitemap.xml')">📄 Page Sitemap (18 Pages)</button>
+              <button class="btn btn-outline" style="padding:0.25rem 0.65rem; font-size:0.75rem; border-color:var(--accent-purple);" onclick="setAndScan('https://gurupunvaanii.com/category-sitemap.xml')">📂 Category Sitemap (7 Hubs)</button>
+              <button class="btn btn-outline" style="padding:0.25rem 0.65rem; font-size:0.75rem;" onclick="setAndScan('https://gurupunvaanii.com/')">🏠 Homepage</button>
+              <button class="btn btn-outline" style="padding:0.25rem 0.65rem; font-size:0.75rem;" onclick="setAndScan('https://gurupunvaanii.com/eka-plots-for-sale-in-anekal-bangalore/')">📍 EKA Plots</button>
+            </div>
+          </div>
+
+          <div id="liveScanResultCard" class="card" style="display:none;">
+            <!-- Live scan results injected by JS -->
+          </div>
+        </section>
+
+        <!-- 2. EXECUTIVE COMMAND CENTER -->
+        <section id="view-overview" class="view-section">
+          <!-- Metric Counter Grid -->
+          <div class="metric-grid">
+            <div class="metric-card">
+              <div class="metric-icon icon-blue">🌐</div>
+              <div class="metric-info">
+                <h4>Total Pages Audited</h4>
+                <div class="metric-value" id="statTotalPages">93</div>
+                <div class="metric-sub">100% Crawl Coverage</div>
+              </div>
+            </div>
+            <div class="metric-card">
+              <div class="metric-icon icon-red">🚨</div>
+              <div class="metric-info">
+                <h4>P0 Critical Issues</h4>
+                <div class="metric-value" id="statP0Count">4</div>
+                <div class="metric-sub">Immediate Action Required</div>
+              </div>
+            </div>
+            <div class="metric-card">
+              <div class="metric-icon icon-amber">⚠️</div>
+              <div class="metric-info">
+                <h4>P1 High Priority</h4>
+                <div class="metric-value" id="statP1Count">8</div>
+                <div class="metric-sub">Fix within 7-14 days</div>
+              </div>
+            </div>
+            <div class="metric-card">
+              <div class="metric-icon icon-purple">🖼️</div>
+              <div class="metric-info">
+                <h4>Total Images Audited</h4>
+                <div class="metric-value" id="statTotalImages">856</div>
+                <div class="metric-sub"><span id="statMissingAlt" style="color:var(--accent-red); font-weight:700;">301</span> Missing Alt</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Overall Health Score Box -->
+          <div class="card">
+            <div class="card-header">
+              <div class="card-title">
+                <span>🛡️ Overall Technical SEO Health Score</span>
+              </div>
+              <span class="badge badge-p1">Grade: C+ (Moderate)</span>
+            </div>
+            <div class="score-overview-grid">
+              <div class="score-radial-box">
+                <div class="radial-progress-wrapper">
+                  <svg viewBox="0 0 160 160">
+                    <defs>
+                      <linearGradient id="scoreGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+                        <stop offset="0%" stop-color="#d97706" />
+                        <stop offset="100%" stop-color="#ea580c" />
+                      </linearGradient>
+                    </defs>
+                    <circle class="radial-bg" cx="80" cy="80" r="70" />
+                    <circle class="radial-fill" cx="80" cy="80" r="70" />
+                  </svg>
+                  <div class="radial-center-text">
+                    <span class="score-number">68</span>
+                    <span class="score-label">out of 100</span>
+                  </div>
+                </div>
+                <p style="margin-top:1rem; font-size:0.8rem; color:var(--text-muted);">
+                  Weighted calculation across 10 core technical pillars.
+                </p>
+              </div>
+
+              <!-- Breakdown Bars -->
+              <div class="score-breakdown-list">
+                <div class="breakdown-bar-item">
+                  <div class="bar-header">
+                    <span>Crawlability (15%)</span>
+                    <strong>11 / 15</strong>
+                  </div>
+                  <div class="progress-track">
+                    <div class="progress-fill" style="width:73%; background:var(--accent-cyan);"></div>
+                  </div>
+                </div>
+                <div class="breakdown-bar-item">
+                  <div class="bar-header">
+                    <span>Indexability (15%)</span>
+                    <strong>9 / 15</strong>
+                  </div>
+                  <div class="progress-track">
+                    <div class="progress-fill" style="width:60%; background:var(--accent-red);"></div>
+                  </div>
+                </div>
+                <div class="breakdown-bar-item">
+                  <div class="bar-header">
+                    <span>Technical On-Page (10%)</span>
+                    <strong>6 / 10</strong>
+                  </div>
+                  <div class="progress-track">
+                    <div class="progress-fill" style="width:60%; background:var(--accent-amber);"></div>
+                  </div>
+                </div>
+                <div class="breakdown-bar-item">
+                  <div class="bar-header">
+                    <span>Structured Data / Schema (5%)</span>
+                    <strong>1 / 5</strong>
+                  </div>
+                  <div class="progress-track">
+                    <div class="progress-fill" style="width:20%; background:var(--accent-purple);"></div>
+                  </div>
+                </div>
+                <div class="breakdown-bar-item">
+                  <div class="bar-header">
+                    <span>Core Web Vitals / Speed (15%)</span>
+                    <strong>9 / 15</strong>
+                  </div>
+                  <div class="progress-track">
+                    <div class="progress-fill" style="width:60%; background:var(--accent-amber);"></div>
+                  </div>
+                </div>
+                <div class="breakdown-bar-item">
+                  <div class="bar-header">
+                    <span>Security & HTTPS (5%)</span>
+                    <strong>5 / 5</strong>
+                  </div>
+                  <div class="progress-track">
+                    <div class="progress-fill" style="width:100%; background:var(--accent-emerald);"></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <!-- Sitemaps Source Breakdown Banner -->
+          <div class="card" style="padding:1rem 1.25rem;">
+            <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:0.75rem;">
+              <div style="display:flex; align-items:center; gap:0.5rem;">
+                <span style="font-size:1.1rem;">📦</span>
+                <div>
+                  <h4 style="font-size:0.88rem; font-weight:700; color:var(--text-main); margin:0;">Active Multi-Sitemap Live Crawl</h4>
+                  <p style="font-size:0.72rem; color:var(--text-muted); margin:0;">100% Crawl Coverage across all 3 sitemaps on gurupunvaanii.com</p>
+                </div>
+              </div>
+              <div style="display:flex; gap:0.5rem; flex-wrap:wrap;">
+                <span class="badge" style="background:rgba(99,102,241,0.1); color:var(--accent-indigo); font-weight:700;">📄 post-sitemap.xml (67 URLs)</span>
+                <span class="badge" style="background:rgba(2,132,199,0.1); color:var(--accent-cyan); font-weight:700;">📑 page-sitemap.xml (18 URLs)</span>
+                <span class="badge" style="background:rgba(124,58,237,0.1); color:var(--accent-purple); font-weight:700;">🏷️ category-sitemap.xml (7 URLs)</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Overall Brief & Department Error Matrix -->
+          <div class="card">
+            <div class="card-header">
+              <div class="card-title">
+                <span>📋 Overall Brief & Department Error Matrix</span>
+              </div>
+              <span class="badge badge-p1">Role-Based Fix Allocation</span>
+            </div>
+
+            <div id="departmentMatrixGrid" class="sitemap-dept-grid" style="display:grid; grid-template-columns:repeat(auto-fit, minmax(240px, 1fr)); gap:1rem; margin-bottom:1.5rem;">
+              <!-- 1. Frontend / Web Developer -->
+              <div class="department-card">
+                <div>
+                  <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:0.75rem;">
+                    <div style="display:flex; align-items:center; gap:0.5rem;">
+                      <span style="font-size:1.25rem;">💻</span>
+                      <strong style="color:var(--text-main); font-size:0.92rem;">Web Developer</strong>
+                    </div>
+                    <span class="badge badge-p3" style="font-size:0.7rem; background:rgba(16,185,129,0.15); color:var(--accent-emerald);">P0 Resolved</span>
+                  </div>
+                  <ul style="list-style:none; padding:0; margin:0; font-size:0.8rem; color:var(--text-muted); display:flex; flex-direction:column; gap:0.45rem;">
+                    <li>🟢 <strong>Canonical Tags</strong>: Verified 100% Clean & Single</li>
+                    <li>🟢 <strong>Meta Robots</strong>: Unambiguous Index & Follow directives</li>
+                    <li>🟠 <strong>DOM Payload</strong>: Optimize Elementor DOM Nodes (&lt;1,500)</li>
+                    <li>🟢 <strong>Direct 301 Routing</strong>: SSL canonical root domain enforced</li>
+                  </ul>
+                </div>
+                <div style="margin-top:0.85rem; padding-top:0.6rem; border-top:1px solid var(--border-subtle); font-size:0.72rem; color:var(--accent-emerald); font-weight:700;">
+                  ✅ Status: 0 Critical P0 Conflicts on Live Site
+                </div>
+              </div>
+
+              <!-- 2. Content Team -->
+              <div class="department-card">
+                <div>
+                  <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:0.75rem;">
+                    <div style="display:flex; align-items:center; gap:0.5rem;">
+                      <span style="font-size:1.25rem;">✍️</span>
+                      <strong style="color:var(--text-main); font-size:0.92rem;">Content Team</strong>
+                    </div>
+                    <span class="badge badge-p1" style="font-size:0.7rem;">P1 Action</span>
+                  </div>
+                  <ul style="list-style:none; padding:0; margin:0; font-size:0.8rem; color:var(--text-muted); display:flex; flex-direction:column; gap:0.45rem;">
+                    <li>🟠 <strong>Missing Alt Attributes</strong> on Project Maps & Villa Photos</li>
+                    <li>🟢 <strong>Meta Descriptions</strong>: Formatted within 120-155 characters</li>
+                    <li>🟡 <strong>Category Hub Content</strong>: Expand archive text depth (&gt;400 words)</li>
+                    <li>🟢 <strong>Blog Word Counts</strong>: Strong 1,500+ avg legal guides</li>
+                  </ul>
+                </div>
+                <div style="margin-top:0.85rem; padding-top:0.6rem; border-top:1px solid var(--border-subtle); font-size:0.72rem; color:var(--accent-cyan); font-weight:700;">
+                  ⚡ Action: Populate descriptive real estate image alt tags
+                </div>
+              </div>
+
+              <!-- 3. SEO Specialist -->
+              <div class="department-card">
+                <div>
+                  <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:0.75rem;">
+                    <div style="display:flex; align-items:center; gap:0.5rem;">
+                      <span style="font-size:1.25rem;">🏷️</span>
+                      <strong style="color:var(--text-main); font-size:0.92rem;">SEO Specialist</strong>
+                    </div>
+                    <span class="badge badge-p1" style="font-size:0.7rem;">P1 Action</span>
+                  </div>
+                  <ul style="list-style:none; padding:0; margin:0; font-size:0.8rem; color:var(--text-muted); display:flex; flex-direction:column; gap:0.45rem;">
+                    <li>🟠 <strong>JSON-LD Schema</strong>: Deploy RealEstateAgent & Residence</li>
+                    <li>🟡 <strong>BreadcrumbList Schema</strong>: Add structured breadcrumbs</li>
+                    <li>🟡 <strong>Internal Link Silos</strong>: Link legal guides to project landing pages</li>
+                    <li>🟢 <strong>Single H1 Structure</strong>: Semantic title hierarchy verified</li>
+                  </ul>
+                </div>
+                <div style="margin-top:0.85rem; padding-top:0.6rem; border-top:1px solid var(--border-subtle); font-size:0.72rem; color:var(--accent-purple); font-weight:700;">
+                  ⚡ Action: Deploy Schema Studio JSON-LD & silo internal links
+                </div>
+              </div>
+
+              <!-- 4. DevOps / Server -->
+              <div class="department-card">
+                <div>
+                  <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:0.75rem;">
+                    <div style="display:flex; align-items:center; gap:0.5rem;">
+                      <span style="font-size:1.25rem;">🛡️</span>
+                      <strong style="color:var(--text-main); font-size:0.92rem;">DevOps / Server</strong>
+                    </div>
+                    <span class="badge badge-p2" style="font-size:0.7rem;">P2 Security</span>
+                  </div>
+                  <ul style="list-style:none; padding:0; margin:0; font-size:0.8rem; color:var(--text-muted); display:flex; flex-direction:column; gap:0.45rem;">
+                    <li>🟢 <strong>SSL Certificate Active</strong>: Valid HTTPS on all endpoints</li>
+                    <li>🟢 <strong>Server Response TTFB Fast</strong>: ~140ms average response</li>
+                    <li>🟡 <strong>Missing HSTS Security Header</strong>: Add Strict-Transport-Security</li>
+                    <li>🟢 <strong>Multi-Sitemap Routing</strong>: 95 URLs crawled cleanly (200 OK)</li>
+                  </ul>
+                </div>
+                <div style="margin-top:0.85rem; padding-top:0.6rem; border-top:1px solid var(--border-subtle); font-size:0.72rem; color:var(--accent-emerald); font-weight:700;">
+                  ⚡ Action: Enable HSTS header in Nginx/LiteSpeed config
+                </div>
+              </div>
+            </div>
+
+            <!-- Positive Achievements Box -->
+            <div class="positive-box">
+              <div style="font-weight:700; color:var(--accent-emerald); font-size:0.88rem; margin-bottom:0.6rem; display:flex; align-items:center; gap:0.4rem;">
+                <span>✅</span> <strong>Positive SEO Signals Verified Across Gurupunvaanii.com</strong>
+              </div>
+              <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(260px, 1fr)); gap:0.5rem;">
+                <div class="positive-item"><span>✔️</span> <span><strong>100% HTTP 200 OK</strong>: All 93 pages crawled without 404 or 500 server errors.</span></div>
+                <div class="positive-item"><span>✔️</span> <span><strong>HTTPS Enforced</strong>: 100% of URLs are secured via SSL certificates.</span></div>
+                <div class="positive-item"><span>✔️</span> <span><strong>Mobile Responsive</strong>: Viewport meta tags correctly declared sitewide.</span></div>
+                <div class="positive-item"><span>✔️</span> <span><strong>Strong Word Counts</strong>: Top articles average 1,500+ words with deep legal guidelines.</span></div>
+                <div class="positive-item"><span>✔️</span> <span><strong>Fast Server TTFB</strong>: Core static pages respond within 110ms - 220ms.</span></div>
+                <div class="positive-item"><span>✔️</span> <span><strong>OpenGraph & Twitter Cards</strong>: Social media rich preview tags declared on all blog posts.</span></div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Top 10 Priority Fixes -->
+          <div class="card">
+            <div class="card-header">
+              <div class="card-title">
+                <span>🔥 Top 10 Priority Technical SEO Fixes</span>
+              </div>
+              <span style="font-size:0.8rem; color:var(--text-muted);">Executive Roadmap</span>
+            </div>
+            <div class="table-container">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Priority</th>
+                    <th>Issue Name</th>
+                    <th>Team</th>
+                    <th>Effort</th>
+                    <th>SEO Impact & Business Value</th>
+                  </tr>
+                </thead>
+                <tbody id="topFixesTableBody">
+                  <!-- Populated by JS -->
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+
+        <!-- 2. TECHNICAL SEO VIEW -->
+        <section id="view-technical" class="view-section">
+          <!-- Redirect Chain Visualizer Card -->
+          <div class="card">
+            <div class="card-header">
+              <div class="card-title">
+                <span>🔀 Root Domain Redirect Chain Diagnostic</span>
+              </div>
+              <span class="badge badge-p1">2-Hop Suboptimal Path Detected</span>
+            </div>
+            <div class="redirect-flow-box">
+              <div class="redirect-node">
+                <span class="node-status status-301">301 Moved</span>
+                <div class="node-url">http://www.gurupunvaanii.com</div>
+              </div>
+              <div class="redirect-arrow">&rarr;</div>
+              <div class="redirect-node">
+                <span class="node-status status-301">301 Moved</span>
+                <div class="node-url">https://www.gurupunvaanii.com/</div>
+              </div>
+              <div class="redirect-arrow">&rarr;</div>
+              <div class="redirect-node final">
+                <span class="node-status status-200">200 OK</span>
+                <div class="node-url">https://gurupunvaanii.com/</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Technical Health Details -->
+          <div class="card">
+            <div class="card-header">
+              <div class="card-title">
+                <span>⚙️ Crawled Pages Technical Inventory (93 URLs)</span>
+              </div>
+            </div>
+            <div class="filter-bar">
+              <div class="search-input-wrapper">
+                <span class="search-icon">🔍</span>
+                <input type="text" id="techSearchInput" class="search-input" placeholder="Search URLs, slugs, or titles...">
+              </div>
+            </div>
+            <div class="table-container">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Target URL</th>
+                    <th>HTTP Status</th>
+                    <th>Canonical Status</th>
+                    <th>H1 Tags</th>
+                    <th>Payload Size</th>
+                    <th>Response Time</th>
+                  </tr>
+                </thead>
+                <tbody id="techPagesTableBody">
+                  <!-- Populated by JS -->
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+
+        <!-- 3. ON-PAGE SEO VIEW -->
+        <section id="view-onpage" class="view-section">
+          <!-- SERP Snippet Previewer Card -->
+          <div class="card">
+            <div class="card-header">
+              <div class="card-title">
+                <span>🔍 Live Google SERP Snippet Preview (Homepage)</span>
+              </div>
+              <span class="badge badge-p0">Critical: Corrupted Snippet</span>
+            </div>
+            <div class="serp-preview-card">
+              <div class="serp-domain">https://gurupunvaanii.com</div>
+              <div class="serp-title">Guru Punvaanii | Top Real Estate Companies in Bangalore</div>
+              <div class="serp-snippet" style="color:var(--accent-red);">
+                [ERROR] https://gurupunvaanii.com/wp-content/uploads/2026/08/home-page-video-landscape.mp4#t=1,180... Guru Punvaanii A Name You Can Always Trust...
+              </div>
+            </div>
+          </div>
+
+          <!-- On-Page Master Table -->
+          <div class="card">
+            <div class="card-header">
+              <div class="card-title">
+                <span>📝 On-Page Metadata & Content Analysis</span>
+              </div>
+            </div>
+            <div class="filter-bar">
+              <div class="search-input-wrapper">
+                <span class="search-icon">🔍</span>
+                <input type="text" id="onpageSearchInput" class="search-input" placeholder="Search page title or meta description...">
+              </div>
+            </div>
+            <div class="table-container">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Page URL</th>
+                    <th>Title Tag & Length</th>
+                    <th>Meta Description & Length</th>
+                    <th>Word Count</th>
+                  </tr>
+                </thead>
+                <tbody id="onpageTableBody">
+                  <!-- Populated by JS -->
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+
+        <!-- 4. SCHEMA STUDIO VIEW -->
+        <section id="view-schema" class="view-section">
+          <!-- Schema Generator Tool -->
+          <div class="card" style="margin-bottom:1.5rem;">
+            <div class="card-header">
+              <div class="card-title">
+                <span>🏷️ Real Estate JSON-LD Schema Generator Studio</span>
+              </div>
+              <span class="badge badge-p3">Schema.org v26.0 Compliant</span>
+            </div>
+
+            <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap:1rem; margin-bottom:1.25rem;">
+              <div>
+                <label style="display:block; font-size:0.75rem; color:var(--text-muted); margin-bottom:0.35rem;">Schema Type</label>
+                <select id="schemaTypeSelect" class="filter-select" style="width:100%;">
+                  <option value="RealEstateAgent">RealEstateAgent (Developer / Company)</option>
+                  <option value="SingleFamilyResidence">SingleFamilyResidence (Villa Project)</option>
+                  <option value="PlottedDevelopment">Product (Plotted / Land Development)</option>
+                  <option value="FAQPage">FAQPage (Project FAQs)</option>
+                  <option value="BreadcrumbList">BreadcrumbList (Site Navigation)</option>
+                </select>
+              </div>
+              <div>
+                <label style="display:block; font-size:0.75rem; color:var(--text-muted); margin-bottom:0.35rem;">Project / Entity Name</label>
+                <input type="text" id="schemaProjectName" class="scan-input" style="padding:0.6rem 1rem; font-size:0.85rem;" value="EKA Plots" />
+              </div>
+              <div>
+                <label style="display:block; font-size:0.75rem; color:var(--text-muted); margin-bottom:0.35rem;">Location</label>
+                <input type="text" id="schemaProjectLocation" class="scan-input" style="padding:0.6rem 1rem; font-size:0.85rem;" value="Anekal, Bangalore" />
+              </div>
+              <div>
+                <label style="display:block; font-size:0.75rem; color:var(--text-muted); margin-bottom:0.35rem;">Price Range</label>
+                <input type="text" id="schemaProjectPrice" class="scan-input" style="padding:0.6rem 1rem; font-size:0.85rem;" value="INR 35,00,000 Onwards" />
+              </div>
+            </div>
+
+            <div class="code-container">
+              <button class="copy-btn" id="copySchemaBtn">Copy JSON-LD</button>
+              <pre><code id="schemaJsonOutput">// Generated JSON-LD Schema will appear here</code></pre>
+            </div>
+          </div>
+
+          <!-- Live Crawled Schema Inventory Table -->
+          <div class="card">
+            <div class="card-header">
+              <div class="card-title">
+                <span>📋 Live Crawled Schema Markup Status (Sitewide Inventory)</span>
+              </div>
+              <span class="badge badge-status" id="schemaCoverageBadge">Crawl Inventory</span>
+            </div>
+            <div class="filter-bar">
+              <div class="search-input-wrapper">
+                <span class="search-icon">🔍</span>
+                <input type="text" id="schemaSearchInput" class="search-input" placeholder="Search URLs or schema types (e.g. Article, WebPage, RealEstateAgent)...">
+              </div>
+            </div>
+            <div class="table-container">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Page URL</th>
+                    <th>Detected Schema Types</th>
+                    <th>JSON-LD Scripts</th>
+                    <th>Schema Health Status</th>
+                    <th>Recommended Schema</th>
+                  </tr>
+                </thead>
+                <tbody id="schemaAuditTableBody">
+                  <!-- Populated by JS -->
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+
+        <!-- 5. OFF-PAGE & BACKLINKS VIEW -->
+        <section id="view-offpage" class="view-section">
+          <!-- Backlink KPI Cards -->
+          <div class="metric-grid" style="margin-bottom:1.5rem;">
+            <div class="metric-card">
+              <div class="metric-icon icon-blue">🌐</div>
+              <div class="metric-info">
+                <h4>Domain Authority (DA)</h4>
+                <div class="metric-value" style="color:var(--accent-indigo);">28 / 100</div>
+                <div class="metric-sub">Target Benchmark: 40+</div>
+              </div>
+            </div>
+            <div class="metric-card">
+              <div class="metric-icon icon-green">🔗</div>
+              <div class="metric-info">
+                <h4>Internal Link Equity</h4>
+                <div class="metric-value" id="offpageInternalLinksCount" style="color:var(--accent-emerald);">4,501</div>
+                <div class="metric-sub">Across 92 Crawled Pages (Avg 48.9/page)</div>
+              </div>
+            </div>
+            <div class="metric-card">
+              <div class="metric-icon icon-purple">🏛️</div>
+              <div class="metric-info">
+                <h4>Referring Portals</h4>
+                <div class="metric-value" style="color:var(--accent-purple);">9 Portals</div>
+                <div class="metric-sub">Top Tier Real Estate Platforms</div>
+              </div>
+            </div>
+            <div class="metric-card">
+              <div class="metric-icon icon-amber">📍</div>
+              <div class="metric-info">
+                <h4>NAP Citations Score</h4>
+                <div class="metric-value" id="offpageCitationScore" style="color:var(--accent-amber);">89%</div>
+                <div class="metric-sub" id="offpageVerifiedCount">8 of 9 Listings Verified</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- GA4 Referral Inbound Traffic Card -->
+          <div style="background:var(--bg-card); border:1px solid var(--border-subtle); border-radius:12px; padding:1.25rem; margin-bottom:1.5rem; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:1rem;">
+            <div>
+              <div style="display:flex; align-items:center; gap:0.5rem; margin-bottom:0.25rem;">
+                <h3 style="font-size:1.15rem; color:var(--text-main); font-family:var(--font-display); font-weight:700; margin:0;">
+                  🔗 Inbound Referral & Citation Traffic (GA4 Live Connected)
+                </h3>
+                <span class="badge" style="background:rgba(16,185,129,0.15); color:var(--accent-emerald); font-size:0.75rem;">🟢 Live Stream</span>
+              </div>
+              <div style="font-size:0.8rem; color:var(--text-muted);" id="offpageReferralStats">
+                Organic Referral & Social Sessions: <strong>153 sessions</strong> &bull; Top Channels: <strong>Direct (828), Organic Social (100), Referral (53)</strong>
+              </div>
+            </div>
+          </div>
+
+          <!-- Real Estate Citations & Backlink Directory -->
+          <div class="card" style="margin-bottom:1.5rem;">
+            <div class="card-header" style="flex-direction:column; align-items:flex-start; gap:0.75rem;">
+              <div style="display:flex; justify-content:space-between; align-items:center; width:100%; flex-wrap:wrap; gap:0.5rem;">
+                <div class="card-title">
+                  <span>🔗 Real Estate High-Authority Backlinks & Directory Monitor</span>
+                </div>
+                <span class="badge badge-status" id="citationsBadge">9 Core Portals</span>
+              </div>
+
+              <!-- Filter Pills & Search -->
+              <div style="display:flex; justify-content:space-between; align-items:center; width:100%; flex-wrap:wrap; gap:0.75rem;">
+                <div class="filter-pill-group" style="display:flex; gap:0.3rem; background:var(--bg-primary); padding:0.25rem; border-radius:30px; border:1px solid var(--border-subtle);">
+                  <button class="filter-pill-btn active" id="btnCiteAll" onclick="filterCitations('all')">All Citations</button>
+                  <button class="filter-pill-btn" id="btnCiteDoFollow" onclick="filterCitations('dofollow')">DoFollow Only</button>
+                  <button class="filter-pill-btn" id="btnCiteP0" onclick="filterCitations('p0')">P0 Critical</button>
+                  <button class="filter-pill-btn" id="btnCiteHighDA" onclick="filterCitations('high_da')">High DA (80+)</button>
+                  <button class="filter-pill-btn" id="btnCiteAction" onclick="filterCitations('action')">Action Needed</button>
+                </div>
+
+                <div style="position:relative; min-width:240px;">
+                  <input type="text" id="citationSearchInput" placeholder="Search portal or domain..." style="width:100%; background:var(--bg-primary); border:1px solid var(--border-subtle); border-radius:8px; padding:0.45rem 0.8rem; font-size:0.8rem; color:var(--text-main);" />
+                </div>
+              </div>
+            </div>
+
+            <div class="table-container">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Directory / Portal</th>
+                    <th>Domain / URL</th>
+                    <th>Authority (DA)</th>
+                    <th>Link Type</th>
+                    <th>Listing Status</th>
+                    <th>Priority</th>
+                    <th>Verified (Click to Toggle)</th>
+                  </tr>
+                </thead>
+                <tbody id="citationsTableBody">
+                  <!-- Populated by JS -->
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- Internal Link Silo & Outlinks Equity Table -->
+          <div class="card">
+            <div class="card-header">
+              <div class="card-title">
+                <span>🏛️ Internal Linking Architecture & Page Link Equity (4,501 Links)</span>
+              </div>
+              <span class="badge badge-p3">Silo Distribution</span>
+            </div>
+            <div class="table-container">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Page / URL</th>
+                    <th>Category</th>
+                    <th>Internal Outlinks</th>
+                    <th>Link Status</th>
+                    <th>Silo Equity Focus</th>
+                  </tr>
+                </thead>
+                <tbody id="internalLinksTableBody">
+                  <!-- Populated by JS -->
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+
+        <!-- 6. CORE WEB VITALS & MEDIA VIEW -->
+        <section id="view-performance" class="view-section">
+          <!-- CWV Hero & Control Bar -->
+          <div class="cwv-hero-card">
+            <div style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:1rem;">
+              <div>
+                <div style="display:flex; align-items:center; gap:0.5rem; margin-bottom:0.35rem;">
+                  <span style="font-size:1.4rem;">⚡</span>
+                  <h3 style="font-size:1.25rem; font-weight:700; color:var(--text-main);">Core Web Vitals & PageSpeed Insights Suite</h3>
+                  <span class="badge badge-status" style="background:rgba(16,185,129,0.15); color:var(--accent-emerald);">Lighthouse V11 + CrUX</span>
+                </div>
+                <p style="font-size:0.85rem; color:var(--text-muted); max-width:650px;">
+                  Test real-user Core Web Vitals (LCP, INP, CLS, FCP, TTFB, TBT) across Guru Punvaanii landing pages. Evaluates mobile & desktop field performance, Elementor DOM bloat, and image rendering.
+                </p>
+              </div>
+
+              <div class="cwv-device-selector">
+                <button type="button" class="cwv-device-btn active" id="cwvDeviceMobile" onclick="setCwvDevice('mobile')">
+                  <span>📱</span> Mobile
+                </button>
+                <button type="button" class="cwv-device-btn" id="cwvDeviceDesktop" onclick="setCwvDevice('desktop')">
+                  <span>💻</span> Desktop
+                </button>
+              </div>
+            </div>
+
+            <!-- Quick Presets -->
+            <div style="margin-top:1rem; display:flex; align-items:center; gap:0.5rem; flex-wrap:wrap;">
+              <span style="font-size:0.75rem; color:var(--text-muted); font-weight:600;">Quick Test Presets:</span>
+              <button type="button" class="badge" style="cursor:pointer; border:1px solid var(--border-subtle); background:var(--bg-primary); color:var(--text-main);" onclick="setCwvUrlAndRun('https://gurupunvaanii.com/')">🏠 Homepage</button>
+              <button type="button" class="badge" style="cursor:pointer; border:1px solid var(--border-subtle); background:var(--bg-primary); color:var(--text-main);" onclick="setCwvUrlAndRun('https://gurupunvaanii.com/eka-plots-for-sale-in-anekal-bangalore/')">🏡 EKA Plots (Anekal)</button>
+              <button type="button" class="badge" style="cursor:pointer; border:1px solid var(--border-subtle); background:var(--bg-primary); color:var(--text-main);" onclick="setCwvUrlAndRun('https://gurupunvaanii.com/elegance/')">🏰 Elegance Villas (Bidadi)</button>
+              <button type="button" class="badge" style="cursor:pointer; border:1px solid var(--border-subtle); background:var(--bg-primary); color:var(--text-main);" onclick="setCwvUrlAndRun('https://gurupunvaanii.com/ekansh-plots-for-sale-in-mysore/')">📐 Ekansh (Mysore)</button>
+              <button type="button" class="badge" style="cursor:pointer; border:1px solid var(--border-subtle); background:var(--bg-primary); color:var(--text-main);" onclick="setCwvUrlAndRun('https://gurupunvaanii.com/difference-between-a-khata-and-b-khata-properties/')">📜 Legal Khata Guide</button>
+            </div>
+
+            <!-- URL Input & Run Button -->
+            <div class="cwv-control-bar">
+              <input type="url" id="cwvTargetUrlInput" class="scan-input" style="flex:1; min-width:280px;" value="https://gurupunvaanii.com/" placeholder="Enter Guru Punvaanii URL to test Core Web Vitals..." />
+              <button type="button" id="runCwvBtn" class="btn btn-primary" onclick="runLiveCWVTest()" style="padding:0.75rem 1.4rem; white-space:nowrap;">
+                <span>⚡ Run Core Web Vitals Test</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- Live CWV Results Container -->
+          <div id="cwvLiveResultsContainer">
+            <!-- Populated dynamically by JS -->
+          </div>
+
+          <!-- Site-Wide Project Landing Pages CWV Benchmark Table -->
+          <div class="card">
+            <div class="card-header">
+              <div class="card-title">
+                <span>📊 Key Project Silos Core Web Vitals Benchmark</span>
+              </div>
+              <span class="badge badge-status">Site-wide Overview</span>
+            </div>
+            <div class="table-container">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Target Landing Page</th>
+                    <th>Mobile Grade</th>
+                    <th>LCP (Target &lt;2.5s)</th>
+                    <th>INP (Target &lt;200ms)</th>
+                    <th>CLS (Target &lt;0.1)</th>
+                    <th>TTFB Server</th>
+                    <th>Action</th>
+                  </tr>
+                </thead>
+                <tbody id="cwvSilosTableBody">
+                  <!-- Populated by JS -->
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- Image SEO Remediation Queue (301 Missing Alt Tags) -->
+          <div class="card">
+            <div class="card-header">
+              <div class="card-title">
+                <span>🖼️ Image SEO Remediation Queue (301 Missing Alt Tags)</span>
+              </div>
+              <span class="badge badge-p1">Media Audit</span>
+            </div>
+            <div class="table-container">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Parent Page</th>
+                    <th>Image Asset File</th>
+                    <th>Status</th>
+                    <th>Action</th>
+                  </tr>
+                </thead>
+                <tbody id="missingAltTableBody">
+                  <!-- Populated by JS -->
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+
+        <!-- 7. REAL ESTATE LOCAL SILOS -->
+        <section id="view-local" class="view-section">
+          <div class="card">
+            <div class="card-header">
+              <div class="card-title">
+                <span>📍 Bangalore Micro-Market Project Silos</span>
+              </div>
+            </div>
+            <div class="score-breakdown-list">
+              <div class="breakdown-bar-item">
+                <h4 style="color:var(--accent-cyan); margin-bottom:0.5rem;">Anekal Real Estate Hub</h4>
+                <p style="font-size:0.8rem; color:var(--text-muted); margin-bottom:0.5rem;">
+                  Projects: <strong>EKA Plots</strong>, <strong>Ernika Villa Plots</strong>
+                </p>
+                <span class="badge badge-status">High Search Volume</span>
+              </div>
+              <div class="breakdown-bar-item">
+                <h4 style="color:var(--accent-indigo); margin-bottom:0.5rem;">Bidadi / Mysore Road Hub</h4>
+                <p style="font-size:0.8rem; color:var(--text-muted); margin-bottom:0.5rem;">
+                  Projects: <strong>Elegance Villas</strong>, <strong>Eureka Plots</strong>
+                </p>
+                <span class="badge badge-status">High Search Volume</span>
+              </div>
+              <div class="breakdown-bar-item">
+                <h4 style="color:var(--accent-emerald); margin-bottom:0.5rem;">Attibele / Hosur Corridor</h4>
+                <p style="font-size:0.8rem; color:var(--text-muted); margin-bottom:0.5rem;">
+                  Projects: <strong>Exotica Plots</strong>
+                </p>
+                <span class="badge badge-status">Emerging Market</span>
+              </div>
+              <div class="breakdown-bar-item">
+                <h4 style="color:var(--accent-purple); margin-bottom:0.5rem;">Magadi Road & Kolar Hubs</h4>
+                <p style="font-size:0.8rem; color:var(--text-muted); margin-bottom:0.5rem;">
+                  Projects: <strong>Shyam Residency</strong>, <strong>Sankeshwar Padmavathi Nagar</strong>
+                </p>
+                <span class="badge badge-status">Plotted Category</span>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- 7. TRAFFIC & KEYWORD SERP ANALYSIS VIEW -->
+        <section id="view-traffic" class="view-section">
+          
+          <!-- Filter & Live Refresh Top Bar -->
+          <div style="background:var(--bg-card); border:1px solid var(--border-subtle); border-radius:12px; padding:1.25rem; margin-bottom:1.5rem; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:1rem;">
+            <div>
+              <div style="display:flex; align-items:center; gap:0.5rem; margin-bottom:0.35rem;">
+                <h3 style="font-size:1.2rem; color:var(--text-main); font-family:var(--font-display); font-weight:700; margin:0;">
+                  📈 Organic Search Traffic & Keyword Rank Tracker
+                </h3>
+                <span class="badge" id="trafficLiveBadge" style="background:rgba(16,185,129,0.15); color:var(--accent-emerald); font-size:0.75rem;">
+                  🟢 Live SERP Rank Active
+                </span>
+              </div>
+              <div style="font-size:0.78rem; color:var(--text-muted);">
+                Data Model: <strong>Bangalore Real Estate Google SERP Index (Anekal, Bidadi, Mysore Rd)</strong> &bull; <span id="trafficLastSynced">Last Updated: Just now</span>
+              </div>
+            </div>
+
+            <!-- Date Range Filter Buttons + Refresh -->
+            <div style="display:flex; align-items:center; gap:0.5rem; flex-wrap:wrap;">
+              <div class="filter-pill-group" style="display:flex; gap:0.3rem; background:var(--bg-primary); padding:0.25rem; border-radius:30px; border:1px solid var(--border-subtle);">
+                <button class="filter-pill-btn" id="tfBtn24h" onclick="setTrafficTimeframe('24h')">⚡ 24h (Hourly)</button>
+                <button class="filter-pill-btn" id="tfBtn7d" onclick="setTrafficTimeframe('7d')">7 Days</button>
+                <button class="filter-pill-btn active" id="tfBtn28d" onclick="setTrafficTimeframe('28d')">28 Days</button>
+                <button class="filter-pill-btn" id="tfBtn6m" onclick="setTrafficTimeframe('6m')">6 Months</button>
+                <button class="filter-pill-btn" id="tfBtn1y" onclick="setTrafficTimeframe('1y')">1 Year</button>
+              </div>
+              <button class="btn btn-primary" id="btnRefreshTraffic" onclick="refreshTrafficDataLive()" style="padding:0.45rem 0.9rem; font-size:0.8rem; display:flex; align-items:center; gap:0.4rem;">
+                <span id="trafficRefreshIcon">🔄</span> Refresh Ranks
+              </button>
+            </div>
+          </div>
+
+          <!-- Top Metric Cards -->
+          <div class="metric-grid" style="margin-bottom:1.5rem;">
+            <div class="traffic-stat-card">
+              <div class="metric-icon icon-blue">📈</div>
+              <div class="metric-info">
+                <h4 id="trafficCardVisitsLabel">EST. ORGANIC VISITS</h4>
+                <div class="metric-value" id="trafficStatVisits" style="color:var(--accent-cyan);">14.8K</div>
+                <div class="traffic-growth-badge" id="trafficStatGrowth">▲ +187% Potential Growth</div>
+              </div>
+            </div>
+            <div class="traffic-stat-card">
+              <div class="metric-icon icon-green">🎯</div>
+              <div class="metric-info">
+                <h4>TOP 10 KEYWORDS</h4>
+                <div class="metric-value" id="trafficStatKeywords" style="color:var(--accent-emerald);">128</div>
+                <div class="metric-sub">34 High-Intent Conversion Terms</div>
+              </div>
+            </div>
+            <div class="traffic-stat-card">
+              <div class="metric-icon icon-purple">💰</div>
+              <div class="metric-info">
+                <h4 id="trafficCardValueLabel">PPC TRAFFIC VALUE</h4>
+                <div class="metric-value" id="trafficStatValue" style="color:var(--accent-purple);">₹3.85 Lakh</div>
+                <div class="metric-sub">Google Ads Ad-Spend Equivalent</div>
+              </div>
+            </div>
+            <div class="traffic-stat-card">
+              <div class="metric-icon icon-amber">👥</div>
+              <div class="metric-info">
+                <h4>AVG SERP CTR</h4>
+                <div class="metric-value" id="trafficStatCtr" style="color:var(--accent-amber);">3.42%</div>
+                <div class="metric-sub">Benchmark: 5.8% via Rich Snippets</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Charts Row -->
+          <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap:1.25rem; margin-bottom:1.5rem;">
+            <!-- Traffic Forecast Chart -->
+            <div class="card">
+              <div class="card-header">
+                <div class="card-title">
+                  <span id="trafficChartTitle">📈 Organic Traffic Trend (<span id="tfLabelSpan">Last 28 Days</span>)</span>
+                </div>
+                <span class="badge badge-p3" id="trafficChartBadge">Live GSC & SERP Stream</span>
+              </div>
+              <div id="trafficForecastContainer" style="width:100%; height:260px; min-height:260px; position:relative;">
+                <canvas id="chartTrafficForecast" height="260"></canvas>
+              </div>
+            </div>
+
+            <!-- Keyword Ranking Tiers Chart -->
+            <div class="card">
+              <div class="card-header">
+                <div class="card-title">
+                  <span id="trafficDistributionTitle">📊 GA4 Real Traffic Acquisition Channels (Sessions)</span>
+                </div>
+                <span class="badge badge-status" id="trafficDistributionBadge">GA4 Live Stream</span>
+              </div>
+              <div id="trafficDistributionContainer" style="width:100%; height:260px; min-height:260px; position:relative;">
+                <canvas id="chartKeywordDistribution" height="260"></canvas>
+              </div>
+            </div>
+          </div>
+
+          <!-- High-Intent Real Estate Keywords Matrix Table -->
+          <div class="card" style="margin-bottom:1.5rem;">
+            <div class="card-header" style="flex-direction:column; align-items:flex-start; gap:0.75rem;">
+              <div style="display:flex; justify-content:space-between; align-items:center; width:100%; flex-wrap:wrap; gap:0.5rem;">
+                <div class="card-title">
+                  <span>🎯 Google Search Console Live Query & Keyword Rank Explorer</span>
+                </div>
+                <span class="badge badge-p3" id="gscQueryCountBadge">1,000 Live GSC Queries</span>
+              </div>
+
+              <!-- Search Bar & Filters -->
+              <div style="display:flex; gap:0.75rem; width:100%; flex-wrap:wrap; align-items:center;">
+                <div class="search-input-wrapper" style="flex:1; min-width:280px;">
+                  <span class="search-icon">🔍</span>
+                  <input type="text" id="gscKeywordSearchInput" class="search-input" placeholder="Type to search any custom keyword (e.g. 'plots', 'anekal', 'vastu', 'eka', 'villa', 'kaveri')..." />
+                </div>
+                <div class="filter-pill-group" style="display:flex; gap:0.3rem; background:var(--bg-primary); padding:0.25rem; border-radius:30px; border:1px solid var(--border-subtle); flex-wrap:wrap;">
+                  <button class="filter-pill-btn active" id="btnFilterAll" onclick="filterGSCQueries('all')">All Queries</button>
+                  <button class="filter-pill-btn" id="btnFilterTop3" onclick="filterGSCQueries('top3')">🏆 Top 3 Rank</button>
+                  <button class="filter-pill-btn" id="btnFilterClicks" onclick="filterGSCQueries('clicks')">🔥 High Clicks</button>
+                  <button class="filter-pill-btn" id="btnFilterImpressions" onclick="filterGSCQueries('impr')">👁️ High Impressions (>5K)</button>
+                  <button class="filter-pill-btn" id="btnFilterStriking" onclick="filterGSCQueries('striking')">⚡ Striking (Pos 4-10)</button>
+                </div>
+              </div>
+            </div>
+            <div class="table-container">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Search Query / Keyword</th>
+                    <th>Ranking Landing Page</th>
+                    <th>Google Clicks</th>
+                    <th>Impressions</th>
+                    <th>CTR (%)</th>
+                    <th>SERP Rank</th>
+                    <th>Traffic Signal</th>
+                  </tr>
+                </thead>
+                <tbody id="trafficKeywordsTableBody">
+                  <!-- Populated by JS -->
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- Competitor Benchmarking Matrix -->
+          <div class="card">
+            <div class="card-header">
+              <div class="card-title">
+                <span>⚔️ Bangalore Real Estate Competitor Visibility Benchmark</span>
+              </div>
+              <span class="badge badge-status">Competitive Intelligence</span>
+            </div>
+            <div class="table-container">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Competitor Domain</th>
+                    <th>Organic Traffic</th>
+                    <th>Indexed Keywords</th>
+                    <th>Schema Adoption</th>
+                    <th>CWV Mobile Score</th>
+                    <th>Key Strength / Vulnerability</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr style="background:rgba(99, 102, 241, 0.05); font-weight:600;">
+                    <td><strong>🏡 gurupunvaanii.com (You)</strong></td>
+                    <td style="color:var(--accent-cyan);">14.8K /mo</td>
+                    <td>1,240</td>
+                    <td><span class="badge badge-p1">Partial (FAQ/WebPage)</span></td>
+                    <td><span class="badge badge-p1">58 / 100</span></td>
+                    <td style="color:var(--accent-emerald);">High local intent in Anekal/Bidadi; Needs RealEstateAgent JSON-LD</td>
+                  </tr>
+                  <tr>
+                    <td>sobha.com</td>
+                    <td>280K /mo</td>
+                    <td>18,400</td>
+                    <td><span class="badge badge-p3">Full RealEstateAgent</span></td>
+                    <td><span class="badge badge-p3">82 / 100</span></td>
+                    <td>Strong brand authority; Heavy Elementor payload</td>
+                  </tr>
+                  <tr>
+                    <td>prestigeconstructions.com</td>
+                    <td>340K /mo</td>
+                    <td>24,100</td>
+                    <td><span class="badge badge-p3">Full RealEstateAgent</span></td>
+                    <td><span class="badge badge-p1">64 / 100</span></td>
+                    <td>Broad city coverage; Slower LCP on mobile villas</td>
+                  </tr>
+                  <tr>
+                    <td>brigadegroup.com</td>
+                    <td>210K /mo</td>
+                    <td>15,800</td>
+                    <td><span class="badge badge-p3">Full Schema</span></td>
+                    <td><span class="badge badge-p3">78 / 100</span></td>
+                    <td>Strong project landing pages & blog internal linking</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+
+        <!-- 8. 30-DAY ROADMAP VIEW -->
+        <section id="view-roadmap" class="view-section">
+          <div class="card">
+            <div class="card-header" style="flex-wrap:wrap; gap:1rem;">
+              <div>
+                <div class="card-title">
+                  <span>🎯 30-Day Developer Implementation Roadmap & Task Resolver</span>
+                </div>
+                <p style="font-size:0.8rem; color:var(--text-muted); margin-top:0.25rem;">
+                  Check off resolved SEO fixes, run automated live verification scans, or add custom action items. All changes persist automatically in localStorage.
+                </p>
+              </div>
+              <div style="display:flex; align-items:center; gap:0.6rem; flex-wrap:wrap;">
+                <span id="devProgressLabel" class="badge badge-status" style="font-size:0.85rem; padding:0.4rem 0.8rem;">0% Complete (0/10 Tasks)</span>
+                <button type="button" class="btn btn-outline" style="padding:0.4rem 0.8rem; font-size:0.78rem;" onclick="verifyAllTasksLive()">
+                  <span>🔍 Auto-Verify All Live</span>
+                </button>
+                <button type="button" class="btn btn-primary" style="padding:0.4rem 0.8rem; font-size:0.78rem;" onclick="openAddTaskModal()">
+                  <span>➕ Add Task</span>
+                </button>
+                <button type="button" class="btn btn-outline" style="padding:0.4rem 0.6rem; font-size:0.75rem; color:var(--text-muted);" onclick="resetTasksToDefault()">
+                  <span>🔄 Reset</span>
+                </button>
+              </div>
+            </div>
+
+            <!-- Progress Bar -->
+            <div class="progress-track" style="height:12px; margin-bottom:1.25rem; border-radius:6px;">
+              <div id="devProgressBar" class="progress-fill" style="width:0%; background:linear-gradient(90deg, #10b981, #06b6d4, #6366f1); transition:width 0.4s ease;"></div>
+            </div>
+
+            <!-- Filter Tabs -->
+            <div class="task-filter-tabs">
+              <button type="button" class="task-filter-btn active" id="taskFilterAll" onclick="filterTaskView('all')">All Tasks (<span id="taskCountAll">10</span>)</button>
+              <button type="button" class="task-filter-btn" id="taskFilterOpen" onclick="filterTaskView('open')">Pending / Open (<span id="taskCountOpen">7</span>)</button>
+              <button type="button" class="task-filter-btn" id="taskFilterDone" onclick="filterTaskView('done')">✅ Resolved / Done (<span id="taskCountDone">3</span>)</button>
+            </div>
+
+            <!-- Tasks List -->
+            <div id="devTasksList">
+              <!-- Populated by JS -->
+            </div>
+          </div>
+        </section>
+
+        <!-- Add Custom Task Modal -->
+        <div id="addTaskModal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.6); z-index:9999; align-items:center; justify-content:center; backdrop-filter:blur(4px);">
+          <div style="background:var(--bg-card); border:1px solid var(--border-subtle); border-radius:12px; padding:1.5rem; max-width:480px; width:90%; box-shadow:0 15px 35px rgba(0,0,0,0.25);">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1rem; border-bottom:1px solid var(--border-subtle); padding-bottom:0.75rem;">
+              <h4 style="font-size:1.1rem; color:var(--text-main); display:flex; align-items:center; gap:0.4rem;">
+                <span>➕</span> Add Custom Developer Action Item
+              </h4>
+              <button type="button" onclick="closeAddTaskModal()" style="background:none; border:none; color:var(--text-muted); font-size:1.4rem; cursor:pointer;">&times;</button>
+            </div>
+            <form onsubmit="handleAddTaskSubmit(event)">
+              <div style="margin-bottom:0.85rem;">
+                <label style="display:block; font-size:0.78rem; font-weight:600; color:var(--text-main); margin-bottom:0.3rem;">Task Title *</label>
+                <input type="text" id="newTaskTitle" class="scan-input" placeholder="e.g. Optimize Hero Banner LCP WebP Image" required style="width:100%;" />
+              </div>
+              <div style="margin-bottom:0.85rem;">
+                <label style="display:block; font-size:0.78rem; font-weight:600; color:var(--text-main); margin-bottom:0.3rem;">Technical Implementation Details</label>
+                <textarea id="newTaskDesc" class="scan-input" rows="2" placeholder="Brief technical instruction or files to edit..." style="width:100%; resize:vertical;"></textarea>
+              </div>
+              <div style="display:grid; grid-template-columns:1fr 1fr; gap:0.75rem; margin-bottom:1.25rem;">
+                <div>
+                  <label style="display:block; font-size:0.78rem; font-weight:600; color:var(--text-main); margin-bottom:0.3rem;">Priority</label>
+                  <select id="newTaskPriority" class="scan-input" style="width:100%;">
+                    <option value="P0">P0 - Critical</option>
+                    <option value="P1" selected>P1 - High</option>
+                    <option value="P2">P2 - Medium</option>
+                    <option value="P3">P3 - Low</option>
+                  </select>
+                </div>
+                <div>
+                  <label style="display:block; font-size:0.78rem; font-weight:600; color:var(--text-main); margin-bottom:0.3rem;">Phase / Timeline</label>
+                  <select id="newTaskPhase" class="scan-input" style="width:100%;">
+                    <option value="Week 1" selected>Week 1</option>
+                    <option value="Week 2">Week 2</option>
+                    <option value="Week 3">Week 3</option>
+                    <option value="Week 4">Week 4</option>
+                  </select>
+                </div>
+              </div>
+              <div style="display:flex; justify-content:flex-end; gap:0.5rem;">
+                <button type="button" class="btn btn-outline" onclick="closeAddTaskModal()">Cancel</button>
+                <button type="submit" class="btn btn-primary">Save Task</button>
+              </div>
+            </form>
+          </div>
+        </div>
+
+      </div>
+    </main>
+  </div>
+
+  <div id="account-modal" class="hidden" role="dialog" aria-modal="true" aria-labelledby="account-title" style="display:none; position:fixed; inset:0; background:rgba(15,23,18,.55); z-index:10000; align-items:center; justify-content:center; padding:1rem;">
+    <div style="background:var(--bg-card); border:1px solid var(--border-subtle); border-radius:14px; padding:1.5rem; max-width:420px; width:100%; box-shadow:var(--shadow-lg);">
+      <h3 id="account-title" style="margin:0 0 .35rem; font-size:1.15rem;">Account</h3>
+      <p style="margin:0 0 1rem; color:var(--text-muted); font-size:.85rem;">Update your profile or password for GPP AI.</p>
+      <form id="account-form" style="display:grid; gap:.75rem;">
+        <label style="display:grid; gap:.3rem; font-size:.8rem; font-weight:600;">Username<input id="account-username" class="scan-input" style="width:100%; padding:.6rem .85rem; font-size:.9rem;"></label>
+        <label style="display:grid; gap:.3rem; font-size:.8rem; font-weight:600;">Display name<input id="account-display" class="scan-input" style="width:100%; padding:.6rem .85rem; font-size:.9rem;"></label>
+        <label style="display:grid; gap:.3rem; font-size:.8rem; font-weight:600;">Current password<input id="account-pw-current" type="password" class="scan-input" style="width:100%; padding:.6rem .85rem; font-size:.9rem;" autocomplete="current-password"></label>
+        <label style="display:grid; gap:.3rem; font-size:.8rem; font-weight:600;">New password<input id="account-pw-new" type="password" class="scan-input" style="width:100%; padding:.6rem .85rem; font-size:.9rem;" autocomplete="new-password"></label>
+        <label style="display:grid; gap:.3rem; font-size:.8rem; font-weight:600;">Confirm new password<input id="account-pw-confirm" type="password" class="scan-input" style="width:100%; padding:.6rem .85rem; font-size:.9rem;" autocomplete="new-password"></label>
+        <div id="account-message" style="font-size:.8rem; color:var(--accent-emerald); min-height:1.1em;"></div>
+        <div style="display:flex; justify-content:flex-end; gap:.5rem;">
+          <button type="button" id="account-cancel" class="btn btn-outline">Cancel</button>
+          <button type="submit" class="btn btn-primary">Save</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <style>
+    body.seo-auth-pending .app-layout { visibility: hidden; }
+    body.seo-ready .app-layout { visibility: visible; }
+    #account-modal:not(.hidden) { display: flex !important; }
+    .seo-toast {
+      position: fixed; right: 24px; bottom: 24px; background: #17211d; color: #f4f6f3;
+      padding: 11px 15px; border-radius: 9px; opacity: 0; transform: translateY(8px);
+      pointer-events: none; transition: .2s; z-index: 11000; font-size: 13px;
+    }
+    .seo-toast.show { opacity: 1; transform: none; }
+    .notif-count.hidden { display: none !important; }
+    .hidden { display: none !important; }
+  </style>
+
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+  <script src="data.js?v=8.0.0.stable"></script>
+  <script src="app.js?v=8.0.0.stable"></script>
+
+  <div id="notif-drawer" class="notif-drawer hidden" aria-live="polite" role="dialog" aria-label="Notifications">
+    <div class="notif-drawer-head">
+      <div class="notif-drawer-title">
+        <span class="notif-drawer-mark" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M15 17h5l-1.4-1.4A2 2 0 0 1 18 14.2V11a6 6 0 1 0-12 0v3.2c0 .5-.2 1-.6 1.4L4 17h5"/><path d="M9.5 17a2.5 2.5 0 0 0 5 0"/></svg>
+        </span>
+        <div>
+          <strong>Notifications</strong>
+          <p class="notif-drawer-sub" id="notif-unread-label">Loading…</p>
+        </div>
+      </div>
+      <div class="notif-drawer-actions">
+        <button type="button" id="notif-mark-all" class="notif-action-btn">Mark all read</button>
+        <button type="button" id="notif-clear-all" class="notif-action-btn">Clear all</button>
+        <button type="button" id="notif-close" class="notif-close-btn" aria-label="Close">×</button>
+      </div>
+    </div>
+    <div id="notif-list" class="notif-list"></div>
+  </div>
+</body>
+</html>
