@@ -1,8 +1,8 @@
 /**
  * /dev Super User ERP Sync panel — fetch ERP → store raw → hand off to main Audit UI.
  */
-import {api} from './api-client.js?v=6.3.3.stable';
-import {getUser} from './auth.js?v=6.3.3.stable';
+import {api} from './api-client.js?v=6.3.4.stable';
+import {getUser} from './auth.js?v=6.3.4.stable';
 
 const FIELD_IDS = [
   'mobile', 'project', 'registration', 'telecaller', 'source', 'update',
