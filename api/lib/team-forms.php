@@ -76,8 +76,8 @@ function ll_tf_ensure_system_fields(int $formId): void
   $sort = $min - count($missing);
   $ins = $pdo->prepare(
     'INSERT INTO form_fields
-      (form_id, field_key, label, field_type, options_json, required, sort_order)
-     VALUES (?, ?, ?, ?, NULL, 1, ?)'
+      (form_id, field_key, label, field_type, options_json, required, creator_only, sort_order)
+     VALUES (?, ?, ?, ?, NULL, 1, 1, ?)'
   );
   foreach ($missing as $def) {
     $ins->execute([$formId, $def['field_key'], $def['label'], $def['field_type'], $sort]);
@@ -821,6 +821,7 @@ function ll_team_forms_ensure_tables(): void
     calc_left_field_id INT UNSIGNED NULL,
     calc_right_field_id INT UNSIGNED NULL,
     required TINYINT(1) NOT NULL DEFAULT 0,
+    creator_only TINYINT(1) NOT NULL DEFAULT 0,
     sort_order INT NOT NULL DEFAULT 0,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -886,6 +887,32 @@ function ll_team_forms_ensure_tables(): void
   ll_tf_ensure_completed_status($pdo);
   ll_tf_ensure_task_events_schema($pdo);
   ll_tf_ensure_task_reviewers_schema($pdo);
+  ll_tf_ensure_field_creator_only_schema($pdo);
+}
+
+/** Per-field: only Form Creator / Task Builder can edit answers when set. */
+function ll_tf_ensure_field_creator_only_schema(PDO $pdo): void
+{
+  try {
+    $has = $pdo->query("SHOW COLUMNS FROM form_fields LIKE 'creator_only'")->fetch();
+    if (!$has) {
+      $pdo->exec(
+        'ALTER TABLE form_fields
+         ADD COLUMN creator_only TINYINT(1) NOT NULL DEFAULT 0 AFTER required'
+      );
+    }
+  } catch (Throwable $e) {
+    /* concurrent migrate */
+  }
+  try {
+    $pdo->exec(
+      "UPDATE form_fields SET creator_only = 1
+       WHERE field_type IN ('assign_to','status','reviewer')
+          OR field_key LIKE 'sys\\_%'"
+    );
+  } catch (Throwable $e) {
+    /* best-effort backfill */
+  }
 }
 
 /**
@@ -1085,6 +1112,7 @@ function ll_tf_fields_snapshot(array $fields): array
       'calc_left_field_id' => isset($f['calc_left_field_id']) ? (int) $f['calc_left_field_id'] : null,
       'calc_right_field_id' => isset($f['calc_right_field_id']) ? (int) $f['calc_right_field_id'] : null,
       'required' => !empty($f['required']),
+      'creator_only' => ll_tf_field_is_creator_only($f),
       'is_system' => ll_tf_is_system_field($f),
       'sort_order' => (int) ($f['sort_order'] ?? 0),
     ];
@@ -1120,9 +1148,13 @@ function ll_tf_fields_from_snapshot($raw): array
       'calc_left_field_id' => !empty($f['calc_left_field_id']) ? (int) $f['calc_left_field_id'] : null,
       'calc_right_field_id' => !empty($f['calc_right_field_id']) ? (int) $f['calc_right_field_id'] : null,
       'required' => !empty($f['required']),
+      'creator_only' => !empty($f['creator_only']),
       'sort_order' => (int) ($f['sort_order'] ?? 0),
     ];
     $fields[array_key_last($fields)]['is_system'] = ll_tf_is_system_field($fields[array_key_last($fields)]);
+    if ($fields[array_key_last($fields)]['is_system']) {
+      $fields[array_key_last($fields)]['creator_only'] = true;
+    }
   }
   usort($fields, static fn ($a, $b) => ($a['sort_order'] <=> $b['sort_order']) ?: ($a['id'] <=> $b['id']));
   return $fields;
@@ -1197,7 +1229,69 @@ function ll_tf_can_edit_task_answers(array $user, array $task): bool
   if (in_array((string) ($task['status'] ?? ''), ['approved', 'closed'], true)) {
     return false;
   }
-  return ll_tf_is_task_form_creator($user, $task);
+  if (ll_tf_is_task_form_creator($user, $task)) {
+    return true;
+  }
+  return ll_tf_user_is_assignee($user, $task);
+}
+
+/** System fields and creator_only custom fields are Task Builder / creator-editable only. */
+function ll_tf_field_is_creator_only(array $f): bool
+{
+  if (ll_tf_is_system_field($f)) {
+    return true;
+  }
+  return !empty($f['creator_only']);
+}
+
+function ll_tf_can_edit_field_answer(array $user, array $task, array $f): bool
+{
+  if (in_array((string) ($task['status'] ?? ''), ['approved', 'closed'], true)) {
+    return false;
+  }
+  $type = (string) ($f['field_type'] ?? '');
+  if (in_array($type, ['readonly', 'calculated', 'assign_to', 'status', 'reviewer'], true)) {
+    return false;
+  }
+  if (ll_tf_is_task_form_creator($user, $task)) {
+    return true;
+  }
+  if (ll_tf_user_is_assignee($user, $task)) {
+    return !ll_tf_field_is_creator_only($f);
+  }
+  return false;
+}
+
+function ll_tf_can_delete_task(array $user, array $task): bool
+{
+  if (!empty($user['is_super']) || ll_tf_can_manage_org($user)) {
+    return true;
+  }
+  $uid = (int) ($user['id'] ?? 0);
+  $assignedBy = (int) ($task['assigned_by'] ?? 0);
+  return $uid > 0 && $assignedBy > 0 && $uid === $assignedBy;
+}
+
+function ll_tf_delete_task_cascade(int $taskId): void
+{
+  if ($taskId < 1) {
+    return;
+  }
+  $pdo = ll_pdo();
+  ll_tf_doc_delete_task_dir($taskId);
+  $pdo->prepare('DELETE FROM form_answers WHERE task_id = ?')->execute([$taskId]);
+  $pdo->prepare('DELETE FROM form_comments WHERE task_id = ?')->execute([$taskId]);
+  try {
+    $pdo->prepare('DELETE FROM form_task_events WHERE task_id = ?')->execute([$taskId]);
+  } catch (Throwable $e) {
+    /* table may not exist yet */
+  }
+  try {
+    $pdo->prepare('DELETE FROM form_task_reviewers WHERE task_id = ?')->execute([$taskId]);
+  } catch (Throwable $e) {
+    /* table may not exist yet */
+  }
+  $pdo->prepare('DELETE FROM form_tasks WHERE id = ?')->execute([$taskId]);
 }
 
 function ll_tf_can_set_task_status(array $user, array $task): bool
@@ -1594,7 +1688,7 @@ function ll_tf_row_field(array $row): array
   } elseif (!is_array($options)) {
     $options = [];
   }
-  return [
+  $out = [
     'id' => (int) $row['id'],
     'form_id' => (int) $row['form_id'],
     'field_key' => (string) $row['field_key'],
@@ -1606,9 +1700,13 @@ function ll_tf_row_field(array $row): array
     'calc_left_field_id' => $row['calc_left_field_id'] !== null ? (int) $row['calc_left_field_id'] : null,
     'calc_right_field_id' => $row['calc_right_field_id'] !== null ? (int) $row['calc_right_field_id'] : null,
     'required' => (int) ($row['required'] ?? 0) === 1,
+    'creator_only' => (int) ($row['creator_only'] ?? 0) === 1,
     'sort_order' => (int) ($row['sort_order'] ?? 0),
   ];
   $out['is_system'] = ll_tf_is_system_field($out);
+  if ($out['is_system']) {
+    $out['creator_only'] = true;
+  }
   return $out;
 }
 
