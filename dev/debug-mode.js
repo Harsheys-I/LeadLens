@@ -16,25 +16,25 @@ import {
   sortResults,
   validateApiKey,
   SERVER_API_KEY,
-} from "./audit.js?v=7.2.0.dev";
-import {getApiKey,apiKeyIsRemembered,saveApiKey,forgetApiKey,setStorageUserId,storageKey} from "./db.js?v=7.2.0.dev";
-import {requireAuth,logout,getUser,changePassword,updateProfile} from "./auth.js?v=7.2.0.dev";
-import {SettingsApi} from "./api-client.js?v=7.2.0.dev";
-import {mountNotifications} from "./notifications-ui.js?v=7.2.0.dev";
-import {appUrl, homePath} from "./app-base.js?v=7.2.0.dev";
-import {initTheme} from "./theme.js?v=7.2.0.dev";
+} from "./audit.js?v=7.2.1.dev";
+import {getApiKey,apiKeyIsRemembered,saveApiKey,forgetApiKey,setStorageUserId,storageKey} from "./db.js?v=7.2.1.dev";
+import {requireAuth,logout,getUser,changePassword,updateProfile} from "./auth.js?v=7.2.1.dev";
+import {SettingsApi} from "./api-client.js?v=7.2.1.dev";
+import {mountNotifications} from "./notifications-ui.js?v=7.2.1.dev";
+import {appUrl, homePath} from "./app-base.js?v=7.2.1.dev";
+import {initTheme} from "./theme.js?v=7.2.1.dev";
 import {
   debugAuditBatch,
   telecallerAuditBatch,
   compareDebugVsTelecaller,
   activePromptsReady,
   normalizeActiveErrorTypes,
-} from "./debug-engine.js?v=7.2.0.dev";
+} from "./debug-engine.js?v=7.2.1.dev";
 import {
   LAB_ERROR_TYPES,
   STATUS_HISTORY_PROMPT,
   emptyErrorPrompts,
-} from "./debug-prompts.js?v=7.2.0.dev";
+} from "./debug-prompts.js?v=7.2.1.dev";
 
 const $=id=>document.getElementById(id);
 const ids=[

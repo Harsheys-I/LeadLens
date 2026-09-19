@@ -6,17 +6,17 @@
   <meta name="theme-color" media="(prefers-color-scheme: light)" content="#12372a">
   <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#0f2d22">
   <meta name="description" content="GPP AI · LeadLens">
-  <meta name="app-version" content="7.2.0.dev">
+  <meta name="app-version" content="7.2.1.dev">
   <title>GPP AI · LeadLens</title>
-  <script src="../theme-boot.js?v=7.2.0.dev"></script>
-  <script src="../motion.js?v=7.2.0.dev"></script>
+  <script src="../theme-boot.js?v=7.2.1.dev"></script>
+  <script src="../motion.js?v=7.2.1.dev"></script>
   <link rel="manifest" href="../manifest.webmanifest">
-  <link rel="stylesheet" href="../styles.css?v=7.2.0.dev">
+  <link rel="stylesheet" href="../styles.css?v=7.2.1.dev">
   <script defer src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js"></script>
-  <script type="module" src="../app.js?v=7.2.0.dev"></script>
+  <script type="module" src="../app.js?v=7.2.1.dev"></script>
 </head>
 <body>
   <div id="update-banner" class="update-banner hidden" role="status">
@@ -61,7 +61,7 @@
           </div>
         </div>
       </nav>
-      <div class="privacy-note"><strong id="sidebar-version">v7.2.0.dev</strong><span id="sidebar-notes">v7.2.0.dev: Team Forms Task Builder wizard (form → create → fill → assign), assignee read-only answers, comment status snapshot with attachments and time spent, Submit after Completed, Task History, and assign/reviewer rules (no self-assign, no self-approve/close, assignee ≠ reviewer, multiple reviewers).</span></div>
+      <div class="privacy-note"><strong id="sidebar-version">v7.2.1.dev</strong><span id="sidebar-notes">v7.2.1.dev: ERP Sync daily/continue self-chains audit batches (in-request loop + fire-and-forget continue) so progress does not wait on the 10-minute cron; continue cron is optional backup.</span></div>
     </aside>
 
     <main>
@@ -283,7 +283,7 @@
             </section>
 
             <section class="settings-card">
-              <div class="card-title"><h2>4 · Daily automation &amp; cron</h2><p>Unattended Hostinger cron: fetch ERP → server AI audit → publish TeleCaller dashboards. Does not use the browser Audit UI. Cookie must stay valid overnight — keep-alive every 1 minute is recommended.</p></div>
+              <div class="card-title"><h2>4 · Daily automation &amp; cron</h2><p>Unattended Hostinger cron: fetch ERP → server AI audit (self-chains batches until done) → publish TeleCaller dashboards. Does not use the browser Audit UI. Cookie must stay valid overnight — keep-alive every 1 minute is recommended. Continue-every-10m cron is optional backup only.</p></div>
               <div class="field-grid run-grid">
                 <label class="check-row"><input id="erp-sync-daily" type="checkbox"><span>Enable daily auto pipeline (6:00 AM IST)</span></label>
                 <label class="check-row"><input id="erp-sync-cron-auto-publish" type="checkbox" checked><span>Cron auto-publish dashboards when daily audit completes</span></label>

@@ -1,15 +1,15 @@
 /**
  * Sales Graph module — Upload (Leads + Visits + Booked) + published Dashboard.
  */
-import {APP_VERSION} from "./audit.js?v=7.2.0.dev";
-import {requireAuth, logout, hasPermission, getUser, changePassword, updateProfile} from "./auth.js?v=7.2.0.dev";
-import {SalesGraphApi} from "./api-client.js?v=7.2.0.dev";
-import {mountNotifications} from "./notifications-ui.js?v=7.2.0.dev";
-import {appUrl, homePath} from "./app-base.js?v=7.2.0.dev";
-import {initTheme} from "./theme.js?v=7.2.0.dev";
-import {setStorageUserId, storageKey} from "./db.js?v=7.2.0.dev";
-import {parseSalesGraphSheet, buildSalesGraphPayload} from "./sales-graph-parse.js?v=7.2.0.dev";
-import {renderSalesGraphDashboard, destroySalesGraphCharts} from "./sales-graph-dashboard.js?v=7.2.0.dev";
+import {APP_VERSION} from "./audit.js?v=7.2.1.dev";
+import {requireAuth, logout, hasPermission, getUser, changePassword, updateProfile} from "./auth.js?v=7.2.1.dev";
+import {SalesGraphApi} from "./api-client.js?v=7.2.1.dev";
+import {mountNotifications} from "./notifications-ui.js?v=7.2.1.dev";
+import {appUrl, homePath} from "./app-base.js?v=7.2.1.dev";
+import {initTheme} from "./theme.js?v=7.2.1.dev";
+import {setStorageUserId, storageKey} from "./db.js?v=7.2.1.dev";
+import {parseSalesGraphSheet, buildSalesGraphPayload} from "./sales-graph-parse.js?v=7.2.1.dev";
+import {renderSalesGraphDashboard, destroySalesGraphCharts} from "./sales-graph-dashboard.js?v=7.2.1.dev";
 
 const $ = id => document.getElementById(id);
 const ids = [
@@ -27,7 +27,7 @@ const els = Object.fromEntries(ids.map(id => [id, $(id)]));
 if (els["sidebar-version"]) els["sidebar-version"].textContent = `v${APP_VERSION}`;
 
 const titles = {upload: "Upload", dashboard: "Dashboard"};
-const RELEASE_NOTES = "v7.2.0.dev: Team Forms Task Builder wizard (form → create → fill → assign), assignee read-only answers, comment status snapshot with attachments and time spent, Submit after Completed, Task History, and assign/reviewer rules (no self-assign, no self-approve/close, assignee ≠ reviewer, multiple reviewers).";
+const RELEASE_NOTES = "v7.2.1.dev: Team Forms Task Builder wizard (form → create → fill → assign), assignee read-only answers, comment status snapshot with attachments and time spent, Submit after Completed, Task History, and assign/reviewer rules (no self-assign, no self-approve/close, assignee ≠ reviewer, multiple reviewers).";
 
 let leadsParsed = null;
 let visitsParsed = null;
