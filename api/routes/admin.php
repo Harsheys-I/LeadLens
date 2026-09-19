@@ -2,16 +2,11 @@
 
 declare(strict_types=1);
 
-require_once __DIR__ . '/../lib/team-forms.php';
-
 function ll_route_admin(string $action, ?int $id, array $parts): void
 {
   switch ($action) {
     case 'users':
       ll_admin_users($id);
-      break;
-    case 'org':
-      ll_admin_org();
       break;
     case 'roles':
       ll_admin_roles($id);
@@ -25,46 +20,6 @@ function ll_route_admin(string $action, ?int $id, array $parts): void
     default:
       ll_error('Not found', 404);
   }
-}
-
-/** Actor already has admin.users. Org writes need Super or team_forms.manage_org. */
-function ll_admin_can_assign_org(array $actor): bool
-{
-  return ll_tf_can_manage_org($actor);
-}
-
-function ll_admin_assert_can_assign_org(array $actor): void
-{
-  if (!ll_admin_can_assign_org($actor)) {
-    ll_error('Forbidden: org memberships require Super User or Manage org', 403);
-  }
-}
-
-function ll_admin_public_user_with_org(?array $row): ?array
-{
-  $public = ll_public_user($row);
-  if (!$public) {
-    return null;
-  }
-  return $public + ll_tf_org_ids_from_memberships($public['org_memberships'] ?? []);
-}
-
-function ll_admin_take_group_ids(array $actor, array $body): ?array
-{
-  if (!array_key_exists('group_ids', $body)) {
-    return null;
-  }
-  ll_admin_assert_can_assign_org($actor);
-  return ll_tf_normalize_group_ids($body['group_ids']);
-}
-
-function ll_admin_org(): void
-{
-  $actor = ll_require_permission('admin.users');
-  ll_require_method('GET');
-  ll_ok(ll_tf_org_catalog() + [
-    'can_assign_org' => ll_admin_can_assign_org($actor),
-  ]);
 }
 
 function ll_admin_users(?int $id): void
@@ -83,13 +38,10 @@ function ll_admin_users(?int $id): void
        FROM users u INNER JOIN roles r ON r.id = u.role_id
        ORDER BY r.rank DESC, u.username ASC'
     )->fetchAll();
-    $orgMap = ll_tf_org_ids_map_for_users(array_map(static fn($row) => (int) $row['id'], $rows));
     ll_ok([
-      'users' => array_map(static function ($row) use ($orgMap) {
-        $uid = (int) $row['id'];
-        $org = $orgMap[$uid] ?? ['department_ids' => [], 'group_ids' => []];
+      'users' => array_map(static function ($row) {
         return [
-          'id' => $uid,
+          'id' => (int) $row['id'],
           'username' => $row['username'],
           'display_name' => $row['display_name'],
           'role_id' => (int) $row['role_id'],
@@ -100,13 +52,10 @@ function ll_admin_users(?int $id): void
           'is_active' => (int) $row['is_active'] === 1,
           'must_change_password' => (int) $row['must_change_password'] === 1,
           'notes' => $row['notes'],
-          'department_ids' => $org['department_ids'],
-          'group_ids' => $org['group_ids'],
           'created_at' => $row['created_at'],
           'updated_at' => $row['updated_at'],
         ];
       }, $rows),
-      'can_assign_org' => ll_admin_can_assign_org($actor),
     ]);
   }
 
@@ -115,7 +64,7 @@ function ll_admin_users(?int $id): void
     if (!$row) {
       ll_error('User not found', 404);
     }
-    ll_ok(['user' => ll_admin_public_user_with_org($row) + [
+    ll_ok(['user' => ll_public_user($row) + [
       'notes' => $row['notes'] ?? null,
       'created_at' => $row['created_at'] ?? null,
       'updated_at' => $row['updated_at'] ?? null,
@@ -141,7 +90,6 @@ function ll_admin_users(?int $id): void
     if (ll_find_user_by_username($username)) {
       ll_error('Username already exists');
     }
-    $groupIds = ll_admin_take_group_ids($actor, $body);
     $hash = password_hash($password, PASSWORD_BCRYPT);
     $pdo->prepare(
       'INSERT INTO users (username, password_hash, display_name, role_id, telecaller_name, is_active, must_change_password, notes)
@@ -156,10 +104,7 @@ function ll_admin_users(?int $id): void
       $notes !== '' ? $notes : null,
     ]);
     $newId = (int) $pdo->lastInsertId();
-    if ($groupIds !== null) {
-      ll_tf_sync_user_group_memberships($newId, $groupIds);
-    }
-    ll_ok(['user' => ll_admin_public_user_with_org(ll_find_user_by_id($newId))], 201);
+    ll_ok(['user' => ll_public_user(ll_find_user_by_id($newId))], 201);
   }
 
   if (($method === 'PUT' || $method === 'PATCH') && $id !== null) {
@@ -235,8 +180,7 @@ function ll_admin_users(?int $id): void
       $params[] = $username;
     }
 
-    $groupIds = ll_admin_take_group_ids($actor, $body);
-    if (!$fields && $groupIds === null) {
+    if (!$fields) {
       ll_error('No fields to update');
     }
     if ($fields) {
@@ -244,10 +188,7 @@ function ll_admin_users(?int $id): void
       $params[] = $id;
       $pdo->prepare('UPDATE users SET ' . implode(', ', $fields) . ' WHERE id = ?')->execute($params);
     }
-    if ($groupIds !== null) {
-      ll_tf_sync_user_group_memberships($id, $groupIds);
-    }
-    ll_ok(['user' => ll_admin_public_user_with_org(ll_find_user_by_id($id))]);
+    ll_ok(['user' => ll_public_user(ll_find_user_by_id($id))]);
   }
 
   if ($method === 'DELETE' && $id !== null) {

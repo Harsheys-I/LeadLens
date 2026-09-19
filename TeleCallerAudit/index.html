@@ -16,7 +16,7 @@
   <script defer src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js"></script>
-  <script type="module" src="../app.js?v=8.0.0.stable"></script>
+  <script type="module" src="../app.js?v=8.0.1.daily-ist"></script>
 </head>
 <body>
   <div id="update-banner" class="update-banner hidden" role="status">
@@ -30,34 +30,34 @@
         <div class="nav-group is-collapsed hidden" data-nav-group="telecaller-dashboards" id="nav-telecaller-dashboards">
           <div class="nav-parent-row">
             <button type="button" class="nav-toggle" aria-expanded="true" aria-label="Collapse Dashboards"></button>
-            <button type="button" class="nav-item nav-item-parent" data-nav-toggle-group><span>▦</span>Dashboards</button>
+            <button type="button" class="nav-item nav-item-parent" data-nav-toggle-group><span>📊</span>Dashboards</button>
           </div>
           <div class="nav-children">
-            <button class="nav-item nav-item-child" data-view="published" data-perm="telecaller.dashboard"><span>◎</span>B1 Leads Audit</button>
-            <button class="nav-item nav-item-child" data-view="perf-dashboard" data-perm="telecaller.perf_dashboard"><span>◈</span>Telecalling Performance</button>
+            <button class="nav-item nav-item-child" data-view="published" data-perm="telecaller.dashboard"><span>🎯</span>B1 Leads Audit</button>
+            <button class="nav-item nav-item-child" data-view="perf-dashboard" data-perm="telecaller.perf_dashboard"><span>⚡</span>Telecalling Performance</button>
           </div>
         </div>
         <div class="nav-group is-collapsed" data-nav-group="bucket1">
           <div class="nav-parent-row">
             <button type="button" class="nav-toggle" aria-expanded="false" aria-label="Expand Bucket 1 Followup Review"></button>
-            <button type="button" class="nav-item nav-item-parent active" data-view="review" data-nav-toggle-group data-perm="telecaller.bucket1"><span>◎</span>Bucket 1 Followup Review</button>
+            <button type="button" class="nav-item nav-item-parent active" data-view="review" data-nav-toggle-group data-perm="telecaller.bucket1"><span>📋</span>Bucket 1 Followup Review</button>
           </div>
           <div class="nav-children">
-            <button class="nav-item nav-item-child" data-view="console" data-perm="telecaller.run_console"><span>⌁</span>Run console</button>
-            <button class="nav-item nav-item-child" data-view="published" data-perm="telecaller.dashboard" data-label-flat="Bucket 1"><span>▦</span>Dashboard</button>
-            <button class="nav-item nav-item-child" data-view="history" data-perm="telecaller.history"><span>◷</span>History</button>
-            <button class="nav-item nav-item-child" data-view="settings" data-perm="telecaller.settings"><span>⚙</span>Settings</button>
-            <button class="nav-item nav-item-child hidden" data-view="erp-sync" id="nav-erp-sync" data-super-only="1"><span>⟳</span>ERP Sync</button>
+            <button class="nav-item nav-item-child" data-view="console" data-perm="telecaller.run_console"><span>🖥️</span>Run console</button>
+            <button class="nav-item nav-item-child" data-view="published" data-perm="telecaller.dashboard" data-label-flat="Bucket 1"><span>📊</span>Dashboard</button>
+            <button class="nav-item nav-item-child" data-view="history" data-perm="telecaller.history"><span>🕑</span>History</button>
+            <button class="nav-item nav-item-child" data-view="settings" data-perm="telecaller.settings"><span>⚙️</span>Settings</button>
+            <button class="nav-item nav-item-child hidden" data-view="erp-sync" id="nav-erp-sync" data-super-only="1"><span>🔄</span>ERP Sync</button>
           </div>
         </div>
         <div class="nav-group is-collapsed" data-nav-group="perf">
           <div class="nav-parent-row">
             <button type="button" class="nav-toggle" aria-expanded="false" aria-label="Expand TeleCalling Performance"></button>
-            <button type="button" class="nav-item nav-item-parent" data-view="perf-report" data-nav-toggle-group data-perm="telecaller.perf_report"><span>◈</span>TeleCalling Performance</button>
+            <button type="button" class="nav-item nav-item-parent" data-view="perf-report" data-nav-toggle-group data-perm="telecaller.perf_report"><span>📈</span>TeleCalling Performance</button>
           </div>
           <div class="nav-children">
-            <button class="nav-item nav-item-child" data-view="perf-dashboard" data-perm="telecaller.perf_dashboard" data-label-flat="Performance Report"><span>▦</span>Dashboard</button>
-            <button class="nav-item nav-item-child" data-view="perf-settings" data-perm="telecaller.perf_settings"><span>⚙</span>Settings</button>
+            <button class="nav-item nav-item-child" data-view="perf-dashboard" data-perm="telecaller.perf_dashboard" data-label-flat="Performance Report"><span>📊</span>Dashboard</button>
+            <button class="nav-item nav-item-child" data-view="perf-settings" data-perm="telecaller.perf_settings"><span>⚙️</span>Settings</button>
           </div>
         </div>
       </nav>
@@ -87,7 +87,7 @@
         </div>
         <div id="review-drop-zone" class="drop-zone" role="button" tabindex="0" aria-label="Upload Excel for Bucket 1 audit">
           <input id="review-file-input" type="file" accept=".xlsx,.xls,.xlsm" hidden>
-          <div class="upload-icon">⇧</div><h3>Drop Excel here</h3><p id="review-drop-hint">CRM / RAW export · auto-detect TeleCallers · audit then Save / Create Dashboard · XLSX, XLS or XLSM</p>
+          <div class="upload-icon">📤</div><h3>Drop Excel here</h3><p id="review-drop-hint">CRM / RAW export · auto-detect TeleCallers · audit then Save / Create Dashboard · XLSX, XLS or XLSM</p>
         </div>
         <div id="review-file-list" class="file-list hidden"></div>
         <div id="review-validation" class="validation hidden" role="status"></div>
@@ -283,7 +283,7 @@
             </section>
 
             <section class="settings-card">
-              <div class="card-title"><h2>4 · Daily automation &amp; cron</h2><p>Unattended Hostinger cron: fetch ERP → server AI audit (self-chains batches until done) → publish TeleCaller dashboards. Does not use the browser Audit UI. Cookie must stay valid overnight — keep-alive every 1 minute is recommended. Continue-every-10m cron is optional backup only.</p></div>
+              <div class="card-title"><h2>4 · Daily automation &amp; cron</h2><p>Unattended at <strong>6:00 AM IST</strong>: keep-alive (every 1 minute) starts fetch → server AI audit → publish. Hostinger <code>/daily</code> cron is optional backup — PHP ignores it outside 05:55–06:45 IST, so a 4pm schedule will not run the pipeline. Cookie must stay valid overnight.</p></div>
               <div class="field-grid run-grid">
                 <label class="check-row"><input id="erp-sync-daily" type="checkbox"><span>Enable daily auto pipeline (6:00 AM IST)</span></label>
                 <label class="check-row"><input id="erp-sync-cron-auto-publish" type="checkbox" checked><span>Cron auto-publish dashboards when daily audit completes</span></label>
@@ -300,6 +300,7 @@
               <p id="erp-sync-daily-status" class="muted form-message" aria-live="polite"></p>
               <div class="inline-actions" style="margin-top:0.75rem;flex-wrap:wrap">
                 <button id="erp-sync-ping" type="button" class="secondary-button">Ping keep-alive now</button>
+                <button id="erp-sync-run-daily" type="button" class="secondary-button">Run daily now</button>
                 <button id="erp-sync-run-server" type="button" class="secondary-button">Server audit (advanced)</button>
                 <button id="erp-sync-publish" type="button" class="secondary-button">Publish last server results</button>
               </div>
@@ -314,11 +315,11 @@
         <div class="perf-upload-grid">
           <div id="perf-master-drop" class="drop-zone" role="button" tabindex="0" aria-label="Upload Master Excel">
             <input id="perf-master-input" type="file" accept=".xlsx,.xls,.xlsm" hidden>
-            <div class="upload-icon">M</div><h3>Master Data (M)</h3><p>Active leads · Mobile, Project, Source, LRD, NFD, Status, Telecaller</p>
+            <div class="upload-icon">📒</div><h3>Master Data (M)</h3><p>Active leads · Mobile, Project, Source, LRD, NFD, Status, Telecaller</p>
           </div>
           <div id="perf-history-drop" class="drop-zone" role="button" tabindex="0" aria-label="Upload History Excel">
             <input id="perf-history-input" type="file" accept=".xlsx,.xls,.xlsm" hidden>
-            <div class="upload-icon">H</div><h3>History Data (H)</h3><p>Call history · includes Lead Update Date</p>
+            <div class="upload-icon">🕑</div><h3>History Data (H)</h3><p>Call history · includes Lead Update Date</p>
           </div>
         </div>
         <div id="perf-file-list" class="file-list hidden"></div>

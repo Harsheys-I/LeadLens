@@ -3,7 +3,7 @@
 **Two paths:**
 
 1. **Manual (primary for interactive work):** fetch ERP report → store raw payload → map leads → **hand off to Bucket 1 TeleCaller Audit** (browser Start Audit / progress / Stop / Publish).
-2. **Unattended daily (cron):** at **6:00 AM IST** the server fetches with the saved Cookie/URL, runs **server-side OpenAI audit** in chunks, and **auto-publishes TeleCaller dashboards** when the job finishes. No browser tab required.
+2. **Unattended daily (cron):** at **6:00 AM IST** the **keep-alive** ping (every minute) starts a fresh fetch, runs **server-side OpenAI audit** in chunks, and **auto-publishes TeleCaller dashboards**. Hostinger `/daily` cron is optional backup and is **ignored outside 05:55–06:45 IST** (a 4pm schedule will not run the pipeline). No browser tab required.
 
 UI and API are available on **production `/`** and **`/dev`**, gated to **Super User** (plus cron bearer for keep-alive / daily / continue).
 
@@ -37,8 +37,8 @@ When Test fetch / Fetch / keep-alive / daily run shows **session expired**:
    - Leave **Cron auto-publish dashboards when daily audit completes** **on** (default) so TeleCaller boards upload when audit finishes
    - Check **Enable session keep-alive** and set a **Cron bearer secret**
 2. Save settings.
-3. Add Hostinger cron jobs (see below): **daily kickoff** + **keep-alive**. Continue-every-10m is optional backup (self-chain is primary).
-4. Watch **Last scheduled run** on the ERP Sync panel after 6 AM (or after a manual Super User `POST …/daily`). Progress should climb without waiting for the continue cron.
+3. Add Hostinger cron jobs (see below): **keep-alive every 1 minute is required** for 6:00 AM IST kickoff. Daily `/daily` cron is optional backup (must be `30 0 * * *` UTC). Continue-every-10m is optional backup (self-chain is primary).
+4. Watch **Last scheduled run** on the ERP Sync panel after 6 AM (or click **Run daily now**). Progress should climb without waiting for the continue cron.
 
 ### Resume / self-chain (Hostinger time limits)
 
@@ -48,7 +48,8 @@ Each PHP request audits in chunks (`Max leads / invocation`, default 40). After 
 2. **Fire-and-forget self-HTTP** — when about to hit the limit and the job is still incomplete, PHP POSTs `erp-sync/continue` on the same host with a one-time chain token (`X-ERP-Sync-Chain`). A running lock prevents stampede (cron + self-chain overlap → busy no-op).
 3. **Continue cron (optional backup)** — every 10 minutes still works if a self-chain handoff fails; idle no-ops are harmless.
 
-- **Daily cron (6:00 AM IST)** → `POST /api/erp-sync/daily` — always starts a **fresh fetch**, begins audit, and **self-chains** until complete (or session expired / error).
+- **Keep-alive cron (every 1 minute)** → `POST /api/erp-sync/keepalive` — session ping, and at **6:00 AM IST** it fire-and-forgets `/daily`.
+- **Daily cron (optional backup, 6:00 AM IST)** → `POST /api/erp-sync/daily` — PHP only starts a **fresh fetch** inside **05:55–06:45 IST**. Hits at 4pm (or any other hour) are ignored.
 - **Continue cron (every 10 minutes)** → `POST /api/erp-sync/continue` — safety net only; resumes if a job is still `auditing`. You can keep or remove this cron once self-chain is confirmed working.
 
 ## API (Super User session or cron bearer where noted)
@@ -76,7 +77,9 @@ India is **UTC+5:30** (no DST).
 
 Confirm the timezone shown in **hPanel → Advanced · Cron Jobs**. Most Hostinger shared plans schedule in **UTC** — use **`30 0 * * *`** for 6:00 AM IST.
 
-## Hostinger cron — daily kickoff (6:00 AM IST)
+A `/daily` cron at 4:00 PM IST almost always means the expression was `0 11 * * *` UTC (or `0 6 * * *` on a US-Central panel). PHP now ignores those hits. Keep-alive every minute is what actually starts the 6:00 AM IST run.
+
+## Hostinger cron — daily kickoff (optional backup, 6:00 AM IST)
 
 ```bash
 # 6:00 AM IST = 00:30 UTC  →  schedule: 30 0 * * *  (when cron is UTC)

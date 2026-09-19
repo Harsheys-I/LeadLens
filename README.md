@@ -11,7 +11,6 @@ Login-gated multi-module app for Hostinger (PHP + MySQL) with browser-side AI au
 | `/` | Login, request access, home module tiles |
 | `/TeleCallerAudit/` | Bucket 1 audit, Run console (permission), published dashboards, History, Settings |
 | `/SalesGraph/` | Sales Graph — Leads/Visits upload, published multi-chart dashboard |
-| `/TeamForms/` | Team Forms — departments/groups, form builder, task builder, assign & review workflow |
 | `/SEO/` | SEO — technical audit command center, live scanner, schema studio, 30-day action plan |
 | `/admin/` | Users, Roles, access-request queue, notifications |
 | `/api/` | PHP session auth, admin CRUD, published dashboards |

@@ -360,6 +360,7 @@ function ll_erp_sync_route_status(): void
     'last_keepalive' => $cfg['last_keepalive'] ?? null,
     'last_daily_status' => $cfg['last_daily_status'] ?? null,
     'keepalive' => ll_erp_sync_keepalive_diagnostics($cfg),
+    'daily_schedule' => ll_erp_sync_daily_schedule_info($cfg),
     'job' => $jobMeta,
     'progress' => $progress,
   ]);

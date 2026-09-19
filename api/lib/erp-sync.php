@@ -20,6 +20,9 @@ const LL_ERP_SYNC_CHAIN_SAFETY_BUFFER = 18;
 const LL_ERP_SYNC_RUNNING_STALE_SEC = 210;
 /** Chain token TTL for fire-and-forget self-continue. */
 const LL_ERP_SYNC_CHAIN_TOKEN_TTL = 600;
+/** Inclusive IST minutes for cron daily kickoff (05:55–06:45). */
+const LL_ERP_SYNC_DAILY_WINDOW_START_MIN = 5 * 60 + 55;
+const LL_ERP_SYNC_DAILY_WINDOW_END_MIN = 6 * 60 + 45;
 
 /** @return array<string, list<string>> */
 function ll_erp_sync_default_field_map(): array
@@ -137,6 +140,7 @@ function ll_erp_sync_public_config(): array
     $safeHeaders[$k] = $v;
   }
   $cfg['extra_headers'] = $safeHeaders;
+  unset($cfg['daily_chain_token'], $cfg['daily_chain_token_at']);
   return $cfg;
 }
 
@@ -319,18 +323,30 @@ function ll_erp_sync_extract_chain_token(): ?string
 function ll_erp_sync_verify_chain_token(string $candidate): bool
 {
   $job = ll_erp_sync_load_job();
-  if (!is_array($job) || ($job['status'] ?? '') !== 'auditing') {
-    return false;
+  if (is_array($job) && ($job['status'] ?? '') === 'auditing') {
+    $expected = (string) ($job['chain_token'] ?? '');
+    $at = (int) ($job['chain_token_at'] ?? 0);
+    if (
+      $expected !== ''
+      && hash_equals($expected, $candidate)
+      && $at > 0
+      && (time() - $at) <= LL_ERP_SYNC_CHAIN_TOKEN_TTL
+    ) {
+      return true;
+    }
   }
-  $expected = (string) ($job['chain_token'] ?? '');
+  return ll_erp_sync_verify_daily_chain_token($candidate);
+}
+
+function ll_erp_sync_verify_daily_chain_token(string $candidate): bool
+{
+  $cfg = ll_erp_sync_load_config();
+  $expected = (string) ($cfg['daily_chain_token'] ?? '');
   if ($expected === '' || !hash_equals($expected, $candidate)) {
     return false;
   }
-  $at = (int) ($job['chain_token_at'] ?? 0);
-  if ($at <= 0 || (time() - $at) > LL_ERP_SYNC_CHAIN_TOKEN_TTL) {
-    return false;
-  }
-  return true;
+  $at = (int) ($cfg['daily_chain_token_at'] ?? 0);
+  return $at > 0 && (time() - $at) <= LL_ERP_SYNC_CHAIN_TOKEN_TTL;
 }
 
 function ll_erp_sync_extract_bearer(): ?string
@@ -453,6 +469,99 @@ function ll_erp_sync_set_last_daily_status(array $status): void
 function ll_erp_sync_daily_is_enabled(array $cfg): bool
 {
   return !empty($cfg['daily_enabled']) || !empty($cfg['enabled']);
+}
+
+function ll_erp_sync_ist_now(): DateTimeImmutable
+{
+  return new DateTimeImmutable('now', new DateTimeZone('Asia/Kolkata'));
+}
+
+function ll_erp_sync_ist_today(): string
+{
+  return ll_erp_sync_ist_now()->format('Y-m-d');
+}
+
+function ll_erp_sync_in_daily_window(?DateTimeImmutable $now = null): bool
+{
+  $now = $now ?? ll_erp_sync_ist_now();
+  $minutes = ((int) $now->format('G')) * 60 + (int) $now->format('i');
+  return $minutes >= LL_ERP_SYNC_DAILY_WINDOW_START_MIN
+    && $minutes <= LL_ERP_SYNC_DAILY_WINDOW_END_MIN;
+}
+
+/**
+ * Persist extra config keys (no secrets). Null deletes a key.
+ * @param array<string, mixed|null> $fields
+ */
+function ll_erp_sync_persist_config_fields(array $fields): void
+{
+  $cfg = ll_erp_sync_load_config();
+  foreach ($fields as $key => $value) {
+    if ($value === null) {
+      unset($cfg[$key]);
+    } else {
+      $cfg[$key] = $value;
+    }
+  }
+  unset($cfg['cookie_configured'], $cfg['cron_secret_configured']);
+  $json = json_encode($cfg, JSON_UNESCAPED_UNICODE);
+  if ($json !== false) {
+    ll_setting_set(LL_ERP_SYNC_CONFIG_KEY, $json, null);
+  }
+}
+
+function ll_erp_sync_mark_daily_kickoff_today(): void
+{
+  ll_erp_sync_persist_config_fields([
+    'last_daily_kickoff_ist_date' => ll_erp_sync_ist_today(),
+    'daily_chain_token' => null,
+    'daily_chain_token_at' => null,
+  ]);
+}
+
+/**
+ * Whether cron should start a fresh daily fetch now (6:00 AM IST window).
+ */
+function ll_erp_sync_cron_should_start_daily(array $cfg): bool
+{
+  if (!ll_erp_sync_daily_is_enabled($cfg) || !ll_erp_sync_in_daily_window()) {
+    return false;
+  }
+  $job = ll_erp_sync_load_job();
+  if (is_array($job) && ($job['status'] ?? '') === 'auditing') {
+    return false;
+  }
+  $today = ll_erp_sync_ist_today();
+  if ((string) ($cfg['last_daily_kickoff_ist_date'] ?? '') !== $today) {
+    return true;
+  }
+  $daily = is_array($cfg['last_daily_status'] ?? null) ? $cfg['last_daily_status'] : null;
+  if (!is_array($daily) || ($daily['ok'] ?? true) !== false) {
+    return false;
+  }
+  $at = strtotime((string) ($daily['at'] ?? ''));
+  return $at !== false && (time() - $at) >= 600;
+}
+
+/** @return array<string, mixed> */
+function ll_erp_sync_daily_schedule_info(array $cfg): array
+{
+  $now = ll_erp_sync_ist_now();
+  $today6 = $now->setTime(6, 0, 0);
+  $windowEnd = $now->setTime(6, 45, 0);
+  $startedToday = (string) ($cfg['last_daily_kickoff_ist_date'] ?? '') === $now->format('Y-m-d');
+  if (!$startedToday && $now <= $windowEnd) {
+    $next = $today6;
+  } else {
+    $next = $today6->modify('+1 day');
+  }
+  return [
+    'timezone' => 'Asia/Kolkata',
+    'window' => '05:55–06:45 IST',
+    'in_window' => ll_erp_sync_in_daily_window($now),
+    'next_at' => $next->format('c'),
+    'kickoff_ist_date' => (string) ($cfg['last_daily_kickoff_ist_date'] ?? ''),
+  ];
 }
 
 /**
@@ -657,7 +766,8 @@ function ll_erp_sync_http_ping(string $url, ?string $cookie, array $extraHeaders
 
 /**
  * Ping ERP with saved Cookie so idle sessions may last longer.
- * Updates last_keepalive only — never runs Audit / publish / stores payloads.
+ * Updates last_keepalive only. Cron pings also fire-and-forget `/daily` at 6:00 AM IST
+ * (the ping itself never runs Audit inline).
  *
  * @param 'manual'|'cron' $source
  * @return array<string, mixed>
@@ -742,6 +852,14 @@ function ll_erp_sync_keepalive(string $source = 'manual'): array
     'at' => gmdate('c'),
   ];
   ll_erp_sync_set_last_keepalive($status);
+  try {
+    $queued = ll_erp_sync_maybe_queue_daily_from_keepalive($source);
+    if (is_array($queued) && !empty($queued['queued'])) {
+      $status['daily_queued'] = true;
+    }
+  } catch (Throwable $e) {
+    // Keep-alive must stay a cheap ping even if daily queue fails.
+  }
   return $status;
 }
 
@@ -1572,7 +1690,7 @@ function ll_erp_sync_build_system_prompt(array $settings): string
   }
   $extra = trim((string) ($settings['additionalInstructions'] ?? ''));
   return "LeadLens ERP server auditor. Evidence only. Never invent facts.\n"
-    . "OUTPUT: JSON object with a[] items {id,q,e,i,o,r}. Echo each id.\n"
+    . "OUTPUT: JSON object with a[] items {id,q,e,i,o,r}. Echo each compact id exactly (b0, b1, …).\n"
     . "q=comment quality 0-10; e=error labels from allowed set only; i=0|1 buying intent; o=18-28 words; r=20-40 words.\n"
     . "Allowed e labels: Lead Status Not Aligned With Comments | Customer Requirement Empty | Incorrect Customer Requirement | Customer Comment Quality Not Appropriate.\n"
     . "Never emit Follow-up Missed, Budget/Location/Parameter Empty, or TAT labels (those are in le).\n"
@@ -1581,22 +1699,136 @@ function ll_erp_sync_build_system_prompt(array $settings): string
     . ($extra !== '' ? "\nEXTRA:\n" . $extra : '');
 }
 
-/**
- * @param list<array> $leads
- * @return list<array>
- */
-function ll_erp_sync_audit_batch(array $leads, array $settings): array
+/** Normalize a model-returned lead id for matching. */
+function ll_erp_sync_clean_lead_id(string $value): string
 {
-  if (!$leads) {
-    return [];
+  $norm = strtolower(trim($value));
+  $norm = preg_replace('/[_-]+/', ' ', $norm) ?? $norm;
+  $norm = preg_replace('/\s+/', ' ', $norm) ?? $norm;
+  if (in_array($norm, ['', 'nan', 'none', 'nat', 'undefined', 'null'], true)) {
+    return '';
   }
+  return trim($value);
+}
+
+/**
+ * Map a model-returned id (compact, shortened, or original) back to a sent id.
+ * @param list<string> $sentIds
+ */
+function ll_erp_sync_resolve_audit_result_id(string $returnedId, array $sentIds): ?string
+{
+  $ret = ll_erp_sync_clean_lead_id($returnedId);
+  if ($ret === '') {
+    return null;
+  }
+  foreach ($sentIds as $id) {
+    if (ll_erp_sync_clean_lead_id((string) $id) === $ret) {
+      return (string) $id;
+    }
+  }
+  $tail = [];
+  foreach ($sentIds as $id) {
+    $parts = explode('|', ll_erp_sync_clean_lead_id((string) $id));
+    $last = trim((string) end($parts));
+    if ($last === $ret) {
+      $tail[] = (string) $id;
+    }
+  }
+  if (count($tail) === 1) {
+    return $tail[0];
+  }
+  $suffix = [];
+  foreach ($sentIds as $id) {
+    $clean = ll_erp_sync_clean_lead_id((string) $id);
+    if ($clean !== '' && str_ends_with($clean, $ret)) {
+      $suffix[] = (string) $id;
+    }
+  }
+  return count($suffix) === 1 ? $suffix[0] : null;
+}
+
+/** @return array<string, true> */
+function ll_erp_sync_ai_allowed_errors(): array
+{
+  return [
+    'Lead Status Not Aligned With Comments' => true,
+    'Customer Requirement Empty' => true,
+    'Incorrect Customer Requirement' => true,
+    'Customer Comment Quality Not Appropriate' => true,
+  ];
+}
+
+/** @return array<string, true> */
+function ll_erp_sync_high_severity_errors(): array
+{
+  return [
+    'Follow-up Missed' => true,
+    'Customer Requirement Empty' => true,
+    'Customer Comment Quality Not Appropriate' => true,
+  ];
+}
+
+/**
+ * @param array<string, mixed> $lead
+ * @param ?array<string, mixed> $ai
+ * @return array<string, mixed>
+ */
+function ll_erp_sync_apply_ai_to_lead(array $lead, ?array $ai, bool $fallback = false): array
+{
+  $sv = is_array($lead['staticValues'] ?? null) ? $lead['staticValues'] : [];
+  $local = is_array($lead['localErrors'] ?? null) ? $lead['localErrors'] : [];
+  $allowed = ll_erp_sync_ai_allowed_errors();
+  $high = ll_erp_sync_high_severity_errors();
+  $aiErrors = [];
+  if (is_array($ai) && isset($ai['e']) && is_array($ai['e'])) {
+    foreach ($ai['e'] as $label) {
+      $label = trim((string) $label);
+      if (isset($allowed[$label])) {
+        $aiErrors[] = $label;
+      }
+    }
+  }
+  $errors = array_values(array_unique(array_merge($local, $aiErrors)));
+  $q = is_array($ai) ? (int) ($ai['q'] ?? 5) : 5;
+  $q = max(0, min(10, $q));
+  $intent = (is_array($ai) && (int) ($ai['i'] ?? 0) === 1) ? 'Yes' : 'No';
+  $severity = !$errors ? 'NONE' : (array_filter($errors, static fn ($e) => isset($high[$e])) ? 'HIGH' : 'MEDIUM');
+  $observation = is_array($ai) ? trim((string) ($ai['o'] ?? '')) : '';
+  $recommendation = is_array($ai) ? trim((string) ($ai['r'] ?? '')) : '';
+  if ($fallback) {
+    $observation = $observation !== '' ? $observation : 'Server audit fallback — model omitted this lead; local checks only.';
+    $recommendation = $recommendation !== '' ? $recommendation : 'Review comments and status in CRM, then update if needed.';
+  }
+  return array_merge($sv, [
+    'commentQuality' => $q,
+    'errorTypes' => $errors ? implode(', ', $errors) : 'None',
+    'errorSeverity' => $severity,
+    'buyingIntent' => $intent,
+    'observation' => $observation,
+    'recommendation' => $recommendation,
+  ]);
+}
+
+/**
+ * Ask OpenAI for one batch. Returns map of real leadId → AI item.
+ * Compact ids (b0, b1, …) avoid pipes/hashes in project|mobile#row ids.
+ *
+ * @param list<array> $leads
+ * @return array<string, array>
+ */
+function ll_erp_sync_audit_batch_request(array $leads, array $settings): array
+{
+  $compactToReal = [];
   $modelInput = [];
-  foreach ($leads as $lead) {
+  foreach ($leads as $i => $lead) {
+    $real = trim((string) ($lead['leadId'] ?? ''));
+    $compact = 'b' . $i;
+    $compactToReal[$compact] = $real;
     $ctx = $lead['auditContext'] ?? [];
-    $modelInput[] = array_merge(['id' => $lead['leadId']], is_array($ctx) ? $ctx : []);
+    $modelInput[] = array_merge(['id' => $compact], is_array($ctx) ? $ctx : []);
   }
   $model = (string) ($settings['model'] ?? 'gpt-4o-mini');
-  $maxTokens = max(500, count($leads) * 140);
+  $maxTokens = max(500, count($leads) * 160);
   $schema = [
     'type' => 'object',
     'additionalProperties' => false,
@@ -1628,7 +1860,7 @@ function ll_erp_sync_audit_batch(array $leads, array $settings): array
       ['role' => 'system', 'content' => ll_erp_sync_build_system_prompt($settings)],
       [
         'role' => 'user',
-        'content' => 'Audit ' . count($leads) . " call(s). Echo each id. Judge status vs comments; comment quality; buying intent. le=local errors — explain in o/r, never copy into e.\n"
+        'content' => 'Audit ' . count($leads) . " call(s). Echo each compact id exactly (b0, b1, …). Judge status vs comments; comment quality; buying intent. le=local errors — explain in o/r, never copy into e.\n"
           . json_encode(['L' => $modelInput], JSON_UNESCAPED_UNICODE),
       ],
     ],
@@ -1641,7 +1873,6 @@ function ll_erp_sync_audit_batch(array $leads, array $settings): array
       ],
     ],
   ];
-  // Reasoning models need max_completion_tokens.
   if (preg_match('/(^|[^a-z])(gpt-5|o1|o3|o4)([.-]|$)/i', $model) && !str_contains(strtolower($model), 'gpt-5-chat')) {
     unset($body['max_tokens'], $body['temperature']);
     $body['max_completion_tokens'] = $maxTokens;
@@ -1678,60 +1909,64 @@ function ll_erp_sync_audit_batch(array $leads, array $settings): array
     throw $lastError ?? new RuntimeException('Audit batch failed');
   }
 
-  $byId = [];
+  $claimed = [];
+  $byReal = [];
   foreach ($aiList as $item) {
     if (!is_array($item)) {
       continue;
     }
-    $id = trim((string) ($item['id'] ?? ''));
-    if ($id !== '') {
+    $pool = [];
+    foreach ($compactToReal as $compact => $real) {
+      if (isset($claimed[$real])) {
+        continue;
+      }
+      $pool[] = $compact;
+      if ($real !== '') {
+        $pool[] = $real;
+      }
+    }
+    $resolved = ll_erp_sync_resolve_audit_result_id((string) ($item['id'] ?? ''), $pool);
+    if ($resolved === null) {
+      continue;
+    }
+    $real = $compactToReal[$resolved] ?? $resolved;
+    if ($real === '' || isset($claimed[$real])) {
+      continue;
+    }
+    $claimed[$real] = true;
+    $byReal[$real] = $item;
+  }
+  return $byReal;
+}
+
+/**
+ * @param list<array> $leads
+ * @return list<array>
+ */
+function ll_erp_sync_audit_batch(array $leads, array $settings): array
+{
+  if (!$leads) {
+    return [];
+  }
+  $byId = ll_erp_sync_audit_batch_request($leads, $settings);
+  $missing = [];
+  foreach ($leads as $lead) {
+    $id = trim((string) ($lead['leadId'] ?? ''));
+    if ($id === '' || !isset($byId[$id])) {
+      $missing[] = $lead;
+    }
+  }
+  if ($missing) {
+    $recovered = ll_erp_sync_audit_batch_request($missing, $settings);
+    foreach ($recovered as $id => $item) {
       $byId[$id] = $item;
     }
   }
-
-  $allowed = [
-    'Lead Status Not Aligned With Comments' => true,
-    'Customer Requirement Empty' => true,
-    'Incorrect Customer Requirement' => true,
-    'Customer Comment Quality Not Appropriate' => true,
-  ];
-  $high = [
-    'Follow-up Missed' => true,
-    'Customer Requirement Empty' => true,
-    'Customer Comment Quality Not Appropriate' => true,
-  ];
-
   $results = [];
   foreach ($leads as $lead) {
     $id = trim((string) ($lead['leadId'] ?? ''));
     $ai = $byId[$id] ?? null;
-    if ($ai === null) {
-      throw new RuntimeException('OpenAI omitted lead id: ' . $id);
-    }
-    $sv = $lead['staticValues'] ?? [];
-    $local = is_array($lead['localErrors'] ?? null) ? $lead['localErrors'] : [];
-    $aiErrors = [];
-    if (isset($ai['e']) && is_array($ai['e'])) {
-      foreach ($ai['e'] as $label) {
-        $label = trim((string) $label);
-        if (isset($allowed[$label])) {
-          $aiErrors[] = $label;
-        }
-      }
-    }
-    $errors = array_values(array_unique(array_merge($local, $aiErrors)));
-    $q = (int) ($ai['q'] ?? 5);
-    $q = max(0, min(10, $q));
-    $intent = ((int) ($ai['i'] ?? 0) === 1) ? 'Yes' : 'No';
-    $severity = !$errors ? 'NONE' : (array_filter($errors, static fn ($e) => isset($high[$e])) ? 'HIGH' : 'MEDIUM');
-    $results[] = array_merge($sv, [
-      'commentQuality' => $q,
-      'errorTypes' => $errors ? implode(', ', $errors) : 'None',
-      'errorSeverity' => $severity,
-      'buyingIntent' => $intent,
-      'observation' => trim((string) ($ai['o'] ?? '')),
-      'recommendation' => trim((string) ($ai['r'] ?? '')),
-    ]);
+    $results[] = ll_erp_sync_apply_ai_to_lead($lead, is_array($ai) ? $ai : null, $ai === null);
   }
   return $results;
 }
@@ -1851,16 +2086,92 @@ function ll_erp_sync_release_run_lock(array $job, string $ownerToken): array
   return $job;
 }
 
-/** Build same-host continue URL (/api or /dev/api). */
-function ll_erp_sync_continue_self_url(): string
+/** Build same-host ERP sync URL (/api or /dev/api). */
+function ll_erp_sync_self_url(string $action): string
 {
+  $action = trim($action, '/');
   $https = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off')
     || ((int) ($_SERVER['SERVER_PORT'] ?? 0) === 443)
     || (strtolower((string) ($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? '')) === 'https');
   $scheme = $https ? 'https' : 'http';
   $host = (string) ($_SERVER['HTTP_HOST'] ?? 'localhost');
   $prefix = ll_is_dev_request() ? '/dev/api' : '/api';
-  return $scheme . '://' . $host . $prefix . '/erp-sync/continue';
+  return $scheme . '://' . $host . $prefix . '/erp-sync/' . $action;
+}
+
+function ll_erp_sync_continue_self_url(): string
+{
+  return ll_erp_sync_self_url('continue');
+}
+
+/**
+ * @param array<string, string> $headers
+ */
+function ll_erp_sync_fire_and_forget_post(string $url, array $headers, string $body = '{}'): bool
+{
+  $parts = parse_url($url);
+  if (!is_array($parts) || empty($parts['host'])) {
+    return false;
+  }
+  $host = (string) $parts['host'];
+  $port = (int) ($parts['port'] ?? ((string) ($parts['scheme'] ?? 'https') === 'https' ? 443 : 80));
+  $path = (string) ($parts['path'] ?? '/');
+  if (!empty($parts['query'])) {
+    $path .= '?' . $parts['query'];
+  }
+  $ssl = ((string) ($parts['scheme'] ?? '')) === 'https';
+  $req = "POST {$path} HTTP/1.1\r\n";
+  $req .= "Host: {$host}\r\n";
+  $req .= "Content-Type: application/json\r\n";
+  foreach ($headers as $name => $value) {
+    $req .= $name . ': ' . $value . "\r\n";
+  }
+  $req .= 'Content-Length: ' . strlen($body) . "\r\n";
+  $req .= "Connection: Close\r\n\r\n";
+  $req .= $body;
+
+  $errno = 0;
+  $errstr = '';
+  $remote = ($ssl ? 'ssl://' : 'tcp://') . $host . ':' . $port;
+  $ctx = stream_context_create($ssl ? [
+    'ssl' => [
+      'verify_peer' => true,
+      'verify_peer_name' => true,
+      'SNI_enabled' => true,
+      'peer_name' => $host,
+    ],
+  ] : []);
+  $fp = @stream_socket_client($remote, $errno, $errstr, 1.5, STREAM_CLIENT_CONNECT, $ctx);
+  if (is_resource($fp)) {
+    stream_set_timeout($fp, 1);
+    @fwrite($fp, $req);
+    @fclose($fp);
+    return true;
+  }
+
+  if (!function_exists('curl_init')) {
+    return false;
+  }
+  $ch = curl_init($url);
+  if ($ch === false) {
+    return false;
+  }
+  $curlHeaders = ['Content-Type: application/json'];
+  foreach ($headers as $name => $value) {
+    $curlHeaders[] = $name . ': ' . $value;
+  }
+  curl_setopt_array($ch, [
+    CURLOPT_POST => true,
+    CURLOPT_POSTFIELDS => $body,
+    CURLOPT_HTTPHEADER => $curlHeaders,
+    CURLOPT_RETURNTRANSFER => true,
+    CURLOPT_TIMEOUT => 1,
+    CURLOPT_CONNECTTIMEOUT => 1,
+    CURLOPT_NOSIGNAL => 1,
+  ]);
+  @curl_exec($ch);
+  curl_close($ch);
+  return true;
 }
 
 /**
@@ -1882,73 +2193,45 @@ function ll_erp_sync_fire_self_chain_continue(): bool
   $job['chain_token_at'] = time();
   unset($job['running'], $job['running_since'], $job['running_token']);
   ll_erp_sync_save_job($job);
+  return ll_erp_sync_fire_and_forget_post(
+    ll_erp_sync_continue_self_url(),
+    ['X-ERP-Sync-Chain' => $token],
+    '{}'
+  );
+}
 
-  $url = ll_erp_sync_continue_self_url();
-  $parts = parse_url($url);
-  if (!is_array($parts) || empty($parts['host'])) {
-    return false;
+/**
+ * Keep-alive (every minute) starts the 6:00 AM IST daily pipeline.
+ * @return array{queued:bool}|null
+ */
+function ll_erp_sync_maybe_queue_daily_from_keepalive(string $source): ?array
+{
+  if ($source !== 'cron') {
+    return null;
   }
-  $host = (string) $parts['host'];
-  $port = (int) ($parts['port'] ?? ((string) ($parts['scheme'] ?? 'https') === 'https' ? 443 : 80));
-  $path = (string) ($parts['path'] ?? '/api/erp-sync/continue');
-  if (!empty($parts['query'])) {
-    $path .= '?' . $parts['query'];
+  $cfg = ll_erp_sync_load_config();
+  if (!ll_erp_sync_cron_should_start_daily($cfg)) {
+    return null;
   }
-  $ssl = ((string) ($parts['scheme'] ?? '')) === 'https';
-  $body = '{}';
-  $req = "POST {$path} HTTP/1.1\r\n";
-  $req .= "Host: {$host}\r\n";
-  $req .= "Content-Type: application/json\r\n";
-  $req .= 'X-ERP-Sync-Chain: ' . $token . "\r\n";
-  $req .= 'Content-Length: ' . strlen($body) . "\r\n";
-  $req .= "Connection: Close\r\n\r\n";
-  $req .= $body;
-
-  $errno = 0;
-  $errstr = '';
-  $remote = ($ssl ? 'ssl://' : 'tcp://') . $host . ':' . $port;
-  $ctx = null;
-  if ($ssl) {
-    $ctx = stream_context_create([
-      'ssl' => [
-        'verify_peer' => true,
-        'verify_peer_name' => true,
-        'SNI_enabled' => true,
-        'peer_name' => $host,
-      ],
-    ]);
+  $pendingAt = (int) ($cfg['daily_chain_token_at'] ?? 0);
+  if ($pendingAt > 0 && (time() - $pendingAt) < 90) {
+    return ['queued' => false];
   }
-  $fp = @stream_socket_client($remote, $errno, $errstr, 1.5, STREAM_CLIENT_CONNECT, $ctx ?: stream_context_create());
-  if (is_resource($fp)) {
-    stream_set_timeout($fp, 1);
-    @fwrite($fp, $req);
-    // Do not wait for the response body — next PHP worker continues the audit.
-    @fclose($fp);
-    return true;
+  try {
+    $token = bin2hex(random_bytes(16));
+  } catch (Throwable $e) {
+    $token = sha1(uniqid('erp-daily', true));
   }
-
-  if (function_exists('curl_init')) {
-    $ch = curl_init($url);
-    if ($ch === false) {
-      return false;
-    }
-    curl_setopt_array($ch, [
-      CURLOPT_POST => true,
-      CURLOPT_POSTFIELDS => $body,
-      CURLOPT_HTTPHEADER => [
-        'Content-Type: application/json',
-        'X-ERP-Sync-Chain: ' . $token,
-      ],
-      CURLOPT_RETURNTRANSFER => true,
-      CURLOPT_TIMEOUT => 1,
-      CURLOPT_CONNECTTIMEOUT => 1,
-      CURLOPT_NOSIGNAL => 1,
-    ]);
-    @curl_exec($ch);
-    curl_close($ch);
-    return true;
-  }
-  return false;
+  ll_erp_sync_persist_config_fields([
+    'daily_chain_token' => $token,
+    'daily_chain_token_at' => time(),
+  ]);
+  $ok = ll_erp_sync_fire_and_forget_post(
+    ll_erp_sync_self_url('daily'),
+    ['X-ERP-Sync-Chain' => $token],
+    '{}'
+  );
+  return ['queued' => $ok];
 }
 
 /**
@@ -2382,6 +2665,33 @@ function ll_erp_sync_daily_kickoff(array $actor): array
   if ($actor['username'] === 'erp-sync-cron' && !ll_erp_sync_daily_is_enabled($cfg)) {
     return ['ok' => false, 'error' => 'Daily ERP pipeline is disabled', 'status' => 'disabled'];
   }
+  $isCron = $actor['username'] === 'erp-sync-cron';
+  if ($isCron && !ll_erp_sync_in_daily_window()) {
+    $job = ll_erp_sync_load_job();
+    if (is_array($job) && ($job['status'] ?? '') === 'auditing') {
+      return ll_erp_sync_continue_job($actor);
+    }
+    return [
+      'ok' => true,
+      'idle' => true,
+      'skipped_window' => true,
+      'status' => 'outside_ist_window',
+      'message' => 'Daily cron is ignored outside 6:00 AM IST (05:55–06:45). Keep-alive starts the pipeline at 6:00 AM IST.',
+    ];
+  }
+  if ($isCron && !ll_erp_sync_cron_should_start_daily($cfg)) {
+    $job = ll_erp_sync_load_job();
+    if (is_array($job) && ($job['status'] ?? '') === 'auditing') {
+      return ll_erp_sync_continue_job($actor);
+    }
+    return [
+      'ok' => true,
+      'idle' => true,
+      'status' => 'already_ran_today',
+      'message' => 'Daily pipeline already started today (IST).',
+    ];
+  }
+  ll_erp_sync_mark_daily_kickoff_today();
   return ll_erp_sync_run($actor, true, false, [
     'auto_publish_key' => 'cron_auto_publish',
     'record_daily' => true,
