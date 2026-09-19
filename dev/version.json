@@ -1,5 +1,5 @@
 {
-  "version": "7.1.1.dev",
+  "version": "7.2.0.dev",
   "name": "GPP AI",
-  "notes": "v7.1.1.dev: Team Forms Task Builder under Form Builder — pick a template and create snapshot tasks (Assign To, Status, Reviewer + custom fields)."
+  "notes": "v7.2.0.dev: Team Forms Task Builder wizard (form → create → fill → assign), assignee read-only answers, comment status snapshot with attachments and time spent, Submit after Completed, Task History, and assign/reviewer rules (no self-assign, no self-approve/close, assignee ≠ reviewer, multiple reviewers)."
 }
