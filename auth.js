@@ -1,8 +1,8 @@
 /**
  * Session helpers + permission checks for LeadLens shells.
  */
-import {AuthApi} from './api-client.js?v=6.3.0.stable';
-import {appUrl, homePath, isHomePath} from './app-base.js?v=6.3.0.stable';
+import {AuthApi} from './api-client.js?v=6.3.1.stable';
+import {appUrl, homePath, isHomePath} from './app-base.js?v=6.3.1.stable';
 
 let currentUser = null;
 

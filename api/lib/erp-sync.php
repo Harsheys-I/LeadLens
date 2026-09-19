@@ -55,10 +55,16 @@ function ll_erp_sync_default_config(): array
     'report_url' => '',
     'http_method' => 'GET',
     'extra_headers' => new stdClass(),
+    /** @deprecated Prefer daily_enabled — kept so older cron /run gates still work */
     'enabled' => false,
+    /** Daily 6 AM IST kickoff: fetch → server AI audit → optional publish */
+    'daily_enabled' => false,
     'keepalive_enabled' => false,
     'keepalive_url' => '',
+    /** Manual / advanced server-audit path (defaults off) */
     'auto_publish' => false,
+    /** Scheduled daily/continue path — defaults on so dashboards upload after audit */
+    'cron_auto_publish' => true,
     'batch_size' => 10,
     'max_leads_per_run' => 40,
     'rows_path' => '',
@@ -67,6 +73,7 @@ function ll_erp_sync_default_config(): array
     'cron_secret_configured' => false,
     'last_status' => null,
     'last_keepalive' => null,
+    'last_daily_status' => null,
   ];
 }
 
@@ -79,6 +86,13 @@ function ll_erp_sync_load_config(): array
     $decoded = json_decode((string) $row['setting_value'], true);
     if (is_array($decoded)) {
       $base = array_merge($base, $decoded);
+      // Migrate older configs that only had `enabled`.
+      if (!array_key_exists('daily_enabled', $decoded) && !empty($decoded['enabled'])) {
+        $base['daily_enabled'] = true;
+      }
+      if (!array_key_exists('cron_auto_publish', $decoded)) {
+        $base['cron_auto_publish'] = true;
+      }
     }
   }
   if (!isset($base['field_map']) || !is_array($base['field_map'])) {
@@ -154,6 +168,14 @@ function ll_erp_sync_save_config(array $body, int $userId): array
   if (array_key_exists('enabled', $body)) {
     $next['enabled'] = (bool) $body['enabled'];
   }
+  if (array_key_exists('daily_enabled', $body)) {
+    $next['daily_enabled'] = (bool) $body['daily_enabled'];
+    // Keep legacy `enabled` in sync so older /run cron jobs still gate correctly.
+    $next['enabled'] = (bool) $body['daily_enabled'];
+  } elseif (array_key_exists('enabled', $body)) {
+    // Saving only legacy checkbox still drives daily_enabled.
+    $next['daily_enabled'] = (bool) $body['enabled'];
+  }
   if (array_key_exists('keepalive_enabled', $body)) {
     $next['keepalive_enabled'] = (bool) $body['keepalive_enabled'];
   }
@@ -162,6 +184,9 @@ function ll_erp_sync_save_config(array $body, int $userId): array
   }
   if (array_key_exists('auto_publish', $body)) {
     $next['auto_publish'] = (bool) $body['auto_publish'];
+  }
+  if (array_key_exists('cron_auto_publish', $body)) {
+    $next['cron_auto_publish'] = (bool) $body['cron_auto_publish'];
   }
   if (array_key_exists('batch_size', $body)) {
     $next['batch_size'] = max(1, min(20, (int) $body['batch_size']));
@@ -314,6 +339,44 @@ function ll_erp_sync_set_last_keepalive(array $status): void
   if ($json !== false) {
     ll_setting_set(LL_ERP_SYNC_CONFIG_KEY, $json, null);
   }
+}
+
+/** @param array<string, mixed> $status */
+function ll_erp_sync_set_last_daily_status(array $status): void
+{
+  $cfg = ll_erp_sync_load_config();
+  unset($status['cookie'], $status['request_headers'], $status['body'], $status['leads'], $status['results']);
+  $cfg['last_daily_status'] = $status;
+  unset($cfg['cookie_configured'], $cfg['cron_secret_configured']);
+  $json = json_encode($cfg, JSON_UNESCAPED_UNICODE);
+  if ($json !== false) {
+    ll_setting_set(LL_ERP_SYNC_CONFIG_KEY, $json, null);
+  }
+}
+
+/** Daily pipeline is on when either the new or legacy flag is set. */
+function ll_erp_sync_daily_is_enabled(array $cfg): bool
+{
+  return !empty($cfg['daily_enabled']) || !empty($cfg['enabled']);
+}
+
+/**
+ * Resolve auto-publish for a run mode.
+ * @param 'auto_publish'|'cron_auto_publish' $key
+ */
+function ll_erp_sync_resolve_auto_publish(array $cfg, string $key, bool $dryRun): bool
+{
+  if ($dryRun) {
+    return false;
+  }
+  if ($key === 'cron_auto_publish') {
+    // Default ON when key absent (older saved configs).
+    if (!array_key_exists('cron_auto_publish', $cfg)) {
+      return true;
+    }
+    return !empty($cfg['cron_auto_publish']);
+  }
+  return !empty($cfg['auto_publish']);
 }
 
 /**
@@ -1633,29 +1696,73 @@ function ll_erp_sync_save_job(?array $job): void
 
 /**
  * Full or resumable pipeline: fetch → parse → audit → optional publish.
+ *
+ * @param array{auto_publish_key?:string,record_daily?:bool,continue_only?:bool,skip_enabled_check?:bool} $opts
  * @return array<string, mixed>
  */
-function ll_erp_sync_run(array $actor, bool $forceFetch = false, bool $dryRun = false): array
+function ll_erp_sync_run(array $actor, bool $forceFetch = false, bool $dryRun = false, array $opts = []): array
 {
   @set_time_limit(240);
   $cfg = ll_erp_sync_load_config();
-  if (empty($cfg['enabled']) && empty($forceFetch) && $actor['username'] === 'erp-sync-cron') {
+  $autoPublishKey = (string) ($opts['auto_publish_key'] ?? 'auto_publish');
+  if ($autoPublishKey !== 'cron_auto_publish') {
+    $autoPublishKey = 'auto_publish';
+  }
+  $recordDaily = !empty($opts['record_daily']);
+  $continueOnly = !empty($opts['continue_only']);
+
+  if (
+    empty($opts['skip_enabled_check'])
+    && empty($forceFetch)
+    && $actor['username'] === 'erp-sync-cron'
+    && !ll_erp_sync_daily_is_enabled($cfg)
+  ) {
     return ['ok' => false, 'error' => 'ERP sync is disabled', 'status' => 'disabled'];
   }
 
   $job = ll_erp_sync_load_job();
   $resume = is_array($job) && ($job['status'] ?? '') === 'auditing' && !empty($job['leads']);
 
+  if ($continueOnly) {
+    if (!$resume) {
+      return [
+        'ok' => true,
+        'idle' => true,
+        'status' => 'idle',
+        'needs_continue' => false,
+        'message' => 'No in-progress audit job',
+      ];
+    }
+    $forceFetch = false;
+  }
+
   if (!$resume || $forceFetch) {
+    if ($continueOnly) {
+      return [
+        'ok' => true,
+        'idle' => true,
+        'status' => 'idle',
+        'needs_continue' => false,
+        'message' => 'No in-progress audit job',
+      ];
+    }
     $url = trim((string) ($cfg['report_url'] ?? ''));
     $cookie = ll_erp_sync_cookie_plaintext();
     if ($url === '') {
-      ll_erp_sync_set_last_status(['ok' => false, 'phase' => 'fetch', 'error' => 'Report URL not configured', 'at' => gmdate('c')]);
+      $fail = ['ok' => false, 'phase' => 'fetch', 'error' => 'Report URL not configured', 'at' => gmdate('c')];
+      ll_erp_sync_set_last_status($fail);
+      if ($recordDaily) {
+        ll_erp_sync_set_last_daily_status(array_merge($fail, ['source' => 'daily']));
+      }
       return ['ok' => false, 'error' => 'Report URL not configured', 'phase' => 'fetch'];
     }
     if ($cookie === null) {
-      ll_erp_sync_set_last_status(['ok' => false, 'phase' => 'fetch', 'error' => 'Cookie not configured', 'session_expired' => true, 'at' => gmdate('c')]);
-      return ['ok' => false, 'error' => 'Cookie not configured — paste Cookie header in /dev ERP Sync', 'phase' => 'fetch', 'session_expired' => true];
+      $fail = ['ok' => false, 'phase' => 'fetch', 'error' => 'Cookie not configured', 'session_expired' => true, 'at' => gmdate('c')];
+      ll_erp_sync_set_last_status($fail);
+      if ($recordDaily) {
+        ll_erp_sync_set_last_daily_status(array_merge($fail, ['source' => 'daily']));
+      }
+      return ['ok' => false, 'error' => 'Cookie not configured — paste Cookie header in ERP Sync', 'phase' => 'fetch', 'session_expired' => true];
     }
     $extra = $cfg['extra_headers'] ?? [];
     if ($extra instanceof stdClass) {
@@ -1663,14 +1770,18 @@ function ll_erp_sync_run(array $actor, bool $forceFetch = false, bool $dryRun = 
     }
     $fetch = ll_erp_sync_http_fetch($url, (string) ($cfg['http_method'] ?? 'GET'), $cookie, (array) $extra);
     if (!empty($fetch['session_expired'])) {
-      ll_erp_sync_set_last_status([
+      $fail = [
         'ok' => false,
         'phase' => 'fetch',
         'error' => $fetch['error'] ?? 'session_expired',
         'session_expired' => true,
         'http_status' => $fetch['status'],
         'at' => gmdate('c'),
-      ]);
+      ];
+      ll_erp_sync_set_last_status($fail);
+      if ($recordDaily) {
+        ll_erp_sync_set_last_daily_status(array_merge($fail, ['source' => 'daily']));
+      }
       ll_erp_sync_save_job(null);
       return [
         'ok' => false,
@@ -1680,13 +1791,17 @@ function ll_erp_sync_run(array $actor, bool $forceFetch = false, bool $dryRun = 
       ];
     }
     if (empty($fetch['ok'])) {
-      ll_erp_sync_set_last_status([
+      $fail = [
         'ok' => false,
         'phase' => 'fetch',
         'error' => $fetch['error'] ?? 'fetch failed',
         'http_status' => $fetch['status'],
         'at' => gmdate('c'),
-      ]);
+      ];
+      ll_erp_sync_set_last_status($fail);
+      if ($recordDaily) {
+        ll_erp_sync_set_last_daily_status(array_merge($fail, ['source' => 'daily']));
+      }
       return ['ok' => false, 'error' => $fetch['error'] ?? 'fetch failed', 'phase' => 'fetch'];
     }
 
@@ -1695,6 +1810,11 @@ function ll_erp_sync_run(array $actor, bool $forceFetch = false, bool $dryRun = 
     if ($format === 'json') {
       $decoded = json_decode($fetch['body'], true);
       if (!is_array($decoded)) {
+        $fail = ['ok' => false, 'phase' => 'parse', 'error' => 'Invalid JSON payload', 'at' => gmdate('c')];
+        ll_erp_sync_set_last_status($fail);
+        if ($recordDaily) {
+          ll_erp_sync_set_last_daily_status(array_merge($fail, ['source' => 'daily']));
+        }
         return ['ok' => false, 'error' => 'Invalid JSON payload', 'phase' => 'parse'];
       }
       [$rows] = ll_erp_sync_extract_rows($decoded, (string) ($cfg['rows_path'] ?? ''));
@@ -1702,14 +1822,34 @@ function ll_erp_sync_run(array $actor, bool $forceFetch = false, bool $dryRun = 
       try {
         $rows = ll_erp_sync_parse_xlsx_rows($fetch['body']);
       } catch (Throwable $e) {
+        $fail = ['ok' => false, 'phase' => 'parse', 'error' => $e->getMessage(), 'at' => gmdate('c')];
+        ll_erp_sync_set_last_status($fail);
+        if ($recordDaily) {
+          ll_erp_sync_set_last_daily_status(array_merge($fail, ['source' => 'daily']));
+        }
         return ['ok' => false, 'error' => $e->getMessage(), 'phase' => 'parse'];
       }
     } else {
+      $fail = ['ok' => false, 'phase' => 'parse', 'error' => 'Unsupported payload format', 'at' => gmdate('c')];
+      ll_erp_sync_set_last_status($fail);
+      if ($recordDaily) {
+        ll_erp_sync_set_last_daily_status(array_merge($fail, ['source' => 'daily']));
+      }
       return ['ok' => false, 'error' => 'Unsupported payload format', 'phase' => 'parse'];
     }
 
     $mapped = ll_erp_sync_map_to_leads($rows, (array) ($cfg['field_map'] ?? ll_erp_sync_default_field_map()));
     if (!empty($mapped['missing_required'])) {
+      $fail = [
+        'ok' => false,
+        'phase' => 'parse',
+        'error' => 'Missing required field mapping: ' . implode(', ', $mapped['missing_required']),
+        'at' => gmdate('c'),
+      ];
+      ll_erp_sync_set_last_status($fail);
+      if ($recordDaily) {
+        ll_erp_sync_set_last_daily_status(array_merge($fail, ['source' => 'daily']));
+      }
       return [
         'ok' => false,
         'error' => 'Missing required field mapping: ' . implode(', ', $mapped['missing_required']),
@@ -1718,7 +1858,19 @@ function ll_erp_sync_run(array $actor, bool $forceFetch = false, bool $dryRun = 
       ];
     }
     if (!$mapped['leads']) {
+      $fail = ['ok' => false, 'phase' => 'parse', 'error' => 'No leads mapped from ERP payload', 'at' => gmdate('c')];
+      ll_erp_sync_set_last_status($fail);
+      if ($recordDaily) {
+        ll_erp_sync_set_last_daily_status(array_merge($fail, ['source' => 'daily']));
+      }
       return ['ok' => false, 'error' => 'No leads mapped from ERP payload', 'phase' => 'parse'];
+    }
+
+    // Keep latest-leads.json in sync (manual Audit handoff still works after a daily fetch).
+    try {
+      ll_erp_sync_store_mapped_leads($mapped, $file, $fetch['content_type']);
+    } catch (Throwable $e) {
+      // Non-fatal for cron audit; job still holds leads in settings.
     }
 
     $job = [
@@ -1732,8 +1884,22 @@ function ll_erp_sync_run(array $actor, bool $forceFetch = false, bool $dryRun = 
       'lead_count' => $mapped['lead_count'],
       'started_at' => gmdate('c'),
       'actor_name' => $actor['display_name'] ?? $actor['username'] ?? 'system',
+      'pipeline' => $recordDaily ? 'daily' : 'manual',
     ];
     ll_erp_sync_save_job($job);
+    if ($recordDaily) {
+      ll_erp_sync_set_last_daily_status([
+        'ok' => true,
+        'phase' => 'audit',
+        'source' => 'daily',
+        'partial' => true,
+        'needs_continue' => true,
+        'lead_count' => $mapped['lead_count'],
+        'done' => 0,
+        'at' => gmdate('c'),
+        'message' => 'Fetched ' . $mapped['lead_count'] . ' leads — auditing…',
+      ]);
+    }
   }
 
   $settings = ll_erp_sync_audit_settings();
@@ -1754,14 +1920,18 @@ function ll_erp_sync_run(array $actor, bool $forceFetch = false, bool $dryRun = 
       $job['cursor'] = $cursor;
       $job['results'] = $results;
       ll_erp_sync_save_job($job);
-      ll_erp_sync_set_last_status([
+      $fail = [
         'ok' => false,
         'phase' => 'audit',
         'error' => $e->getMessage(),
         'cursor' => $cursor,
         'lead_count' => count($leads),
         'at' => gmdate('c'),
-      ]);
+      ];
+      ll_erp_sync_set_last_status($fail);
+      if ($recordDaily) {
+        ll_erp_sync_set_last_daily_status(array_merge($fail, ['source' => 'daily']));
+      }
       return [
         'ok' => false,
         'error' => $e->getMessage(),
@@ -1783,34 +1953,35 @@ function ll_erp_sync_run(array $actor, bool $forceFetch = false, bool $dryRun = 
   }
 
   if ($cursor < count($leads)) {
-    ll_erp_sync_set_last_status([
+    $partial = [
       'ok' => true,
       'phase' => 'audit',
-      'partial' => true,
-      'cursor' => $cursor,
-      'lead_count' => count($leads),
-      'done' => count($results),
-      'at' => gmdate('c'),
-    ]);
-    return [
-      'ok' => true,
       'partial' => true,
       'needs_continue' => true,
       'complete' => false,
-      'phase' => 'audit',
-      'message' => 'Audited ' . count($results) . ' / ' . count($leads) . ' leads — call run again to continue',
       'cursor' => $cursor,
       'lead_count' => count($leads),
       'done' => count($results),
       'audited' => count($results),
       'total' => count($leads),
+      'at' => gmdate('c'),
     ];
+    ll_erp_sync_set_last_status($partial);
+    if ($recordDaily) {
+      ll_erp_sync_set_last_daily_status(array_merge($partial, [
+        'source' => 'daily',
+        'message' => 'Audited ' . count($results) . ' / ' . count($leads) . ' — continue cron will resume',
+      ]));
+    }
+    return array_merge($partial, [
+      'message' => 'Audited ' . count($results) . ' / ' . count($leads) . ' leads — call continue (or run) again',
+    ]);
   }
 
   $sourceFile = (string) ($job['source_file'] ?? 'ERP sync');
   $dashboards = ll_erp_sync_build_dashboards($results, $sourceFile);
   $published = null;
-  $autoPublish = !empty($cfg['auto_publish']) && !$dryRun;
+  $autoPublish = ll_erp_sync_resolve_auto_publish($cfg, $autoPublishKey, $dryRun);
 
   if ($autoPublish && $dashboards) {
     $published = ll_publish_telecaller_dashboards($dashboards, $actor);
@@ -1819,7 +1990,9 @@ function ll_erp_sync_run(array $actor, bool $forceFetch = false, bool $dryRun = 
     $job['published_count'] = count($published['published'] ?? []);
   } else {
     $job['status'] = 'ready';
-    $job['publish_skipped'] = $dryRun ? 'dry_run' : (empty($cfg['auto_publish']) ? 'auto_publish_off' : 'no_dashboards');
+    $job['publish_skipped'] = $dryRun
+      ? 'dry_run'
+      : (!$autoPublish ? ($autoPublishKey === 'cron_auto_publish' ? 'cron_auto_publish_off' : 'auto_publish_off') : 'no_dashboards');
   }
   ll_erp_sync_save_job($job);
 
@@ -1840,6 +2013,14 @@ function ll_erp_sync_run(array $actor, bool $forceFetch = false, bool $dryRun = 
     'at' => gmdate('c'),
   ];
   ll_erp_sync_set_last_status($status);
+  if ($recordDaily) {
+    ll_erp_sync_set_last_daily_status(array_merge($status, [
+      'source' => 'daily',
+      'message' => $autoPublish
+        ? ('Published ' . ($status['published_count'] ?? 0) . ' TeleCaller dashboard(s)')
+        : 'Audit complete — publish skipped (cron auto-publish off)',
+    ]));
+  }
 
   return array_merge(['ok' => true], $status, [
     'dashboards_preview' => array_map(static fn ($d) => [
@@ -1848,6 +2029,54 @@ function ll_erp_sync_run(array $actor, bool $forceFetch = false, bool $dryRun = 
       'title' => $d['title'],
     ], $dashboards),
     'published' => $published,
+  ]);
+}
+
+/**
+ * Cron daily kickoff: always fresh fetch + start/continue audit batch + publish when done.
+ * @return array<string, mixed>
+ */
+function ll_erp_sync_daily_kickoff(array $actor): array
+{
+  $cfg = ll_erp_sync_load_config();
+  if ($actor['username'] === 'erp-sync-cron' && !ll_erp_sync_daily_is_enabled($cfg)) {
+    return ['ok' => false, 'error' => 'Daily ERP pipeline is disabled', 'status' => 'disabled'];
+  }
+  return ll_erp_sync_run($actor, true, false, [
+    'auto_publish_key' => 'cron_auto_publish',
+    'record_daily' => true,
+    'skip_enabled_check' => true,
+  ]);
+}
+
+/**
+ * Resume in-progress daily/server audit only. No-ops when idle.
+ * @return array<string, mixed>
+ */
+function ll_erp_sync_continue_job(array $actor): array
+{
+  $cfg = ll_erp_sync_load_config();
+  if ($actor['username'] === 'erp-sync-cron' && !ll_erp_sync_daily_is_enabled($cfg)) {
+    return ['ok' => true, 'idle' => true, 'status' => 'disabled', 'message' => 'Daily ERP pipeline is disabled'];
+  }
+  $job = ll_erp_sync_load_job();
+  $isDailyJob = is_array($job) && (($job['pipeline'] ?? '') === 'daily' || ($job['status'] ?? '') === 'auditing');
+  // Continue any auditing job (daily or advanced) so one cron covers both.
+  if (!is_array($job) || ($job['status'] ?? '') !== 'auditing') {
+    return [
+      'ok' => true,
+      'idle' => true,
+      'status' => 'idle',
+      'needs_continue' => false,
+      'message' => 'No in-progress audit job',
+    ];
+  }
+  $recordDaily = $isDailyJob || (($job['pipeline'] ?? '') === 'daily');
+  return ll_erp_sync_run($actor, false, false, [
+    'auto_publish_key' => $recordDaily ? 'cron_auto_publish' : 'auto_publish',
+    'record_daily' => $recordDaily,
+    'continue_only' => true,
+    'skip_enabled_check' => true,
   ]);
 }
 

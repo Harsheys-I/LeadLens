@@ -1,5 +1,5 @@
 {
-  "version": "6.3.0.stable",
+  "version": "6.3.1.stable",
   "name": "GPP AI",
-  "notes": "v6.3.0.stable: ERP Sync live for Super User — Sync nav on first paint, Fetch→Audit handoff, session keep-alive; API unlocked on production."
+  "notes": "v6.3.1.stable: Unattended ERP Sync daily pipeline — cron fetch + server AI audit + auto-publish at 6:00 AM IST, with continue cron for Hostinger time limits."
 }
