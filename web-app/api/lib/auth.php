@@ -29,8 +29,20 @@ function ll_public_user(?array $row): ?array
     return null;
   }
   $permissions = ll_normalize_permissions($row['permissions'] ?? []);
+  $userId = (int) $row['id'];
+  $memberships = [];
+  if (is_file(__DIR__ . '/team-forms.php')) {
+    require_once __DIR__ . '/team-forms.php';
+    if (function_exists('ll_tf_org_memberships')) {
+      try {
+        $memberships = ll_tf_org_memberships($userId);
+      } catch (Throwable $e) {
+        $memberships = [];
+      }
+    }
+  }
   return [
-    'id' => (int) $row['id'],
+    'id' => $userId,
     'username' => (string) $row['username'],
     'display_name' => (string) ($row['display_name'] ?? ''),
     'role_id' => (int) $row['role_id'],
@@ -44,6 +56,7 @@ function ll_public_user(?array $row): ?array
     'must_change_password' => (int) ($row['must_change_password'] ?? 0) === 1,
     'permissions' => $permissions,
     'is_super' => (($row['role_key'] ?? '') === 'super') || ((int) ($row['role_rank'] ?? 0) >= 100),
+    'org_memberships' => $memberships,
   ];
 }
 

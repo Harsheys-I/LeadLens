@@ -37,6 +37,10 @@ try {
       require __DIR__ . '/routes/sales-graph.php';
       ll_route_sales_graph($action, $id);
       break;
+    case 'team-forms':
+      require __DIR__ . '/routes/team-forms.php';
+      ll_route_team_forms($action, $id, $parts);
+      break;
     case 'settings':
       require __DIR__ . '/routes/settings.php';
       ll_route_settings($action);

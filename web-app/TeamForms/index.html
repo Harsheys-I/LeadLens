@@ -1,0 +1,240 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" media="(prefers-color-scheme: light)" content="#12372a">
+  <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#0f2d22">
+  <meta name="description" content="GPP AI Team Forms">
+  <title>GPP AI · Team Forms</title>
+  <meta name="app-version" content="7.0.0.dev">
+  <script src="../theme-boot.js?v=7.0.0.dev"></script>
+  <script src="../motion.js?v=7.0.0.dev"></script>
+  <link rel="manifest" href="../manifest.webmanifest">
+  <link rel="stylesheet" href="../styles.css?v=7.0.0.dev">
+  <script type="module" src="../team-forms.js?v=7.0.0.dev"></script>
+</head>
+<body>
+  <div id="update-banner" class="update-banner hidden" role="status">
+    <div id="update-banner-text"></div>
+    <button id="reload-app" type="button" class="primary-button">Hard reload now</button>
+  </div>
+  <div class="shell">
+    <aside class="sidebar">
+      <a class="brand" href="../"><img class="brand-mark" src="../assets/gpp-ai-logo.png" alt="" width="48" height="28"><span>GPP AI</span></a>
+      <nav aria-label="Team Forms navigation">
+        <button class="nav-item active" data-view="workspace"><span>◎</span>My workspace</button>
+        <button class="nav-item hidden" data-view="org" data-perm="team_forms.manage_org"><span>▣</span>Org</button>
+        <button class="nav-item" data-view="builder"><span>✎</span>Form builder</button>
+        <button class="nav-item" data-view="review"><span>▦</span>Review board</button>
+        <button class="nav-item hidden" data-view="task"><span>·</span>Task</button>
+      </nav>
+      <div class="privacy-note"><strong id="sidebar-version">Team Forms</strong><span id="sidebar-notes">Departments → Groups → forms, assign &amp; review.</span></div>
+    </aside>
+
+    <main>
+      <header class="topbar">
+        <button id="mobile-menu" class="icon-button" aria-label="Toggle navigation">☰</button>
+        <div><p class="eyebrow">TEAM FORMS</p><h1 id="page-title">My workspace</h1></div>
+        <div class="topbar-actions">
+          <span id="shell-user-label" class="topbar-user-label"></span>
+          <button type="button" id="notif-bell" class="notif-bell notif-bell-chrome" title="Notifications" aria-label="Notifications">
+            <span id="notif-count" class="notif-count hidden">0</span>
+          </button>
+          <button type="button" id="shell-account" class="secondary-button">Account</button>
+          <button type="button" id="shell-logout" class="secondary-button">Sign out</button>
+        </div>
+      </header>
+
+      <section id="view-workspace" class="view active">
+        <div class="section-head">
+          <div>
+            <h2>My workspace</h2>
+            <p>Your departments, groups, and forms assigned to you.</p>
+          </div>
+          <button id="ws-refresh" type="button" class="secondary-button">Refresh</button>
+        </div>
+        <div id="ws-memberships" class="tf-panel"></div>
+        <div class="section-head" style="margin-top:28px">
+          <div><h2>Assigned to me</h2><p>Open a task to fill fields, update status, and comment.</p></div>
+        </div>
+        <div id="ws-tasks" class="admin-table-wrap"></div>
+      </section>
+
+      <section id="view-org" class="view">
+        <div class="section-head">
+          <div>
+            <h2>Organization</h2>
+            <p>Departments → Groups → team members with roles (Form Creator, Reviewer, Assignee).</p>
+          </div>
+          <div class="inline-actions">
+            <button id="org-new-dept" type="button" class="primary-button">New department</button>
+            <button id="org-refresh" type="button" class="secondary-button">Refresh</button>
+          </div>
+        </div>
+        <div id="org-tree" class="tf-panel"></div>
+      </section>
+
+      <section id="view-builder" class="view">
+        <div class="section-head">
+          <div>
+            <h2>Form builder</h2>
+            <p>Create forms for groups where you are a Form Creator. Add fields, then assign.</p>
+          </div>
+          <div class="inline-actions">
+            <button id="builder-new-form" type="button" class="primary-button">New form</button>
+            <button id="builder-refresh" type="button" class="secondary-button">Refresh</button>
+          </div>
+        </div>
+        <div class="tf-builder-layout">
+          <div>
+            <label class="tf-inline-label">Group
+              <select id="builder-group"></select>
+            </label>
+            <div id="builder-forms" class="admin-table-wrap" style="margin-top:12px"></div>
+          </div>
+          <div id="builder-editor" class="tf-panel hidden">
+            <div class="section-head">
+              <div>
+                <h3 id="builder-form-title">Form</h3>
+                <p id="builder-form-meta" class="muted"></p>
+              </div>
+              <div class="inline-actions">
+                <button id="builder-add-field" type="button" class="secondary-button">Add field</button>
+                <button id="builder-assign" type="button" class="primary-button">Assign</button>
+              </div>
+            </div>
+            <div id="builder-fields"></div>
+          </div>
+        </div>
+      </section>
+
+      <section id="view-review" class="view">
+        <div class="section-head">
+          <div>
+            <h2>Review board</h2>
+            <p>Live progress for tasks in your reviewer scope. Polls every few seconds while this view is open.</p>
+          </div>
+          <div class="inline-actions">
+            <span id="review-poll-status" class="muted"></span>
+            <button id="review-refresh" type="button" class="secondary-button">Refresh</button>
+          </div>
+        </div>
+        <div id="review-board" class="admin-table-wrap"></div>
+      </section>
+
+      <section id="view-task" class="view">
+        <div class="section-head">
+          <div>
+            <button id="task-back" type="button" class="text-button">← Back</button>
+            <h2 id="task-title">Task</h2>
+            <p id="task-meta" class="muted"></p>
+          </div>
+          <div class="inline-actions" id="task-actions"></div>
+        </div>
+        <div id="task-progress" class="tf-progress hidden"></div>
+        <div id="task-form" class="tf-panel"></div>
+        <div class="tf-panel" style="margin-top:16px">
+          <h3>Comments</h3>
+          <div id="task-comments"></div>
+          <div class="inline-actions" style="margin-top:12px">
+            <input id="task-comment-input" type="text" placeholder="Add a comment" style="flex:1;min-width:180px">
+            <button id="task-comment-send" type="button" class="secondary-button">Send</button>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+  <div id="tf-modal" class="key-modal hidden" role="dialog" aria-modal="true">
+    <div class="key-modal-card admin-modal-card">
+      <h2 id="tf-modal-title">Dialog</h2>
+      <form id="tf-modal-form" class="auth-form" autocomplete="off">
+        <div id="tf-modal-body"></div>
+        <div id="tf-modal-message" class="form-message"></div>
+        <div class="inline-actions">
+          <button type="submit" class="primary-button">Save</button>
+          <button type="button" id="tf-modal-cancel" class="text-button">Cancel</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div id="account-modal" class="key-modal hidden" role="dialog" aria-modal="true">
+    <div class="key-modal-card">
+      <p class="eyebrow">ACCOUNT</p>
+      <h2>Your profile</h2>
+      <p class="key-modal-copy">Update username or password.</p>
+      <label>Username<input id="account-username" type="text"></label>
+      <label>Display name<input id="account-display" type="text"></label>
+      <label>Appearance
+        <select data-theme-select aria-label="Theme">
+          <option value="system">System</option>
+          <option value="light">Light</option>
+          <option value="dark">Dark</option>
+        </select>
+      </label>
+      <hr class="account-divider">
+      <p class="muted">Change password (optional)</p>
+      <label>Current password<input id="account-pw-current" type="password"></label>
+      <label>New password<input id="account-pw-new" type="password"></label>
+      <label>Confirm new password<input id="account-pw-confirm" type="password"></label>
+      <div id="account-message" class="form-message"></div>
+      <div class="inline-actions">
+        <button id="account-save" type="button" class="primary-button">Save</button>
+        <button id="account-cancel" type="button" class="text-button">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="notif-drawer" class="notif-drawer hidden" aria-live="polite" role="dialog" aria-label="Notifications">
+    <div class="notif-drawer-head">
+      <div class="notif-drawer-title">
+        <span class="notif-drawer-mark" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M15 17h5l-1.4-1.4A2 2 0 0 1 18 14.2V11a6 6 0 1 0-12 0v3.2c0 .5-.2 1-.6 1.4L4 17h5"/><path d="M9.5 17a2.5 2.5 0 0 0 5 0"/></svg>
+        </span>
+        <div>
+          <strong>Notifications</strong>
+          <p class="notif-drawer-sub" id="notif-unread-label">Loading…</p>
+        </div>
+      </div>
+      <div class="notif-drawer-actions">
+        <button type="button" id="notif-mark-all" class="notif-action-btn">Mark all read</button>
+        <button type="button" id="notif-clear-all" class="notif-action-btn">Clear all</button>
+        <button type="button" id="notif-close" class="notif-close-btn" aria-label="Close">×</button>
+      </div>
+    </div>
+    <div id="notif-list" class="notif-list"></div>
+  </div>
+
+  <style>
+    .tf-panel{border:1px solid var(--line);border-radius:12px;background:var(--panel);padding:16px 18px}
+    .tf-builder-layout{display:grid;gap:18px;grid-template-columns:minmax(240px,340px) 1fr}
+    @media (max-width:900px){.tf-builder-layout{grid-template-columns:1fr}}
+    .tf-inline-label{display:grid;gap:6px;font-size:13px;font-weight:650}
+    .tf-inline-label select,.tf-inline-label input{width:100%;border:1px solid var(--input-border);border-radius:9px;background:var(--input-bg);padding:10px 11px;color:var(--ink)}
+    .tf-role-chip{display:inline-block;font-size:11px;font-weight:650;padding:2px 8px;border-radius:999px;border:1px solid var(--line);background:var(--soft-3);margin:0 4px 4px 0}
+    .tf-dept-block{margin-bottom:22px}
+    .tf-dept-block h3{margin:0 0 8px;font-size:18px;font-family:Georgia,serif;font-weight:500}
+    .tf-group-card{border:1px solid var(--line);border-radius:10px;padding:12px 14px;margin:10px 0;background:var(--soft-3)}
+    .tf-group-card .inline-actions{margin-top:8px;flex-wrap:wrap}
+    .tf-field-row{display:grid;gap:8px;padding:12px 0;border-bottom:1px solid var(--line)}
+    .tf-field-row:last-child{border-bottom:0}
+    .tf-field-head{display:flex;justify-content:space-between;gap:10px;align-items:center;flex-wrap:wrap}
+    .tf-progress{margin-bottom:14px;font-size:13px;color:var(--muted)}
+    .tf-progress-bar{height:8px;border-radius:999px;background:var(--soft-3);overflow:hidden;margin-top:6px}
+    .tf-progress-bar > span{display:block;height:100%;background:var(--accent,#2f6f5e);width:0}
+    .tf-status{display:inline-block;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;padding:2px 8px;border-radius:6px;border:1px solid var(--line)}
+    .tf-comment{padding:8px 0;border-bottom:1px solid var(--line);font-size:13px}
+    .tf-comment strong{display:block;font-size:12px}
+    .tf-comment time{color:var(--muted);font-size:11px;font-weight:400}
+    #task-comment-input{border:1px solid var(--input-border);border-radius:9px;background:var(--input-bg);padding:10px 11px;color:var(--ink)}
+    .tf-form-field{display:grid;gap:6px;margin:12px 0;font-size:13px;font-weight:650}
+    .tf-form-field input,.tf-form-field textarea,.tf-form-field select{width:100%;border:1px solid var(--input-border);border-radius:9px;background:var(--input-bg);padding:10px 11px;color:var(--ink);font-weight:400}
+    .tf-form-field.readonly,.tf-form-field.calculated{opacity:.92}
+    .tf-check-row{display:flex;align-items:center;gap:8px;font-weight:500}
+  </style>
+</body>
+</html>
