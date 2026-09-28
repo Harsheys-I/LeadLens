@@ -55,8 +55,10 @@ function ll_audit_route_upload(): void
   }
 
   [$binary, $sourceFile] = ll_audit_upload_read_file();
+  $cfg = ll_erp_sync_load_config();
+  $fieldMap = (array) ($cfg['field_map'] ?? ll_erp_sync_default_field_map());
   try {
-    $rows = ll_erp_sync_parse_xlsx_rows($binary);
+    $rows = ll_erp_sync_parse_xlsx_rows($binary, $fieldMap);
   } catch (Throwable $e) {
     ll_error('Could not read the workbook: ' . $e->getMessage(), 400);
   }
@@ -65,8 +67,7 @@ function ll_audit_route_upload(): void
     ll_error('The first sheet has no data rows', 400);
   }
 
-  $cfg = ll_erp_sync_load_config();
-  $mapped = ll_erp_sync_map_to_leads($rows, (array) ($cfg['field_map'] ?? ll_erp_sync_default_field_map()));
+  $mapped = ll_erp_sync_map_to_leads($rows, $fieldMap);
   if (!empty($mapped['missing_required'])) {
     ll_error('Missing required column(s): ' . implode(', ', $mapped['missing_required']), 400, [
       'mapped_columns' => $mapped['mapped_columns'],
