@@ -6,8 +6,9 @@ require_once __DIR__ . '/../lib/erp-sync.php';
 
 /**
  * Terminal Bucket 1 (no session, no cron secret):
- *   POST audit/upload  multipart: username, password, file (.xlsx), optional batch_size, concurrency
- * Parses the first sheet, audits with saved audit_settings + server OpenAI key, then publishes
+ *   POST audit/upload  multipart: username, password, file (.xlsx or ERP .json), optional batch_size, concurrency
+ * .xlsx: first sheet. .json: Strategic ERP report rows A1–A13.
+ * Audits with saved audit_settings + server OpenAI key, then publishes
  * TeleCaller dashboards. Responds once the audit has started; the server finishes via the
  * one-time self-chain continue.
  */
@@ -54,17 +55,21 @@ function ll_audit_route_upload(): void
     ll_error('Another Bucket 1 server audit is already running — try again when it finishes', 409, $busy);
   }
 
-  [$binary, $sourceFile] = ll_audit_upload_read_file();
+  [$binary, $sourceFile, $kind] = ll_audit_upload_read_file();
   $cfg = ll_erp_sync_load_config();
   $fieldMap = (array) ($cfg['field_map'] ?? ll_erp_sync_default_field_map());
   try {
-    $rows = ll_erp_sync_parse_xlsx_rows($binary, $fieldMap);
+    if ($kind === 'json') {
+      $rows = ll_audit_upload_rows_from_erp_json($binary, $fieldMap);
+    } else {
+      $rows = ll_erp_sync_parse_xlsx_rows($binary, $fieldMap);
+    }
   } catch (Throwable $e) {
-    ll_error('Could not read the workbook: ' . $e->getMessage(), 400);
+    ll_error('Could not read the file: ' . $e->getMessage(), 400);
   }
   unset($binary);
   if (!$rows) {
-    ll_error('The first sheet has no data rows', 400);
+    ll_error($kind === 'json' ? 'The JSON report has no data rows' : 'The first sheet has no data rows', 400);
   }
 
   $mapped = ll_erp_sync_map_to_leads($rows, $fieldMap);
@@ -170,7 +175,113 @@ function ll_audit_upload_busy_response(?array $job): ?array
 }
 
 /**
- * @return array{0: string, 1: string} Workbook bytes and a safe display name
+ * Strategic ERP getreportjsondata columns, in Bucket 1 field order.
+ * A1 mobile, A2 project, A3 registration, A4 telecaller, A5 source,
+ * A6 lead update, A7 status, A8 comments, A9 next follow-up,
+ * A10 location, A11 requirement, A12 analysis parameter, A13 budget.
+ *
+ * @return array<string, string>
+ */
+function ll_audit_upload_erp_json_codes(): array
+{
+  return [
+    'A1' => 'mobile',
+    'A2' => 'project',
+    'A3' => 'registration',
+    'A4' => 'telecaller',
+    'A5' => 'source',
+    'A6' => 'update',
+    'A7' => 'status',
+    'A8' => 'comments',
+    'A9' => 'next',
+    'A10' => 'location',
+    'A11' => 'requirement',
+    'A12' => 'parameter',
+    'A13' => 'budget',
+  ];
+}
+
+/** Drop fractional seconds so "2024-01-29 10:10:00.0" parses as a date. */
+function ll_audit_upload_normalize_erp_value(string $value): string
+{
+  if (preg_match('/^(\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2})\.\d+$/', $value, $m)) {
+    return $m[1];
+  }
+  return $value;
+}
+
+/**
+ * ERP report JSON (a list of A1–A13 objects) → rows keyed by the active field-map headers.
+ *
+ * @param array<string, mixed> $fieldMap
+ * @return list<array<string, string>>
+ */
+function ll_audit_upload_rows_from_erp_json(string $raw, array $fieldMap): array
+{
+  $decoded = json_decode($raw, true);
+  if (!is_array($decoded)) {
+    throw new RuntimeException('Invalid JSON');
+  }
+  $list = $decoded;
+  if (!isset($decoded[0]) || !is_array($decoded[0])) {
+    foreach (['data', 'rows', 'records', 'result', 'results', 'reportData', 'jsondata'] as $key) {
+      if (isset($decoded[$key]) && is_array($decoded[$key]) && isset($decoded[$key][0]) && is_array($decoded[$key][0])) {
+        $list = $decoded[$key];
+        break;
+      }
+    }
+  }
+  if (!isset($list[0]) || !is_array($list[0])) {
+    throw new RuntimeException('JSON report has no rows');
+  }
+  $sample = $list[0];
+  $hasCode = false;
+  foreach (ll_audit_upload_erp_json_codes() as $code => $_field) {
+    if (array_key_exists($code, $sample)) {
+      $hasCode = true;
+      break;
+    }
+  }
+  if (!$hasCode) {
+    throw new RuntimeException('JSON report is missing A1–A13 columns');
+  }
+
+  $headerFor = [];
+  foreach (ll_audit_upload_erp_json_codes() as $code => $fieldId) {
+    $aliases = $fieldMap[$fieldId] ?? [$fieldId];
+    if (!is_array($aliases) || !$aliases) {
+      $aliases = [$fieldId];
+    }
+    $headerFor[$code] = (string) $aliases[0];
+  }
+
+  $rows = [];
+  foreach ($list as $item) {
+    if (!is_array($item)) {
+      continue;
+    }
+    $assoc = [];
+    $empty = true;
+    foreach (ll_audit_upload_erp_json_codes() as $code => $_field) {
+      $val = $item[$code] ?? '';
+      if (is_array($val) || is_object($val)) {
+        $val = '';
+      }
+      $val = ll_audit_upload_normalize_erp_value(trim((string) $val));
+      if ($val !== '') {
+        $empty = false;
+      }
+      $assoc[$headerFor[$code]] = $val;
+    }
+    if (!$empty) {
+      $rows[] = $assoc;
+    }
+  }
+  return $rows;
+}
+
+/**
+ * @return array{0: string, 1: string, 2: string} Bytes, display name, and "xlsx" or "json"
  */
 function ll_audit_upload_read_file(): array
 {
@@ -189,8 +300,9 @@ function ll_audit_upload_read_file(): array
     ll_error('File upload failed (code ' . $err . ')', 400);
   }
   $name = basename(str_replace('\\', '/', (string) ($file['name'] ?? '')));
-  if (strtolower((string) pathinfo($name, PATHINFO_EXTENSION)) !== 'xlsx') {
-    ll_error('Only .xlsx files are supported');
+  $ext = strtolower((string) pathinfo($name, PATHINFO_EXTENSION));
+  if (!in_array($ext, ['xlsx', 'json'], true)) {
+    ll_error('Only .xlsx or Strategic ERP .json reports are supported');
   }
   $size = (int) ($file['size'] ?? 0);
   if ($size <= 0) {
@@ -207,9 +319,22 @@ function ll_audit_upload_read_file(): array
   if ($binary === false || $binary === '') {
     ll_error('Could not read the uploaded file', 400);
   }
-  if (strncmp($binary, "PK", 2) !== 0) {
-    ll_error('That file is not a valid .xlsx workbook');
+  if (strncmp($binary, "\xEF\xBB\xBF", 3) === 0) {
+    $binary = substr($binary, 3);
   }
-  $safeName = preg_replace('/[^\w .()\-]+/u', '_', $name) ?? 'upload.xlsx';
-  return [$binary, $safeName !== '' ? $safeName : 'upload.xlsx'];
+  $isZip = strncmp($binary, "PK", 2) === 0;
+  $trim = ltrim($binary);
+  $isJson = $trim !== '' && ($trim[0] === '[' || $trim[0] === '{');
+  if ($ext === 'xlsx' || ($ext === '' && $isZip)) {
+    if (!$isZip) {
+      ll_error('That file is not a valid .xlsx workbook');
+    }
+    $safeName = preg_replace('/[^\w .()\-]+/u', '_', $name) ?? 'upload.xlsx';
+    return [$binary, $safeName !== '' ? $safeName : 'upload.xlsx', 'xlsx'];
+  }
+  if (!$isJson) {
+    ll_error('That file is not a JSON report');
+  }
+  $safeName = preg_replace('/[^\w .()\-]+/u', '_', $name) ?? 'upload.json';
+  return [$binary, $safeName !== '' ? $safeName : 'upload.json', 'json'];
 }
