@@ -339,6 +339,7 @@ function ll_erp_sync_route_status(): void
       'phase' => $phase,
       'needs_continue' => $needsContinue,
       'complete' => $complete,
+      'pipeline' => $job['pipeline'] ?? null,
       'source_file' => $job['source_file'] ?? null,
       'started_at' => $job['started_at'] ?? null,
       'published_at' => $job['published_at'] ?? null,
@@ -364,6 +365,7 @@ function ll_erp_sync_route_status(): void
     'daily_schedule' => ll_erp_sync_daily_schedule_info($cfg),
     'job' => $jobMeta,
     'progress' => $progress,
+    'api_uploads' => ll_audit_upload_log_read(),
   ]);
 }
 
