@@ -388,6 +388,86 @@ function ll_erp_sync_extract_bearer(): ?string
   return null;
 }
 
+const LL_AUDIT_UPLOAD_LOG_KEY = 'audit_upload_log';
+const LL_AUDIT_UPLOAD_LOG_LIMIT = 40;
+
+/**
+ * Recent terminal uploads (metadata only — no lead rows). Newest first.
+ * @return list<array<string, mixed>>
+ */
+function ll_audit_upload_log_read(): array
+{
+  $row = ll_setting_get(LL_AUDIT_UPLOAD_LOG_KEY);
+  if (!$row || $row['setting_value'] === null || $row['setting_value'] === '') {
+    return [];
+  }
+  $decoded = json_decode((string) $row['setting_value'], true);
+  return is_array($decoded) ? array_values(array_filter($decoded, 'is_array')) : [];
+}
+
+/** @param list<array<string, mixed>> $entries */
+function ll_audit_upload_log_write(array $entries): void
+{
+  $entries = array_slice(array_values($entries), 0, LL_AUDIT_UPLOAD_LOG_LIMIT);
+  $json = json_encode($entries, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+  if ($json === false) {
+    return;
+  }
+  ll_setting_set(LL_AUDIT_UPLOAD_LOG_KEY, $json, null);
+}
+
+/**
+ * Insert or update one API upload row, matched by started_at.
+ * @param array<string, mixed> $entry
+ */
+function ll_audit_upload_log_record(array $entry): void
+{
+  $started = trim((string) ($entry['started_at'] ?? ''));
+  if ($started === '') {
+    return;
+  }
+  $entry['updated_at'] = gmdate('c');
+  $rows = ll_audit_upload_log_read();
+  $replaced = false;
+  foreach ($rows as $i => $row) {
+    if ((string) ($row['started_at'] ?? '') === $started) {
+      $rows[$i] = array_merge($row, $entry);
+      $replaced = true;
+      break;
+    }
+  }
+  if (!$replaced) {
+    array_unshift($rows, $entry);
+  }
+  usort($rows, static function (array $a, array $b): int {
+    return strcmp((string) ($b['started_at'] ?? ''), (string) ($a['started_at'] ?? ''));
+  });
+  ll_audit_upload_log_write($rows);
+}
+
+/** @param array<string, mixed> $job */
+function ll_audit_upload_log_touch_job(array $job): void
+{
+  if (($job['pipeline'] ?? '') !== 'upload') {
+    return;
+  }
+  $audited = isset($job['results']) && is_array($job['results']) ? count($job['results']) : (int) ($job['cursor'] ?? 0);
+  ll_audit_upload_log_record([
+    'started_at' => (string) ($job['started_at'] ?? ''),
+    'source_file' => (string) ($job['source_file'] ?? ''),
+    'row_count' => (int) ($job['row_count'] ?? 0),
+    'lead_count' => (int) ($job['lead_count'] ?? 0),
+    'uploaded_by' => (string) ($job['uploaded_by_name'] ?? $job['actor_name'] ?? ''),
+    'batch_size' => (int) ($job['batchSize'] ?? 0),
+    'concurrency' => (int) ($job['concurrency'] ?? 0),
+    'status' => (string) ($job['status'] ?? ''),
+    'error' => isset($job['error']) ? (string) $job['error'] : null,
+    'published_at' => $job['published_at'] ?? null,
+    'published_count' => isset($job['published_count']) ? (int) $job['published_count'] : null,
+    'audited' => $audited,
+  ]);
+}
+
 /** @param array<string, mixed> $status */
 function ll_erp_sync_set_last_status(array $status): void
 {
@@ -2811,6 +2891,9 @@ function ll_erp_sync_run(array $actor, bool $forceFetch = false, bool $dryRun = 
           $job['results'] = $results;
           $job = ll_erp_sync_release_run_lock($job, $ownerToken);
           ll_erp_sync_save_job($job);
+          if ($isUpload) {
+            ll_audit_upload_log_touch_job($job);
+          }
           $fail = [
             'ok' => false,
             'phase' => 'audit',
@@ -2941,6 +3024,9 @@ function ll_erp_sync_run(array $actor, bool $forceFetch = false, bool $dryRun = 
   }
   unset($job['chain_token'], $job['chain_token_at'], $job['running'], $job['running_since'], $job['running_token']);
   ll_erp_sync_save_job($job);
+  if ($isUpload) {
+    ll_audit_upload_log_touch_job($job);
+  }
 
   $status = [
     'ok' => true,
@@ -3153,6 +3239,7 @@ function ll_erp_sync_start_upload_job(array $user, array $mapped, string $source
       'uploaded_by_username' => (string) ($user['username'] ?? ''),
     ];
     ll_erp_sync_save_job($job);
+    ll_audit_upload_log_touch_job($job);
   } finally {
     $pdo->query("SELECT RELEASE_LOCK('leadlens_audit_upload_start')");
   }
@@ -3175,6 +3262,7 @@ function ll_erp_sync_start_upload_job(array $user, array $mapped, string $source
       $failed['error'] = 'Could not start the background audit';
       unset($failed['chain_token'], $failed['chain_token_at']);
       ll_erp_sync_save_job($failed);
+      ll_audit_upload_log_touch_job($failed);
     }
     return ['ok' => false, 'error' => 'Could not start the background audit — try again', 'job' => $job];
   }

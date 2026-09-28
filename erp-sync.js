@@ -400,11 +400,76 @@ export function applyErpSyncNavVisibility() {
   nav.classList.toggle('hidden', !canShowErpSync());
 }
 
+function formatIst(iso) {
+  const d = new Date(String(iso || ''));
+  if (Number.isNaN(d.getTime())) return String(iso || '');
+  return d.toLocaleString('en-IN', {
+    timeZone: 'Asia/Kolkata',
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: true
+  });
+}
+
+function renderApiUploads(rows) {
+  const el = $('erp-sync-api-uploads');
+  if (!el) return;
+  const list = Array.isArray(rows) ? rows : [];
+  if (!list.length) {
+    el.textContent = 'No API uploads yet.';
+    return;
+  }
+  el.replaceChildren();
+  for (const row of list) {
+    const line = document.createElement('p');
+    line.style.margin = '0 0 0.7rem';
+    const audited = Number(row.audited || 0);
+    const total = Number(row.lead_count || 0);
+    const status = String(row.status || 'unknown');
+    const progress = status === 'auditing' && total ? ` ${audited}/${total}` : '';
+    const bits = [
+      formatIst(row.started_at),
+      row.source_file || 'file',
+      `${total || 0} leads`,
+      `${Number(row.row_count || 0)} rows`,
+      row.uploaded_by ? `by ${row.uploaded_by}` : '',
+      row.batch_size ? `batch ${row.batch_size}` : '',
+      row.concurrency ? `parallel ${row.concurrency}` : '',
+      status + progress
+    ].filter(Boolean);
+    line.textContent = bits.join(' · ');
+    if (row.error) line.textContent += ` — ${row.error}`;
+    if (row.published_at) line.textContent += ` · published ${formatIst(row.published_at)}`;
+    el.append(line);
+  }
+}
+
+let apiUploadTimer = 0;
+
+function ensureApiUploadRefresh() {
+  if (apiUploadTimer) return;
+  apiUploadTimer = window.setInterval(async () => {
+    const view = document.getElementById('view-erp-sync');
+    if (!view || !view.classList.contains('active') || !canShowErpSync()) return;
+    try {
+      const data = await api('erp-sync/status');
+      renderApiUploads(data.api_uploads || []);
+    } catch {
+      /* leave the list in place */
+    }
+  }, 15000);
+}
+
 export async function loadErpSyncPanel() {
   if (!canShowErpSync()) return;
+  ensureApiUploadRefresh();
   try {
     const data = await api('erp-sync/status');
     applyConfig(data.config || {}, data.keepalive || null);
+    renderApiUploads(data.api_uploads || []);
     statusElWrite(data);
     const last = data.last_status;
     if (last?.phase === 'ready-for-audit' && last.lead_count != null) {
