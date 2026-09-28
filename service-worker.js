@@ -1,5 +1,7 @@
 // LeadLens intentionally does not cache application code. Audit rules can change
 // frequently, and GitHub Pages must always serve the latest deployed version.
+const SW_VERSION = "8.0.1.kpi-fix";
+void SW_VERSION;
 self.addEventListener("install", event => {
   self.skipWaiting();
 });

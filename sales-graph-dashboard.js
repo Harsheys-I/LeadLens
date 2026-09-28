@@ -1880,15 +1880,7 @@ export function renderSalesGraphDashboard(mount, payload, opts = {}) {
   }
 
   if (opts.preview) {
-    mount.append(el("p", "sg-preview-banner", "Local preview — not yet published."));
-  } else if (opts.meta || payload.title) {
-    const bits = [];
-    if (payload.title) bits.push(payload.title);
-    if (opts.meta?.uploaded_by_name) bits.push(`by ${opts.meta.uploaded_by_name}`);
-    if (opts.meta?.uploaded_at || payload.uploaded_at) {
-      bits.push(String(opts.meta?.uploaded_at || payload.uploaded_at));
-    }
-    if (bits.length) mount.append(el("p", "sg-meta-line", bits.join(" · ")));
+    mount.append(el("p", "sg-preview-banner", "Local preview - not yet published."));
   }
 
   const months = payload.months || [];

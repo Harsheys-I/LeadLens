@@ -53,6 +53,10 @@ try {
       require __DIR__ . '/routes/erp-sync.php';
       ll_route_erp_sync($action);
       break;
+    case 'audit':
+      require __DIR__ . '/routes/audit-upload.php';
+      ll_route_audit($action);
+      break;
     case 'meta':
       ll_ok([
         'permissions' => ll_permission_catalog(),

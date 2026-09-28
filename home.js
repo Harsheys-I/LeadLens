@@ -1,8 +1,8 @@
-import {login, logout, loadSession, changePassword, updateProfile, moduleTilesForUser, hasSessionHint, getUser} from './auth.js?v=8.0.0.stable';
-import {AuthApi} from './api-client.js?v=8.0.0.stable';
-import {mountNotifications} from './notifications-ui.js?v=8.0.0.stable';
-import {appUrl} from './app-base.js?v=8.0.0.stable';
-import {initTheme} from './theme.js?v=8.0.0.stable';
+import {login, logout, loadSession, changePassword, updateProfile, moduleTilesForUser, hasSessionHint, getUser} from './auth.js?v=8.0.1.kpi-fix';
+import {AuthApi} from './api-client.js?v=8.0.1.kpi-fix';
+import {mountNotifications} from './notifications-ui.js?v=8.0.1.kpi-fix';
+import {appUrl} from './app-base.js?v=8.0.1.kpi-fix';
+import {initTheme} from './theme.js?v=8.0.1.kpi-fix';
 
 const $ = id => document.getElementById(id);
 let notifCtl = null;
