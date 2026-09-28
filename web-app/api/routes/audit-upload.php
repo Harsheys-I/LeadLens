@@ -11,6 +11,8 @@ require_once __DIR__ . '/../lib/erp-sync.php';
  * Audits with saved audit_settings + server OpenAI key, then publishes
  * TeleCaller dashboards. Responds once the audit has started; the server finishes via the
  * one-time self-chain continue.
+ *   GET  audit/status  session: progress of the background audit
+ *   POST audit/cancel  session: stop that audit
  */
 function ll_route_audit(string $action): void
 {
@@ -18,9 +20,44 @@ function ll_route_audit(string $action): void
     case 'upload':
       ll_audit_route_upload();
       break;
+    case 'status':
+      ll_audit_route_status();
+      break;
+    case 'cancel':
+      ll_audit_route_cancel();
+      break;
     default:
       ll_error('Not found', 404);
   }
+}
+
+function ll_audit_route_session_actor(): array
+{
+  $user = ll_require_user();
+  if (
+    empty($user['is_super'])
+    && !ll_user_has_permission($user, 'module.telecaller_audit')
+    && !ll_user_has_permission($user, 'telecaller.bucket1')
+  ) {
+    ll_error('Not allowed', 403);
+  }
+  return $user;
+}
+
+function ll_audit_route_status(): void
+{
+  ll_require_method('GET');
+  ll_audit_route_session_actor();
+  $progress = ll_erp_sync_public_progress(ll_erp_sync_load_job());
+  ll_ok(['progress' => $progress]);
+}
+
+function ll_audit_route_cancel(): void
+{
+  ll_require_method('POST');
+  ll_audit_route_session_actor();
+  $progress = ll_erp_sync_request_cancel();
+  ll_ok(['progress' => $progress, 'message' => $progress['message'] ?? 'Audit stopped']);
 }
 
 function ll_audit_route_upload(): void

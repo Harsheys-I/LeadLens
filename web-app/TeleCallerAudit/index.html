@@ -11,17 +11,26 @@
   <script src="../theme-boot.js?v=8.0.1.kpi-fix"></script>
   <script src="../motion.js?v=8.0.1.kpi-fix"></script>
   <link rel="manifest" href="../manifest.webmanifest">
-  <link rel="stylesheet" href="../styles.css?v=8.0.1.kpi-fix">
+  <link rel="stylesheet" href="../styles.css?v=8.0.2.audit-stop">
   <script defer src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js"></script>
-  <script type="module" src="../app.js?v=8.0.1.kpi-fix"></script>
+  <script type="module" src="../app.js?v=8.0.2.audit-stop"></script>
 </head>
 <body>
   <div id="update-banner" class="update-banner hidden" role="status">
     <div id="update-banner-text"></div>
     <button id="reload-app" type="button" class="primary-button">Hard reload now</button>
+  </div>
+  <div id="server-audit-banner" class="server-audit-banner hidden" role="status" aria-live="polite">
+    <div class="server-audit-copy">
+      <strong id="server-audit-label">Server audit</strong>
+      <span id="server-audit-percent">0%</span>
+      <p id="server-audit-detail">Running in the background</p>
+      <div class="progress-track"><div id="server-audit-bar" class="progress-bar"></div></div>
+    </div>
+    <button id="server-audit-stop" type="button" class="primary-button">Stop audit</button>
   </div>
   <div class="shell">
     <aside class="sidebar">
@@ -248,6 +257,9 @@
               <div id="erp-sync-progress-bar" class="progress-bar" style="width:0%"></div>
             </div>
             <p id="erp-sync-progress-detail" class="muted form-message" style="margin:0.65rem 0 0">Configure URL + Cookie, Save, then Fetch &amp; send to Audit.</p>
+            <div class="inline-actions" style="margin-top:0.75rem">
+              <button id="erp-sync-cancel" type="button" class="danger-button hidden">Stop audit</button>
+            </div>
           </div>
 
           <section class="settings-card" style="margin-bottom:1rem">
