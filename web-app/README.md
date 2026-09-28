@@ -34,7 +34,7 @@ curl.exe -sS -X POST "https://ai.gurupunvaanii.com/api/audit/upload" -F "usernam
 | Field | Required | Meaning |
 |-------|----------|---------|
 | `username`, `password` | yes | Your LeadLens login (same check as the website; the password is not stored). The account must be active and have Bucket 1 (`telecaller.bucket1` or `module.telecaller_audit`) plus Upload Dashboard, or be Super User. |
-| `file` | yes | `.xlsx` only; the first sheet is read. Mobile and Project columns are required (ERP Sync field map). |
+| `file` | yes | `.xlsx` (first sheet) or a Strategic ERP `.json` report (`A1` mobile through `A13` budget). Mobile and Project are required. |
 | `batch_size` | no | Leads per OpenAI request, 1–20. Omit to use the saved Settings value. |
 | `concurrency` | no | Parallel batches (requests in flight at once), 1–50. Omit to use the saved Settings value. |
 
