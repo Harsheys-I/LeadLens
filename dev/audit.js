@@ -1072,6 +1072,40 @@ function evaluateStatusClearMismatch(status,comments){
 }
 export function indianMobile(value){let digits=clean(value).replace(/\.0$/,"").replace(/\D/g,"");if(digits.length===12&&digits.startsWith("91"))digits=digits.slice(2);if(digits.length===11&&digits.startsWith("0"))digits=digits.slice(1);return /^[6-9]\d{9}$/.test(digits)?digits:"";}
 function fieldColumns(headers,fields){const normalized=headers.map(header=>({header,key:norm(header)}));return Object.fromEntries(fields.filter(field=>field.required||field.enabled!==false).map(field=>{const match=normalized.find(item=>list(field.aliases).includes(item.key));return[field.id,match?.header||""];}));}
+/** StrategicERP title blocks sit above Mobile / Project Name — find that header row. */
+function sheetRowsFromHeader(sheet,inputFields,maxScan=25){
+  const matrix=XLSX.utils.sheet_to_json(sheet,{header:1,defval:"",raw:true});
+  let headerIndex=0;
+  for(let i=0;i<Math.min(matrix.length,maxScan);i++){
+    const labels=(matrix[i]||[]).map(cell=>clean(cell)).filter(Boolean);
+    if(!labels.length)continue;
+    const columns=fieldColumns(labels,inputFields);
+    if(columns.mobile&&columns.project){headerIndex=i;break;}
+  }
+  const headerCells=matrix[headerIndex]||[];
+  const headers=[];
+  const colIndexes=[];
+  for(let c=0;c<headerCells.length;c++){
+    const label=clean(headerCells[c]);
+    if(!label)continue;
+    headers.push(label);
+    colIndexes.push(c);
+  }
+  const columns=fieldColumns(headers,inputFields);
+  const rows=[];
+  for(let r=headerIndex+1;r<matrix.length;r++){
+    const cells=matrix[r]||[];
+    const obj={};
+    let empty=true;
+    for(let i=0;i<headers.length;i++){
+      const v=clean(cells[colIndexes[i]]);
+      if(v)empty=false;
+      obj[headers[i]]=v;
+    }
+    if(!empty)rows.push(obj);
+  }
+  return{rows,headers,columns};
+}
 function correctedAiLocation(project,location){const exceptions=new Set(["guru punvaanii eureka|bidadi","guru punvaanii ernika|anekal","guru punvaanii eka|anekal","guru punvaanii elegance|bheemenahalli"]);return exceptions.has(`${norm(project)}|${norm(location)}`)?"":location;}
 function connectedFromParameter(parameter,settings){const value=norm(parameter);if(!value)return"";if(list(settings.yesValues).includes(value)||value==="yes")return"Yes";if(list(settings.noValues).includes(value)||value==="no")return"No";return"";}
 function localErrors(call,aiLocation,leadRecords){
@@ -1149,8 +1183,8 @@ export function parseWorkbook(arrayBuffer,rawSettings=DEFAULT_SETTINGS){
   if(!window.XLSX)throw new Error("Excel reader failed to load. Check the internet connection and reload.");
   const settings=normalizeSettings(rawSettings),workbook=XLSX.read(arrayBuffer,{type:"array",cellDates:true});
   const candidates=workbook.SheetNames.map(name=>{
-    const rows=XLSX.utils.sheet_to_json(workbook.Sheets[name],{defval:"",raw:true}),headers=rows.length?Object.keys(rows[0]):[],columns=fieldColumns(headers,settings.inputFields);
-    return{name,rows,headers,columns,score:Object.values(columns).filter(Boolean).length};
+    const parsed=sheetRowsFromHeader(workbook.Sheets[name],settings.inputFields);
+    return{name,...parsed,score:Object.values(parsed.columns).filter(Boolean).length};
   }).sort((a,b)=>b.score-a.score),selected=candidates[0];
   if(!selected?.columns.mobile||!selected?.columns.project)throw new Error("No sheet contains both Mobile and Project Name. Edit their aliases in Settings if your headers use different names.");
   const grouped=new Map();let lastMobile="",lastProject="",invalidRows=0;

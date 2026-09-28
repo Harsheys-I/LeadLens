@@ -121,7 +121,8 @@ function ll_erp_sync_route_test_fetch(): void
   }
 
   $file = ll_erp_sync_store_payload($fetch['body'], $fetch['content_type']);
-  $preview = ll_erp_sync_preview_payload($fetch['body'], $fetch['content_type'], (string) ($cfg['rows_path'] ?? ''));
+  $fieldMap = (array) ($cfg['field_map'] ?? ll_erp_sync_default_field_map());
+  $preview = ll_erp_sync_preview_payload($fetch['body'], $fetch['content_type'], (string) ($cfg['rows_path'] ?? ''), $fieldMap);
   $mapped = null;
   if (($preview['row_count'] ?? 0) > 0 && empty($preview['error'])) {
     $format = $preview['format'] ?? '';
@@ -133,7 +134,7 @@ function ll_erp_sync_route_test_fetch(): void
       }
     } elseif ($format === 'xlsx') {
       try {
-        $rows = ll_erp_sync_parse_xlsx_rows($fetch['body']);
+        $rows = ll_erp_sync_parse_xlsx_rows($fetch['body'], $fieldMap);
       } catch (Throwable $e) {
         $rows = [];
       }
