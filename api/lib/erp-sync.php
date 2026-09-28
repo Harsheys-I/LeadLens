@@ -37,7 +37,7 @@ function ll_erp_sync_default_field_map(): array
     'mobile' => ['Mobile', 'Mobile Number', 'Mobile No', 'mobile', 'phone', 'PHONE', 'MOBILE_NO'],
     'project' => ['Project Name', 'Project', 'project', 'PROJECT_NAME'],
     'registration' => ['Lead Registration Date', 'Registration Date', 'LRD', 'registration'],
-    'telecaller' => ['Telecaller Name', 'Tele Caller Name', 'Agent Name', 'telecaller', 'EXECUTIVE_NAME'],
+    'telecaller' => ['Telecaller Name', 'Tellecaller Name', 'Tele Caller Name', 'Telle Caller Name', 'Agent Name', 'telecaller', 'EXECUTIVE_NAME'],
     'source' => ['Source', 'Source Name', 'source'],
     'update' => ['Lead Update Date', 'Call Date', 'Update Date', 'LUD', 'update'],
     'status' => ['Lead Status', 'Status', 'status', 'LEAD_STATUS'],
@@ -1026,7 +1026,7 @@ function ll_erp_sync_fetch_for_audit(): array
     [$rows, $usedPath] = ll_erp_sync_extract_rows($decoded, (string) ($cfg['rows_path'] ?? ''));
   } elseif ($format === 'xlsx') {
     try {
-      $rows = ll_erp_sync_parse_xlsx_rows($fetch['body']);
+      $rows = ll_erp_sync_parse_xlsx_rows($fetch['body'], (array) ($cfg['field_map'] ?? ll_erp_sync_default_field_map()));
       $usedPath = '';
     } catch (Throwable $e) {
       return ['ok' => false, 'error' => $e->getMessage(), 'phase' => 'parse'];
@@ -1085,9 +1085,10 @@ function ll_erp_sync_fetch_for_audit(): array
 }
 
 /**
+ * @param array<string, list<string>|string>|null $fieldMap
  * @return array{keys: list<string>, row_count: int, sample_row: ?array, rows_path: string, format: string, error?: string}
  */
-function ll_erp_sync_preview_payload(string $body, string $contentType, string $rowsPath = ''): array
+function ll_erp_sync_preview_payload(string $body, string $contentType, string $rowsPath = '', ?array $fieldMap = null): array
 {
   $format = ll_erp_sync_detect_format($body, $contentType);
   if ($format === 'json') {
@@ -1115,7 +1116,7 @@ function ll_erp_sync_preview_payload(string $body, string $contentType, string $
   }
   if ($format === 'xlsx') {
     try {
-      $rows = ll_erp_sync_parse_xlsx_rows($body);
+      $rows = ll_erp_sync_parse_xlsx_rows($body, $fieldMap);
     } catch (Throwable $e) {
       return ['keys' => [], 'row_count' => 0, 'sample_row' => null, 'rows_path' => '', 'format' => 'xlsx', 'error' => $e->getMessage()];
     }
@@ -1254,10 +1255,77 @@ function ll_erp_sync_find_row_list(array $node, string $prefix, int $depth = 0):
 }
 
 /**
+ * Normalized alias set for one field id from a field map.
+ *
+ * @param array<string, list<string>|string> $fieldMap
+ * @return list<string>
+ */
+function ll_erp_sync_field_alias_norms(array $fieldMap, string $fieldId): array
+{
+  $aliases = $fieldMap[$fieldId] ?? [];
+  $candidates = is_array($aliases) ? $aliases : [(string) $aliases];
+  array_unshift($candidates, $fieldId);
+  $norms = [];
+  foreach ($candidates as $alias) {
+    $n = ll_erp_sync_norm_key((string) $alias);
+    if ($n !== '') {
+      $norms[$n] = true;
+    }
+  }
+  return array_keys($norms);
+}
+
+/**
+ * Pick the first sheet row (within the first $maxScan rows) that looks like column
+ * headers: at least one Mobile alias and one Project alias. StrategicERP exports
+ * put a title block above the real header; skip those rows.
+ *
+ * @param array<int, array<int, string>> $grid
+ * @param array<string, list<string>|string> $fieldMap
+ * @return int|null Excel 1-based row index, or null to keep the first grid row
+ */
+function ll_erp_sync_find_header_row_index(array $grid, array $fieldMap, int $maxScan = 25): ?int
+{
+  $mobileNorms = array_fill_keys(ll_erp_sync_field_alias_norms($fieldMap, 'mobile'), true);
+  $projectNorms = array_fill_keys(ll_erp_sync_field_alias_norms($fieldMap, 'project'), true);
+  if (!$mobileNorms || !$projectNorms) {
+    return null;
+  }
+  $scanned = 0;
+  foreach ($grid as $rIdx => $cols) {
+    if ($scanned >= $maxScan) {
+      break;
+    }
+    $scanned++;
+    $hasMobile = false;
+    $hasProject = false;
+    foreach ($cols as $label) {
+      $n = ll_erp_sync_norm_key(trim((string) $label));
+      if ($n === '') {
+        continue;
+      }
+      if (isset($mobileNorms[$n])) {
+        $hasMobile = true;
+      }
+      if (isset($projectNorms[$n])) {
+        $hasProject = true;
+      }
+      if ($hasMobile && $hasProject) {
+        return (int) $rIdx;
+      }
+    }
+  }
+  return null;
+}
+
+/**
  * Minimal XLSX → associative rows (first sheet). Requires ZipArchive + SimpleXML.
+ * Skips StrategicERP title-block rows above the real Mobile / Project Name header.
+ *
+ * @param array<string, list<string>|string>|null $fieldMap
  * @return list<array<string, string>>
  */
-function ll_erp_sync_parse_xlsx_rows(string $binary): array
+function ll_erp_sync_parse_xlsx_rows(string $binary, ?array $fieldMap = null): array
 {
   if (!class_exists('ZipArchive')) {
     throw new RuntimeException('ZipArchive required to parse Excel');
@@ -1321,7 +1389,12 @@ function ll_erp_sync_parse_xlsx_rows(string $binary): array
     return [];
   }
   ksort($grid);
-  $headerRow = reset($grid);
+  $map = is_array($fieldMap) && $fieldMap ? $fieldMap : ll_erp_sync_default_field_map();
+  $headerIdx = ll_erp_sync_find_header_row_index($grid, $map);
+  if ($headerIdx === null || !isset($grid[$headerIdx])) {
+    $headerIdx = (int) array_key_first($grid);
+  }
+  $headerRow = $grid[$headerIdx];
   ksort($headerRow);
   $headers = [];
   foreach ($headerRow as $col => $label) {
@@ -1331,9 +1404,8 @@ function ll_erp_sync_parse_xlsx_rows(string $binary): array
     }
   }
   $out = [];
-  $firstKey = array_key_first($grid);
   foreach ($grid as $rIdx => $cols) {
-    if ($rIdx === $firstKey) {
+    if ((int) $rIdx <= $headerIdx) {
       continue;
     }
     $assoc = [];
@@ -2596,7 +2668,7 @@ function ll_erp_sync_run(array $actor, bool $forceFetch = false, bool $dryRun = 
       [$rows] = ll_erp_sync_extract_rows($decoded, (string) ($cfg['rows_path'] ?? ''));
     } elseif ($format === 'xlsx') {
       try {
-        $rows = ll_erp_sync_parse_xlsx_rows($fetch['body']);
+        $rows = ll_erp_sync_parse_xlsx_rows($fetch['body'], (array) ($cfg['field_map'] ?? ll_erp_sync_default_field_map()));
       } catch (Throwable $e) {
         $fail = ['ok' => false, 'phase' => 'parse', 'error' => $e->getMessage(), 'at' => gmdate('c')];
         ll_erp_sync_set_last_status($fail);
