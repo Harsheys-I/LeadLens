@@ -2,13 +2,13 @@ import {APP_VERSION,DEFAULT_SETTINGS,DEFAULT_OUTPUT_FIELDS,SETTINGS_SEED,MAX_BAT
 import {getJob,getJobs,loadSettings,saveSettings,getApiKey,apiKeyIsRemembered,saveApiKey,forgetApiKey,setStorageUserId,storageKey} from "./db.js?v=8.0.1.kpi-fix";
 import {renderReviewDashboard,destroyReviewDashboard} from "./dashboard-view.js?v=8.0.1.kpi-fix";
 import {requireAuth,logout,hasPermission,getUser,changePassword,updateProfile} from "./auth.js?v=8.0.1.kpi-fix";
-import {DashboardApi,SettingsApi} from "./api-client.js?v=8.0.1.kpi-fix";
+import {DashboardApi,SettingsApi,api} from "./api-client.js?v=8.0.1.kpi-fix";
 import {mountNotifications} from "./notifications-ui.js?v=8.0.1.kpi-fix";
 import {persistJob,removeJobSynced,clearJobsSynced,pullJobsFromServer} from "./jobs-sync.js?v=8.0.1.kpi-fix";
 import {mountPerfReportUpload,mountPerfPublishedDashboard,refreshPerfPublished} from "./perf-dashboard.js?v=8.0.1.kpi-fix";
 import {appUrl, homePath} from "./app-base.js?v=8.0.1.kpi-fix";
 import {initTheme} from "./theme.js?v=8.0.1.kpi-fix";
-import {mountErpSyncPanel, loadErpSyncPanel, canShowErpSync, applyErpSyncNavVisibility} from "./erp-sync.js?v=8.0.1.kpi-fix";
+import {mountErpSyncPanel, loadErpSyncPanel, canShowErpSync, applyErpSyncNavVisibility} from "./erp-sync.js?v=8.0.2.audit-stop";
 
 const $=id=>document.getElementById(id);
 const ids=["page-title","key-state","run-name","pause-run","download-result","progress-label","progress-percent","progress-bar","metric-leads","metric-excel-rows","metric-calls","metric-batch","metric-completed","metric-status","metric-input-tokens","metric-cached-tokens","metric-output-tokens","metric-duration","metric-cost","live-log","clear-console","history-list","clear-history","api-key","remember-key","toggle-key","save-key","forget-key","key-message","batch-size","concurrency","model","input-field-config","add-input-field","ai-field-config","output-field-config","yes-values","no-values","input-price","cached-price","output-price","save-settings","reset-settings","settings-message","toast","mobile-menu","active-job-switch","sort-field","sort-direction","app-version","export-settings","import-settings","import-settings-file","update-banner","update-banner-text","reload-app","key-modal","onboard-key","onboard-toggle","onboard-remember","onboard-message","onboard-save","onboard-skip","sidebar-version","sidebar-notes","review-drop-zone","review-file-input","review-drop-hint","review-file-list","review-validation","start-review","review-run-panel","review-aggregate","review-cards","review-dashboard-panel","review-dashboard-mount","download-review-excel","review-open-console","review-precounts","review-live-progress","review-progress-label","review-progress-percent","review-progress-bar","review-post-actions","create-review-dashboard","export-dashboard-pdf","upload-dashboard-btn","upload-dashboard-modal","upload-telecaller-list","upload-dash-message","upload-dash-confirm","upload-dash-cancel","published-list","refresh-published","published-dashboard-panel","published-dash-title","published-dash-meta","published-dash-actions","published-dashboard-mount","shell-user-label","shell-logout","shell-account"];
@@ -221,7 +221,7 @@ function expandNavGroupForView(name){
   if(group)setNavGroupExpanded(group,true);
 }
 
-function showView(name){
+function showView(name,{keepMenu=false}={}){
   const btn=document.querySelector(`.nav-item[data-view="${name}"]:not(.hidden)`)
     ||document.querySelector(`.nav-item[data-view="${name}"]`);
   if(name==="erp-sync"&&!canShowErpSync()){
@@ -242,7 +242,7 @@ function showView(name){
   });
   if(els["page-title"])els["page-title"].textContent=titleForView(name);
   expandNavGroupForView(name);
-  document.querySelector(".shell")?.classList.remove("menu-open");
+  if(!keepMenu)document.querySelector(".shell")?.classList.remove("menu-open");
   const activeRail=document.querySelector(".view.active .dashboard-filters-rail:not(.is-collapsed)");
   document.body.classList.toggle("dashboard-filters-open",Boolean(activeRail));
   if(name==="history")renderHistory();
@@ -1985,6 +1985,11 @@ document.querySelectorAll(".nav-item").forEach(button=>button.addEventListener("
       else setNavGroupExpanded(group,group.classList.contains("is-collapsed"));
     }
     if(!button.dataset.view)return;
+    const narrow=window.matchMedia("(max-width:850px)").matches;
+    if(narrow){
+      showView(button.dataset.view,{keepMenu:true});
+      return;
+    }
   }
   if(button.dataset.view)showView(button.dataset.view);
 }));
@@ -2217,6 +2222,7 @@ async function bootTeleCallerAudit(){
     if(perm&&!hasPermission(perm))btn.classList.add("hidden");
   });
   applyErpSyncNavVisibility();
+  startServerAuditWatch();
   setupTelecallerDashboardsNav();
   document.querySelectorAll(".nav-group").forEach(group=>{
     if(group.classList.contains("hidden"))return;
@@ -2465,6 +2471,55 @@ async function refreshPublishedDashboards(){
     panel?.classList.add("hidden");
   }
 }
+
+function paintServerAuditBanner(progress){
+  const banner=document.getElementById("server-audit-banner");
+  if(!banner)return;
+  const running=Boolean(progress?.running)||progress?.status==="auditing";
+  banner.classList.toggle("hidden",!running);
+  if(!running)return;
+  const done=Number(progress.audited||0);
+  const total=Number(progress.total||0);
+  const pct=total?Math.min(100,Math.round((done/total)*100)):0;
+  const pipeline=progress.pipeline==="upload"?"API upload":progress.pipeline==="daily"?"Daily ERP":"Server";
+  const label=document.getElementById("server-audit-label");
+  const detail=document.getElementById("server-audit-detail");
+  const bar=document.getElementById("server-audit-bar");
+  const pctEl=document.getElementById("server-audit-percent");
+  if(label)label.textContent=`${pipeline} audit · ${done.toLocaleString()} / ${total.toLocaleString()}`;
+  if(detail)detail.textContent=progress.source_file?String(progress.source_file):"Running in the background";
+  if(bar)bar.style.width=`${pct}%`;
+  if(pctEl)pctEl.textContent=`${pct}%`;
+}
+
+async function pollServerAudit(){
+  try{
+    const data=await api("audit/status");
+    paintServerAuditBanner(data.progress||data);
+  }catch{/* keep the last banner */}
+}
+
+let serverAuditTimer=0;
+function startServerAuditWatch(){
+  if(serverAuditTimer)return;
+  pollServerAudit();
+  serverAuditTimer=window.setInterval(pollServerAudit,4000);
+}
+
+document.getElementById("server-audit-stop")?.addEventListener("click",async()=>{
+  const btn=document.getElementById("server-audit-stop");
+  if(btn){btn.disabled=true;btn.textContent="Stopping…";}
+  try{
+    const data=await api("audit/cancel",{method:"POST",body:{}});
+    toast(data.message||"Audit stopped");
+    paintServerAuditBanner(data.progress||{});
+    await pollServerAudit();
+  }catch(err){
+    toast(err.message||"Could not stop the audit");
+  }finally{
+    if(btn){btn.disabled=false;btn.textContent="Stop audit";}
+  }
+});
 
 bootTeleCallerAudit();
 // Do not re-register a service worker — it only caused sticky "update" banners.

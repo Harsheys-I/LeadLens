@@ -400,20 +400,6 @@ export function applyErpSyncNavVisibility() {
   nav.classList.toggle('hidden', !canShowErpSync());
 }
 
-function formatIst(iso) {
-  const d = new Date(String(iso || ''));
-  if (Number.isNaN(d.getTime())) return String(iso || '');
-  return d.toLocaleString('en-IN', {
-    timeZone: 'Asia/Kolkata',
-    day: '2-digit',
-    month: 'short',
-    year: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: true
-  });
-}
-
 function renderApiUploads(rows) {
   const el = $('erp-sync-api-uploads');
   if (!el) return;
@@ -457,10 +443,40 @@ function ensureApiUploadRefresh() {
     try {
       const data = await api('erp-sync/status');
       renderApiUploads(data.api_uploads || []);
+      const wasRunning = !$('erp-sync-cancel')?.classList.contains('hidden');
+      const still = paintJobProgress(data);
+      if (wasRunning && !still) {
+        updateProgressUI({
+          label: 'Idle',
+          percent: '0%',
+          width: '0%',
+          detail: 'Server audit is not running.'
+        });
+      }
     } catch {
       /* leave the list in place */
     }
   }, 15000);
+}
+
+function paintJobProgress(payload) {
+  const job = payload?.job || null;
+  const prog = payload?.progress || null;
+  const status = String(job?.status || prog?.status || '');
+  const stop = $('erp-sync-cancel');
+  if (stop) stop.classList.toggle('hidden', status !== 'auditing');
+  if (status !== 'auditing') return false;
+  const done = Number(prog?.audited ?? job?.audited ?? job?.result_count ?? 0);
+  const total = Number(prog?.total ?? job?.total ?? job?.lead_count ?? 0);
+  const pct = total ? Math.min(100, Math.round((done / total) * 100)) : 0;
+  const source = job?.source_file ? ` · ${job.source_file}` : '';
+  updateProgressUI({
+    label: `Auditing ${done.toLocaleString()}/${total ? total.toLocaleString() : '…'}`,
+    percent: `${pct}%`,
+    width: `${pct}%`,
+    detail: `${job?.pipeline || 'server'} audit${source}. This keeps running on the server until it finishes or you stop it.`
+  });
+  return true;
 }
 
 export async function loadErpSyncPanel() {
@@ -471,29 +487,31 @@ export async function loadErpSyncPanel() {
     applyConfig(data.config || {}, data.keepalive || null);
     renderApiUploads(data.api_uploads || []);
     statusElWrite(data);
-    const last = data.last_status;
-    if (last?.phase === 'ready-for-audit' && last.lead_count != null) {
-      updateProgressUI({
-        label: `Ready — ${Number(last.lead_count).toLocaleString()} leads`,
-        percent: '100%',
-        width: '100%',
-        detail: 'Stored on server. Use Fetch & send to Audit again, or open Bucket 1 and Start Audit if already loaded.'
-      });
-    } else if (last?.ok === false) {
-      updateProgressUI({
-        label: 'Last fetch failed',
-        percent: '—',
-        width: '0%',
-        detail: last.error || 'Error',
-        error: true
-      });
-    } else {
-      updateProgressUI({
-        label: 'Idle',
-        percent: '0%',
-        width: '0%',
-        detail: 'Configure URL + Cookie, Save, then Fetch & send to Audit.'
-      });
+    if (!paintJobProgress(data)) {
+      const last = data.last_status;
+      if (last?.phase === 'ready-for-audit' && last.lead_count != null) {
+        updateProgressUI({
+          label: `Ready — ${Number(last.lead_count).toLocaleString()} leads`,
+          percent: '100%',
+          width: '100%',
+          detail: 'Stored on server. Use Fetch & send to Audit again, or open Bucket 1 and Start Audit if already loaded.'
+        });
+      } else if (last?.ok === false) {
+        updateProgressUI({
+          label: 'Last fetch failed',
+          percent: '—',
+          width: '0%',
+          detail: last.error || 'Error',
+          error: true
+        });
+      } else {
+        updateProgressUI({
+          label: 'Idle',
+          percent: '0%',
+          width: '0%',
+          detail: 'Configure URL + Cookie, Save, then Fetch & send to Audit.'
+        });
+      }
     }
   } catch (err) {
     setMsg(err.message || 'Could not load ERP sync config', true);
@@ -902,6 +920,38 @@ async function refreshStatus({signal} = {}) {
   return data;
 }
 
+async function stopServerAudit() {
+  const btn = $('erp-sync-cancel');
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = 'Stopping…';
+  }
+  try {
+    const data = await api('audit/cancel', {method: 'POST', body: {}});
+    setMsg(data.message || 'Audit stopped');
+    const status = await api('erp-sync/status');
+    renderApiUploads(status.api_uploads || []);
+    statusElWrite(status);
+    if (!paintJobProgress(status)) {
+      updateProgressUI({
+        label: 'Stopped',
+        percent: '—',
+        width: '0%',
+        detail: data.message || 'Audit stopped.'
+      });
+    }
+    toastFn?.(data.message || 'Audit stopped');
+  } catch (err) {
+    setMsg(err.message || 'Could not stop the audit', true);
+    toastFn?.(err.message || 'Could not stop the audit');
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = 'Stop audit';
+    }
+  }
+}
+
 /**
  * @param {{toast?: (msg: string) => void, showView?: (name: string) => void, loadErpIntoAudit?: (entry: object) => void|Promise<void>}} [opts]
  */
@@ -922,6 +972,7 @@ export function mountErpSyncPanel({toast, showView, loadErpIntoAudit} = {}) {
   $('erp-sync-run-daily')?.addEventListener('click', () => runDailyNow());
   $('erp-sync-run-server')?.addEventListener('click', () => runServerAuditOnce());
   $('erp-sync-publish')?.addEventListener('click', () => publishLast());
+  $('erp-sync-cancel')?.addEventListener('click', () => stopServerAudit());
 
   // Silence unused lint if showView not used here — kept for callers / future.
   void showViewFn;
