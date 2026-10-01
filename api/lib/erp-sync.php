@@ -2396,6 +2396,110 @@ function ll_erp_sync_load_job(): ?array
   return is_array($decoded) ? $decoded : null;
 }
 
+/**
+ * Progress safe to show in the UI (no leads, results, or chain tokens).
+ * @param ?array<string, mixed> $job
+ * @return array<string, mixed>
+ */
+function ll_erp_sync_public_progress(?array $job): array
+{
+  if (!is_array($job)) {
+    return [
+      'running' => false,
+      'status' => 'idle',
+      'audited' => 0,
+      'total' => 0,
+      'pipeline' => null,
+      'source_file' => null,
+      'started_at' => null,
+      'error' => null,
+      'cancel_requested' => false,
+    ];
+  }
+  $total = (int) ($job['lead_count'] ?? (isset($job['leads']) && is_array($job['leads']) ? count($job['leads']) : 0));
+  $audited = isset($job['results']) && is_array($job['results']) ? count($job['results']) : (int) ($job['cursor'] ?? 0);
+  $status = (string) ($job['status'] ?? 'idle');
+  return [
+    'running' => $status === 'auditing',
+    'status' => $status !== '' ? $status : 'idle',
+    'pipeline' => $job['pipeline'] ?? null,
+    'source_file' => $job['source_file'] ?? null,
+    'started_at' => $job['started_at'] ?? null,
+    'audited' => $audited,
+    'total' => $total,
+    'error' => isset($job['error']) ? (string) $job['error'] : null,
+    'cancel_requested' => !empty($job['cancel_requested']),
+  ];
+}
+
+/**
+ * Copy a user stop onto the in-memory job so a later save cannot revive the audit.
+ * @param array<string, mixed> $job
+ * @return array<string, mixed>
+ */
+function ll_erp_sync_honor_cancel(array $job): array
+{
+  $fresh = ll_erp_sync_load_job();
+  $flag = !empty($job['cancel_requested'])
+    || ($job['status'] ?? '') === 'cancelled'
+    || (is_array($fresh) && (!empty($fresh['cancel_requested']) || ($fresh['status'] ?? '') === 'cancelled'));
+  if (!$flag) {
+    return $job;
+  }
+  $job['cancel_requested'] = true;
+  $job['status'] = 'cancelled';
+  $fromFresh = is_array($fresh) ? (string) ($fresh['error'] ?? '') : '';
+  $job['error'] = $fromFresh !== '' ? $fromFresh : (string) ($job['error'] ?? 'Stopped by user');
+  $cancelledAt = is_array($fresh) ? (string) ($fresh['cancelled_at'] ?? '') : '';
+  $job['cancelled_at'] = $cancelledAt !== '' ? $cancelledAt : (string) ($job['cancelled_at'] ?? gmdate('c'));
+  unset($job['chain_token'], $job['chain_token_at']);
+  return $job;
+}
+
+/**
+ * Stop the in-progress server audit (upload, daily, or advanced).
+ * The current OpenAI batch may finish; no further batch is started.
+ * @return array<string, mixed>
+ */
+function ll_erp_sync_request_cancel(): array
+{
+  $job = ll_erp_sync_load_job();
+  if (!is_array($job) || ($job['status'] ?? '') !== 'auditing') {
+    $progress = ll_erp_sync_public_progress(is_array($job) ? $job : null);
+    $progress['ok'] = true;
+    $progress['message'] = ($progress['status'] ?? '') === 'cancelled'
+      ? 'Audit already stopped'
+      : 'No server audit is running';
+    return $progress;
+  }
+  $job['cancel_requested'] = true;
+  $job['status'] = 'cancelled';
+  $job['error'] = 'Stopped by user';
+  $job['cancelled_at'] = gmdate('c');
+  unset($job['chain_token'], $job['chain_token_at']);
+  $since = (int) ($job['running_since'] ?? 0);
+  $lockFresh = !empty($job['running']) && $since > 0 && (time() - $since) < LL_ERP_SYNC_RUNNING_STALE_SEC;
+  if (!$lockFresh) {
+    unset($job['running'], $job['running_since'], $job['running_token']);
+  }
+  ll_erp_sync_save_job($job);
+  if (($job['pipeline'] ?? '') === 'upload') {
+    ll_audit_upload_log_touch_job($job);
+  }
+  ll_erp_sync_set_last_status([
+    'ok' => true,
+    'phase' => 'cancelled',
+    'error' => 'Stopped by user',
+    'done' => isset($job['results']) && is_array($job['results']) ? count($job['results']) : 0,
+    'lead_count' => $job['lead_count'] ?? null,
+    'at' => gmdate('c'),
+  ]);
+  $progress = ll_erp_sync_public_progress($job);
+  $progress['ok'] = true;
+  $progress['message'] = 'Audit stopped. A batch already sent to the model may still finish, then nothing else runs.';
+  return $progress;
+}
+
 /** @param ?array<string, mixed> $job */
 function ll_erp_sync_save_job(?array $job): void
 {
@@ -2649,6 +2753,26 @@ function ll_erp_sync_run(array $actor, bool $forceFetch = false, bool $dryRun = 
   }
 
   $job = ll_erp_sync_load_job();
+  if (is_array($job) && (!empty($job['cancel_requested']) || ($job['status'] ?? '') === 'cancelled')) {
+    $job = ll_erp_sync_honor_cancel($job);
+    $since = (int) ($job['running_since'] ?? 0);
+    $lockFresh = !empty($job['running']) && $since > 0 && (time() - $since) < LL_ERP_SYNC_RUNNING_STALE_SEC;
+    if (!$lockFresh) {
+      unset($job['running'], $job['running_since'], $job['running_token']);
+    }
+    ll_erp_sync_save_job($job);
+    if (($job['pipeline'] ?? '') === 'upload') {
+      ll_audit_upload_log_touch_job($job);
+    }
+    return [
+      'ok' => true,
+      'status' => 'cancelled',
+      'needs_continue' => false,
+      'message' => 'Audit stopped',
+      'done' => isset($job['results']) && is_array($job['results']) ? count($job['results']) : 0,
+      'total' => (int) ($job['lead_count'] ?? 0),
+    ];
+  }
   $resume = is_array($job) && ($job['status'] ?? '') === 'auditing' && !empty($job['leads']);
 
   if ($continueOnly) {
@@ -2865,6 +2989,10 @@ function ll_erp_sync_run(array $actor, bool $forceFetch = false, bool $dryRun = 
 
   try {
     while ($cursor < count($leads)) {
+      $job = ll_erp_sync_honor_cancel($job);
+      if (($job['status'] ?? '') === 'cancelled') {
+        break;
+      }
       if ($selfChain && time() >= $deadline) {
         $hitTimeLimit = true;
         break;
@@ -2872,6 +3000,10 @@ function ll_erp_sync_run(array $actor, bool $forceFetch = false, bool $dryRun = 
 
       $processedThisRun = 0;
       while ($cursor < count($leads) && $processedThisRun < $maxPerRun) {
+        $job = ll_erp_sync_honor_cancel($job);
+        if (($job['status'] ?? '') === 'cancelled') {
+          break 2;
+        }
         if ($selfChain && time() >= $deadline) {
           $hitTimeLimit = true;
           break 2;
@@ -2922,8 +3054,14 @@ function ll_erp_sync_run(array $actor, bool $forceFetch = false, bool $dryRun = 
         $processedThisRun += count($batch);
         $job['cursor'] = $cursor;
         $job['results'] = $results;
-        $job['status'] = $cursor >= count($leads) ? 'audited' : 'auditing';
+        $job = ll_erp_sync_honor_cancel($job);
+        if (($job['status'] ?? '') !== 'cancelled') {
+          $job['status'] = $cursor >= count($leads) ? 'audited' : 'auditing';
+        }
         ll_erp_sync_save_job($job);
+        if (($job['status'] ?? '') === 'cancelled') {
+          break 2;
+        }
       }
 
       $chunksThisRequest++;
@@ -2946,15 +3084,61 @@ function ll_erp_sync_run(array $actor, bool $forceFetch = false, bool $dryRun = 
   } finally {
     $fresh = ll_erp_sync_load_job();
     if (is_array($fresh)) {
+      $cancelled = !empty($job['cancel_requested'])
+        || ($job['status'] ?? '') === 'cancelled'
+        || !empty($fresh['cancel_requested'])
+        || ($fresh['status'] ?? '') === 'cancelled';
+      $errored = !$cancelled && (($job['status'] ?? '') === 'error' || ($fresh['status'] ?? '') === 'error');
       $job = $fresh;
       $job['cursor'] = $cursor;
       $job['results'] = $results;
-      $job['status'] = $cursor >= count($leads) ? ($job['status'] ?? 'audited') : 'auditing';
-      if ($cursor < count($leads)) {
+      if ($cancelled) {
+        $job['cancel_requested'] = true;
+        $job['status'] = 'cancelled';
+        $job['error'] = (string) ($fresh['error'] ?? $job['error'] ?? 'Stopped by user');
+        if (empty($job['cancelled_at'])) {
+          $job['cancelled_at'] = gmdate('c');
+        }
+        unset($job['chain_token'], $job['chain_token_at']);
+      } elseif ($errored) {
+        $job['status'] = 'error';
+        if (!empty($fresh['error'])) {
+          $job['error'] = (string) $fresh['error'];
+        }
+      } elseif ($cursor >= count($leads)) {
+        $kept = (string) ($fresh['status'] ?? '');
+        $job['status'] = in_array($kept, ['published', 'audited'], true) ? $kept : 'audited';
+      } else {
         $job['status'] = 'auditing';
       }
       $job = ll_erp_sync_release_run_lock($job, $ownerToken);
+      if (($job['pipeline'] ?? '') === 'upload') {
+        ll_audit_upload_log_touch_job($job);
+      }
     }
+  }
+
+  if (($job['status'] ?? '') === 'cancelled' || !empty($job['cancel_requested'])) {
+    return [
+      'ok' => true,
+      'status' => 'cancelled',
+      'phase' => 'cancelled',
+      'needs_continue' => false,
+      'done' => count($results),
+      'total' => count($leads),
+      'message' => 'Audit stopped',
+    ];
+  }
+  if (($job['status'] ?? '') === 'error') {
+    return [
+      'ok' => false,
+      'status' => 'error',
+      'phase' => 'audit',
+      'error' => (string) ($job['error'] ?? 'Audit failed'),
+      'needs_continue' => false,
+      'done' => count($results),
+      'total' => count($leads),
+    ];
   }
 
   if ($cursor < count($leads)) {

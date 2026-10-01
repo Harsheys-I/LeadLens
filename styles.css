@@ -103,6 +103,15 @@ body .update-banner{display:flex;align-items:center;justify-content:space-betwee
 body .update-banner.hidden{display:none!important}
 body .update-banner kbd{display:inline-block;padding:1px 6px;border:1px solid rgba(255,255,255,.35);border-radius:4px;font-size:11px;background:rgba(0,0,0,.15)}
 body .update-banner .primary-button{background:var(--input-bg);color:var(--green);white-space:nowrap}
+.server-audit-banner{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:12px 20px;background:#6b3a12;color:#fff;font-size:13px;line-height:1.45}
+.server-audit-banner.hidden{display:none!important}
+.server-audit-copy{display:flex;flex-wrap:wrap;align-items:baseline;gap:8px 12px;min-width:0;flex:1}
+.server-audit-copy p,.server-audit-banner .progress-track{flex-basis:100%}
+.server-audit-copy p{margin:0;opacity:.9}
+.server-audit-banner .progress-track{height:8px;background:rgba(255,255,255,.28);border-radius:99px;overflow:hidden;margin:8px 0 0;max-width:480px}
+.server-audit-banner .progress-bar{height:100%;width:0;background:#fff;border-radius:99px}
+.server-audit-banner .primary-button{background:#fff;color:#6b3a12;white-space:nowrap}
+#server-audit-percent{margin-left:8px;font-variant-numeric:tabular-nums}
 body .file-list{max-width:none;width:100%;margin:16px 0 0;display:grid;gap:10px}
 body .file-list .file-card{max-width:none;margin:0}
 body .job-switch{margin-top:16px;display:flex;align-items:center;gap:12px;padding:12px 14px;background:var(--panel);border:1px solid var(--line);border-radius:12px}
