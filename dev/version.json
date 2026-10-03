@@ -1,5 +1,5 @@
 {
   "version": "10.0.0.stable",
   "name": "GPP AI",
-  "notes": "v10.0.0.stable: ERP Sync is GitHub Actions–only — dedicated Super User module, daily IST upload via GHA, Hostinger cron keepalive/daily retired (410); Sales Graph charts sync from ERP without in-app Excel upload."
+  "notes": "v10.0.0.stable: ERP Sync is GitHub Actions-only - dedicated Super User module, daily IST upload via GHA, Hostinger cron keepalive/daily retired (410); Sales Graph charts sync from ERP without in-app Excel upload."
 }
