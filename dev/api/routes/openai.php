@@ -7,6 +7,8 @@ require_once __DIR__ . '/../lib/settings.php';
 /**
  * Server-side OpenAI proxy so Admins/TeleCallers never need the raw API key in the browser.
  * Paths: /api/openai/chat/completions  /api/openai/models
+ *
+ * Chat completions are constrained to the saved audit model and safe request shape.
  */
 function ll_route_openai(string $action, array $parts): void
 {
@@ -31,15 +33,82 @@ function ll_route_openai(string $action, array $parts): void
     if ($body === false || trim($body) === '') {
       ll_error('Request body required');
     }
-    ll_openai_proxy('https://api.openai.com/v1/chat/completions', 'POST', $key, $body);
+    $payload = json_decode($body, true);
+    if (!is_array($payload)) {
+      ll_error('Invalid JSON body');
+    }
+    $safe = ll_openai_sanitize_chat_payload($payload);
+    ll_openai_proxy(
+      'https://api.openai.com/v1/chat/completions',
+      'POST',
+      $key,
+      json_encode($safe, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?: '{}'
+    );
   }
 
   if ($sub === 'models') {
     ll_require_method('GET');
+    // Super only — listing the full account catalog is not needed for audits.
+    if (empty($user['is_super'])) {
+      ll_error('Forbidden', 403);
+    }
     ll_openai_proxy('https://api.openai.com/v1/models', 'GET', $key, null);
   }
 
   ll_error('Not found', 404);
+}
+
+/** @param array<string, mixed> $payload @return array<string, mixed> */
+function ll_openai_sanitize_chat_payload(array $payload): array
+{
+  $allowedModel = ll_audit_settings_model();
+
+  $messages = $payload['messages'] ?? null;
+  if (!is_array($messages) || !$messages) {
+    ll_error('messages array is required');
+  }
+  if (count($messages) > 40) {
+    ll_error('Too many messages');
+  }
+
+  $maxTokens = isset($payload['max_tokens']) ? (int) $payload['max_tokens'] : 4096;
+  if ($maxTokens < 1) {
+    $maxTokens = 1;
+  }
+  if ($maxTokens > 8192) {
+    $maxTokens = 8192;
+  }
+
+  $temperature = isset($payload['temperature']) ? (float) $payload['temperature'] : 0.2;
+  if ($temperature < 0) {
+    $temperature = 0.0;
+  }
+  if ($temperature > 2) {
+    $temperature = 2.0;
+  }
+
+  // Reject high-cost / abuse-prone options.
+  if (!empty($payload['stream'])) {
+    ll_error('Streaming is not allowed through the proxy');
+  }
+  if (isset($payload['tools']) || isset($payload['functions']) || isset($payload['tool_choice'])) {
+    ll_error('Tools are not allowed through the proxy');
+  }
+  if (isset($payload['n']) && (int) $payload['n'] > 1) {
+    ll_error('n > 1 is not allowed through the proxy');
+  }
+
+  $safe = [
+    'model' => $allowedModel,
+    'messages' => $messages,
+    'max_tokens' => $maxTokens,
+    'temperature' => $temperature,
+    'n' => 1,
+  ];
+  if (isset($payload['response_format']) && is_array($payload['response_format'])) {
+    $safe['response_format'] = $payload['response_format'];
+  }
+  return $safe;
 }
 
 function ll_openai_proxy(string $url, string $method, string $apiKey, ?string $body): void
@@ -70,7 +139,7 @@ function ll_openai_proxy(string $url, string $method, string $apiKey, ?string $b
   curl_close($ch);
 
   if ($response === false) {
-    ll_error('OpenAI proxy failed: ' . ($err ?: 'unknown error'), 502);
+    ll_error('OpenAI proxy failed', 502);
   }
 
   http_response_code($status > 0 ? $status : 502);

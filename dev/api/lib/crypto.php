@@ -4,16 +4,31 @@ declare(strict_types=1);
 
 /** AES-256-GCM helpers for secrets stored in app_settings. */
 
+function ll_secrets_key_is_placeholder(string $raw): bool
+{
+  $raw = trim($raw);
+  if ($raw === '') {
+    return true;
+  }
+  $known = [
+    'change-me-to-a-long-random-string',
+    'change-me-to-another-long-random-string',
+  ];
+  return in_array($raw, $known, true);
+}
+
 function ll_secrets_key(): string
 {
   $cfg = $GLOBALS['LL_CONFIG'] ?? [];
-  $raw = (string) ($cfg['app']['secrets_key'] ?? '');
-  if ($raw === '') {
-    $raw = (string) ($cfg['session']['secret'] ?? '');
+  $raw = trim((string) ($cfg['app']['secrets_key'] ?? ''));
+  if (ll_secrets_key_is_placeholder($raw)) {
+    $raw = trim((string) ($cfg['session']['secret'] ?? ''));
   }
-  if ($raw === '' || $raw === 'change-me-to-a-long-random-string') {
-    // Deterministic fallback so installs still work; operators should set secrets_key.
-    $raw = 'leadlens-dev-secrets-key-' . ($cfg['db']['name'] ?? 'local');
+  if (ll_secrets_key_is_placeholder($raw)) {
+    ll_error(
+      'Secrets key is not configured. Set app.secrets_key (or session.secret) in api/config.local.php to a long random string that is not the example placeholder.',
+      503
+    );
   }
   return hash('sha256', $raw, true);
 }

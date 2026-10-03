@@ -74,9 +74,26 @@ function ll_find_user_by_username(string $username): ?array
   return $row ?: null;
 }
 
+function ll_request_is_https(): bool
+{
+  if (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') {
+    return true;
+  }
+  $fwd = strtolower((string) ($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? ''));
+  if ($fwd === 'https') {
+    return true;
+  }
+  return (string) ($_SERVER['SERVER_PORT'] ?? '') === '443';
+}
+
+function ll_min_password_length(): int
+{
+  return 8;
+}
+
 function ll_set_session_cookie(string $token, int $expiresAt): void
 {
-  $secure = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off');
+  $secure = ll_request_is_https();
   setcookie(ll_cookie_name(), $token, [
     'expires' => $expiresAt,
     'path' => ll_cookie_path(),
@@ -88,7 +105,7 @@ function ll_set_session_cookie(string $token, int $expiresAt): void
 
 function ll_clear_session_cookie(): void
 {
-  $secure = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off');
+  $secure = ll_request_is_https();
   setcookie(ll_cookie_name(), '', [
     'expires' => time() - 3600,
     'path' => ll_cookie_path(),
@@ -96,6 +113,20 @@ function ll_clear_session_cookie(): void
     'httponly' => true,
     'samesite' => 'Lax',
   ]);
+}
+
+/** Revoke sessions for a user. Keep the current cookie token when provided. */
+function ll_destroy_user_sessions(int $userId, ?string $keepToken = null): void
+{
+  if ($userId < 1) {
+    return;
+  }
+  if ($keepToken !== null && $keepToken !== '') {
+    ll_pdo()->prepare('DELETE FROM sessions WHERE user_id = ? AND token_hash <> ?')
+      ->execute([$userId, hash('sha256', $keepToken)]);
+    return;
+  }
+  ll_pdo()->prepare('DELETE FROM sessions WHERE user_id = ?')->execute([$userId]);
 }
 
 function ll_create_session(int $userId): string
@@ -174,11 +205,14 @@ function ll_current_user(): ?array
   return $user;
 }
 
-function ll_require_user(): array
+function ll_require_user(bool $allowPasswordChangePending = false): array
 {
   $user = ll_current_user();
   if (!$user) {
     ll_error('Authentication required', 401);
+  }
+  if (!$allowPasswordChangePending && !empty($user['must_change_password'])) {
+    ll_error('Password change required', 403, ['password_change_required' => true]);
   }
   return $user;
 }

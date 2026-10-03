@@ -39,7 +39,8 @@ function ll_pdo(): PDO
       PDO::ATTR_EMULATE_PREPARES => false,
     ]);
   } catch (Throwable $e) {
-    ll_error('Database connection failed: ' . $e->getMessage(), 503);
+    error_log('LeadLens DB connection failed: ' . $e->getMessage());
+    ll_error('Database connection failed. Check api/config.local.php on the server.', 503);
   }
 
   return $pdo;

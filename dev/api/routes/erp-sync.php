@@ -176,7 +176,8 @@ function ll_erp_sync_route_fetch_for_audit(): void
   try {
     $result = ll_erp_sync_fetch_for_audit();
   } catch (Throwable $e) {
-    ll_error('ERP fetch failed: ' . $e->getMessage(), 500);
+    error_log('LeadLens ERP fetch failed: ' . $e->getMessage());
+    ll_error('ERP fetch failed', 500);
   }
   if (empty($result['ok'])) {
     $code = !empty($result['session_expired']) ? 401 : 400;
@@ -234,7 +235,8 @@ function ll_erp_sync_route_run(): void
       'skip_enabled_check' => true,
     ]);
   } catch (Throwable $e) {
-    ll_error('ERP sync failed: ' . $e->getMessage(), 500);
+    error_log('LeadLens ERP sync failed: ' . $e->getMessage());
+    ll_error('ERP sync failed', 500);
   }
   ll_ok($result);
 }
@@ -250,7 +252,8 @@ function ll_erp_sync_route_daily(): void
   try {
     $result = ll_erp_sync_daily_kickoff($actor);
   } catch (Throwable $e) {
-    ll_error('ERP daily pipeline failed: ' . $e->getMessage(), 500);
+    error_log('LeadLens ERP daily failed: ' . $e->getMessage());
+    ll_error('ERP daily pipeline failed', 500);
   }
   ll_ok($result);
 }
@@ -262,7 +265,8 @@ function ll_erp_sync_route_continue(): void
   try {
     $result = ll_erp_sync_continue_job($actor);
   } catch (Throwable $e) {
-    ll_error('ERP continue failed: ' . $e->getMessage(), 500);
+    error_log('LeadLens ERP continue failed: ' . $e->getMessage());
+    ll_error('ERP continue failed', 500);
   }
   ll_ok($result);
 }
@@ -289,7 +293,8 @@ function ll_erp_sync_route_keepalive(): void
   try {
     $result = ll_erp_sync_keepalive($source);
   } catch (Throwable $e) {
-    ll_error('ERP keep-alive failed: ' . $e->getMessage(), 500);
+    error_log('LeadLens ERP keep-alive failed: ' . $e->getMessage());
+    ll_error('ERP keep-alive failed', 500);
   }
   ll_ok($result);
 }
@@ -301,7 +306,8 @@ function ll_erp_sync_route_publish(): void
   try {
     $out = ll_erp_sync_publish_last($actor);
   } catch (Throwable $e) {
-    ll_error($e->getMessage(), 400);
+    error_log('LeadLens ERP route error: ' . $e->getMessage());
+    ll_error('Request failed', 400);
   }
   ll_ok(['published' => $out['published'], 'cleared' => $out['cleared'], 'message' => 'Published from last ERP sync']);
 }

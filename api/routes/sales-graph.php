@@ -120,7 +120,8 @@ function ll_route_sales_graph(string $action, ?int $id): void
       if ($pdo->inTransaction()) {
         $pdo->rollBack();
       }
-      ll_error('Publish failed: ' . $e->getMessage(), 500);
+      error_log('LeadLens sales-graph publish failed: ' . $e->getMessage());
+      ll_error('Publish failed', 500);
     }
 
     try {

@@ -19,9 +19,12 @@ return [
   ],
   'app' => [
     'name' => 'GPP AI',
-    // Set true after first install if you want install.php to refuse re-runs
+    // Set true immediately after first successful /api/install.php
     'install_locked' => false,
-    // Used to encrypt OpenAI API key at rest (AES-256-GCM). Falls back to session.secret if empty.
+    // Optional: required to re-run install when users already exist (POST force_token=…)
+    'install_force_token' => '',
+    // Used to encrypt OpenAI API key + ERP cookie at rest (AES-256-GCM).
+    // Must be a long random string — placeholders are rejected at runtime.
     'secrets_key' => 'change-me-to-another-long-random-string',
   ],
 ];

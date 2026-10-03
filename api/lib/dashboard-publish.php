@@ -104,7 +104,8 @@ function ll_publish_telecaller_dashboards(array $items, array $actor): array
     if ($pdo->inTransaction()) {
       $pdo->rollBack();
     }
-    ll_error('Publish failed: ' . $e->getMessage(), 500);
+    error_log('LeadLens publish failed: ' . $e->getMessage());
+    ll_error('Publish failed', 500);
   }
 
   try {

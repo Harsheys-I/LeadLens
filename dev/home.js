@@ -169,23 +169,25 @@ $('account-cancel')?.addEventListener('click', closeAccountModal);
 
 $('account-save')?.addEventListener('click', async () => {
   const msg = $('account-message');
+  const pwCur = $('account-pw-current').value;
+  const pwNew = $('account-pw-new').value;
+  if (pwCur || pwNew) {
+    if (pwNew !== $('account-pw-confirm').value) {
+      msg.textContent = 'New passwords do not match.';
+      return;
+    }
+    if (pwNew.length < 8) {
+      msg.textContent = 'New password must be at least 8 characters.';
+      return;
+    }
+  }
   msg.textContent = 'Saving…';
   try {
     const user = await updateProfile({
       username: $('account-username').value.trim(),
       display_name: $('account-display').value.trim(),
     });
-    const pwCur = $('account-pw-current').value;
-    const pwNew = $('account-pw-new').value;
     if (pwCur || pwNew) {
-      if (pwNew !== $('account-pw-confirm').value) {
-        msg.textContent = 'New passwords do not match.';
-        return;
-      }
-      if (pwNew.length < 5) {
-        msg.textContent = 'New password must be at least 5 characters.';
-        return;
-      }
       await changePassword(pwCur, pwNew);
     }
     msg.textContent = 'Account updated.';
@@ -202,6 +204,10 @@ $('pw-save').onclick = async () => {
   const next = $('pw-new').value;
   if (next !== $('pw-confirm').value) {
     msg.textContent = 'New passwords do not match.';
+    return;
+  }
+  if (next.length < 8) {
+    msg.textContent = 'New password must be at least 8 characters.';
     return;
   }
   msg.textContent = 'Saving…';

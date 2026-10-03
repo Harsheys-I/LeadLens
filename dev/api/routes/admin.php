@@ -83,8 +83,8 @@ function ll_admin_users(?int $id): void
     if ($username === '' || $password === '' || $roleId < 1) {
       ll_error('username, password, and role_id are required');
     }
-    if (strlen($password) < 5) {
-      ll_error('Password must be at least 5 characters');
+    if (strlen($password) < ll_min_password_length()) {
+      ll_error('Password must be at least ' . ll_min_password_length() . ' characters');
     }
     ll_assert_role_assignable($actor, $roleId);
     if (ll_find_user_by_username($username)) {
@@ -152,13 +152,14 @@ function ll_admin_users(?int $id): void
     }
     if (!empty($body['password'])) {
       $password = (string) $body['password'];
-      if (strlen($password) < 5) {
-        ll_error('Password must be at least 5 characters');
+      if (strlen($password) < ll_min_password_length()) {
+        ll_error('Password must be at least ' . ll_min_password_length() . ' characters');
       }
       $fields[] = 'password_hash = ?';
       $params[] = password_hash($password, PASSWORD_BCRYPT);
       $fields[] = 'must_change_password = ?';
       $params[] = !empty($body['must_change_password']) ? 1 : 0;
+      ll_destroy_user_sessions((int) $id);
     }
     if (array_key_exists('must_change_password', $body) && empty($body['password'])) {
       $fields[] = 'must_change_password = ?';
@@ -430,6 +431,9 @@ function ll_admin_access_requests(?int $id, string $verb): void
     $telecaller = trim((string) ($body['telecaller_name'] ?? ''));
     if ($username === '' || $password === '' || $roleId < 1) {
       ll_error('username, password, and role_id are required to approve');
+    }
+    if (strlen($password) < ll_min_password_length()) {
+      ll_error('Password must be at least ' . ll_min_password_length() . ' characters');
     }
     ll_assert_role_assignable($actor, $roleId);
     if (ll_find_user_by_username($username)) {

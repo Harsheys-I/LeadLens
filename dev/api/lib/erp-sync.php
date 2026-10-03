@@ -17,7 +17,8 @@ const LL_ERP_SYNC_KEEPALIVE_MAX_BYTES = 65_536;
 /** Seconds of headroom before max_execution_time when in-request chaining. */
 const LL_ERP_SYNC_CHAIN_SAFETY_BUFFER = 18;
 /** Stale running lock age (seconds) — allow takeover if a worker died. */
-const LL_ERP_SYNC_RUNNING_STALE_SEC = 210;
+// Must exceed the longest single PHP worker budget (≈222s) so keepalive cannot steal a live lock.
+const LL_ERP_SYNC_RUNNING_STALE_SEC = 300;
 /** Chain token TTL for fire-and-forget self-continue. */
 const LL_ERP_SYNC_CHAIN_TOKEN_TTL = 600;
 /** Inclusive IST minutes for cron daily kickoff (05:55–06:45). */
@@ -1734,22 +1735,26 @@ function ll_erp_sync_overdue_display(string $status, string $next): int|string
   if (in_array(ll_erp_sync_norm_key($status), ['lost', 'beyondbudget'], true) || str_contains(ll_erp_sync_norm_key($status), 'beyondbudget')) {
     return '-';
   }
-  // Best-effort: if next parses as past date, rough day count; else 0.
-  $ts = strtotime($next);
-  if ($ts === false) {
-    // DD/MM/YYYY
-    if (preg_match('#^(\d{1,2})/(\d{1,2})/(\d{2,4})#', $next, $m)) {
-      $y = (int) $m[3];
-      if ($y < 100) {
-        $y += 2000;
-      }
-      $ts = mktime(0, 0, 0, (int) $m[2], (int) $m[1], $y);
+  // Strategic ERP uses DD/MM/YYYY — parse that before strtotime (which treats / as US MDY).
+  $ts = false;
+  if (preg_match('#^(\d{1,2})/(\d{1,2})/(\d{2,4})#', trim($next), $m)) {
+    $y = (int) $m[3];
+    if ($y < 100) {
+      $y += 2000;
     }
+    $tz = new DateTimeZone('Asia/Kolkata');
+    $dt = DateTimeImmutable::createFromFormat('!Y-n-j', sprintf('%d-%d-%d', $y, (int) $m[2], (int) $m[1]), $tz);
+    if ($dt instanceof DateTimeImmutable) {
+      $ts = $dt->getTimestamp();
+    }
+  }
+  if ($ts === false) {
+    $ts = strtotime($next);
   }
   if ($ts === false) {
     return 0;
   }
-  $today = strtotime('today');
+  $today = (new DateTimeImmutable('today', new DateTimeZone('Asia/Kolkata')))->getTimestamp();
   $days = (int) floor(($today - $ts) / 86400);
   return max(0, $days);
 }
@@ -2425,6 +2430,7 @@ function ll_erp_sync_public_progress(?array $job): array
     'pipeline' => $job['pipeline'] ?? null,
     'source_file' => $job['source_file'] ?? null,
     'started_at' => $job['started_at'] ?? null,
+    'uploaded_by_id' => isset($job['uploaded_by_id']) ? (int) $job['uploaded_by_id'] : null,
     'audited' => $audited,
     'total' => $total,
     'error' => isset($job['error']) ? (string) $job['error'] : null,
@@ -3312,7 +3318,9 @@ function ll_erp_sync_continue_job(array $actor): array
   if ($actor['username'] === 'erp-sync-cron' && !ll_erp_sync_daily_is_enabled($cfg)) {
     return ['ok' => true, 'idle' => true, 'status' => 'disabled', 'message' => 'Daily ERP pipeline is disabled'];
   }
-  $isDailyJob = is_array($job) && (($job['pipeline'] ?? '') === 'daily' || ($job['status'] ?? '') === 'auditing');
+  // Only pipeline === 'daily' uses cron_auto_publish. Status "auditing" alone must not
+  // force cron publish (that wiped boards after a long manual /run with auto_publish off).
+  $isDailyJob = is_array($job) && (($job['pipeline'] ?? '') === 'daily');
   // Continue any auditing job (daily or advanced) so one cron covers both.
   if (!is_array($job) || ($job['status'] ?? '') !== 'auditing') {
     return [
@@ -3323,7 +3331,7 @@ function ll_erp_sync_continue_job(array $actor): array
       'message' => 'No in-progress audit job',
     ];
   }
-  $recordDaily = $isDailyJob || (($job['pipeline'] ?? '') === 'daily');
+  $recordDaily = $isDailyJob;
   return ll_erp_sync_run($actor, false, false, [
     'auto_publish_key' => $recordDaily ? 'cron_auto_publish' : 'auto_publish',
     'record_daily' => $recordDaily,

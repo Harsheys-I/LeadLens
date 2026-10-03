@@ -14,10 +14,13 @@ function ll_route_auth(string $action): void
         ll_error('Username and password are required');
       }
       $row = ll_find_user_by_username($username);
-      if (!$row || !(int) $row['is_active']) {
-        ll_error('Invalid username or password', 401);
+      // Constant-time-ish path: always verify against a hash so missing users don't short-circuit.
+      $hash = is_array($row) ? (string) $row['password_hash'] : '';
+      if ($hash === '') {
+        $hash = '$2y$10$usesomesillystringfore7hnbRJHxXVLeakoG8K30oukPsANqfuu';
       }
-      if (!password_verify($password, (string) $row['password_hash'])) {
+      $ok = password_verify($password, $hash);
+      if (!$row || !(int) $row['is_active'] || !$ok) {
         ll_error('Invalid username or password', 401);
       }
       ll_create_session((int) $row['id']);
@@ -32,21 +35,19 @@ function ll_route_auth(string $action): void
 
     case 'me':
       ll_require_method('GET');
-      $user = ll_current_user();
-      if (!$user) {
-        ll_error('Authentication required', 401);
-      }
+      $user = ll_require_user(true);
       ll_ok(['user' => $user]);
       break;
 
     case 'change-password':
       ll_require_method('POST');
-      $user = ll_require_user();
+      $user = ll_require_user(true);
       $body = ll_read_json_body();
       $current = (string) ($body['current_password'] ?? '');
       $next = (string) ($body['new_password'] ?? '');
-      if (strlen($next) < 5) {
-        ll_error('New password must be at least 5 characters');
+      $minLen = ll_min_password_length();
+      if (strlen($next) < $minLen) {
+        ll_error('New password must be at least ' . $minLen . ' characters');
       }
       $row = ll_find_user_by_id((int) $user['id']);
       if (!$row || !password_verify($current, (string) $row['password_hash'])) {
@@ -56,6 +57,8 @@ function ll_route_auth(string $action): void
       ll_pdo()->prepare(
         'UPDATE users SET password_hash = ?, must_change_password = 0, updated_at = UTC_TIMESTAMP() WHERE id = ?'
       )->execute([$hash, (int) $user['id']]);
+      $keep = $_COOKIE[ll_cookie_name()] ?? '';
+      ll_destroy_user_sessions((int) $user['id'], is_string($keep) ? $keep : null);
       $fresh = ll_find_user_by_id((int) $user['id']);
       ll_ok(['user' => ll_public_user($fresh)]);
       break;

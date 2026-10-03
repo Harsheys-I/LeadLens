@@ -55,7 +55,18 @@ function ll_audit_route_status(): void
 function ll_audit_route_cancel(): void
 {
   ll_require_method('POST');
-  ll_audit_route_session_actor();
+  $user = ll_audit_route_session_actor();
+  $job = ll_erp_sync_load_job();
+  if (is_array($job) && ($job['status'] ?? '') === 'auditing') {
+    $pipeline = (string) ($job['pipeline'] ?? '');
+    $uploadedBy = isset($job['uploaded_by_id']) ? (int) $job['uploaded_by_id'] : 0;
+    $isSuper = !empty($user['is_super']);
+    $ownsUpload = $pipeline === 'upload' && $uploadedBy > 0 && $uploadedBy === (int) $user['id'];
+    // Daily / advanced (and orphan uploads) — Super only. Upload jobs — Super or uploader.
+    if (!$isSuper && !$ownsUpload) {
+      ll_error('Only Super User (or the uploader of an API audit) can stop this audit', 403);
+    }
+  }
   $progress = ll_erp_sync_request_cancel();
   ll_ok(['progress' => $progress, 'message' => $progress['message'] ?? 'Audit stopped']);
 }
@@ -102,7 +113,8 @@ function ll_audit_route_upload(): void
       $rows = ll_erp_sync_parse_xlsx_rows($binary, $fieldMap);
     }
   } catch (Throwable $e) {
-    ll_error('Could not read the file: ' . $e->getMessage(), 400);
+    error_log('LeadLens audit upload read failed: ' . $e->getMessage());
+    ll_error('Could not read the file', 400);
   }
   unset($binary);
   if (!$rows) {

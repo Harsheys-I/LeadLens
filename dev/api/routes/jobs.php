@@ -36,6 +36,13 @@ function ll_jobs_is_uuid(string $value): bool
   );
 }
 
+function ll_jobs_can_view_all(array $user): bool
+{
+  return !empty($user['is_super'])
+    || ll_user_has_permission($user, 'dashboards.view_all')
+    || ll_user_has_permission($user, 'admin.users');
+}
+
 function ll_jobs_meta_row(array $row): array
 {
   return [
@@ -51,12 +58,25 @@ function ll_jobs_meta_row(array $row): array
   ];
 }
 
+function ll_jobs_assert_access(array $user, array $row): void
+{
+  if (ll_jobs_can_view_all($user)) {
+    return;
+  }
+  $ownerId = $row['owner_user_id'] !== null ? (int) $row['owner_user_id'] : null;
+  if ($ownerId !== null && $ownerId === (int) $user['id']) {
+    return;
+  }
+  ll_error('Forbidden', 403);
+}
+
 function ll_route_jobs(string $action, ?int $id, array $parts): void
 {
   ll_ensure_audit_jobs_table();
   $user = ll_require_permission('telecaller.history');
   $pdo = ll_pdo();
   $method = ll_method();
+  $viewAll = ll_jobs_can_view_all($user);
   $jobKey = '';
   if (isset($parts[1]) && ll_jobs_is_uuid((string) $parts[1])) {
     $jobKey = (string) $parts[1];
@@ -65,13 +85,25 @@ function ll_route_jobs(string $action, ?int $id, array $parts): void
   }
 
   if ($method === 'GET' && ($action === '' || $action === 'list')) {
-    $stmt = $pdo->query(
-      'SELECT job_id, owner_user_id, owner_name, file_name, status, mode, client_updated_at, created_at, updated_at
-       FROM audit_jobs
-       ORDER BY client_updated_at DESC, updated_at DESC
-       LIMIT 500'
-    );
-    $rows = $stmt->fetchAll();
+    if ($viewAll) {
+      $stmt = $pdo->query(
+        'SELECT job_id, owner_user_id, owner_name, file_name, status, mode, client_updated_at, created_at, updated_at
+         FROM audit_jobs
+         ORDER BY client_updated_at DESC, updated_at DESC
+         LIMIT 500'
+      );
+      $rows = $stmt->fetchAll();
+    } else {
+      $stmt = $pdo->prepare(
+        'SELECT job_id, owner_user_id, owner_name, file_name, status, mode, client_updated_at, created_at, updated_at
+         FROM audit_jobs
+         WHERE owner_user_id = ?
+         ORDER BY client_updated_at DESC, updated_at DESC
+         LIMIT 500'
+      );
+      $stmt->execute([(int) $user['id']]);
+      $rows = $stmt->fetchAll();
+    }
     $out = [];
     foreach ($rows as $row) {
       $out[] = ll_jobs_meta_row($row);
@@ -90,6 +122,7 @@ function ll_route_jobs(string $action, ?int $id, array $parts): void
     if (!$row) {
       ll_error('Job not found', 404);
     }
+    ll_jobs_assert_access($user, $row);
     $payload = json_decode((string) $row['payload'], true);
     if (!is_array($payload)) {
       ll_error('Stored job payload is invalid', 500);
@@ -114,29 +147,26 @@ function ll_route_jobs(string $action, ?int $id, array $parts): void
     if ($clientUpdated === '') {
       ll_error('updatedAt is required');
     }
-
-    $ownerName = trim((string) ($job['ownerName'] ?? ''));
-    if ($ownerName === '') {
-      $ownerName = trim((string) ($user['display_name'] ?? $user['username'] ?? ''));
+    // Reject obviously non-ISO / far-future stamps that freeze sync.
+    if (!preg_match('/^\d{4}-\d{2}-\d{2}/', $clientUpdated)) {
+      ll_error('updatedAt must be an ISO-8601 timestamp');
     }
-    $ownerUserId = isset($job['ownerUserId']) && is_numeric($job['ownerUserId'])
-      ? (int) $job['ownerUserId']
-      : (int) $user['id'];
-    if (empty($job['ownerName'])) {
-      $job['ownerName'] = $ownerName;
+    $updatedTs = strtotime($clientUpdated);
+    if ($updatedTs === false) {
+      ll_error('updatedAt must be an ISO-8601 timestamp');
     }
-    if (empty($job['ownerUserId'])) {
-      $job['ownerUserId'] = $ownerUserId;
+    if ($updatedTs > time() + 300) {
+      ll_error('updatedAt cannot be far in the future');
     }
 
-    $fileName = trim((string) ($job['fileName'] ?? ''));
-    $status = trim((string) ($job['status'] ?? ''));
-    $mode = trim((string) ($job['mode'] ?? ''));
+    $ownerName = trim((string) ($user['display_name'] ?? $user['username'] ?? ''));
+    $ownerUserId = (int) $user['id'];
 
     $existing = $pdo->prepare('SELECT client_updated_at, owner_user_id, owner_name FROM audit_jobs WHERE job_id = ? LIMIT 1');
     $existing->execute([$jobId]);
     $prev = $existing->fetch();
     if ($prev) {
+      ll_jobs_assert_access($user, $prev);
       $prevUpdated = (string) ($prev['client_updated_at'] ?? '');
       if ($prevUpdated !== '' && strcmp($clientUpdated, $prevUpdated) < 0) {
         ll_ok(['upserted' => false, 'reason' => 'stale', 'client_updated_at' => $prevUpdated]);
@@ -150,6 +180,9 @@ function ll_route_jobs(string $action, ?int $id, array $parts): void
       }
       $job['ownerUserId'] = $ownerUserId;
       $job['ownerName'] = $ownerName;
+      $fileName = trim((string) ($job['fileName'] ?? ''));
+      $status = trim((string) ($job['status'] ?? ''));
+      $mode = trim((string) ($job['mode'] ?? ''));
       $payloadJson = json_encode($job, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
       if ($payloadJson === false) {
         ll_error('Could not encode job payload');
@@ -161,6 +194,11 @@ function ll_route_jobs(string $action, ?int $id, array $parts): void
          WHERE job_id = ?'
       )->execute([$ownerUserId, $ownerName, $fileName, $status, $mode, $payloadJson, $clientUpdated, $jobId]);
     } else {
+      $job['ownerUserId'] = $ownerUserId;
+      $job['ownerName'] = $ownerName;
+      $fileName = trim((string) ($job['fileName'] ?? ''));
+      $status = trim((string) ($job['status'] ?? ''));
+      $mode = trim((string) ($job['mode'] ?? ''));
       $payloadJson = json_encode($job, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
       if ($payloadJson === false) {
         ll_error('Could not encode job payload');
@@ -175,8 +213,15 @@ function ll_route_jobs(string $action, ?int $id, array $parts): void
   }
 
   if ($method === 'POST' && $action === 'clear') {
-    $count = (int) $pdo->query('SELECT COUNT(*) FROM audit_jobs')->fetchColumn();
-    $pdo->exec('DELETE FROM audit_jobs');
+    if ($viewAll) {
+      $count = (int) $pdo->query('SELECT COUNT(*) FROM audit_jobs')->fetchColumn();
+      $pdo->exec('DELETE FROM audit_jobs');
+      ll_ok(['cleared' => true, 'count' => $count]);
+    }
+    $stmt = $pdo->prepare('SELECT COUNT(*) FROM audit_jobs WHERE owner_user_id = ?');
+    $stmt->execute([(int) $user['id']]);
+    $count = (int) $stmt->fetchColumn();
+    $pdo->prepare('DELETE FROM audit_jobs WHERE owner_user_id = ?')->execute([(int) $user['id']]);
     ll_ok(['cleared' => true, 'count' => $count]);
   }
 
@@ -196,8 +241,14 @@ function ll_route_jobs(string $action, ?int $id, array $parts): void
     if (!ll_jobs_is_uuid($jobId)) {
       ll_error('Job id required');
     }
-    $stmt = $pdo->prepare('DELETE FROM audit_jobs WHERE job_id = ?');
+    $stmt = $pdo->prepare('SELECT job_id, owner_user_id, owner_name FROM audit_jobs WHERE job_id = ? LIMIT 1');
     $stmt->execute([$jobId]);
+    $row = $stmt->fetch();
+    if (!$row) {
+      ll_error('Job not found', 404);
+    }
+    ll_jobs_assert_access($user, $row);
+    $pdo->prepare('DELETE FROM audit_jobs WHERE job_id = ?')->execute([$jobId]);
     ll_ok(['deleted' => true, 'job_id' => $jobId]);
   }
 
