@@ -6,17 +6,17 @@
   <meta name="theme-color" media="(prefers-color-scheme: light)" content="#12372a">
   <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#0f2d22">
   <meta name="description" content="GPP AI · LeadLens">
-  <meta name="app-version" content="9.0.0.stable">
+  <meta name="app-version" content="9.1.0.stable">
   <title>GPP AI · LeadLens</title>
-  <script src="../theme-boot.js?v=9.0.0.stable"></script>
-  <script src="../motion.js?v=9.0.0.stable"></script>
+  <script src="../theme-boot.js?v=9.1.0.stable"></script>
+  <script src="../motion.js?v=9.1.0.stable"></script>
   <link rel="manifest" href="../manifest.webmanifest">
-  <link rel="stylesheet" href="../styles.css?v=8.0.2.audit-stop">
+  <link rel="stylesheet" href="../styles.css?v=9.1.0.stable">
   <script defer src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js"></script>
-  <script type="module" src="../app.js?v=8.0.2.audit-stop"></script>
+  <script type="module" src="../app.js?v=9.1.0.stable"></script>
 </head>
 <body>
   <div id="update-banner" class="update-banner hidden" role="status">
@@ -70,7 +70,7 @@
           </div>
         </div>
       </nav>
-      <div class="privacy-note"><strong id="sidebar-version">v9.0.0.stable</strong><span id="sidebar-notes">v9.0.0.stable: Sales Graph KPI/byline build — corrected dashboard KPIs and byline, with a full cache-bust so live Hostinger/SW stop serving 8.0.0.stable.</span></div>
+      <div class="privacy-note"><strong id="sidebar-version">v9.1.0.stable</strong><span id="sidebar-notes">v9.1.0.stable: Sales Graph KPI/byline build — corrected dashboard KPIs and byline, with a full cache-bust so live Hostinger/SW stop serving 8.0.0.stable.</span></div>
     </aside>
 
     <main>
@@ -185,9 +185,9 @@
             </form>
 
             <section class="settings-card">
-              <div class="card-title"><h2>2 · Run &amp; cost</h2><p>Applied to new audits. <strong>Batch size</strong> is leads per API request (max 20). <strong>Parallel batches</strong> max 50.</p></div>
+              <div class="card-title"><h2>2 · Run &amp; cost</h2><p>Applied to new audits. <strong>Batch size</strong> is leads per API request (max 40). <strong>Parallel batches</strong> max 50.</p></div>
               <div class="field-grid run-grid">
-                <label>Batch size (leads)<input id="batch-size" type="number" min="1" max="20" value="20"></label>
+                <label>Batch size (leads)<input id="batch-size" type="number" min="1" max="40" value="20"></label>
                 <label>Parallel batches<input id="concurrency" type="number" min="1" max="50" value="2"></label>
                 <label>Audit model<input id="model" type="text" value="gpt-4o-mini"></label>
               </div>
@@ -306,8 +306,8 @@
                 <label class="check-row"><input id="erp-sync-cron-auto-publish" type="checkbox" checked><span>Cron auto-publish dashboards when daily audit completes</span></label>
                 <label class="check-row"><input id="erp-sync-keepalive" type="checkbox"><span>Enable session keep-alive (cron every 1 minute)</span></label>
                 <label class="check-row"><input id="erp-sync-auto-publish" type="checkbox"><span>Auto-publish after manual server audit (advanced)</span></label>
-                <label>Batch size<input id="erp-sync-batch-size" type="number" min="1" max="20" value="10"></label>
-                <label>Max leads / invocation<input id="erp-sync-max-leads" type="number" min="1" max="200" value="40"></label>
+                <label>Batch size<input id="erp-sync-batch-size" type="number" min="1" max="40" value="25"></label>
+                <label>Max leads / manual run<input id="erp-sync-max-leads" type="number" min="1" max="2000" value="200"></label>
               </div>
               <label>Keep-alive URL (optional)<input id="erp-sync-keepalive-url" type="url" autocomplete="off" placeholder="Defaults to Report URL — use a lighter same-host page if preferred"></label>
               <label>Cron bearer secret<input id="erp-sync-cron-secret" type="password" autocomplete="new-password" placeholder="Set a long random secret"></label>

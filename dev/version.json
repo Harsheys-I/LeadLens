@@ -1,5 +1,5 @@
 {
-  "version": "9.0.0.stable",
+  "version": "9.1.0.stable",
   "name": "GPP AI",
-  "notes": "v9.0.0.stable: TeleCalling Performance terminal upload API - POST /api/perf-dashboards/upload takes the Master and History reports (Strategic ERP JSON or .xlsx), reconciles them on the server and publishes one Performance dashboard per TeleCaller in a single request; shared terminal upload helpers for Bucket 1 and Performance; ERP Sync API uploads list now labels Bucket 1 vs Performance rows. Includes the live security hardenings (install lock, job ownership, server-side password change, OpenAI proxy limits, ERP continue/overdue fixes)."
+  "notes": "v9.1.0.stable: faster server AI audit - rolling pool of up to 8 parallel OpenAI requests (batch 25, max 40) that uses each worker's full time budget; 429s honor Retry-After, pause and halve concurrency (kept across chained workers) then step back up; 5xx/timeouts retry with backoff; failing batches split and requeue instead of stopping the job; ERP Sync panel and Bucket 1 banner show the current parallel/batch level and rate-limit pauses."
 }

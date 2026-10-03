@@ -24,12 +24,26 @@ const LL_ERP_SYNC_CHAIN_TOKEN_TTL = 600;
 /** Inclusive IST minutes for cron daily kickoff (05:55–06:45). */
 const LL_ERP_SYNC_DAILY_WINDOW_START_MIN = 5 * 60 + 55;
 const LL_ERP_SYNC_DAILY_WINDOW_END_MIN = 6 * 60 + 45;
-/** Terminal Bucket 1 upload (pipeline `upload`): limits and defaults match the website Settings page. */
-const LL_AUDIT_UPLOAD_MAX_BATCH = 20;
+/** Server audit limits (upload, daily, advanced); max batch matches the website Settings page. */
+const LL_AUDIT_UPLOAD_MAX_BATCH = 40;
 const LL_AUDIT_UPLOAD_MAX_CONCURRENCY = 50;
-const LL_AUDIT_UPLOAD_DEFAULT_BATCH = 20;
-const LL_AUDIT_UPLOAD_DEFAULT_CONCURRENCY = 2;
-const LL_AUDIT_UPLOAD_OPENAI_ATTEMPTS = 3;
+const LL_AUDIT_UPLOAD_DEFAULT_BATCH = 25;
+const LL_AUDIT_UPLOAD_DEFAULT_CONCURRENCY = 8;
+/** Manual advanced /run (no self-chain) lead cap per call; self-chained workers use their full time budget. */
+const LL_ERP_SYNC_DEFAULT_LEADS_PER_RUN = 200;
+const LL_ERP_SYNC_MAX_LEADS_PER_RUN = 2000;
+/** Rate-limit fallback: batch size never shrinks below this. */
+const LL_AUDIT_MIN_BATCH = 5;
+/** Successful requests (and seconds since the last change) before stepping back up one notch. */
+const LL_AUDIT_STEP_UP_AFTER = 4;
+const LL_AUDIT_STEP_UP_GAP = 30;
+/** Simultaneous 429s from requests already in flight count as one step-down / one backoff level. */
+const LL_AUDIT_STEP_DOWN_GAP = 5;
+const LL_AUDIT_BACKOFF_MAX = 60;
+/** Longest Retry-After / x-ratelimit-reset we honor; longer waits are saved and resumed by the next worker. */
+const LL_AUDIT_RATE_WAIT_MAX = 600;
+const LL_AUDIT_CHECKPOINT_SEC = 15;
+const LL_AUDIT_OPENAI_TIMEOUT = 180;
 
 /** @return array<string, list<string>> */
 function ll_erp_sync_default_field_map(): array
@@ -81,8 +95,8 @@ function ll_erp_sync_default_config(): array
     'auto_publish' => false,
     /** Scheduled daily/continue path — defaults on so dashboards upload after audit */
     'cron_auto_publish' => true,
-    'batch_size' => 10,
-    'max_leads_per_run' => 40,
+    'batch_size' => LL_AUDIT_UPLOAD_DEFAULT_BATCH,
+    'max_leads_per_run' => LL_ERP_SYNC_DEFAULT_LEADS_PER_RUN,
     'rows_path' => '',
     'field_map' => ll_erp_sync_default_field_map(),
     'cookie_configured' => false,
@@ -206,10 +220,10 @@ function ll_erp_sync_save_config(array $body, int $userId): array
     $next['cron_auto_publish'] = (bool) $body['cron_auto_publish'];
   }
   if (array_key_exists('batch_size', $body)) {
-    $next['batch_size'] = max(1, min(20, (int) $body['batch_size']));
+    $next['batch_size'] = max(1, min(LL_AUDIT_UPLOAD_MAX_BATCH, (int) $body['batch_size']));
   }
   if (array_key_exists('max_leads_per_run', $body)) {
-    $next['max_leads_per_run'] = max(1, min(200, (int) $body['max_leads_per_run']));
+    $next['max_leads_per_run'] = max(1, min(LL_ERP_SYNC_MAX_LEADS_PER_RUN, (int) $body['max_leads_per_run']));
   }
   if (array_key_exists('rows_path', $body)) {
     $next['rows_path'] = trim((string) $body['rows_path']);
@@ -454,6 +468,7 @@ function ll_audit_upload_log_touch_job(array $job): void
     return;
   }
   $audited = isset($job['results']) && is_array($job['results']) ? count($job['results']) : (int) ($job['cursor'] ?? 0);
+  $throttle = ll_erp_sync_throttle_public($job);
   ll_audit_upload_log_record([
     'kind' => 'bucket1',
     'started_at' => (string) ($job['started_at'] ?? ''),
@@ -468,6 +483,7 @@ function ll_audit_upload_log_touch_job(array $job): void
     'published_at' => $job['published_at'] ?? null,
     'published_count' => isset($job['published_count']) ? (int) $job['published_count'] : null,
     'audited' => $audited,
+    'throttle' => $throttle,
   ]);
 }
 
@@ -1788,60 +1804,144 @@ function ll_erp_sync_audit_settings(): array
 }
 
 /**
- * Call OpenAI chat completions and return decoded content JSON.
- * @param array<string, mixed> $body
- * @return array<string, mixed>
+ * Chat completions cURL handle that records lower-cased response headers into $headers.
+ * @param array<string, string> $headers
  */
-function ll_erp_sync_openai_chat(array $body): array
+function ll_erp_sync_openai_handle(string $payload, string $key, array &$headers): CurlHandle
 {
-  $key = ll_openai_key_plaintext();
-  if ($key === null || $key === '') {
-    throw new RuntimeException('Server OpenAI API key is not configured');
-  }
-  if (!function_exists('curl_init')) {
-    throw new RuntimeException('cURL required for OpenAI');
-  }
-  $payload = json_encode($body, JSON_UNESCAPED_UNICODE);
-  if ($payload === false) {
-    throw new RuntimeException('Could not encode OpenAI body');
-  }
   $ch = curl_init('https://api.openai.com/v1/chat/completions');
   curl_setopt_array($ch, [
     CURLOPT_RETURNTRANSFER => true,
     CURLOPT_POST => true,
-    CURLOPT_TIMEOUT => 180,
+    CURLOPT_TIMEOUT => LL_AUDIT_OPENAI_TIMEOUT,
+    CURLOPT_CONNECTTIMEOUT => 15,
     CURLOPT_HTTPHEADER => [
       'Authorization: Bearer ' . $key,
       'Content-Type: application/json',
       'Accept: application/json',
     ],
     CURLOPT_POSTFIELDS => $payload,
+    CURLOPT_HEADERFUNCTION => static function ($ch, string $line) use (&$headers): int {
+      $pos = strpos($line, ':');
+      if ($pos !== false) {
+        $headers[strtolower(trim(substr($line, 0, $pos)))] = trim(substr($line, $pos + 1));
+      }
+      return strlen($line);
+    },
   ]);
-  $response = curl_exec($ch);
-  $status = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
-  $err = curl_error($ch);
-  curl_close($ch);
-  return ll_erp_sync_openai_decode_response($response, $status, $err);
+  return $ch;
+}
+
+/** OpenAI reset durations such as "1s", "6m0s", "250ms", "1h2m3.5s" → seconds. */
+function ll_erp_sync_parse_duration(string $raw): float
+{
+  $raw = trim($raw);
+  if ($raw === '') {
+    return 0.0;
+  }
+  if (is_numeric($raw)) {
+    return max(0.0, (float) $raw);
+  }
+  if (!preg_match_all('/(\d+(?:\.\d+)?)(ms|h|m|s)/i', $raw, $m, PREG_SET_ORDER)) {
+    return 0.0;
+  }
+  $unit = ['ms' => 0.001, 'h' => 3600.0, 'm' => 60.0, 's' => 1.0];
+  $sec = 0.0;
+  foreach ($m as $part) {
+    $sec += (float) $part[1] * $unit[strtolower($part[2])];
+  }
+  return $sec;
 }
 
 /**
- * @param string|false|null $response
- * @return array<string, mixed>
+ * Seconds OpenAI asked us to wait (Retry-After, then the exhausted x-ratelimit-reset-*), 0 when absent.
+ * @param array<string, string> $headers
  */
-function ll_erp_sync_openai_decode_response($response, int $status, string $err): array
+function ll_erp_sync_retry_after(array $headers): float
 {
-  if ($response === false || $response === null) {
-    throw new RuntimeException('OpenAI request failed: ' . ($err ?: 'unknown'));
+  if (isset($headers['retry-after-ms']) && is_numeric($headers['retry-after-ms'])) {
+    return max(0.0, (float) $headers['retry-after-ms'] / 1000);
   }
-  $decoded = json_decode($response, true);
-  if (!is_array($decoded)) {
-    throw new RuntimeException('OpenAI returned invalid JSON');
+  if (isset($headers['retry-after'])) {
+    $ra = $headers['retry-after'];
+    if (is_numeric($ra)) {
+      return max(0.0, (float) $ra);
+    }
+    $ts = strtotime($ra);
+    if ($ts !== false) {
+      return max(0.0, (float) ($ts - time()));
+    }
   }
-  if ($status < 200 || $status >= 300) {
-    $msg = $decoded['error']['message'] ?? ('HTTP ' . $status);
-    throw new RuntimeException('OpenAI ' . $status . ': ' . $msg);
+  $exhausted = [];
+  $any = [];
+  foreach (['requests', 'tokens'] as $kind) {
+    if (!isset($headers['x-ratelimit-reset-' . $kind])) {
+      continue;
+    }
+    $sec = ll_erp_sync_parse_duration($headers['x-ratelimit-reset-' . $kind]);
+    $any[] = $sec;
+    if (($headers['x-ratelimit-remaining-' . $kind] ?? '') === '0') {
+      $exhausted[] = $sec;
+    }
   }
-  return $decoded;
+  if ($exhausted) {
+    return max($exhausted);
+  }
+  return $any ? min($any) : 0.0;
+}
+
+/**
+ * Classify one chat completion response.
+ * ok: parsed a[] · rate: 429 (back off + slow down) · transient: 5xx / timeout / network ·
+ * bad: this batch was rejected or unparseable (split / mark leads errored) · fatal: stop the job.
+ *
+ * @param string|false|null $response
+ * @param array<string, string> $headers
+ * @return array{kind: string, message: string, wait: float, list?: list<mixed>}
+ */
+function ll_erp_sync_openai_outcome(int $status, int $curlErrno, string $curlErr, $response, array $headers): array
+{
+  if ($curlErrno !== 0 || $response === false || $response === null || $status === 0) {
+    return [
+      'kind' => 'transient',
+      'message' => 'OpenAI request failed: ' . ($curlErr !== '' ? $curlErr : 'no response'),
+      'wait' => 0.0,
+    ];
+  }
+  $decoded = json_decode((string) $response, true);
+  if ($status >= 200 && $status < 300) {
+    if (!is_array($decoded)) {
+      return ['kind' => 'bad', 'message' => 'OpenAI returned invalid JSON', 'wait' => 0.0];
+    }
+    try {
+      return ['kind' => 'ok', 'message' => '', 'wait' => 0.0, 'list' => ll_erp_sync_audit_ai_list_from_chat($decoded)];
+    } catch (Throwable $e) {
+      return ['kind' => 'bad', 'message' => $e->getMessage(), 'wait' => 0.0];
+    }
+  }
+  $apiErr = is_array($decoded) && is_array($decoded['error'] ?? null) ? $decoded['error'] : [];
+  $code = (string) ($apiErr['code'] ?? '');
+  $type = (string) ($apiErr['type'] ?? '');
+  $param = (string) ($apiErr['param'] ?? '');
+  $message = 'OpenAI ' . $status . ': ' . substr((string) ($apiErr['message'] ?? ('HTTP ' . $status)), 0, 300);
+  $wait = min((float) LL_AUDIT_RATE_WAIT_MAX, ll_erp_sync_retry_after($headers));
+
+  $accountCodes = ['insufficient_quota', 'billing_hard_limit_reached', 'invalid_api_key', 'model_not_found', 'unsupported_parameter', 'unsupported_value'];
+  if (
+    in_array($status, [401, 403, 404], true)
+    || in_array($code, $accountCodes, true)
+    || $type === 'insufficient_quota'
+    || in_array($param, ['model', 'max_tokens', 'max_completion_tokens', 'temperature', 'response_format'], true)
+  ) {
+    return ['kind' => 'fatal', 'message' => $message, 'wait' => 0.0];
+  }
+  if ($status === 429) {
+    return ['kind' => 'rate', 'message' => $message, 'wait' => $wait];
+  }
+  if ($status === 408 || $status === 409 || $status >= 500) {
+    return ['kind' => 'transient', 'message' => $message, 'wait' => $wait];
+  }
+  return ['kind' => 'bad', 'message' => $message, 'wait' => 0.0];
 }
 
 function ll_erp_sync_build_system_prompt(array $settings): string
@@ -2072,41 +2172,6 @@ function ll_erp_sync_audit_ai_list_from_chat(array $data): array
 }
 
 /**
- * Ask OpenAI for one batch. Returns map of real leadId → AI item.
- *
- * @param list<array> $leads
- * @return array<string, array>
- */
-function ll_erp_sync_audit_batch_request(array $leads, array $settings): array
-{
-  $prepared = ll_erp_sync_audit_batch_prepare($leads, $settings);
-  $body = $prepared['body'];
-
-  $aiList = null;
-  $lastError = null;
-  for ($attempt = 1; $attempt <= 3; $attempt++) {
-    try {
-      $aiList = ll_erp_sync_audit_ai_list_from_chat(ll_erp_sync_openai_chat($body));
-      break;
-    } catch (Throwable $e) {
-      $lastError = $e;
-      $msg = $e->getMessage();
-      if (str_contains($msg, '429')) {
-        sleep(30);
-        continue;
-      }
-      if ($attempt < 3) {
-        usleep($attempt * 1_500_000);
-      }
-    }
-  }
-  if ($aiList === null) {
-    throw $lastError ?? new RuntimeException('Audit batch failed');
-  }
-  return ll_erp_sync_audit_match_ai_list($aiList, $prepared['compact_to_real']);
-}
-
-/**
  * @param list<mixed> $aiList
  * @param array<string, string> $compactToReal
  * @return array<string, array>
@@ -2144,102 +2209,272 @@ function ll_erp_sync_audit_match_ai_list(array $aiList, array $compactToReal): a
 }
 
 /**
- * @param list<array> $leads
- * @return list<array>
+ * Adaptive request rate kept in the job so chained workers continue at the same level.
+ * Targets follow the current settings; the effective level never exceeds them.
+ *
+ * @param array<string, mixed> $job
+ * @return array<string, mixed>
  */
-function ll_erp_sync_audit_batch(array $leads, array $settings): array
+function ll_erp_sync_rate_state(array $job, int $batchSize, int $concurrency): array
 {
-  if (!$leads) {
-    return [];
+  $rate = is_array($job['rate'] ?? null) ? $job['rate'] : [];
+  $rate['max_batch'] = $batchSize;
+  $rate['max_concurrency'] = $concurrency;
+  $rate['batch'] = max(min(LL_AUDIT_MIN_BATCH, $batchSize), min($batchSize, (int) ($rate['batch'] ?? $batchSize)));
+  $rate['concurrency'] = max(1, min($concurrency, (int) ($rate['concurrency'] ?? $concurrency)));
+  foreach (['ok', 'ok_streak', 'limit_streak', 'fail_streak', 'rate_limited', 'transient', 'step_downs'] as $k) {
+    $rate[$k] = (int) ($rate[$k] ?? 0);
   }
-  $byId = ll_erp_sync_audit_batch_request($leads, $settings);
-  $missing = [];
-  foreach ($leads as $lead) {
-    $id = trim((string) ($lead['leadId'] ?? ''));
-    if ($id === '' || !isset($byId[$id])) {
-      $missing[] = $lead;
-    }
+  foreach (['pause_until', 'last_step_at', 'last_limit_at', 'lat'] as $k) {
+    $rate[$k] = (float) ($rate[$k] ?? 0);
   }
-  if ($missing) {
-    $recovered = ll_erp_sync_audit_batch_request($missing, $settings);
-    foreach ($recovered as $id => $item) {
-      $byId[$id] = $item;
-    }
+  return $rate;
+}
+
+/** Exponential backoff with up to 25% jitter, capped at LL_AUDIT_BACKOFF_MAX. */
+function ll_erp_sync_backoff(int $n): float
+{
+  $base = min((float) LL_AUDIT_BACKOFF_MAX, 2.0 ** max(1, min(6, $n)));
+  return $base * (1 + mt_rand(0, 250) / 1000);
+}
+
+/** Halve concurrency (then batch size once at 1) — once per LL_AUDIT_STEP_DOWN_GAP for a burst. */
+function ll_erp_sync_rate_step_down(array &$rate, float $now): void
+{
+  $rate['ok_streak'] = 0;
+  if ($now - $rate['last_step_at'] < LL_AUDIT_STEP_DOWN_GAP) {
+    return;
   }
-  $results = [];
-  foreach ($leads as $lead) {
-    $id = trim((string) ($lead['leadId'] ?? ''));
-    $ai = $byId[$id] ?? null;
-    $results[] = ll_erp_sync_apply_ai_to_lead($lead, is_array($ai) ? $ai : null, $ai === null);
+  if ($rate['concurrency'] > 1) {
+    $rate['concurrency'] = max(1, intdiv($rate['concurrency'], 2));
+  } elseif ($rate['batch'] > LL_AUDIT_MIN_BATCH) {
+    $rate['batch'] = max(LL_AUDIT_MIN_BATCH, intdiv($rate['batch'], 2));
+  } else {
+    return;
   }
-  return $results;
+  $rate['step_downs']++;
+  $rate['last_step_at'] = $now;
+}
+
+/** After a run of successes, restore batch size first, then add one parallel request. */
+function ll_erp_sync_rate_step_up(array &$rate, float $now): void
+{
+  if ($rate['ok_streak'] < LL_AUDIT_STEP_UP_AFTER || $now - $rate['last_step_at'] < LL_AUDIT_STEP_UP_GAP) {
+    return;
+  }
+  if ($rate['batch'] < $rate['max_batch']) {
+    $rate['batch'] = min($rate['max_batch'], $rate['batch'] * 2);
+  } elseif ($rate['concurrency'] < $rate['max_concurrency']) {
+    $rate['concurrency']++;
+  } else {
+    return;
+  }
+  $rate['ok_streak'] = 0;
+  $rate['last_step_at'] = $now;
 }
 
 /**
- * Keep up to $concurrency OpenAI chat requests in flight (curl_multi). Same retry policy as
- * ll_erp_sync_audit_batch_request: 3 attempts, 30s wait after a 429, short backoff otherwise.
- * Throws the last error if any request still fails after its final attempt.
- *
- * @param array<int|string, array<string, mixed>> $bodies
- * @return array<int|string, list<mixed>> Same keys → the model's a[] list
+ * UI-safe rate summary (effective vs target, rate-limit hits, pause, retry queue).
+ * @param array<string, mixed> $job
+ * @return ?array<string, mixed>
  */
-function ll_erp_sync_audit_ai_lists_parallel(array $bodies, int $concurrency): array
+function ll_erp_sync_throttle_public(array $job): ?array
 {
-  if (!$bodies) {
-    return [];
+  $rate = $job['rate'] ?? null;
+  if (!is_array($rate)) {
+    return null;
   }
+  $pause = (float) ($rate['pause_until'] ?? 0);
+  $concurrency = (int) ($rate['concurrency'] ?? 0);
+  $batch = (int) ($rate['batch'] ?? 0);
+  $maxConcurrency = (int) ($rate['max_concurrency'] ?? $concurrency);
+  $maxBatch = (int) ($rate['max_batch'] ?? $batch);
+  return [
+    'concurrency' => $concurrency,
+    'batch_size' => $batch,
+    'target_concurrency' => $maxConcurrency,
+    'target_batch_size' => $maxBatch,
+    'slowed' => $concurrency < $maxConcurrency || $batch < $maxBatch,
+    'rate_limited' => (int) ($rate['rate_limited'] ?? 0),
+    'transient_errors' => (int) ($rate['transient'] ?? 0),
+    'paused_until' => $pause > time() ? gmdate('c', (int) ceil($pause)) : null,
+    'retry_queue' => isset($job['queue']) && is_array($job['queue']) ? count($job['queue']) : 0,
+    'errored_leads' => (int) ($job['errored'] ?? 0),
+    'last_error' => isset($rate['last_error']) ? (string) $rate['last_error'] : null,
+  ];
+}
+
+/** Serialize job writes between the worker checkpoint and a user Stop. */
+function ll_erp_sync_with_job_lock(callable $fn): mixed
+{
+  $pdo = ll_pdo();
+  $locked = (int) $pdo->query("SELECT GET_LOCK('leadlens_erp_sync_job', 5)")->fetchColumn() === 1;
+  try {
+    return $fn();
+  } finally {
+    if ($locked) {
+      $pdo->query("SELECT RELEASE_LOCK('leadlens_erp_sync_job')");
+    }
+  }
+}
+
+/**
+ * Save progress; in-flight batches are stored as queued so a dead worker's batches re-run.
+ * Returns false (and marks $job cancelled) when the user stopped the audit.
+ *
+ * @param array<string, mixed> $job
+ * @param list<array<string, mixed>> $inFlight Queue items currently sent to OpenAI
+ */
+function ll_erp_sync_pool_checkpoint(array &$job, array $inFlight): bool
+{
+  return ll_erp_sync_with_job_lock(static function () use (&$job, $inFlight): bool {
+    $job = ll_erp_sync_honor_cancel($job);
+    if (($job['status'] ?? '') === 'cancelled') {
+      return false;
+    }
+    $snap = $job;
+    $snap['queue'] = array_merge($inFlight, $job['queue']);
+    ll_erp_sync_save_job($snap);
+    if (($job['pipeline'] ?? '') === 'upload') {
+      ll_audit_upload_log_touch_job($snap);
+    }
+    return true;
+  });
+}
+
+/**
+ * Rolling OpenAI pool: keeps rate.concurrency requests in flight across the whole invocation
+ * (a free slot is refilled at once), results keyed by lead index in $job['results'].
+ * 429 → honor Retry-After, pause, halve concurrency; 5xx/timeouts → retry with backoff;
+ * rejected batches split down to single leads, which are marked errored. Nothing is dropped:
+ * every unfinished batch stays in $job['queue'] for this or the next chained worker.
+ *
+ * @param array<string, mixed> $job Needs leads, results, cursor, queue, rate
+ * @return array{stop: string, error?: string}
+ *   stop: done | deadline | cap | cancelled | fatal
+ */
+function ll_erp_sync_audit_pool(array &$job, array $settings, int $deadline, ?int $maxNew = null): array
+{
   $key = ll_openai_key_plaintext();
   if ($key === null || $key === '') {
-    throw new RuntimeException('Server OpenAI API key is not configured');
+    return ['stop' => 'fatal', 'error' => 'Server OpenAI API key is not configured'];
   }
   if (!function_exists('curl_multi_init')) {
-    throw new RuntimeException('cURL multi required for parallel OpenAI batches');
+    return ['stop' => 'fatal', 'error' => 'cURL multi required for parallel OpenAI batches'];
   }
-  $payloads = [];
-  foreach ($bodies as $k => $body) {
-    $payload = json_encode($body, JSON_UNESCAPED_UNICODE);
-    if ($payload === false) {
-      throw new RuntimeException('Could not encode OpenAI body');
-    }
-    $payloads[$k] = $payload;
-  }
-  $concurrency = max(1, $concurrency);
-  $queue = [];
-  foreach (array_keys($payloads) as $k) {
-    $queue[] = ['key' => $k, 'attempt' => 1, 'not_before' => 0.0];
-  }
-  $out = [];
+  $leads = $job['leads'];
+  $total = count($leads);
+  $budget = max(10.0, $deadline - microtime(true));
+  $newSent = 0;
   $active = [];
+  $stop = null;
+  $error = null;
+  $lastCheckpoint = microtime(true);
   $mh = curl_multi_init();
+
+  $finishLead = static function (int $idx, ?array $ai, bool $fallback, string $note = '') use (&$job, $leads): void {
+    $row = ll_erp_sync_apply_ai_to_lead($leads[$idx], $ai, $fallback);
+    if ($note !== '') {
+      $row['observation'] = 'Server audit could not get a model answer for this lead (' . $note . ') — local checks only.';
+      $job['errored'] = (int) ($job['errored'] ?? 0) + 1;
+    }
+    $job['results'][$idx] = $row;
+  };
+  $requeue = static function (array $item, float $at) use (&$job): void {
+    $item['tries'] = (int) ($item['tries'] ?? 0) + 1;
+    $item['at'] = $at;
+    $item['mark'] = $item['mark'] ?? (int) $job['rate']['ok'];
+    $job['queue'][] = $item;
+  };
+  $split = static function (array $item) use (&$job): void {
+    $half = (int) ceil(count($item['idx']) / 2);
+    foreach ([array_slice($item['idx'], 0, $half), array_slice($item['idx'], $half)] as $part) {
+      $job['queue'][] = ['idx' => $part, 'tries' => 0, 'at' => 0.0, 'rec' => !empty($item['rec'])];
+    }
+  };
+  $inFlightItems = static function () use (&$active): array {
+    return array_values(array_map(static fn ($a) => $a['item'], $active));
+  };
+
   try {
-    while ($queue || $active) {
+    while (true) {
       $now = microtime(true);
-      foreach ($queue as $qi => $item) {
-        if (count($active) >= $concurrency) {
+      if ($now - $lastCheckpoint >= LL_AUDIT_CHECKPOINT_SEC) {
+        $lastCheckpoint = $now;
+        if (!ll_erp_sync_pool_checkpoint($job, $inFlightItems())) {
+          $stop = 'cancelled';
           break;
         }
-        if ($item['not_before'] > $now) {
+      }
+      if ($now >= $deadline) {
+        $stop = 'deadline';
+        break;
+      }
+      $freshLeft = $job['cursor'] < $total && ($maxNew === null || $newSent < $maxNew);
+      if (!$active && !$freshLeft && !$job['queue']) {
+        $stop = $job['cursor'] < $total ? 'cap' : 'done';
+        break;
+      }
+
+      $rate = &$job['rate'];
+      $est = min(max(10.0, $rate['lat'] * 1.25), $budget * 0.6);
+      $canSend = $now >= $rate['pause_until'] && $now + $est < $deadline;
+      while ($canSend && count($active) < $rate['concurrency']) {
+        $item = null;
+        foreach ($job['queue'] as $qi => $queued) {
+          if ((float) ($queued['at'] ?? 0) <= $now) {
+            $item = $queued;
+            unset($job['queue'][$qi]);
+            $job['queue'] = array_values($job['queue']);
+            break;
+          }
+        }
+        if ($item === null && $job['cursor'] < $total && ($maxNew === null || $newSent < $maxNew)) {
+          $take = min($rate['batch'], $total - $job['cursor']);
+          if ($maxNew !== null) {
+            $take = min($take, $maxNew - $newSent);
+          }
+          $item = ['idx' => range($job['cursor'], $job['cursor'] + $take - 1), 'tries' => 0, 'at' => 0.0, 'rec' => false];
+          $job['cursor'] += $take;
+          $newSent += $take;
+        }
+        if ($item === null) {
+          break;
+        }
+        $prepared = ll_erp_sync_audit_batch_prepare(array_map(static fn ($i) => $leads[$i], $item['idx']), $settings);
+        $payload = json_encode($prepared['body'], JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE);
+        if ($payload === false) {
+          foreach ($item['idx'] as $i) {
+            $finishLead($i, null, true, 'could not encode request');
+          }
           continue;
         }
-        unset($queue[$qi]);
-        $ch = curl_init('https://api.openai.com/v1/chat/completions');
-        curl_setopt_array($ch, [
-          CURLOPT_RETURNTRANSFER => true,
-          CURLOPT_POST => true,
-          CURLOPT_TIMEOUT => 180,
-          CURLOPT_HTTPHEADER => [
-            'Authorization: Bearer ' . $key,
-            'Content-Type: application/json',
-            'Accept: application/json',
-          ],
-          CURLOPT_POSTFIELDS => $payloads[$item['key']],
-        ]);
+        $headers = [];
+        $ch = ll_erp_sync_openai_handle($payload, $key, $headers);
+        $active[spl_object_id($ch)] = [
+          'item' => $item,
+          'map' => $prepared['compact_to_real'],
+          'headers' => &$headers,
+          'started' => $now,
+          'ch' => $ch,
+        ];
+        unset($headers);
         curl_multi_add_handle($mh, $ch);
-        $active[spl_object_id($ch)] = $item + ['ch' => $ch];
       }
 
       if (!$active) {
-        usleep(200_000);
+        // Paused or every retry is scheduled later: wait here (cancel still checked) up to the deadline.
+        $ready = max($now, (float) $rate['pause_until']);
+        unset($rate);
+        $nextAt = $freshLeft ? $ready : INF;
+        foreach ($job['queue'] as $queued) {
+          $nextAt = min($nextAt, max($ready, (float) ($queued['at'] ?? 0)));
+        }
+        if ($nextAt <= $now && $now + $est >= $deadline) {
+          $stop = 'deadline';
+          break;
+        }
+        usleep((int) (1_000_000 * max(0.05, min(0.5, $nextAt - $now))));
         continue;
       }
 
@@ -2250,111 +2485,122 @@ function ll_erp_sync_audit_ai_lists_parallel(array $bodies, int $concurrency): a
       while (($info = curl_multi_info_read($mh)) !== false) {
         $ch = $info['handle'];
         $hid = spl_object_id($ch);
-        $item = $active[$hid] ?? null;
+        $slot = $active[$hid] ?? null;
         unset($active[$hid]);
-        $response = curl_multi_getcontent($ch);
-        $status = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
-        $err = $info['result'] !== CURLE_OK ? curl_strerror((int) $info['result']) : '';
+        $errno = (int) $info['result'];
+        $outcome = ll_erp_sync_openai_outcome(
+          (int) curl_getinfo($ch, CURLINFO_HTTP_CODE),
+          $errno,
+          $errno !== CURLE_OK ? curl_strerror($errno) : '',
+          curl_multi_getcontent($ch),
+          is_array($slot) ? $slot['headers'] : []
+        );
         curl_multi_remove_handle($mh, $ch);
         curl_close($ch);
-        if ($item === null) {
+        if (!is_array($slot)) {
           continue;
         }
-        try {
-          if ($err !== '') {
-            throw new RuntimeException('OpenAI request failed: ' . $err);
+        $item = $slot['item'];
+        $done = microtime(true);
+        $rate = &$job['rate'];
+
+        if ($outcome['kind'] === 'ok') {
+          $lat = $done - $slot['started'];
+          $rate['lat'] = $rate['lat'] > 0 ? $rate['lat'] * 0.7 + $lat * 0.3 : $lat;
+          $rate['ok']++;
+          $rate['ok_streak']++;
+          $rate['limit_streak'] = 0;
+          $rate['fail_streak'] = 0;
+          ll_erp_sync_rate_step_up($rate, $done);
+          $byReal = ll_erp_sync_audit_match_ai_list($outcome['list'] ?? [], $slot['map']);
+          $missing = [];
+          foreach ($item['idx'] as $i) {
+            $id = trim((string) ($leads[$i]['leadId'] ?? ''));
+            $ai = $id !== '' ? ($byReal[$id] ?? null) : null;
+            if (is_array($ai)) {
+              $finishLead($i, $ai, false);
+            } elseif (empty($item['rec'])) {
+              $missing[] = $i;
+            } else {
+              $finishLead($i, null, true);
+            }
           }
-          $out[$item['key']] = ll_erp_sync_audit_ai_list_from_chat(
-            ll_erp_sync_openai_decode_response($response, $status, $err)
-          );
-        } catch (Throwable $e) {
-          if ($item['attempt'] >= LL_AUDIT_UPLOAD_OPENAI_ATTEMPTS) {
-            throw $e;
+          if ($missing) {
+            $job['queue'][] = ['idx' => $missing, 'tries' => 0, 'at' => 0.0, 'rec' => true];
           }
-          $delay = str_contains($e->getMessage(), '429') ? 30.0 : $item['attempt'] * 1.5;
-          $queue[] = [
-            'key' => $item['key'],
-            'attempt' => $item['attempt'] + 1,
-            'not_before' => microtime(true) + $delay,
-          ];
+          continue;
+        }
+
+        $rate['last_error'] = $outcome['message'];
+        if ($outcome['kind'] === 'fatal') {
+          $job['queue'][] = $item;
+          $stop = 'fatal';
+          $error = $outcome['message'];
+          break 2;
+        }
+        if ($outcome['kind'] === 'rate') {
+          $rate['rate_limited']++;
+          if ($done - $rate['last_limit_at'] >= LL_AUDIT_STEP_DOWN_GAP) {
+            $rate['limit_streak']++;
+            $rate['last_limit_at'] = $done;
+          }
+          $wait = max($outcome['wait'], ll_erp_sync_backoff($rate['limit_streak']));
+          $rate['pause_until'] = max($rate['pause_until'], $done + $wait);
+          ll_erp_sync_rate_step_down($rate, $done);
+          $requeue($item, $done + $wait);
+          continue;
+        }
+        if ($outcome['kind'] === 'transient') {
+          $rate['transient']++;
+          $rate['fail_streak']++;
+          $tries = (int) ($item['tries'] ?? 0) + 1;
+          $wait = max($outcome['wait'], ll_erp_sync_backoff($tries));
+          if ($rate['fail_streak'] >= 3) {
+            $rate['pause_until'] = max($rate['pause_until'], $done + ll_erp_sync_backoff($rate['fail_streak'] - 2));
+            ll_erp_sync_rate_step_down($rate, $done);
+          }
+          $othersOk = isset($item['mark']) && $rate['ok'] > (int) $item['mark'];
+          if ($othersOk && $tries >= 3 && count($item['idx']) > 1) {
+            $split($item);
+          } elseif ($othersOk && $tries >= 6) {
+            foreach ($item['idx'] as $i) {
+              $finishLead($i, null, true, $outcome['message']);
+            }
+          } else {
+            $requeue($item, $done + $wait);
+          }
+          continue;
+        }
+        // bad: the batch itself was rejected or the reply was unusable.
+        if (count($item['idx']) > 1) {
+          $split($item);
+        } elseif ((int) ($item['tries'] ?? 0) < 2) {
+          $requeue($item, $done + 1.0);
+        } else {
+          $finishLead($item['idx'][0], null, true, $outcome['message']);
+        }
+        if ((int) ($job['errored'] ?? 0) >= 20 && $rate['ok'] === 0) {
+          $stop = 'fatal';
+          $error = 'OpenAI rejected every request — ' . $outcome['message'];
+          break 2;
         }
       }
+      unset($rate);
 
-      if ($active && curl_multi_select($mh, 1.0) === -1) {
-        usleep(100_000);
+      if ($active && curl_multi_select($mh, 0.5) === -1) {
+        usleep(50_000);
       }
     }
   } finally {
-    foreach ($active as $item) {
-      curl_multi_remove_handle($mh, $item['ch']);
-      curl_close($item['ch']);
+    unset($rate);
+    foreach ($active as $slot) {
+      curl_multi_remove_handle($mh, $slot['ch']);
+      curl_close($slot['ch']);
+      array_unshift($job['queue'], $slot['item']);
     }
     curl_multi_close($mh);
   }
-  return $out;
-}
-
-/**
- * Audit several batches with up to $concurrency requests in flight. Results come back in lead
- * order and match ll_erp_sync_audit_batch per batch (one recovery pass for omitted leads).
- *
- * @param list<list<array>> $batches
- * @return list<array>
- */
-function ll_erp_sync_audit_batches_parallel(array $batches, array $settings, int $concurrency): array
-{
-  $batches = array_values(array_filter($batches, static fn ($b) => is_array($b) && $b));
-  if (!$batches) {
-    return [];
-  }
-
-  $maps = [];
-  $bodies = [];
-  foreach ($batches as $i => $batch) {
-    $prepared = ll_erp_sync_audit_batch_prepare($batch, $settings);
-    $maps[$i] = $prepared['compact_to_real'];
-    $bodies[$i] = $prepared['body'];
-  }
-  $lists = ll_erp_sync_audit_ai_lists_parallel($bodies, $concurrency);
-  $byId = [];
-  foreach ($batches as $i => $_batch) {
-    $byId[$i] = ll_erp_sync_audit_match_ai_list($lists[$i] ?? [], $maps[$i]);
-  }
-
-  $missingMaps = [];
-  $missingBodies = [];
-  foreach ($batches as $i => $batch) {
-    $missing = [];
-    foreach ($batch as $lead) {
-      $id = trim((string) ($lead['leadId'] ?? ''));
-      if ($id === '' || !isset($byId[$i][$id])) {
-        $missing[] = $lead;
-      }
-    }
-    if ($missing) {
-      $prepared = ll_erp_sync_audit_batch_prepare($missing, $settings);
-      $missingMaps[$i] = $prepared['compact_to_real'];
-      $missingBodies[$i] = $prepared['body'];
-    }
-  }
-  if ($missingBodies) {
-    $recoveredLists = ll_erp_sync_audit_ai_lists_parallel($missingBodies, $concurrency);
-    foreach ($missingMaps as $i => $map) {
-      foreach (ll_erp_sync_audit_match_ai_list($recoveredLists[$i] ?? [], $map) as $id => $item) {
-        $byId[$i][$id] = $item;
-      }
-    }
-  }
-
-  $results = [];
-  foreach ($batches as $i => $batch) {
-    foreach ($batch as $lead) {
-      $id = trim((string) ($lead['leadId'] ?? ''));
-      $ai = $byId[$i][$id] ?? null;
-      $results[] = ll_erp_sync_apply_ai_to_lead($lead, is_array($ai) ? $ai : null, $ai === null);
-    }
-  }
-  return $results;
+  return $error !== null ? ['stop' => $stop ?? 'fatal', 'error' => $error] : ['stop' => $stop ?? 'deadline'];
 }
 
 /**
@@ -2437,6 +2683,7 @@ function ll_erp_sync_public_progress(?array $job): array
     'total' => $total,
     'error' => isset($job['error']) ? (string) $job['error'] : null,
     'cancel_requested' => !empty($job['cancel_requested']),
+    'throttle' => $status === 'auditing' ? ll_erp_sync_throttle_public($job) : null,
   ];
 }
 
@@ -2471,8 +2718,25 @@ function ll_erp_sync_honor_cancel(array $job): array
  */
 function ll_erp_sync_request_cancel(): array
 {
-  $job = ll_erp_sync_load_job();
-  if (!is_array($job) || ($job['status'] ?? '') !== 'auditing') {
+  [$job, $stopped] = ll_erp_sync_with_job_lock(static function (): array {
+    $job = ll_erp_sync_load_job();
+    if (!is_array($job) || ($job['status'] ?? '') !== 'auditing') {
+      return [$job, false];
+    }
+    $job['cancel_requested'] = true;
+    $job['status'] = 'cancelled';
+    $job['error'] = 'Stopped by user';
+    $job['cancelled_at'] = gmdate('c');
+    unset($job['chain_token'], $job['chain_token_at']);
+    $since = (int) ($job['running_since'] ?? 0);
+    $lockFresh = !empty($job['running']) && $since > 0 && (time() - $since) < LL_ERP_SYNC_RUNNING_STALE_SEC;
+    if (!$lockFresh) {
+      unset($job['running'], $job['running_since'], $job['running_token']);
+    }
+    ll_erp_sync_save_job($job);
+    return [$job, true];
+  });
+  if (!$stopped) {
     $progress = ll_erp_sync_public_progress(is_array($job) ? $job : null);
     $progress['ok'] = true;
     $progress['message'] = ($progress['status'] ?? '') === 'cancelled'
@@ -2480,17 +2744,6 @@ function ll_erp_sync_request_cancel(): array
       : 'No server audit is running';
     return $progress;
   }
-  $job['cancel_requested'] = true;
-  $job['status'] = 'cancelled';
-  $job['error'] = 'Stopped by user';
-  $job['cancelled_at'] = gmdate('c');
-  unset($job['chain_token'], $job['chain_token_at']);
-  $since = (int) ($job['running_since'] ?? 0);
-  $lockFresh = !empty($job['running']) && $since > 0 && (time() - $since) < LL_ERP_SYNC_RUNNING_STALE_SEC;
-  if (!$lockFresh) {
-    unset($job['running'], $job['running_since'], $job['running_token']);
-  }
-  ll_erp_sync_save_job($job);
   if (($job['pipeline'] ?? '') === 'upload') {
     ll_audit_upload_log_touch_job($job);
   }
@@ -2504,7 +2757,7 @@ function ll_erp_sync_request_cancel(): array
   ]);
   $progress = ll_erp_sync_public_progress($job);
   $progress['ok'] = true;
-  $progress['message'] = 'Audit stopped. A batch already sent to the model may still finish, then nothing else runs.';
+  $progress['message'] = 'Audit stopped. The server worker stops within about 15 seconds; nothing else runs.';
   return $progress;
 }
 
@@ -2964,18 +3217,17 @@ function ll_erp_sync_run(array $actor, bool $forceFetch = false, bool $dryRun = 
 
   $settings = ll_erp_sync_audit_settings();
   $isUpload = ($job['pipeline'] ?? '') === 'upload';
-  $concurrency = 1;
   if ($isUpload) {
-    $batchSize = max(1, min(LL_AUDIT_UPLOAD_MAX_BATCH, (int) ($job['batchSize'] ?? 0) ?: LL_AUDIT_UPLOAD_DEFAULT_BATCH));
-    $concurrency = max(1, min(LL_AUDIT_UPLOAD_MAX_CONCURRENCY, (int) ($job['concurrency'] ?? 0) ?: LL_AUDIT_UPLOAD_DEFAULT_CONCURRENCY));
-    $maxPerRun = max($batchSize * $concurrency, (int) ($cfg['max_leads_per_run'] ?? 40));
+    $batchSize = (int) ($job['batchSize'] ?? 0) ?: LL_AUDIT_UPLOAD_DEFAULT_BATCH;
+    $concurrency = (int) ($job['concurrency'] ?? 0) ?: LL_AUDIT_UPLOAD_DEFAULT_CONCURRENCY;
   } else {
-    $batchSize = max(1, min(20, (int) ($cfg['batch_size'] ?? $settings['batchSize'] ?? 10)));
-    $maxPerRun = max($batchSize, (int) ($cfg['max_leads_per_run'] ?? 40));
+    $batchSize = (int) ($cfg['batch_size'] ?? $settings['batchSize'] ?? 0) ?: LL_AUDIT_UPLOAD_DEFAULT_BATCH;
+    $concurrency = (int) ($settings['concurrency'] ?? 0) ?: LL_AUDIT_UPLOAD_DEFAULT_CONCURRENCY;
   }
+  $batchSize = max(1, min(LL_AUDIT_UPLOAD_MAX_BATCH, $batchSize));
+  $concurrency = max(1, min(LL_AUDIT_UPLOAD_MAX_CONCURRENCY, $concurrency));
+  $maxPerRun = $selfChain ? null : max($batchSize, (int) ($cfg['max_leads_per_run'] ?? LL_ERP_SYNC_DEFAULT_LEADS_PER_RUN));
   $leads = $job['leads'];
-  $cursor = (int) ($job['cursor'] ?? 0);
-  $results = is_array($job['results'] ?? null) ? $job['results'] : [];
 
   $lock = ll_erp_sync_acquire_run_lock($job, $ownerToken);
   if (empty($lock['ok'])) {
@@ -2986,145 +3238,38 @@ function ll_erp_sync_run(array $actor, bool $forceFetch = false, bool $dryRun = 
       'needs_continue' => true,
       'status' => 'busy',
       'message' => $lock['message'] ?? 'Audit already in progress',
-      'done' => count($results),
+      'done' => is_array($job['results'] ?? null) ? count($job['results']) : 0,
       'total' => count($leads),
     ];
   }
   $job = $lock['job'];
+  $job['results'] = is_array($job['results'] ?? null) ? $job['results'] : [];
+  $job['cursor'] = (int) ($job['cursor'] ?? 0);
+  $job['queue'] = array_values(array_filter((array) ($job['queue'] ?? []), 'is_array'));
+  $job['rate'] = ll_erp_sync_rate_state($job, $batchSize, $concurrency);
 
-  $chunksThisRequest = 0;
-  $hitTimeLimit = false;
-
+  $outcome = ['stop' => 'deadline'];
   try {
-    while ($cursor < count($leads)) {
-      $job = ll_erp_sync_honor_cancel($job);
-      if (($job['status'] ?? '') === 'cancelled') {
-        break;
-      }
-      if ($selfChain && time() >= $deadline) {
-        $hitTimeLimit = true;
-        break;
-      }
-
-      $processedThisRun = 0;
-      while ($cursor < count($leads) && $processedThisRun < $maxPerRun) {
-        $job = ll_erp_sync_honor_cancel($job);
-        if (($job['status'] ?? '') === 'cancelled') {
-          break 2;
-        }
-        if ($selfChain && time() >= $deadline) {
-          $hitTimeLimit = true;
-          break 2;
-        }
-        try {
-          if ($isUpload) {
-            $batch = array_slice($leads, $cursor, $batchSize * $concurrency);
-            $batchResults = ll_erp_sync_audit_batches_parallel(array_chunk($batch, $batchSize), $settings, $concurrency);
-          } else {
-            $batch = array_slice($leads, $cursor, $batchSize);
-            $batchResults = ll_erp_sync_audit_batch($batch, $settings);
-          }
-        } catch (Throwable $e) {
-          $job['status'] = 'error';
-          $job['error'] = $e->getMessage();
-          $job['cursor'] = $cursor;
-          $job['results'] = $results;
-          $job = ll_erp_sync_release_run_lock($job, $ownerToken);
-          ll_erp_sync_save_job($job);
-          if ($isUpload) {
-            ll_audit_upload_log_touch_job($job);
-          }
-          $fail = [
-            'ok' => false,
-            'phase' => 'audit',
-            'error' => $e->getMessage(),
-            'cursor' => $cursor,
-            'lead_count' => count($leads),
-            'at' => gmdate('c'),
-          ];
-          ll_erp_sync_set_last_status($fail);
-          if ($recordDaily) {
-            ll_erp_sync_set_last_daily_status(array_merge($fail, ['source' => 'daily']));
-          }
-          return [
-            'ok' => false,
-            'error' => $e->getMessage(),
-            'phase' => 'audit',
-            'cursor' => $cursor,
-            'lead_count' => count($leads),
-            'done' => count($results),
-          ];
-        }
-        foreach ($batchResults as $row) {
-          $results[] = $row;
-        }
-        $cursor += count($batch);
-        $processedThisRun += count($batch);
-        $job['cursor'] = $cursor;
-        $job['results'] = $results;
-        $job = ll_erp_sync_honor_cancel($job);
-        if (($job['status'] ?? '') !== 'cancelled') {
-          $job['status'] = $cursor >= count($leads) ? 'audited' : 'auditing';
-        }
-        ll_erp_sync_save_job($job);
-        if (($job['status'] ?? '') === 'cancelled') {
-          break 2;
-        }
-      }
-
-      $chunksThisRequest++;
-
-      if ($cursor >= count($leads)) {
-        break;
-      }
-
-      // One maxPerRun chunk done; without self-chain, stop (manual advanced /run).
-      if (!$selfChain) {
-        break;
-      }
-
-      // Deadline already includes safety buffer — stop and HTTP-handoff when hit.
-      if (time() >= $deadline) {
-        $hitTimeLimit = true;
-        break;
-      }
-    }
+    $outcome = ll_erp_sync_audit_pool($job, $settings, $deadline, $maxPerRun);
   } finally {
-    $fresh = ll_erp_sync_load_job();
-    if (is_array($fresh)) {
-      $cancelled = !empty($job['cancel_requested'])
-        || ($job['status'] ?? '') === 'cancelled'
-        || !empty($fresh['cancel_requested'])
-        || ($fresh['status'] ?? '') === 'cancelled';
-      $errored = !$cancelled && (($job['status'] ?? '') === 'error' || ($fresh['status'] ?? '') === 'error');
-      $job = $fresh;
-      $job['cursor'] = $cursor;
-      $job['results'] = $results;
-      if ($cancelled) {
-        $job['cancel_requested'] = true;
-        $job['status'] = 'cancelled';
-        $job['error'] = (string) ($fresh['error'] ?? $job['error'] ?? 'Stopped by user');
-        if (empty($job['cancelled_at'])) {
-          $job['cancelled_at'] = gmdate('c');
+    $job = ll_erp_sync_with_job_lock(static function () use ($job, $outcome, $ownerToken): array {
+      $job = ll_erp_sync_honor_cancel($job);
+      if (($job['status'] ?? '') !== 'cancelled') {
+        if ($outcome['stop'] === 'fatal') {
+          $job['status'] = 'error';
+          $job['error'] = (string) ($outcome['error'] ?? 'Audit failed');
+        } else {
+          $job['status'] = $outcome['stop'] === 'done' ? 'audited' : 'auditing';
         }
-        unset($job['chain_token'], $job['chain_token_at']);
-      } elseif ($errored) {
-        $job['status'] = 'error';
-        if (!empty($fresh['error'])) {
-          $job['error'] = (string) $fresh['error'];
-        }
-      } elseif ($cursor >= count($leads)) {
-        $kept = (string) ($fresh['status'] ?? '');
-        $job['status'] = in_array($kept, ['published', 'audited'], true) ? $kept : 'audited';
-      } else {
-        $job['status'] = 'auditing';
       }
-      $job = ll_erp_sync_release_run_lock($job, $ownerToken);
-      if (($job['pipeline'] ?? '') === 'upload') {
-        ll_audit_upload_log_touch_job($job);
-      }
+      return ll_erp_sync_release_run_lock($job, $ownerToken);
+    });
+    if (($job['pipeline'] ?? '') === 'upload') {
+      ll_audit_upload_log_touch_job($job);
     }
   }
+  $results = $job['results'];
+  $throttle = ll_erp_sync_throttle_public($job);
 
   if (($job['status'] ?? '') === 'cancelled' || !empty($job['cancel_requested'])) {
     return [
@@ -3138,6 +3283,20 @@ function ll_erp_sync_run(array $actor, bool $forceFetch = false, bool $dryRun = 
     ];
   }
   if (($job['status'] ?? '') === 'error') {
+    $fail = [
+      'ok' => false,
+      'phase' => 'audit',
+      'error' => (string) ($job['error'] ?? 'Audit failed'),
+      'cursor' => $job['cursor'],
+      'lead_count' => count($leads),
+      'done' => count($results),
+      'throttle' => $throttle,
+      'at' => gmdate('c'),
+    ];
+    ll_erp_sync_set_last_status($fail);
+    if ($recordDaily) {
+      ll_erp_sync_set_last_daily_status(array_merge($fail, ['source' => 'daily']));
+    }
     return [
       'ok' => false,
       'status' => 'error',
@@ -3149,7 +3308,7 @@ function ll_erp_sync_run(array $actor, bool $forceFetch = false, bool $dryRun = 
     ];
   }
 
-  if ($cursor < count($leads)) {
+  if (($job['status'] ?? '') !== 'audited') {
     $selfChained = false;
     if ($selfChain) {
       $selfChained = ll_erp_sync_fire_self_chain_continue();
@@ -3159,20 +3318,24 @@ function ll_erp_sync_run(array $actor, bool $forceFetch = false, bool $dryRun = 
       : ($selfChain
         ? 'self-chain handoff failed — continue cron will resume'
         : 'call continue (or run) again');
+    if (is_array($throttle) && ($throttle['slowed'] || $throttle['paused_until'])) {
+      $resumeHint .= ' · rate-limited: ' . $throttle['concurrency'] . '/' . $throttle['target_concurrency']
+        . ' parallel, batch ' . $throttle['batch_size'];
+    }
     $partial = [
       'ok' => true,
       'phase' => 'audit',
       'partial' => true,
       'needs_continue' => true,
       'complete' => false,
-      'cursor' => $cursor,
+      'cursor' => $job['cursor'],
       'lead_count' => count($leads),
       'done' => count($results),
       'audited' => count($results),
       'total' => count($leads),
-      'chunks_this_request' => $chunksThisRequest,
       'self_chained' => $selfChained,
-      'time_limit_handoff' => $hitTimeLimit,
+      'time_limit_handoff' => $outcome['stop'] === 'deadline',
+      'throttle' => $throttle,
       'at' => gmdate('c'),
     ];
     ll_erp_sync_set_last_status($partial);
@@ -3187,6 +3350,10 @@ function ll_erp_sync_run(array $actor, bool $forceFetch = false, bool $dryRun = 
     ]);
   }
 
+  ksort($results);
+  $results = array_values($results);
+  $job['results'] = $results;
+  unset($job['queue']);
   $sourceFile = (string) ($job['source_file'] ?? 'ERP sync');
   $dashboards = ll_erp_sync_build_dashboards($results, $sourceFile);
   $published = null;

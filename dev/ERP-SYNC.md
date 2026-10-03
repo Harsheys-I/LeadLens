@@ -42,11 +42,12 @@ When Test fetch / Fetch / keep-alive / daily run shows **session expired**:
 
 ### Resume / self-chain (Hostinger time limits)
 
-Each PHP request audits in chunks (`Max leads / invocation`, default 40). After each chunk:
+Each PHP request keeps up to `concurrency` OpenAI requests in flight (curl_multi rolling pool — a finished request's slot is refilled at once) for its whole time budget, saving progress every ~15s. `Max leads / manual run` (default 200) only caps the advanced **Run server audit** button; self-chained workers are limited by time only.
 
-1. **In-request loop** — if wall-clock time still has ~18s headroom before `max_execution_time`, the same request starts the next chunk immediately.
-2. **Fire-and-forget self-HTTP** — when about to hit the limit and the job is still incomplete, PHP POSTs `erp-sync/continue` on the same host with a one-time chain token (`X-ERP-Sync-Chain`). A running lock prevents stampede (cron + self-chain overlap → busy no-op).
-3. **Continue cron (optional backup)** — every 10 minutes still works if a self-chain handoff fails; idle no-ops are harmless.
+1. **Time budget** — new requests stop being sent when the expected request time would cross `max_execution_time` minus ~18s; anything still unfinished at the deadline goes back on the job's retry queue (never dropped).
+2. **Fire-and-forget self-HTTP** — when the budget is used and the job is still incomplete, PHP POSTs `erp-sync/continue` on the same host with a one-time chain token (`X-ERP-Sync-Chain`). A running lock prevents stampede (cron + self-chain overlap → busy no-op).
+3. **Rate limits** — on 429 the worker honors `Retry-After` / `x-ratelimit-reset-*`, pauses, halves parallel requests (then batch size, min 5) and persists that level in the job; it steps back up after a run of successes. Waits longer than the remaining budget are saved and the next chained worker waits out the rest. 5xx / timeouts retry with exponential backoff + jitter.
+4. **Continue cron (optional backup)** — every 10 minutes still works if a self-chain handoff fails; idle no-ops are harmless.
 
 - **Keep-alive cron (every 1 minute)** → `POST /api/erp-sync/keepalive` — session ping, and at **6:00 AM IST** it fire-and-forgets `/daily`.
 - **Daily cron (optional backup, 6:00 AM IST)** → `POST /api/erp-sync/daily` — PHP only starts a **fresh fetch** inside **05:55–06:45 IST**. Hits at 4pm (or any other hour) are ignored.
