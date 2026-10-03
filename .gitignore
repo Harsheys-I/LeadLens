@@ -5,3 +5,9 @@ web-app/api/storage/erp-sync/*.meta.json
 web-app/api/storage/erp-sync/*-leads.json
 web-app/api/storage/erp-sync/latest-leads.json
 .cursor/
+
+# ERP report downloads contain customer phone numbers
+automation/erp-out/
+automation/screenshots/
+erp-out/
+screenshots/
