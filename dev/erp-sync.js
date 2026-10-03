@@ -1,64 +1,25 @@
 /**
- * /dev Super User ERP Sync panel — fetch ERP → store raw → hand off to main Audit UI.
+ * ERP Sync Super User module — GitHub Actions dispatch + live audit/status.
  */
-import {api} from './api-client.js?v=9.1.0.stable';
-import {getUser} from './auth.js?v=9.1.0.stable';
+import {APP_VERSION} from './audit.js?v=10.0.0.stable';
+import {api} from './api-client.js?v=10.0.0.stable';
+import {requireAuth, logout, getUser, changePassword, updateProfile} from './auth.js?v=10.0.0.stable';
+import {mountNotifications} from './notifications-ui.js?v=10.0.0.stable';
+import {appUrl, homePath} from './app-base.js?v=10.0.0.stable';
+import {initTheme} from './theme.js?v=10.0.0.stable';
 
-const FIELD_IDS = [
-  'mobile', 'project', 'registration', 'telecaller', 'source', 'update',
-  'status', 'comments', 'next', 'location', 'requirement', 'parameter', 'budget'
-];
+const $ = (id) => document.getElementById(id);
 
-const DEFAULT_ALIASES = {
-  mobile: 'Mobile, Mobile Number, mobile, phone',
-  project: 'Project Name, Project, project',
-  registration: 'Lead Registration Date, Registration Date, LRD',
-  telecaller: 'Telecaller Name, Agent Name, telecaller',
-  source: 'Source, Source Name',
-  update: 'Lead Update Date, Call Date, Update Date, LUD',
-  status: 'Lead Status, Status',
-  comments: 'Comments, Remarks',
-  next: 'Next Followup Date, Next Follow-up Date, NFD',
-  location: 'Customer Location, Location',
-  requirement: 'Customer Requirement, Requirement',
-  parameter: 'Analysis Parameter, Analysis Parameters',
-  budget: 'Estimated Budget, Budget'
-};
-
-const BUSY_DISABLE_IDS = [
-  'erp-sync-save',
-  'erp-sync-test',
-  'erp-sync-fetch-audit',
-  'erp-sync-ping',
-  'erp-sync-run-daily',
-  'erp-sync-run-server',
-  'erp-sync-publish'
-];
-
-/** @type {((entry: object) => void|Promise<void>)|null} */
-let loadIntoAuditFn = null;
-/** @type {((msg: string) => void)|null} */
-let toastFn = null;
-/** @type {((name: string) => void)|null} */
-let showViewFn = null;
-
+let pollTimer = 0;
 let busy = false;
-/** @type {AbortController|null} */
-let activeAbort = null;
-/** @type {Map<string, string>} */
-const buttonLabels = new Map();
 
-function $(id) {
-  return document.getElementById(id);
-}
-
-function isAbortError(err) {
-  return Boolean(
-    err
-    && (err.name === 'AbortError'
-      || err.code === 20
-      || /aborted|AbortError/i.test(String(err.message || '')))
-  );
+function toast(message) {
+  const el = $('toast');
+  if (!el) return;
+  el.textContent = message;
+  el.classList.add('show');
+  clearTimeout(toast._t);
+  toast._t = setTimeout(() => el.classList.remove('show'), 3200);
 }
 
 function setMsg(text, isError = false) {
@@ -66,57 +27,6 @@ function setMsg(text, isError = false) {
   if (!el) return;
   el.textContent = text || '';
   el.style.color = isError ? 'var(--danger, #b42318)' : '';
-}
-
-function aliasesToString(aliases) {
-  if (Array.isArray(aliases)) return aliases.join(', ');
-  if (typeof aliases === 'string') return aliases;
-  return DEFAULT_ALIASES[aliases] || '';
-}
-
-function readFieldMapFromUi() {
-  const map = {};
-  for (const id of FIELD_IDS) {
-    const input = document.querySelector(`[data-erp-map="${id}"]`);
-    const raw = (input?.value || '').trim();
-    map[id] = raw
-      ? raw.split(',').map(s => s.trim()).filter(Boolean)
-      : (DEFAULT_ALIASES[id] || id).split(',').map(s => s.trim()).filter(Boolean);
-  }
-  return map;
-}
-
-function renderFieldMap(fieldMap) {
-  const mount = $('erp-sync-field-map');
-  if (!mount) return;
-  mount.replaceChildren();
-  for (const id of FIELD_IDS) {
-    const row = document.createElement('label');
-    row.style.display = 'grid';
-    row.style.gridTemplateColumns = 'minmax(100px,140px) 1fr';
-    row.style.gap = '10px';
-    row.style.alignItems = 'center';
-    row.style.padding = '8px 0';
-    row.style.borderBottom = '1px solid var(--line)';
-    const title = document.createElement('span');
-    title.textContent = id;
-    const input = document.createElement('input');
-    input.type = 'text';
-    input.dataset.erpMap = id;
-    input.value = aliasesToString(fieldMap?.[id] ?? DEFAULT_ALIASES[id]);
-    row.append(title, input);
-    mount.append(row);
-  }
-}
-
-function parseExtraHeaders() {
-  const raw = ($('erp-sync-headers')?.value || '').trim();
-  if (!raw) return {};
-  const parsed = JSON.parse(raw);
-  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    throw new Error('Extra headers must be a JSON object');
-  }
-  return parsed;
 }
 
 /** Display server UTC timestamps in Asia/Kolkata (IST). */
@@ -139,268 +49,23 @@ function formatIst(iso) {
   return `${get('day')} ${month} ${get('year')}, ${get('hour')}:${get('minute')}:${get('second')} IST`;
 }
 
-function formatAgeSeconds(ageSec) {
-  if (ageSec == null || !Number.isFinite(ageSec)) return '';
-  if (ageSec < 60) return `${ageSec}s ago`;
-  if (ageSec < 3600) return `${Math.floor(ageSec / 60)}m ago`;
-  if (ageSec < 86400) return `${Math.floor(ageSec / 3600)}h ago`;
-  return `${Math.floor(ageSec / 86400)}d ago`;
+function formatElapsed(sec) {
+  const s = Math.max(0, Math.floor(Number(sec) || 0));
+  if (s < 60) return `${s}s`;
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m}m ${s % 60}s`;
+  const h = Math.floor(m / 60);
+  return `${h}h ${m % 60}m`;
 }
 
-function formatKeepaliveLine(ka, diag = null) {
-  if (!ka || typeof ka !== 'object') {
-    if (diag?.enabled) {
-      return 'Keep-alive: enabled, but never run. Cron must be set in hPanel to */1 — Save alone does not ping on a schedule.';
-    }
-    return 'Keep-alive: never run.';
-  }
-  const result = ka.result || (ka.session_expired ? 'session_expired' : (ka.ok ? 'ok' : 'error'));
-  const when = formatIst(ka.at);
-  const source = ka.source === 'cron' ? 'cron' : (ka.source === 'manual' ? 'manual' : '');
-  const sourceBit = source ? ` via ${source}` : '';
-  const ageBit = diag?.age_seconds != null ? ` (${formatAgeSeconds(diag.age_seconds)})` : '';
-  if (result === 'disabled') {
-    return `Keep-alive: cron hit but disabled at ${when}${ageBit} — enable checkbox and Save.`;
-  }
-  if (result === 'session_expired' || ka.session_expired) {
-    return `Keep-alive: session_expired at ${when}${sourceBit}${ageBit} — refresh Cookie and Save.`;
-  }
-  if (result === 'ok' && ka.ok) {
-    const http = ka.http_status != null ? ` HTTP ${ka.http_status}` : '';
-    return `Keep-alive: ok at ${when}${sourceBit}${ageBit}${http}`;
-  }
-  return `Keep-alive: ${result} at ${when}${sourceBit}${ageBit}${ka.error ? ` — ${ka.error}` : ''}`;
+function formatCost(usd) {
+  const n = Number(usd) || 0;
+  if (!n) return '$0.00';
+  if (n < 0.01) return `$${n.toFixed(4)}`;
+  return `$${n.toFixed(2)}`;
 }
 
-function writeKeepaliveStatus(ka, diag = null) {
-  const el = $('erp-sync-keepalive-status');
-  if (!el) return;
-  const lines = [formatKeepaliveLine(ka, diag)];
-  if (diag?.hint) lines.push(diag.hint);
-  el.textContent = lines.join('\n');
-  el.style.color = (ka?.session_expired || ka?.result === 'session_expired' || diag?.cron_silent)
-    ? 'var(--danger, #b42318)'
-    : '';
-}
-
-function istMinutesFromIso(iso) {
-  const d = new Date(String(iso));
-  if (Number.isNaN(d.getTime())) return null;
-  const parts = new Intl.DateTimeFormat('en-GB', {
-    timeZone: 'Asia/Kolkata',
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: false
-  }).formatToParts(d);
-  const hour = Number(parts.find((p) => p.type === 'hour')?.value);
-  const minute = Number(parts.find((p) => p.type === 'minute')?.value);
-  if (!Number.isFinite(hour) || !Number.isFinite(minute)) return null;
-  return hour * 60 + minute;
-}
-
-function formatDailyLine(daily, schedule = null) {
-  if (!daily || typeof daily !== 'object') {
-    const next = schedule?.next_at ? ` Next window ${formatIst(schedule.next_at)}.` : '';
-    return `Last scheduled run: never.${next}`;
-  }
-  const when = formatIst(daily.at);
-  let line;
-  if (daily.skipped_window || daily.status === 'outside_ist_window') {
-    line = `Last scheduled run: ignored at ${when} (outside 6:00 AM IST window)`;
-  } else if (daily.session_expired) {
-    line = `Last scheduled run: session expired at ${when} — refresh Cookie; no publish.`;
-  } else if (daily.ok === false) {
-    line = `Last scheduled run: failed at ${when} — ${daily.error || daily.phase || 'error'}`;
-  } else if (daily.needs_continue || daily.partial) {
-    const done = daily.done ?? daily.audited ?? 0;
-    const total = daily.total ?? daily.lead_count ?? '?';
-    line = `Last scheduled run: auditing ${done}/${total} at ${when} (self-chain continues)`;
-  } else if (daily.phase === 'published' || daily.auto_publish) {
-    line = `Last scheduled run: published ${daily.published_count ?? 0} dashboard(s) at ${when}`;
-  } else if (daily.complete || daily.phase === 'ready') {
-    line = `Last scheduled run: audit complete at ${when}${daily.message ? ` — ${daily.message}` : ''}`;
-  } else {
-    line = `Last scheduled run: ${daily.phase || 'ok'} at ${when}${daily.message ? ` — ${daily.message}` : ''}`;
-  }
-  return line;
-}
-
-function writeDailyStatus(daily, schedule = null) {
-  const el = $('erp-sync-daily-status');
-  if (!el) return;
-  const lines = [formatDailyLine(daily, schedule)];
-  if (schedule?.next_at) {
-    lines.push(`Next 6:00 AM IST window: ${formatIst(schedule.next_at)} — keep-alive starts it (Hostinger /daily outside that window is ignored).`);
-  }
-  const mins = daily?.at ? istMinutesFromIso(daily.at) : null;
-  if (mins != null && (mins < (5 * 60 + 55) || mins > (6 * 60 + 45)) && daily.ok === false) {
-    lines.push('That failure was not at 6:00 AM IST. After this deploy, the 4pm Hostinger hit will no-op and keep-alive will kick off at 6:00 AM IST.');
-  }
-  el.textContent = lines.join('\n');
-  el.style.color = (daily?.ok === false || daily?.session_expired)
-    ? 'var(--danger, #b42318)'
-    : '';
-}
-
-function applyConfig(config, diag = null) {
-  if (!$('erp-sync-url')) return;
-  $('erp-sync-url').value = config.report_url || '';
-  $('erp-sync-method').value = config.http_method === 'POST' ? 'POST' : 'GET';
-  $('erp-sync-cookie').value = '';
-  $('erp-sync-cookie-hint').textContent = config.cookie_configured
-    ? 'Cookie is saved (encrypted). Paste a new value only to replace it.'
-    : 'No cookie saved yet.';
-  const headers = config.extra_headers && typeof config.extra_headers === 'object'
-    ? config.extra_headers
-    : {};
-  $('erp-sync-headers').value = Object.keys(headers).length
-    ? JSON.stringify(headers, null, 2)
-    : '';
-  $('erp-sync-rows-path').value = config.rows_path || '';
-  const dailyOn = Boolean(config.daily_enabled ?? config.enabled);
-  if ($('erp-sync-daily')) {
-    $('erp-sync-daily').checked = dailyOn;
-  }
-  // Legacy id kept if present in older HTML caches.
-  if ($('erp-sync-enabled')) {
-    $('erp-sync-enabled').checked = dailyOn;
-  }
-  if ($('erp-sync-keepalive')) {
-    $('erp-sync-keepalive').checked = Boolean(config.keepalive_enabled);
-  }
-  if ($('erp-sync-keepalive-url')) {
-    $('erp-sync-keepalive-url').value = config.keepalive_url || '';
-  }
-  if ($('erp-sync-cron-auto-publish')) {
-    $('erp-sync-cron-auto-publish').checked = config.cron_auto_publish !== false;
-  }
-  $('erp-sync-auto-publish').checked = Boolean(config.auto_publish);
-  $('erp-sync-batch-size').value = String(config.batch_size ?? 25);
-  $('erp-sync-max-leads').value = String(config.max_leads_per_run ?? 200);
-  $('erp-sync-cron-secret').value = '';
-  $('erp-sync-cron-hint').textContent = config.cron_secret_configured
-    ? 'Cron secret is set. Paste a new value only to rotate it. Daily/self-chain is primary; continue-every-10m cron is optional backup.'
-    : 'Set a cron secret before enabling Hostinger cron (daily + keep-alive; continue cron optional).';
-  const keepaliveDiag = diag || null;
-  writeKeepaliveStatus(config.last_keepalive, keepaliveDiag);
-  writeDailyStatus(config.last_daily_status);
-  renderFieldMap(config.field_map || DEFAULT_ALIASES);
-}
-
-function formatStatus(payload) {
-  const last = payload?.last_status || payload?.config?.last_status;
-  const ka = payload?.last_keepalive || payload?.config?.last_keepalive;
-  const daily = payload?.last_daily_status || payload?.config?.last_daily_status;
-  const job = payload?.job;
-  const lines = [];
-  if (payload?.keepalive?.hint) {
-    lines.push('Keep-alive hint: ' + payload.keepalive.hint);
-  }
-  if (daily) {
-    const when = daily.at ? formatIst(daily.at) : '—';
-    lines.push(`Scheduled (${when}): ` + JSON.stringify({...daily, at_ist: when}, null, 2));
-  }
-  if (ka) {
-    const when = ka.at ? formatIst(ka.at) : '—';
-    lines.push(`Keep-alive (${when}): ` + JSON.stringify({...ka, at_ist: when}, null, 2));
-  }
-  if (last) {
-    const when = last.at ? formatIst(last.at) : '—';
-    lines.push(`Last (${when}): ` + JSON.stringify({...last, at_ist: when}, null, 2));
-  }
-  if (job) {
-    lines.push('Job: ' + JSON.stringify(job, null, 2));
-  }
-  if (!lines.length) return 'No fetches yet.';
-  return lines.join('\n\n');
-}
-
-function updateProgressUI({label = 'Idle', percent = '0%', width = '0%', detail = '', indeterminate = false, error = false} = {}) {
-  const labelEl = $('erp-sync-progress-label');
-  const pctEl = $('erp-sync-progress-percent');
-  const bar = $('erp-sync-progress-bar');
-  const detailEl = $('erp-sync-progress-detail');
-  if (labelEl) labelEl.textContent = label;
-  if (pctEl) pctEl.textContent = percent;
-  if (detailEl) {
-    detailEl.textContent = detail;
-    detailEl.style.color = error ? 'var(--danger, #b42318)' : '';
-  }
-  if (bar) {
-    bar.classList.toggle('is-indeterminate', indeterminate);
-    bar.style.width = indeterminate ? '35%' : width;
-  }
-}
-
-function rememberButtonLabels() {
-  for (const id of BUSY_DISABLE_IDS) {
-    const btn = $(id);
-    if (btn && !buttonLabels.has(id)) buttonLabels.set(id, btn.textContent || '');
-  }
-}
-
-/**
- * @param {boolean} active
- * @param {{activeId?: string|null, workingLabel?: string}} [opts]
- */
-function setBusy(active, {activeId = null, workingLabel = 'Working…'} = {}) {
-  rememberButtonLabels();
-  busy = active;
-  for (const id of BUSY_DISABLE_IDS) {
-    const btn = $(id);
-    if (!btn) continue;
-    btn.disabled = active;
-    if (!active) {
-      btn.textContent = buttonLabels.get(id) || btn.textContent;
-      continue;
-    }
-    if (id === activeId) {
-      btn.textContent = workingLabel;
-    } else {
-      btn.textContent = buttonLabels.get(id) || btn.textContent;
-    }
-  }
-  if (!active) {
-    $('erp-sync-progress-bar')?.classList.remove('is-indeterminate');
-  }
-}
-
-function beginAbortableRequest() {
-  if (activeAbort) {
-    try { activeAbort.abort(); } catch { /* ignore */ }
-  }
-  activeAbort = new AbortController();
-  return activeAbort.signal;
-}
-
-function clearAbortController() {
-  activeAbort = null;
-}
-
-function statusElWrite(payload) {
-  const statusEl = $('erp-sync-status');
-  if (statusEl) statusEl.textContent = formatStatus(payload);
-  const ka = payload?.last_keepalive || payload?.config?.last_keepalive;
-  writeKeepaliveStatus(ka, payload?.keepalive || null);
-  writeDailyStatus(
-    payload?.last_daily_status || payload?.config?.last_daily_status,
-    payload?.daily_schedule || null
-  );
-}
-
-/** Super User only — available on production `/` and `/dev`. */
-export function canShowErpSync() {
-  return Boolean(getUser()?.is_super);
-}
-
-/** Reveal/hide Sync nav as soon as auth/role is known (before slow boot awaits). */
-export function applyErpSyncNavVisibility() {
-  const nav = $('nav-erp-sync');
-  if (!nav) return;
-  nav.classList.toggle('hidden', !canShowErpSync());
-}
-
-/** Short server-audit rate note, e.g. "parallel 4/8 · batch 25 · rate-limited 3× · paused 20s". */
+/** Short server-audit rate note. */
 export function throttleNote(t) {
   if (!t) return '';
   const bits = [`parallel ${t.concurrency}/${t.target_concurrency}`, `batch ${t.batch_size}`];
@@ -410,6 +75,27 @@ export function throttleNote(t) {
   if (t.retry_queue) bits.push(`${t.retry_queue} batch(es) to retry`);
   if (t.errored_leads) bits.push(`${t.errored_leads} lead(s) errored`);
   return bits.join(' · ');
+}
+
+export function canShowErpSync() {
+  return Boolean(getUser()?.is_super);
+}
+
+export function applyErpSyncNavVisibility() {
+  /* legacy TeleCallerAudit hook — no-op in standalone module */
+}
+
+function ghaConclusionLine(gha) {
+  if (!gha?.configured) {
+    return 'GitHub PAT not configured — set github.token in api/config.local.php (Actions: write + Contents: read).';
+  }
+  if (gha.error) return `GHA status error: ${gha.error}`;
+  const latest = gha.latest;
+  if (!latest) return 'No workflow runs yet.';
+  const when = formatIst(latest.updated_at || latest.created_at);
+  const conc = latest.conclusion || latest.status || '—';
+  const link = latest.url ? ` · ${latest.url}` : '';
+  return `Latest run #${latest.run_number || latest.id}: ${conc} · ${when}${link}`;
 }
 
 function renderApiUploads(rows) {
@@ -424,22 +110,23 @@ function renderApiUploads(rows) {
   for (const row of list) {
     const line = document.createElement('p');
     line.style.margin = '0 0 0.7rem';
-    const isPerf = row.kind === 'performance';
+    const kind = String(row.kind || 'bucket1');
+    const label = kind === 'performance' ? 'Performance' : (kind === 'sales' || kind === 'sales_graph' ? 'Sales Graph' : 'Bucket 1');
     const audited = Number(row.audited || 0);
     const total = Number(row.lead_count || 0);
     const status = String(row.status || 'unknown');
-    const progress = !isPerf && status === 'auditing' && total ? ` ${audited}/${total}` : '';
+    const progress = kind !== 'performance' && kind !== 'sales' && status === 'auditing' && total
+      ? ` ${audited}/${total}`
+      : '';
     const bits = [
       formatIst(row.started_at),
-      isPerf ? 'Performance' : 'Bucket 1',
+      label,
       row.source_file || 'file',
-      isPerf ? `${total || 0} TeleCallers` : `${total || 0} leads`,
+      kind === 'performance' ? `${total || 0} TeleCallers` : `${total || 0} leads`,
       `${Number(row.row_count || 0)} rows`,
       row.uploaded_by ? `by ${row.uploaded_by}` : '',
-      !isPerf && row.batch_size ? `batch ${row.batch_size}` : '',
-      !isPerf && row.concurrency ? `parallel ${row.concurrency}` : '',
       status + progress,
-      !isPerf && status === 'auditing' && row.throttle?.slowed ? `slowed: ${throttleNote(row.throttle)}` : ''
+      row.throttle?.slowed ? `slowed: ${throttleNote(row.throttle)}` : ''
     ].filter(Boolean);
     line.textContent = bits.join(' · ');
     if (row.error) line.textContent += ` — ${row.error}`;
@@ -448,495 +135,179 @@ function renderApiUploads(rows) {
   }
 }
 
-let apiUploadTimer = 0;
-
-function ensureApiUploadRefresh() {
-  if (apiUploadTimer) return;
-  apiUploadTimer = window.setInterval(async () => {
-    const view = document.getElementById('view-erp-sync');
-    if (!view || !view.classList.contains('active') || !canShowErpSync()) return;
-    try {
-      const data = await api('erp-sync/status');
-      renderApiUploads(data.api_uploads || []);
-      const wasRunning = !$('erp-sync-cancel')?.classList.contains('hidden');
-      const still = paintJobProgress(data);
-      if (wasRunning && !still) {
-        updateProgressUI({
-          label: 'Idle',
-          percent: '0%',
-          width: '0%',
-          detail: 'Server audit is not running.'
-        });
-      }
-    } catch {
-      /* leave the list in place */
-    }
-  }, 15000);
+function pickUpload(rows, kinds) {
+  const list = Array.isArray(rows) ? rows : [];
+  const want = new Set(kinds);
+  return list.find((r) => want.has(String(r.kind || 'bucket1'))) || null;
 }
 
-function paintJobProgress(payload) {
-  const job = payload?.job || null;
-  const prog = payload?.progress || null;
-  const status = String(job?.status || prog?.status || '');
+function paintBucket1(status) {
+  const el = $('erp-bucket1-body');
+  if (!el) return;
+  const prog = status.progress || {};
+  const job = status.job || {};
+  const gha = status.gha || {};
+  const next = status.next_runs?.bucket1 || gha.next_runs?.bucket1;
+  const upload = pickUpload(status.api_uploads, ['bucket1']);
+  const lines = [];
+  lines.push(`Next scheduled: ${next?.label || next?.at_ist || '—'}`);
+  if (gha.latest) {
+    lines.push(`GHA: ${gha.latest.conclusion || gha.latest.status} · ${formatIst(gha.latest.updated_at || gha.latest.created_at)}`);
+  }
+  if (prog.running || prog.status === 'auditing') {
+    const done = Number(prog.audited ?? job.audited ?? 0);
+    const total = Number(prog.total ?? job.total ?? 0);
+    lines.push(`Audit: ${done.toLocaleString()}/${total ? total.toLocaleString() : '…'} (${prog.status})`);
+    lines.push(`Elapsed: ${formatElapsed(prog.elapsed_seconds)}`);
+    const u = prog.usage || {};
+    lines.push(`Tokens: in ${Number(u.input || 0).toLocaleString()} · cached ${Number(u.cached || 0).toLocaleString()} · out ${Number(u.output || 0).toLocaleString()}`);
+    lines.push(`Est. cost: ${formatCost(prog.estimated_cost)}`);
+    const rate = throttleNote(prog.throttle);
+    if (rate) lines.push(rate);
+  } else if (job.status) {
+    lines.push(`Last job: ${job.status}${job.source_file ? ` · ${job.source_file}` : ''}`);
+    if (job.started_at) lines.push(`Started: ${formatIst(job.started_at)}`);
+    if (prog.usage) {
+      const u = prog.usage;
+      lines.push(`Tokens: in ${Number(u.input || 0).toLocaleString()} · cached ${Number(u.cached || 0).toLocaleString()} · out ${Number(u.output || 0).toLocaleString()}`);
+      lines.push(`Elapsed: ${formatElapsed(prog.elapsed_seconds)} · Est. cost: ${formatCost(prog.estimated_cost)}`);
+    }
+    if (job.error) lines.push(`Error: ${job.error}`);
+  } else if (upload) {
+    lines.push(`Last upload: ${upload.status} · ${formatIst(upload.started_at)}`);
+    lines.push(`${upload.lead_count || 0} leads · ${upload.source_file || ''}`);
+  } else {
+    lines.push('No Lead Audit run yet.');
+  }
+  el.textContent = lines.join('\n');
+  el.style.color = (prog.status === 'error' || job.error) ? 'var(--danger, #b42318)' : '';
+}
+
+function paintPerf(status) {
+  const el = $('erp-perf-body');
+  if (!el) return;
+  const gha = status.gha || {};
+  const next = status.next_runs?.perf || gha.next_runs?.perf;
+  const upload = pickUpload(status.api_uploads, ['performance']);
+  const lines = [];
+  lines.push(`Next scheduled: ${next?.label || next?.at_ist || '—'}`);
+  if (upload) {
+    lines.push(`Last: ${upload.status} · ${formatIst(upload.published_at || upload.started_at)}`);
+    lines.push(`${upload.lead_count || 0} TeleCallers · ${upload.source_file || ''}`);
+    if (upload.error) lines.push(`Error: ${upload.error}`);
+  } else {
+    lines.push('No Performance upload yet.');
+  }
+  el.textContent = lines.join('\n');
+  el.style.color = upload?.error ? 'var(--danger, #b42318)' : '';
+}
+
+function paintSales(status) {
+  const el = $('erp-sales-body');
+  if (!el) return;
+  const gha = status.gha || {};
+  const next = status.next_runs?.sales || gha.next_runs?.sales;
+  const upload = pickUpload(status.api_uploads, ['sales', 'sales_graph']);
+  const lines = [];
+  lines.push(`Next scheduled: ${next?.label || next?.at_ist || '—'}`);
+  lines.push('Note: Sales Graph cURLs are placeholders until configured in automation.');
+  if (upload) {
+    lines.push(`Last: ${upload.status} · ${formatIst(upload.published_at || upload.started_at)}`);
+    lines.push(`${upload.source_file || ''} · ${upload.lead_count != null ? upload.lead_count + ' items' : ''}`);
+    if (upload.error) lines.push(`Error: ${upload.error}`);
+  } else {
+    lines.push('No Sales Graph upload yet.');
+  }
+  el.textContent = lines.join('\n');
+  el.style.color = upload?.error ? 'var(--danger, #b42318)' : '';
+}
+
+function paintStopButton(status) {
   const stop = $('erp-sync-cancel');
-  if (stop) stop.classList.toggle('hidden', status !== 'auditing');
-  if (status !== 'auditing') return false;
-  const done = Number(prog?.audited ?? job?.audited ?? job?.result_count ?? 0);
-  const total = Number(prog?.total ?? job?.total ?? job?.lead_count ?? 0);
-  const pct = total ? Math.min(100, Math.round((done / total) * 100)) : 0;
-  const source = job?.source_file ? ` · ${job.source_file}` : '';
-  const rate = throttleNote(prog?.throttle);
-  updateProgressUI({
-    label: `Auditing ${done.toLocaleString()}/${total ? total.toLocaleString() : '…'}`,
-    percent: `${pct}%`,
-    width: `${pct}%`,
-    detail: `${job?.pipeline || 'server'} audit${source}${rate ? ` · ${rate}` : ''}. This keeps running on the server until it finishes or you stop it.`
-  });
-  return true;
+  if (!stop) return;
+  const running = Boolean(status.progress?.running || status.progress?.status === 'auditing');
+  stop.classList.toggle('hidden', !running);
 }
 
-export async function loadErpSyncPanel() {
-  if (!canShowErpSync()) return;
-  ensureApiUploadRefresh();
-  try {
-    const data = await api('erp-sync/status');
-    applyConfig(data.config || {}, data.keepalive || null);
-    renderApiUploads(data.api_uploads || []);
-    statusElWrite(data);
-    if (!paintJobProgress(data)) {
-      const last = data.last_status;
-      if (last?.phase === 'ready-for-audit' && last.lead_count != null) {
-        updateProgressUI({
-          label: `Ready — ${Number(last.lead_count).toLocaleString()} leads`,
-          percent: '100%',
-          width: '100%',
-          detail: 'Stored on server. Use Fetch & send to Audit again, or open Bucket 1 and Start Audit if already loaded.'
-        });
-      } else if (last?.ok === false) {
-        updateProgressUI({
-          label: 'Last fetch failed',
-          percent: '—',
-          width: '0%',
-          detail: last.error || 'Error',
-          error: true
-        });
-      } else {
-        updateProgressUI({
-          label: 'Idle',
-          percent: '0%',
-          width: '0%',
-          detail: 'Configure URL + Cookie, Save, then Fetch & send to Audit.'
-        });
-      }
+function isActive(status) {
+  if (status.progress?.running || status.progress?.status === 'auditing') return true;
+  if (status.gha?.active) return true;
+  return false;
+}
+
+async function refreshStatus() {
+  const status = await api('erp-sync/status');
+  const meta = $('erp-sync-gha-meta');
+  if (meta) {
+    const bits = [ghaConclusionLine(status.gha)];
+    const d = status.last_dispatch || status.gha?.last_dispatch;
+    if (d?.dispatched_at) {
+      bits.push(`Last dispatch: ${(d.jobs || []).join(', ') || '—'} · ${formatIst(d.dispatched_at)}${d.dry_run ? ' · dry run' : ''}`);
     }
-  } catch (err) {
-    setMsg(err.message || 'Could not load ERP sync config', true);
+    meta.textContent = bits.join('\n');
   }
+  renderApiUploads(status.api_uploads || []);
+  paintBucket1(status);
+  paintPerf(status);
+  paintSales(status);
+  paintStopButton(status);
+  schedulePoll(isActive(status));
+  return status;
 }
 
-function buildConfigBody() {
-  const extra_headers = parseExtraHeaders();
-  const dailyEnabled = Boolean(
-    $('erp-sync-daily')?.checked
-    ?? $('erp-sync-enabled')?.checked
-  );
-  const body = {
-    report_url: $('erp-sync-url')?.value?.trim() || '',
-    http_method: $('erp-sync-method')?.value || 'GET',
-    extra_headers,
-    rows_path: $('erp-sync-rows-path')?.value?.trim() || '',
-    daily_enabled: dailyEnabled,
-    enabled: dailyEnabled,
-    cron_auto_publish: $('erp-sync-cron-auto-publish')
-      ? Boolean($('erp-sync-cron-auto-publish').checked)
-      : true,
-    auto_publish: Boolean($('erp-sync-auto-publish')?.checked),
-    batch_size: Number($('erp-sync-batch-size')?.value || 25),
-    max_leads_per_run: Number($('erp-sync-max-leads')?.value || 200),
-    field_map: readFieldMapFromUi()
-  };
-  // Only send keepalive flags when the controls exist — avoids wiping enabled
-  // state from quiet saves against a stale HTML cache missing the checkbox.
-  const kaEl = $('erp-sync-keepalive');
-  if (kaEl) {
-    body.keepalive_enabled = Boolean(kaEl.checked);
+function schedulePoll(active) {
+  if (pollTimer) {
+    clearInterval(pollTimer);
+    pollTimer = 0;
   }
-  const kaUrl = $('erp-sync-keepalive-url');
-  if (kaUrl) {
-    body.keepalive_url = kaUrl.value?.trim() || '';
-  }
-  const cookie = $('erp-sync-cookie')?.value?.trim() || '';
-  if (cookie) body.cookie = cookie;
-  const cron = $('erp-sync-cron-secret')?.value?.trim() || '';
-  if (cron) body.cron_secret = cron;
-  return body;
+  const ms = active ? 4000 : 15000;
+  pollTimer = window.setInterval(() => {
+    refreshStatus().catch(() => { /* keep last paint */ });
+  }, ms);
 }
 
-async function saveConfig() {
-  setBusy(true, {activeId: 'erp-sync-save', workingLabel: 'Saving…'});
-  setMsg('Saving…');
-  let body;
-  try {
-    body = buildConfigBody();
-  } catch (err) {
-    setBusy(false);
-    setMsg(err.message, true);
+function selectedJobs() {
+  const jobs = [];
+  if ($('erp-job-bucket1')?.checked) jobs.push('bucket1');
+  if ($('erp-job-perf')?.checked) jobs.push('perf');
+  if ($('erp-job-sales')?.checked) jobs.push('sales');
+  return jobs;
+}
+
+async function runNow() {
+  if (busy) return;
+  const jobs = selectedJobs();
+  if (!jobs.length) {
+    setMsg('Select at least one pipeline.', true);
     return;
   }
-  try {
-    const data = await api('erp-sync/config', {method: 'POST', body});
-    applyConfig(data.config || {});
-    const note = body.keepalive_enabled
-      ? 'Saved. Cron must be set in hPanel to */1 — Save alone does not ping on a schedule.'
-      : (data.message || 'Saved');
-    setMsg(note);
-  } catch (err) {
-    setMsg(err.message || 'Save failed', true);
-  } finally {
-    setBusy(false);
+  busy = true;
+  const btn = $('erp-sync-run-now');
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = 'Dispatching…';
   }
-}
-
-async function saveConfigQuiet(signal) {
-  let body;
+  setMsg('Dispatching GitHub Actions…');
   try {
-    body = buildConfigBody();
-  } catch {
-    return;
-  }
-  const data = await api('erp-sync/config', {method: 'POST', body, signal});
-  applyConfig(data.config || {});
-}
-
-async function testFetch() {
-  if (busy) return;
-  const signal = beginAbortableRequest();
-  setBusy(true, {activeId: 'erp-sync-test', workingLabel: 'Testing…'});
-  setMsg('Fetching…');
-  updateProgressUI({label: 'Test fetch…', percent: '…', indeterminate: true, detail: 'Request in flight…'});
-  $('erp-sync-preview').textContent = '';
-  try {
-    await saveConfigQuiet(signal);
-    const data = await api('erp-sync/test-fetch', {method: 'POST', body: {}, signal});
-    const preview = data.preview || {};
-    const mapping = data.mapping || {};
-    const lines = [
-      `HTTP ${data.http_status} · ${data.bytes} bytes · ${preview.format || '?'}`,
-      `Rows: ${preview.row_count ?? 0}` + (preview.rows_path ? ` (path: ${preview.rows_path})` : ''),
-      `Keys: ${(preview.keys || []).join(', ') || '(none)'}`,
-      mapping.mapped_columns
-        ? `Mapped: ${JSON.stringify(mapping.mapped_columns)}`
-        : '',
-      mapping.lead_count != null ? `Leads after map: ${mapping.lead_count}` : '',
-      mapping.missing_required?.length
-        ? `Missing required: ${mapping.missing_required.join(', ')}`
-        : '',
-      preview.sample_row
-        ? `Sample: ${JSON.stringify(preview.sample_row, null, 2)}`
-        : ''
-    ].filter(Boolean);
-    $('erp-sync-preview').textContent = lines.join('\n');
-    setMsg(data.message || 'Test fetch OK');
-    updateProgressUI({
-      label: `Preview — ${(mapping.lead_count ?? preview.row_count ?? 0).toLocaleString()} rows/leads`,
-      percent: '100%',
-      width: '100%',
-      detail: 'Test only — use Fetch & send to Audit to load into Bucket 1.'
-    });
-    await refreshStatus({signal});
-  } catch (err) {
-    if (isAbortError(err)) {
-      setMsg('Stopped.');
-    } else {
-      setMsg(err.message || 'Test fetch failed', true);
-      updateProgressUI({label: 'Error', percent: '—', width: '0%', detail: err.message || 'Test fetch failed', error: true});
-      if (err.data?.session_expired) {
-        $('erp-sync-cookie-hint').textContent = 'Session expired — paste a fresh Cookie header and Save settings.';
-      }
-    }
-  } finally {
-    clearAbortController();
-    setBusy(false);
-  }
-}
-
-/**
- * Primary path: fetch ERP → store raw + mapped leads → hand off to main Audit UI.
- */
-async function fetchAndSendToAudit() {
-  if (busy) return;
-  if (typeof loadIntoAuditFn !== 'function') {
-    setMsg('Audit handoff is not available — reload the page.', true);
-    return;
-  }
-  const signal = beginAbortableRequest();
-  setBusy(true, {activeId: 'erp-sync-fetch-audit', workingLabel: 'Fetching…'});
-  setMsg('Fetching ERP report…');
-  updateProgressUI({
-    label: 'Fetching ERP…',
-    percent: '…',
-    indeterminate: true,
-    detail: 'Saving raw payload, then mapping leads for Audit.'
-  });
-
-  try {
-    await saveConfigQuiet(signal);
-    const summary = await api('erp-sync/fetch-for-audit', {method: 'POST', body: {}, signal});
-    if (!summary?.ok) {
-      throw Object.assign(new Error(summary?.error || 'Fetch failed'), {data: summary});
-    }
-
-    updateProgressUI({
-      label: `Mapped ${Number(summary.lead_count || 0).toLocaleString()} leads`,
-      percent: '…',
-      indeterminate: true,
-      detail: 'Downloading mapped leads into Audit…'
-    });
-    setMsg(`Mapped ${summary.lead_count} leads — loading into Audit…`);
-
-    const pack = await api('erp-sync/latest-leads', {signal});
-    const leads = Array.isArray(pack?.leads) ? pack.leads : [];
-    if (!leads.length) {
-      throw new Error('Server stored the fetch but returned no mapped leads');
-    }
-
-    const fileName = pack.source_file || summary.source_file || `ERP:${summary.payload_file || 'latest'}`;
-    const entry = {
-      sheetName: 'ERP',
-      leads,
-      rowCount: pack.row_count ?? summary.row_count ?? leads.length,
-      leadCount: pack.lead_count ?? summary.lead_count ?? leads.length,
-      callCount: pack.row_count ?? summary.row_count ?? leads.length,
-      latestDayCalls: leads.length,
-      invalidRows: 0,
-      dedupedRows: 0,
-      expectedColumns: [],
-      missingColumns: [],
-      unknownHeaders: [],
-      looksAudited: false,
-      fileName,
-      fileSize: summary.bytes || 0,
-      sourceFormat: 'raw',
-      fromErpSync: true
-    };
-
-    await loadIntoAuditFn(entry);
-    updateProgressUI({
-      label: `Ready — ${leads.length.toLocaleString()} leads in Audit`,
-      percent: '100%',
-      width: '100%',
-      detail: 'Open Bucket 1 Followup Review and click Start Audit → (same progress bar / Stop as Excel RAW).'
-    });
-    setMsg(`Loaded ${leads.length.toLocaleString()} leads into Audit`);
-    toastFn?.(`ERP → Audit: ${leads.length.toLocaleString()} leads ready`);
-    await refreshStatus({signal});
-  } catch (err) {
-    if (isAbortError(err)) {
-      setMsg('Stopped.');
-      updateProgressUI({label: 'Stopped', percent: '—', width: '0%', detail: 'Fetch cancelled.'});
-    } else {
-      setMsg(err.message || 'Fetch & send failed', true);
-      updateProgressUI({
-        label: 'Error',
-        percent: '—',
-        width: '0%',
-        detail: err.message || 'Fetch & send failed',
-        error: true
-      });
-      if (err.data?.session_expired) {
-        $('erp-sync-cookie-hint').textContent = 'Session expired — paste a fresh Cookie header and Save settings.';
-      }
-    }
-  } finally {
-    clearAbortController();
-    setBusy(false);
-  }
-}
-
-async function pingKeepalive() {
-  if (busy) return;
-  const signal = beginAbortableRequest();
-  setBusy(true, {activeId: 'erp-sync-ping', workingLabel: 'Pinging…'});
-  setMsg('Keep-alive ping…');
-  try {
-    await saveConfigQuiet(signal);
-    const data = await api('erp-sync/keepalive', {method: 'POST', body: {}, signal});
-    writeKeepaliveStatus(data, {
-      age_seconds: 0,
-      enabled: true,
-      hint: data.source === 'manual'
-        ? 'Manual ping OK. For overnight sessions, hPanel cron must hit production /api/erp-sync/keepalive every minute (source will show “cron”).'
-        : ''
-    });
-    if (data.session_expired || data.result === 'session_expired') {
-      setMsg(data.error || 'ERP session expired — refresh Cookie', true);
-      $('erp-sync-cookie-hint').textContent = 'Session expired — paste a fresh Cookie header and Save settings.';
-    } else if (data.ok) {
-      setMsg(`Keep-alive OK at ${formatIst(data.at)}`);
-    } else {
-      setMsg(data.error || 'Keep-alive failed', true);
-    }
-    await refreshStatus({signal});
-  } catch (err) {
-    if (isAbortError(err)) {
-      setMsg('Stopped.');
-    } else {
-      setMsg(err.message || 'Keep-alive failed', true);
-      if (err.data?.session_expired) {
-        writeKeepaliveStatus({...err.data, result: 'session_expired', at: err.data.at || new Date().toISOString(), source: 'manual'});
-        $('erp-sync-cookie-hint').textContent = 'Session expired — paste a fresh Cookie header and Save settings.';
-      }
-    }
-  } finally {
-    clearAbortController();
-    setBusy(false);
-  }
-}
-
-/** Super User: start the same pipeline cron uses at 6:00 AM IST (bypass window). */
-async function runDailyNow() {
-  if (busy) return;
-  const signal = beginAbortableRequest();
-  setBusy(true, {activeId: 'erp-sync-run-daily', workingLabel: 'Daily…'});
-  setMsg('Starting daily pipeline (fetch + server audit + publish)…');
-  updateProgressUI({
-    label: 'Daily pipeline…',
-    percent: '…',
-    indeterminate: true,
-    detail: 'Fresh ERP fetch, then server AI audit. Self-chain continues until publish.'
-  });
-  try {
-    await saveConfigQuiet(signal);
-    const data = await api('erp-sync/daily', {method: 'POST', body: {}, signal});
-    if (data.ok === false) {
-      setMsg(data.error || 'Daily pipeline failed', true);
-      updateProgressUI({label: 'Error', percent: '—', width: '0%', detail: data.error || 'Failed', error: true});
-    } else if (data.partial || data.needs_continue) {
-      const done = data.audited ?? data.done ?? 0;
-      const total = data.total ?? data.lead_count ?? '?';
-      setMsg(`Daily audit ${done}/${total} — self-chain continues.`);
-      updateProgressUI({
-        label: `Daily audit ${done}/${total}`,
-        percent: total && Number(total) ? `${Math.round(done / Number(total) * 100)}%` : '…',
-        width: total && Number(total) ? `${Math.min(100, Math.round(done / Number(total) * 100))}%` : '35%',
-        detail: data.message || 'Self-chain continues in the background.'
-      });
-    } else {
-      setMsg(data.message || `Daily pipeline done (${data.result_count ?? data.audited ?? 0} results)`);
-      updateProgressUI({
-        label: data.phase === 'published' ? 'Published' : 'Daily complete',
-        percent: '100%',
-        width: '100%',
-        detail: data.message || 'Daily pipeline finished.'
-      });
-    }
-    await refreshStatus({signal});
-  } catch (err) {
-    if (isAbortError(err)) {
-      setMsg('Stopped.');
-    } else {
-      setMsg(err.message || 'Daily pipeline failed', true);
-      updateProgressUI({label: 'Error', percent: '—', width: '0%', detail: err.message || 'Failed', error: true});
-    }
-  } finally {
-    clearAbortController();
-    setBusy(false);
-  }
-}
-
-/** Optional advanced: server-side OpenAI audit (not the primary path). */
-async function runServerAuditOnce() {
-  if (busy) return;
-  const signal = beginAbortableRequest();
-  setBusy(true, {activeId: 'erp-sync-run-server', workingLabel: 'Server audit…'});
-  setMsg('Running optional server audit (one batch)…');
-  updateProgressUI({
-    label: 'Server audit…',
-    percent: '…',
-    indeterminate: true,
-    detail: 'Advanced path — prefer Fetch & send to Audit for the main UI.'
-  });
-  try {
-    await saveConfigQuiet(signal);
-    const data = await api('erp-sync/run', {
+    const data = await api('erp-sync/trigger', {
       method: 'POST',
-      body: {force_fetch: true, dry_run: false},
-      signal
+      body: {jobs, dry_run: Boolean($('erp-job-dry')?.checked)}
     });
-    if (data.ok === false) {
-      setMsg(data.error || 'Server audit failed', true);
-      updateProgressUI({label: 'Error', percent: '—', width: '0%', detail: data.error || 'Failed', error: true});
-    } else if (data.partial || data.needs_continue) {
-      const done = data.audited ?? data.done ?? 0;
-      const total = data.total ?? data.lead_count ?? '?';
-      setMsg(`Partial server audit ${done}/${total} — call again to continue (or use main Audit instead).`);
-      updateProgressUI({
-        label: `Server audit ${done}/${total}`,
-        percent: total && Number(total) ? `${Math.round(done / Number(total) * 100)}%` : '…',
-        width: total && Number(total) ? `${Math.min(100, Math.round(done / Number(total) * 100))}%` : '35%',
-        detail: 'Incomplete. Prefer Fetch & send to Audit for reliable progress.'
-      });
-    } else {
-      setMsg(data.message || `Server audit done (${data.result_count ?? data.audited ?? 0} results)`);
-      updateProgressUI({
-        label: 'Server audit complete',
-        percent: '100%',
-        width: '100%',
-        detail: data.auto_publish
-          ? 'Auto-published.'
-          : 'Use Publish last results if needed.'
-      });
-    }
-    await refreshStatus({signal});
+    setMsg(data.message || `Dispatched: ${jobs.join(', ')}`);
+    toast(data.message || 'Workflow dispatched');
+    await refreshStatus();
   } catch (err) {
-    if (isAbortError(err)) {
-      setMsg('Stopped.');
-    } else {
-      setMsg(err.message || 'Server audit failed', true);
-      updateProgressUI({label: 'Error', percent: '—', width: '0%', detail: err.message || 'Failed', error: true});
-    }
+    setMsg(err.message || 'Dispatch failed', true);
   } finally {
-    clearAbortController();
-    setBusy(false);
+    busy = false;
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = 'Run now';
+    }
   }
 }
 
-async function publishLast() {
-  if (busy) return;
-  const signal = beginAbortableRequest();
-  setBusy(true, {activeId: 'erp-sync-publish', workingLabel: 'Publishing…'});
-  setMsg('Publishing…');
-  updateProgressUI({label: 'Publishing…', percent: '…', indeterminate: true, detail: 'Publishing last server-audit results…'});
-  try {
-    const data = await api('erp-sync/publish', {method: 'POST', body: {}, signal});
-    setMsg(data.message || `Published ${(data.published || []).length} board(s)`);
-    await refreshStatus({signal});
-    updateProgressUI({
-      label: 'Published',
-      percent: '100%',
-      width: '100%',
-      detail: data.message || 'Dashboards published from last server audit.'
-    });
-  } catch (err) {
-    if (isAbortError(err)) {
-      setMsg('Stopped.');
-    } else {
-      setMsg(err.message || 'Publish failed', true);
-      updateProgressUI({label: 'Error', percent: '—', width: '0%', detail: err.message || 'Publish failed', error: true});
-    }
-  } finally {
-    clearAbortController();
-    setBusy(false);
-  }
-}
-
-async function refreshStatus({signal} = {}) {
-  const data = await api('erp-sync/status', {signal});
-  statusElWrite(data);
-  return data;
-}
-
-async function stopServerAudit() {
+async function stopAudit() {
   const btn = $('erp-sync-cancel');
   if (btn) {
     btn.disabled = true;
@@ -945,21 +316,10 @@ async function stopServerAudit() {
   try {
     const data = await api('audit/cancel', {method: 'POST', body: {}});
     setMsg(data.message || 'Audit stopped');
-    const status = await api('erp-sync/status');
-    renderApiUploads(status.api_uploads || []);
-    statusElWrite(status);
-    if (!paintJobProgress(status)) {
-      updateProgressUI({
-        label: 'Stopped',
-        percent: '—',
-        width: '0%',
-        detail: data.message || 'Audit stopped.'
-      });
-    }
-    toastFn?.(data.message || 'Audit stopped');
+    toast(data.message || 'Audit stopped');
+    await refreshStatus();
   } catch (err) {
     setMsg(err.message || 'Could not stop the audit', true);
-    toastFn?.(err.message || 'Could not stop the audit');
   } finally {
     if (btn) {
       btn.disabled = false;
@@ -968,28 +328,116 @@ async function stopServerAudit() {
   }
 }
 
-/**
- * @param {{toast?: (msg: string) => void, showView?: (name: string) => void, loadErpIntoAudit?: (entry: object) => void|Promise<void>}} [opts]
- */
-export function mountErpSyncPanel({toast, showView, loadErpIntoAudit} = {}) {
-  applyErpSyncNavVisibility();
-  if (!canShowErpSync()) return;
-  toastFn = typeof toast === 'function' ? toast : null;
-  showViewFn = typeof showView === 'function' ? showView : null;
-  loadIntoAuditFn = typeof loadErpIntoAudit === 'function' ? loadErpIntoAudit : null;
-  rememberButtonLabels();
+/** Legacy exports for TeleCallerAudit (if still imported). */
+export async function loadErpSyncPanel() {
+  return refreshStatus();
+}
 
-  $('erp-sync-save')?.addEventListener('click', () => {
-    saveConfig().then(() => toastFn?.('ERP sync settings saved'));
+export function mountErpSyncPanel() {
+  /* standalone module boots itself */
+}
+
+function applySidebarCollapsed(collapsed, {persist = true} = {}) {
+  document.querySelector('.shell')?.classList.toggle('sidebar-collapsed', collapsed);
+  const btn = $('mobile-menu');
+  if (btn) btn.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+  if (persist) {
+    try { localStorage.setItem('ll_sidebar_collapsed', collapsed ? '1' : '0'); } catch { /* ignore */ }
+  }
+}
+
+function readSidebarCollapsedPref() {
+  try { return localStorage.getItem('ll_sidebar_collapsed') === '1'; }
+  catch { return false; }
+}
+
+async function bootErpSync() {
+  initTheme();
+  const ver = $('sidebar-version');
+  if (ver) ver.textContent = `v${APP_VERSION}`;
+
+  const user = await requireAuth({loginPath: homePath()});
+  if (!user) return;
+  if (!user.is_super) {
+    location.href = homePath();
+    return;
+  }
+
+  applySidebarCollapsed(readSidebarCollapsedPref(), {persist: false});
+  if ($('shell-user-label')) {
+    $('shell-user-label').textContent = user.display_name || user.username;
+  }
+
+  $('erp-sync-run-now')?.addEventListener('click', () => runNow());
+  $('erp-sync-refresh')?.addEventListener('click', () => {
+    refreshStatus().then(() => toast('Refreshed')).catch((err) => setMsg(err.message || 'Refresh failed', true));
   });
-  $('erp-sync-test')?.addEventListener('click', () => testFetch());
-  $('erp-sync-fetch-audit')?.addEventListener('click', () => fetchAndSendToAudit());
-  $('erp-sync-ping')?.addEventListener('click', () => pingKeepalive());
-  $('erp-sync-run-daily')?.addEventListener('click', () => runDailyNow());
-  $('erp-sync-run-server')?.addEventListener('click', () => runServerAuditOnce());
-  $('erp-sync-publish')?.addEventListener('click', () => publishLast());
-  $('erp-sync-cancel')?.addEventListener('click', () => stopServerAudit());
+  $('erp-sync-cancel')?.addEventListener('click', () => stopAudit());
+  $('shell-logout')?.addEventListener('click', async () => {
+    await logout();
+    location.href = homePath();
+  });
+  $('mobile-menu')?.addEventListener('click', () => {
+    applySidebarCollapsed(!document.querySelector('.shell')?.classList.contains('sidebar-collapsed'));
+  });
 
-  // Silence unused lint if showView not used here — kept for callers / future.
-  void showViewFn;
+  $('shell-account')?.addEventListener('click', () => {
+    const modal = $('account-modal');
+    if (!modal) return;
+    const u = getUser();
+    $('account-username').value = u?.username || '';
+    $('account-display').value = u?.display_name || '';
+    $('account-telecaller').value = u?.telecaller_name || '';
+    $('account-pw-current').value = '';
+    $('account-pw-new').value = '';
+    $('account-pw-confirm').value = '';
+    $('account-message').textContent = '';
+    modal.classList.remove('hidden');
+  });
+  $('account-cancel')?.addEventListener('click', () => $('account-modal')?.classList.add('hidden'));
+  $('account-save')?.addEventListener('click', async () => {
+    const msg = $('account-message');
+    if (!msg) return;
+    msg.textContent = 'Saving…';
+    try {
+      const updated = await updateProfile({
+        username: $('account-username').value.trim(),
+        display_name: $('account-display').value.trim()
+      });
+      const pwCur = $('account-pw-current').value;
+      const pwNew = $('account-pw-new').value;
+      if (pwCur || pwNew) {
+        if (pwNew !== $('account-pw-confirm').value) {
+          msg.textContent = 'New passwords do not match.';
+          return;
+        }
+        await changePassword(pwCur, pwNew);
+      }
+      if ($('shell-user-label')) {
+        $('shell-user-label').textContent = updated.display_name || updated.username;
+      }
+      msg.textContent = 'Account updated.';
+      toast('Account saved');
+      setTimeout(() => $('account-modal')?.classList.add('hidden'), 400);
+    } catch (err) {
+      msg.textContent = err.message || 'Could not update account';
+    }
+  });
+
+  $('reload-app')?.addEventListener('click', () => location.reload());
+
+  mountNotifications({
+    variant: 'chrome',
+    onOpenAccessRequests: () => { location.href = appUrl('/admin/'); }
+  });
+
+  try {
+    await refreshStatus();
+  } catch (err) {
+    setMsg(err.message || 'Could not load ERP Sync status', true);
+  }
+}
+
+if (document.getElementById('view-ops')) {
+  bootErpSync();
 }

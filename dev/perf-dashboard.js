@@ -1,8 +1,8 @@
 /**
  * TeleCalling Performance — Excel parse, metrics engine, published dashboard UI.
  */
-import {PerfDashboardApi} from "./api-client.js?v=9.1.0.stable";
-import {downloadBlobFile} from "./audit.js?v=9.1.0.stable";
+import {PerfDashboardApi} from "./api-client.js?v=10.0.0.stable";
+import {downloadBlobFile} from "./audit.js?v=10.0.0.stable";
 
 const MASTER_FIELDS = [
   {id: "mobile", label: "Mobile", aliases: "mobile, mobile number, phone"},
@@ -1642,6 +1642,7 @@ export function mountPerfReportUpload(ctx) {
   const {hasPermission, toast, showView} = ctx;
   const masterDrop = document.getElementById("perf-master-drop");
   const historyDrop = document.getElementById("perf-history-drop");
+  if (!masterDrop && !historyDrop) return;
   const masterInput = document.getElementById("perf-master-input");
   const historyInput = document.getElementById("perf-history-input");
   const fileList = document.getElementById("perf-file-list");

@@ -27,4 +27,12 @@ return [
     // Must be a long random string — placeholders are rejected at runtime.
     'secrets_key' => 'change-me-to-another-long-random-string',
   ],
+  // Fine-grained PAT: Actions write + Contents read (for ERP Sync → workflow_dispatch).
+  'github' => [
+    'token' => '',
+    'owner' => 'Harsheys-I',
+    'repo' => 'LeadLens',
+    'workflow' => 'erp-daily-upload.yml',
+    'ref' => 'main',
+  ],
 ];

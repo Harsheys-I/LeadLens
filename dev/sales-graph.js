@@ -1,38 +1,28 @@
 /**
- * Sales Graph module - Upload (Leads + Visits + Booked) + published Dashboard.
+ * Sales Graph module — published Dashboard (data via ERP Sync / API).
  */
-import {APP_VERSION} from "./audit.js?v=9.1.0.stable";
-import {requireAuth, logout, hasPermission, getUser, changePassword, updateProfile} from "./auth.js?v=9.1.0.stable";
-import {SalesGraphApi} from "./api-client.js?v=9.1.0.stable";
-import {mountNotifications} from "./notifications-ui.js?v=9.1.0.stable";
-import {appUrl, homePath} from "./app-base.js?v=9.1.0.stable";
-import {initTheme} from "./theme.js?v=9.1.0.stable";
-import {setStorageUserId, storageKey} from "./db.js?v=9.1.0.stable";
-import {parseSalesGraphSheet, buildSalesGraphPayload} from "./sales-graph-parse.js?v=9.1.0.stable";
-import {renderSalesGraphDashboard, destroySalesGraphCharts} from "./sales-graph-dashboard.js?v=9.1.0.stable";
+import {APP_VERSION} from "./audit.js?v=10.0.0.stable";
+import {requireAuth, logout, hasPermission, getUser, changePassword, updateProfile} from "./auth.js?v=10.0.0.stable";
+import {SalesGraphApi} from "./api-client.js?v=10.0.0.stable";
+import {mountNotifications} from "./notifications-ui.js?v=10.0.0.stable";
+import {appUrl, homePath} from "./app-base.js?v=10.0.0.stable";
+import {initTheme} from "./theme.js?v=10.0.0.stable";
+import {setStorageUserId, storageKey} from "./db.js?v=10.0.0.stable";
+import {renderSalesGraphDashboard, destroySalesGraphCharts} from "./sales-graph-dashboard.js?v=10.0.0.stable";
 
 const $ = id => document.getElementById(id);
 const ids = [
   "page-title", "toast", "mobile-menu", "sidebar-version", "sidebar-notes",
   "update-banner", "update-banner-text", "reload-app",
   "shell-user-label", "shell-logout", "shell-account",
-  "sg-leads-drop", "sg-leads-input", "sg-visits-drop", "sg-visits-input",
-  "sg-booked-drop", "sg-booked-input",
-  "sg-file-list", "sg-validation", "sg-create-dashboard",
-  "sg-preview-panel", "sg-preview-mount", "sg-upload-dashboard-btn",
   "sg-published-meta", "sg-refresh-dashboard", "sg-clear-dashboard",
   "sg-dashboard-empty", "sg-dashboard-mount",
 ];
 const els = Object.fromEntries(ids.map(id => [id, $(id)]));
 if (els["sidebar-version"]) els["sidebar-version"].textContent = `v${APP_VERSION}`;
 
-const titles = {upload: "Upload", dashboard: "Dashboard"};
-const RELEASE_NOTES = "v9.1.0.stable: Sales Graph KPI/byline build — corrected dashboard KPIs and byline, with a full cache-bust so live Hostinger/SW stop serving 8.0.0.stable.";
-
-let leadsParsed = null;
-let visitsParsed = null;
-let bookedParsed = null;
-let previewPayload = null;
+const titles = {dashboard: "Dashboard"};
+const RELEASE_NOTES = "v10.0.0.stable: ERP Sync GHA-only — charts sync via GitHub Actions; manual Excel upload removed from the app.";
 
 function toast(message) {
   if (!els.toast) return;
@@ -65,159 +55,9 @@ function showView(name) {
   }
   document.querySelectorAll(".view").forEach(view => view.classList.toggle("active", view.id === `view-${name}`));
   document.querySelectorAll(".nav-item").forEach(button => button.classList.toggle("active", button.dataset.view === name));
-  if (els["page-title"]) els["page-title"].textContent = titles[name] || titles.upload;
+  if (els["page-title"]) els["page-title"].textContent = titles[name] || titles.dashboard;
   document.querySelector(".shell")?.classList.remove("menu-open");
   if (name === "dashboard") refreshPublishedDashboard();
-}
-
-function wireDropZone(zone, input, onFiles) {
-  if (!zone || !input) return;
-  zone.classList.remove("drop-zone-disabled");
-  zone.removeAttribute("aria-disabled");
-  input.disabled = false;
-  zone.tabIndex = 0;
-  zone.onclick = () => input.click();
-  zone.onkeydown = e => { if (["Enter", " "].includes(e.key)) input.click(); };
-  for (const ev of ["dragenter", "dragover"]) {
-    zone.addEventListener(ev, e => { e.preventDefault(); zone.classList.add("dragover"); });
-  }
-  for (const ev of ["dragleave", "drop"]) {
-    zone.addEventListener(ev, e => { e.preventDefault(); zone.classList.remove("dragover"); });
-  }
-  zone.addEventListener("drop", e => onFiles(e.dataTransfer?.files));
-  input.onchange = () => onFiles(input.files);
-}
-
-function setValidation(messages, isError = false) {
-  const box = els["sg-validation"];
-  if (!box) return;
-  if (!messages?.length) {
-    box.classList.add("hidden");
-    box.textContent = "";
-    return;
-  }
-  box.classList.remove("hidden");
-  box.classList.toggle("error", Boolean(isError));
-  box.classList.toggle("warn", !isError);
-  box.textContent = messages.join(" | ");
-}
-
-function renderFileList() {
-  const list = els["sg-file-list"];
-  if (!list) return;
-  list.replaceChildren();
-  const items = [];
-  if (leadsParsed) {
-    items.push(`Leads: ${leadsParsed.fileName || "workbook"}${leadsParsed.ok ? ` | ${leadsParsed.rows?.length || 0} rows` : " | error"}`);
-  }
-  if (visitsParsed) {
-    items.push(`Visits: ${visitsParsed.fileName || "workbook"}${visitsParsed.ok ? ` | ${visitsParsed.rows?.length || 0} rows` : " | error"}`);
-  }
-  if (bookedParsed) {
-    items.push(`Booked: ${bookedParsed.fileName || "workbook"}${bookedParsed.ok ? ` | ${bookedParsed.rows?.length || 0} rows` : " | error"}`);
-  }
-  if (!items.length) {
-    list.classList.add("hidden");
-    return;
-  }
-  list.classList.remove("hidden");
-  for (const text of items) {
-    const card = document.createElement("div");
-    card.className = "file-card";
-    card.textContent = text;
-    list.append(card);
-  }
-}
-
-function syncCreateState() {
-  const ready = Boolean(leadsParsed?.ok && visitsParsed?.ok && bookedParsed?.ok);
-  if (els["sg-create-dashboard"]) {
-    els["sg-create-dashboard"].disabled = !ready || !hasPermission("sales_graph.upload");
-  }
-  const msgs = [];
-  if (leadsParsed && !leadsParsed.ok) msgs.push(`Leads: ${leadsParsed.error}`);
-  if (visitsParsed && !visitsParsed.ok) msgs.push(`Visits: ${visitsParsed.error}`);
-  if (bookedParsed && !bookedParsed.ok) msgs.push(`Booked: ${bookedParsed.error}`);
-  if (!leadsParsed) msgs.push("Leads Excel required");
-  if (!visitsParsed) msgs.push("Visits Excel required");
-  if (!bookedParsed) msgs.push("Booked Excel required");
-  const hasError = Boolean(
-    (leadsParsed && !leadsParsed.ok) ||
-    (visitsParsed && !visitsParsed.ok) ||
-    (bookedParsed && !bookedParsed.ok)
-  );
-  if (ready) setValidation(["Ready - Create Dashboard for a local preview."], false);
-  else setValidation(msgs, hasError);
-}
-
-async function loadFile(kind, file) {
-  if (!file) return;
-  try {
-    const buffer = await file.arrayBuffer();
-    const parsed = parseSalesGraphSheet(buffer, {fileName: file.name, kind});
-    if (kind === "leads") leadsParsed = parsed;
-    else if (kind === "visits") visitsParsed = parsed;
-    else bookedParsed = parsed;
-    previewPayload = null;
-    els["sg-preview-panel"]?.classList.add("hidden");
-    if (els["sg-upload-dashboard-btn"]) els["sg-upload-dashboard-btn"].disabled = true;
-  } catch (err) {
-    const fail = {ok: false, error: err.message || "Could not read workbook.", fileName: file.name, rows: []};
-    if (kind === "leads") leadsParsed = fail;
-    else if (kind === "visits") visitsParsed = fail;
-    else bookedParsed = fail;
-  }
-  renderFileList();
-  syncCreateState();
-}
-
-function createPreview() {
-  if (!hasPermission("sales_graph.upload") && !getUser()?.is_super) {
-    toast("Upload not permitted for your role.");
-    return;
-  }
-  if (!leadsParsed?.ok || !visitsParsed?.ok || !bookedParsed?.ok) return;
-  try {
-    previewPayload = buildSalesGraphPayload(leadsParsed, visitsParsed, bookedParsed, {title: "Sales Graph"});
-  } catch (err) {
-    setValidation([err.message || "Could not build dashboard"], true);
-    toast(err.message || "Could not build dashboard");
-    return;
-  }
-  els["sg-preview-panel"]?.classList.remove("hidden");
-  renderSalesGraphDashboard(els["sg-preview-mount"], previewPayload, {preview: true});
-  if (els["sg-upload-dashboard-btn"]) {
-    const canPub = hasPermission("sales_graph.publish");
-    els["sg-upload-dashboard-btn"].disabled = !canPub;
-    els["sg-upload-dashboard-btn"].title = canPub ? "" : "Publish not permitted for your role.";
-  }
-  toast("Preview ready");
-}
-
-async function publishDashboard() {
-  if (!hasPermission("sales_graph.publish") && !getUser()?.is_super) {
-    toast("Publish not permitted for your role.");
-    return;
-  }
-  if (!previewPayload) {
-    toast("Create a dashboard preview first.");
-    return;
-  }
-  const btn = els["sg-upload-dashboard-btn"];
-  if (btn) btn.disabled = true;
-  try {
-    const res = await SalesGraphApi.publish(previewPayload, {title: previewPayload.title || "Sales Graph"});
-    const cleared = Number(res?.cleared || 0);
-    toast(cleared > 0 ? "Previous board cleared; Sales Graph published" : "Sales Graph published");
-    if (hasPermission("sales_graph.dashboard")) {
-      location.hash = "#dashboard";
-      showView("dashboard");
-    }
-  } catch (err) {
-    toast(err.message || "Publish failed");
-  } finally {
-    if (btn) btn.disabled = !hasPermission("sales_graph.publish");
-  }
 }
 
 async function refreshPublishedDashboard() {
@@ -245,7 +85,7 @@ async function refreshPublishedDashboard() {
       mount.replaceChildren();
       empty?.classList.remove("hidden");
       if (empty) empty.textContent = "No Sales Graph has been published yet.";
-      if (metaEl) metaEl.textContent = "Published Leads, Visits & Booked from the latest upload.";
+      if (metaEl) metaEl.textContent = "Published Leads, Visits & Booked from ERP Sync.";
       return;
     }
     empty?.classList.add("hidden");
@@ -432,18 +272,6 @@ document.getElementById("account-save")?.addEventListener("click", async () => {
   }
 });
 
-wireDropZone(els["sg-leads-drop"], els["sg-leads-input"], files => {
-  if (files?.[0]) loadFile("leads", files[0]);
-});
-wireDropZone(els["sg-visits-drop"], els["sg-visits-input"], files => {
-  if (files?.[0]) loadFile("visits", files[0]);
-});
-wireDropZone(els["sg-booked-drop"], els["sg-booked-input"], files => {
-  if (files?.[0]) loadFile("booked", files[0]);
-});
-
-els["sg-create-dashboard"]?.addEventListener("click", createPreview);
-els["sg-upload-dashboard-btn"]?.addEventListener("click", publishDashboard);
 els["sg-refresh-dashboard"]?.addEventListener("click", () => refreshPublishedDashboard());
 els["sg-clear-dashboard"]?.addEventListener("click", clearPublishedBoard);
 els["reload-app"]?.addEventListener("click", async () => {
@@ -497,15 +325,11 @@ async function bootSalesGraph() {
   if (els["sg-clear-dashboard"]) {
     els["sg-clear-dashboard"].classList.toggle("hidden", !canClearBoard());
   }
-  if (!hasPermission("sales_graph.upload") && !user.is_super) {
-    els["sg-create-dashboard"] && (els["sg-create-dashboard"].disabled = true);
-  }
-
   const hashView = location.hash.slice(1);
   if (hashView === "dashboard" && (hasPermission("sales_graph.dashboard") || user.is_super)) showView("dashboard");
   else {
     const firstVisible = [...document.querySelectorAll(".nav-item[data-view]:not(.hidden)")][0];
-    showView(firstVisible?.dataset.view || "upload");
+    showView(firstVisible?.dataset.view || "dashboard");
   }
 
   checkForUpdate();
@@ -516,9 +340,6 @@ async function bootSalesGraph() {
   window.addEventListener("hashchange", () => {
     if (location.hash === "#dashboard" && (hasPermission("sales_graph.dashboard") || getUser()?.is_super)) {
       showView("dashboard");
-    }
-    if (location.hash === "#upload" && (hasPermission("sales_graph.upload") || getUser()?.is_super)) {
-      showView("upload");
     }
   });
   setInterval(checkForUpdate, 5 * 60 * 1000);
