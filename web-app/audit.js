@@ -1,16 +1,16 @@
-import {buildTelecallerDashboardBlob} from "./dashboard-export.js?v=9.0.0.stable";
-import {buildDashboardModel} from "./dashboard-metrics.js?v=9.0.0.stable";
-import {STATUS_HISTORY_PROMPT} from "./debug-prompts.js?v=9.0.0.stable";
-import {apiBase} from "./app-base.js?v=9.0.0.stable";
+import {buildTelecallerDashboardBlob} from "./dashboard-export.js?v=9.1.0.stable";
+import {buildDashboardModel} from "./dashboard-metrics.js?v=9.1.0.stable";
+import {STATUS_HISTORY_PROMPT} from "./debug-prompts.js?v=9.1.0.stable";
+import {apiBase} from "./app-base.js?v=9.1.0.stable";
 
-export const APP_VERSION = "9.0.0.stable";
+export const APP_VERSION = "9.1.0.stable";
 /** Sentinel: use server OpenAI proxy (no raw key in the browser). */
 export const SERVER_API_KEY = "__server__";
 /** Bump when default AI rules / field defaults must refresh existing localStorage settings. */
 export const SETTINGS_SEED = 28;
 
 /** Settings limits — batch size is leads per request; concurrency is parallel requests. */
-export const MAX_BATCH_SIZE = 20;
+export const MAX_BATCH_SIZE = 40;
 export const MAX_CONCURRENCY = 50;
 
 export const ERROR_TYPES = [

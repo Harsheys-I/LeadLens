@@ -308,7 +308,7 @@ def main() -> int:
 
     if "bucket1" in jobs:
         r = upload("audit/upload", {"file": files["bucket1"]},
-                   {"batch_size": "20", "concurrency": "2"}, ok=202, busy_wait=180)
+                   {"batch_size": "25", "concurrency": "8"}, ok=202, busy_wait=180)
         log(f"Bucket 1 started: lead_count={r.get('lead_count')} batch_size={r.get('batch_size')} "
             f"concurrency={r.get('concurrency')}")
     if "perf" in jobs:

@@ -6,8 +6,8 @@ import {
   buildDashboardModel,
   OVERDUE_BUCKETS,
   commentQualityBucketKeyFromLabel
-} from "./dashboard-metrics.js?v=9.0.0.stable";
-import {storageKey} from "./db.js?v=9.0.0.stable";
+} from "./dashboard-metrics.js?v=9.1.0.stable";
+import {storageKey} from "./db.js?v=9.1.0.stable";
 
 /** Panel switcher labels (presentation) → internal section titles stay as-built. */
 const DASHBOARD_PANELS = [

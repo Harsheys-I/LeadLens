@@ -360,6 +360,7 @@ function ll_erp_sync_route_status(): void
       'needs_continue' => $needsContinue,
       'complete' => $complete,
       'error' => $job['error'] ?? null,
+      'throttle' => $needsContinue ? ll_erp_sync_throttle_public($job) : null,
     ];
   }
   ll_ok([

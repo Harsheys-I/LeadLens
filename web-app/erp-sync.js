@@ -1,8 +1,8 @@
 /**
  * /dev Super User ERP Sync panel — fetch ERP → store raw → hand off to main Audit UI.
  */
-import {api} from './api-client.js?v=9.0.0.stable';
-import {getUser} from './auth.js?v=9.0.0.stable';
+import {api} from './api-client.js?v=9.1.0.stable';
+import {getUser} from './auth.js?v=9.1.0.stable';
 
 const FIELD_IDS = [
   'mobile', 'project', 'registration', 'telecaller', 'source', 'update',
@@ -275,8 +275,8 @@ function applyConfig(config, diag = null) {
     $('erp-sync-cron-auto-publish').checked = config.cron_auto_publish !== false;
   }
   $('erp-sync-auto-publish').checked = Boolean(config.auto_publish);
-  $('erp-sync-batch-size').value = String(config.batch_size ?? 10);
-  $('erp-sync-max-leads').value = String(config.max_leads_per_run ?? 40);
+  $('erp-sync-batch-size').value = String(config.batch_size ?? 25);
+  $('erp-sync-max-leads').value = String(config.max_leads_per_run ?? 200);
   $('erp-sync-cron-secret').value = '';
   $('erp-sync-cron-hint').textContent = config.cron_secret_configured
     ? 'Cron secret is set. Paste a new value only to rotate it. Daily/self-chain is primary; continue-every-10m cron is optional backup.'
@@ -400,6 +400,18 @@ export function applyErpSyncNavVisibility() {
   nav.classList.toggle('hidden', !canShowErpSync());
 }
 
+/** Short server-audit rate note, e.g. "parallel 4/8 · batch 25 · rate-limited 3× · paused 20s". */
+export function throttleNote(t) {
+  if (!t) return '';
+  const bits = [`parallel ${t.concurrency}/${t.target_concurrency}`, `batch ${t.batch_size}`];
+  if (t.rate_limited) bits.push(`rate-limited ${t.rate_limited}×`);
+  const pauseSec = t.paused_until ? Math.round((Date.parse(t.paused_until) - Date.now()) / 1000) : 0;
+  if (pauseSec > 0) bits.push(`paused ${pauseSec}s`);
+  if (t.retry_queue) bits.push(`${t.retry_queue} batch(es) to retry`);
+  if (t.errored_leads) bits.push(`${t.errored_leads} lead(s) errored`);
+  return bits.join(' · ');
+}
+
 function renderApiUploads(rows) {
   const el = $('erp-sync-api-uploads');
   if (!el) return;
@@ -426,7 +438,8 @@ function renderApiUploads(rows) {
       row.uploaded_by ? `by ${row.uploaded_by}` : '',
       !isPerf && row.batch_size ? `batch ${row.batch_size}` : '',
       !isPerf && row.concurrency ? `parallel ${row.concurrency}` : '',
-      status + progress
+      status + progress,
+      !isPerf && status === 'auditing' && row.throttle?.slowed ? `slowed: ${throttleNote(row.throttle)}` : ''
     ].filter(Boolean);
     line.textContent = bits.join(' · ');
     if (row.error) line.textContent += ` — ${row.error}`;
@@ -472,11 +485,12 @@ function paintJobProgress(payload) {
   const total = Number(prog?.total ?? job?.total ?? job?.lead_count ?? 0);
   const pct = total ? Math.min(100, Math.round((done / total) * 100)) : 0;
   const source = job?.source_file ? ` · ${job.source_file}` : '';
+  const rate = throttleNote(prog?.throttle);
   updateProgressUI({
     label: `Auditing ${done.toLocaleString()}/${total ? total.toLocaleString() : '…'}`,
     percent: `${pct}%`,
     width: `${pct}%`,
-    detail: `${job?.pipeline || 'server'} audit${source}. This keeps running on the server until it finishes or you stop it.`
+    detail: `${job?.pipeline || 'server'} audit${source}${rate ? ` · ${rate}` : ''}. This keeps running on the server until it finishes or you stop it.`
   });
   return true;
 }
@@ -537,8 +551,8 @@ function buildConfigBody() {
       ? Boolean($('erp-sync-cron-auto-publish').checked)
       : true,
     auto_publish: Boolean($('erp-sync-auto-publish')?.checked),
-    batch_size: Number($('erp-sync-batch-size')?.value || 10),
-    max_leads_per_run: Number($('erp-sync-max-leads')?.value || 40),
+    batch_size: Number($('erp-sync-batch-size')?.value || 25),
+    max_leads_per_run: Number($('erp-sync-max-leads')?.value || 200),
     field_map: readFieldMapFromUi()
   };
   // Only send keepalive flags when the controls exist — avoids wiping enabled
