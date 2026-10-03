@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/../lib/erp-sync.php';
+require_once __DIR__ . '/../lib/upload-files.php';
 
 /**
  * Terminal Bucket 1 (no session, no cron secret):
@@ -164,19 +165,7 @@ function ll_audit_route_upload(): void
  */
 function ll_audit_upload_authenticate(): array
 {
-  $username = trim((string) ($_POST['username'] ?? ''));
-  $password = (string) ($_POST['password'] ?? '');
-  if ($username === '' || $password === '') {
-    ll_error('username and password are required');
-  }
-  $row = ll_find_user_by_username($username);
-  if (!$row || !(int) $row['is_active']) {
-    ll_error('Invalid username or password', 401);
-  }
-  if (!password_verify($password, (string) $row['password_hash'])) {
-    ll_error('Invalid username or password', 401);
-  }
-  $user = ll_public_user($row);
+  $user = ll_upload_authenticate_password();
   $canAudit = ll_user_has_permission($user, 'telecaller.bucket1')
     || ll_user_has_permission($user, 'module.telecaller_audit');
   $canPublish = ll_user_has_permission($user, 'telecaller.upload_dashboard');
@@ -250,15 +239,6 @@ function ll_audit_upload_erp_json_codes(): array
   ];
 }
 
-/** Drop fractional seconds so "2024-01-29 10:10:00.0" parses as a date. */
-function ll_audit_upload_normalize_erp_value(string $value): string
-{
-  if (preg_match('/^(\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2})\.\d+$/', $value, $m)) {
-    return $m[1];
-  }
-  return $value;
-}
-
 /**
  * ERP report JSON (a list of A1–A13 objects) → rows keyed by the active field-map headers.
  *
@@ -267,64 +247,24 @@ function ll_audit_upload_normalize_erp_value(string $value): string
  */
 function ll_audit_upload_rows_from_erp_json(string $raw, array $fieldMap): array
 {
-  $decoded = json_decode($raw, true);
-  if (!is_array($decoded)) {
-    throw new RuntimeException('Invalid JSON');
-  }
-  $list = $decoded;
-  if (!isset($decoded[0]) || !is_array($decoded[0])) {
-    foreach (['data', 'rows', 'records', 'result', 'results', 'reportData', 'jsondata'] as $key) {
-      if (isset($decoded[$key]) && is_array($decoded[$key]) && isset($decoded[$key][0]) && is_array($decoded[$key][0])) {
-        $list = $decoded[$key];
-        break;
-      }
-    }
-  }
-  if (!isset($list[0]) || !is_array($list[0])) {
-    throw new RuntimeException('JSON report has no rows');
-  }
-  $sample = $list[0];
-  $hasCode = false;
-  foreach (ll_audit_upload_erp_json_codes() as $code => $_field) {
-    if (array_key_exists($code, $sample)) {
-      $hasCode = true;
-      break;
-    }
-  }
-  if (!$hasCode) {
-    throw new RuntimeException('JSON report is missing A1–A13 columns');
-  }
+  $fieldRows = ll_erp_json_rows($raw, ll_audit_upload_erp_json_codes(), true);
 
   $headerFor = [];
-  foreach (ll_audit_upload_erp_json_codes() as $code => $fieldId) {
+  foreach (ll_audit_upload_erp_json_codes() as $fieldId) {
     $aliases = $fieldMap[$fieldId] ?? [$fieldId];
     if (!is_array($aliases) || !$aliases) {
       $aliases = [$fieldId];
     }
-    $headerFor[$code] = (string) $aliases[0];
+    $headerFor[$fieldId] = (string) $aliases[0];
   }
 
   $rows = [];
-  foreach ($list as $item) {
-    if (!is_array($item)) {
-      continue;
-    }
+  foreach ($fieldRows as $row) {
     $assoc = [];
-    $empty = true;
-    foreach (ll_audit_upload_erp_json_codes() as $code => $_field) {
-      $val = $item[$code] ?? '';
-      if (is_array($val) || is_object($val)) {
-        $val = '';
-      }
-      $val = ll_audit_upload_normalize_erp_value(trim((string) $val));
-      if ($val !== '') {
-        $empty = false;
-      }
-      $assoc[$headerFor[$code]] = $val;
+    foreach ($row as $fieldId => $val) {
+      $assoc[$headerFor[$fieldId]] = $val;
     }
-    if (!$empty) {
-      $rows[] = $assoc;
-    }
+    $rows[] = $assoc;
   }
   return $rows;
 }
@@ -334,56 +274,5 @@ function ll_audit_upload_rows_from_erp_json(string $raw, array $fieldMap): array
  */
 function ll_audit_upload_read_file(): array
 {
-  $file = $_FILES['file'] ?? null;
-  if (!is_array($file) || !isset($file['error']) || is_array($file['error'])) {
-    ll_error('Attach the workbook as form field "file" (e.g. -F "file=@leads.xlsx")');
-  }
-  $err = (int) $file['error'];
-  if ($err === UPLOAD_ERR_INI_SIZE || $err === UPLOAD_ERR_FORM_SIZE) {
-    ll_error('File is larger than the server upload limit (' . (string) ini_get('upload_max_filesize') . ')', 413);
-  }
-  if ($err === UPLOAD_ERR_NO_FILE) {
-    ll_error('Attach the workbook as form field "file" (e.g. -F "file=@leads.xlsx")');
-  }
-  if ($err !== UPLOAD_ERR_OK) {
-    ll_error('File upload failed (code ' . $err . ')', 400);
-  }
-  $name = basename(str_replace('\\', '/', (string) ($file['name'] ?? '')));
-  $ext = strtolower((string) pathinfo($name, PATHINFO_EXTENSION));
-  if (!in_array($ext, ['xlsx', 'json'], true)) {
-    ll_error('Only .xlsx or Strategic ERP .json reports are supported');
-  }
-  $size = (int) ($file['size'] ?? 0);
-  if ($size <= 0) {
-    ll_error('The uploaded file is empty');
-  }
-  if ($size > LL_ERP_SYNC_MAX_BYTES) {
-    ll_error('File is too large (max ' . (int) (LL_ERP_SYNC_MAX_BYTES / 1_000_000) . ' MB)', 413);
-  }
-  $tmp = (string) ($file['tmp_name'] ?? '');
-  if ($tmp === '' || !is_uploaded_file($tmp)) {
-    ll_error('File upload failed', 400);
-  }
-  $binary = file_get_contents($tmp);
-  if ($binary === false || $binary === '') {
-    ll_error('Could not read the uploaded file', 400);
-  }
-  if (strncmp($binary, "\xEF\xBB\xBF", 3) === 0) {
-    $binary = substr($binary, 3);
-  }
-  $isZip = strncmp($binary, "PK", 2) === 0;
-  $trim = ltrim($binary);
-  $isJson = $trim !== '' && ($trim[0] === '[' || $trim[0] === '{');
-  if ($ext === 'xlsx' || ($ext === '' && $isZip)) {
-    if (!$isZip) {
-      ll_error('That file is not a valid .xlsx workbook');
-    }
-    $safeName = preg_replace('/[^\w .()\-]+/u', '_', $name) ?? 'upload.xlsx';
-    return [$binary, $safeName !== '' ? $safeName : 'upload.xlsx', 'xlsx'];
-  }
-  if (!$isJson) {
-    ll_error('That file is not a JSON report');
-  }
-  $safeName = preg_replace('/[^\w .()\-]+/u', '_', $name) ?? 'upload.json';
-  return [$binary, $safeName !== '' ? $safeName : 'upload.json', 'json'];
+  return ll_upload_read_file('file');
 }

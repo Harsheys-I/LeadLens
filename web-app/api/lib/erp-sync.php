@@ -394,6 +394,7 @@ const LL_AUDIT_UPLOAD_LOG_LIMIT = 40;
 
 /**
  * Recent terminal uploads (metadata only — no lead rows). Newest first.
+ * kind is "bucket1" (audit/upload; older rows have no kind) or "performance" (perf-dashboards/upload).
  * @return list<array<string, mixed>>
  */
 function ll_audit_upload_log_read(): array
@@ -454,6 +455,7 @@ function ll_audit_upload_log_touch_job(array $job): void
   }
   $audited = isset($job['results']) && is_array($job['results']) ? count($job['results']) : (int) ($job['cursor'] ?? 0);
   ll_audit_upload_log_record([
+    'kind' => 'bucket1',
     'started_at' => (string) ($job['started_at'] ?? ''),
     'source_file' => (string) ($job['source_file'] ?? ''),
     'row_count' => (int) ($job['row_count'] ?? 0),
