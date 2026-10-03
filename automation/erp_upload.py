@@ -203,8 +203,13 @@ def login(page) -> None:
     page.keyboard.type(env("ERP_USER"))
     page.click("#passwd")
     page.keyboard.type(env("ERP_PASS"))
+    # Enter races a plain-text form submit against ERP's hashed login(); the Login button runs
+    # login() first, which needs the forge SHA-256 library from the CDN.
+    page.wait_for_function("() => typeof forge !== 'undefined' && typeof login === 'function'",
+                           timeout=60_000)
+    page.evaluate("add_login_name(document.getElementById('loginNameTemp'))")
     pressed_at = datetime.now(timezone.utc)
-    page.keyboard.press("Enter")
+    page.click("input#button[value='Login']")
     log("Submitted ERP password")
 
     if wait_after_password(page) == "home":
