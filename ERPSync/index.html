@@ -5,16 +5,14 @@
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="theme-color" media="(prefers-color-scheme: light)" content="#12372a">
   <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#0f2d22">
-  <meta name="description" content="GPP AI Sales Graph">
-  <title>GPP AI · Sales Graph</title>
+  <meta name="description" content="GPP AI ERP Sync">
+  <title>GPP AI · ERP Sync</title>
   <meta name="app-version" content="10.0.0.stable">
   <script src="../theme-boot.js?v=10.0.0.stable"></script>
   <script src="../motion.js?v=10.0.0.stable"></script>
   <link rel="manifest" href="../manifest.webmanifest">
   <link rel="stylesheet" href="../styles.css?v=10.0.0.stable">
-  <script defer src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
-  <script defer src="https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js"></script>
-  <script type="module" src="../sales-graph.js?v=10.0.0.stable"></script>
+  <script type="module" src="../erp-sync.js?v=10.0.0.stable"></script>
 </head>
 <body>
   <div id="update-banner" class="update-banner hidden" role="status">
@@ -24,16 +22,16 @@
   <div class="shell">
     <aside class="sidebar">
       <a class="brand" href="../"><img class="brand-mark" src="../assets/gpp-ai-logo.png" alt="" width="48" height="28"><span>GPP AI</span></a>
-      <nav aria-label="Sales Graph navigation">
-        <button class="nav-item active" data-view="dashboard" data-perm="sales_graph.dashboard"><span>📈</span>Dashboard</button>
+      <nav aria-label="ERP Sync navigation">
+        <button class="nav-item active" data-view="ops" type="button"><span>🔄</span>Ops</button>
       </nav>
-      <div class="privacy-note"><strong id="sidebar-version">v10.0.0.stable</strong><span id="sidebar-notes">v10.0.0.stable: Dashboard-only — charts sync via ERP Sync (GitHub Actions).</span></div>
+      <div class="privacy-note"><strong id="sidebar-version">v10.0.0.stable</strong><span id="sidebar-notes">v10.0.0.stable: ERP Sync · GitHub Actions only</span></div>
     </aside>
 
     <main>
       <header class="topbar">
         <button id="mobile-menu" class="icon-button" aria-label="Hide left panel" title="Hide left panel" aria-expanded="true">☰</button>
-        <div><p class="eyebrow">SALES GRAPH</p><h1 id="page-title">Dashboard</h1></div>
+        <div><p class="eyebrow">ERP SYNC</p><h1 id="page-title">Ops</h1></div>
         <div class="topbar-actions">
           <span id="shell-user-label" class="topbar-user-label"></span>
           <button type="button" id="notif-bell" class="notif-bell notif-bell-chrome" title="Notifications" aria-label="Notifications">
@@ -44,19 +42,51 @@
         </div>
       </header>
 
-      <section id="view-dashboard" class="view view-wide active">
-        <div class="section-head">
-          <div>
-            <h2>Sales Graph Dashboard</h2>
-            <p id="sg-published-meta">Published Leads, Visits &amp; Booked from ERP Sync.</p>
+      <section id="view-ops" class="view active">
+        <div class="intro">
+          <h2>ERP Sync</h2>
+          <p>Dispatch GitHub Actions to pull Strategic ERP reports and publish Lead Audit, Performance, and Sales Graph. No cookie or Excel upload on this site.</p>
+        </div>
+
+        <div class="settings-card" style="margin-bottom:1.25rem">
+          <div class="card-title">
+            <h2>Run now</h2>
+            <p>Select pipelines, then dispatch <code>erp-daily-upload.yml</code>. Schedules: Bucket 1 + Sales Graph daily 00:00 IST; Performance on the 1st 00:00 IST.</p>
+          </div>
+          <div class="inline-actions" style="flex-wrap:wrap;gap:0.75rem 1.25rem;margin:0.75rem 0">
+            <label class="check-row"><input id="erp-job-bucket1" type="checkbox" checked><span>Bucket 1 (Lead Audit)</span></label>
+            <label class="check-row"><input id="erp-job-perf" type="checkbox"><span>Performance</span></label>
+            <label class="check-row"><input id="erp-job-sales" type="checkbox"><span>Sales Graph</span></label>
+            <label class="check-row"><input id="erp-job-dry" type="checkbox"><span>Dry run (download only)</span></label>
           </div>
           <div class="inline-actions">
-            <button id="sg-refresh-dashboard" type="button" class="secondary-button">Refresh</button>
-            <button id="sg-clear-dashboard" type="button" class="text-button hidden">Clear board</button>
+            <button id="erp-sync-run-now" type="button" class="primary-button">Run now</button>
+            <button id="erp-sync-refresh" type="button" class="secondary-button">Refresh</button>
+            <button id="erp-sync-cancel" type="button" class="danger-button hidden">Stop audit</button>
+          </div>
+          <p id="erp-sync-message" class="form-message" aria-live="polite" style="margin-top:0.75rem"></p>
+          <p id="erp-sync-gha-meta" class="muted form-message" style="white-space:pre-wrap;margin-top:0.5rem"></p>
+        </div>
+
+        <div class="perf-upload-grid" style="margin-bottom:1.25rem">
+          <div class="settings-card" id="erp-card-bucket1">
+            <div class="card-title"><h2>Bucket 1 · Lead Audit</h2><p>GHA upload → server OpenAI audit → publish</p></div>
+            <div id="erp-bucket1-body" class="muted form-message" style="white-space:pre-wrap">Loading…</div>
+          </div>
+          <div class="settings-card" id="erp-card-perf">
+            <div class="card-title"><h2>Performance</h2><p>Master + History → published Perf boards</p></div>
+            <div id="erp-perf-body" class="muted form-message" style="white-space:pre-wrap">Loading…</div>
+          </div>
+          <div class="settings-card" id="erp-card-sales">
+            <div class="card-title"><h2>Sales Graph</h2><p>Leads / Visits / Booked → published board</p></div>
+            <div id="erp-sales-body" class="muted form-message" style="white-space:pre-wrap">Loading…</div>
           </div>
         </div>
-        <div id="sg-dashboard-empty" class="dashboard-empty-state hidden">No Sales Graph has been published yet.</div>
-        <div id="sg-dashboard-mount"></div>
+
+        <div class="settings-card">
+          <div class="card-title"><h2>API uploads</h2><p>Terminal / GHA multipart uploads. Newest first. Times are IST.</p></div>
+          <div id="erp-sync-api-uploads" class="muted form-message">No API uploads yet.</div>
+        </div>
       </section>
     </main>
   </div>

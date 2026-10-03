@@ -6,17 +6,17 @@
   <meta name="theme-color" media="(prefers-color-scheme: light)" content="#12372a">
   <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#0f2d22">
   <meta name="description" content="GPP AI · LeadLens">
-  <meta name="app-version" content="9.1.0.stable">
+  <meta name="app-version" content="10.0.0.stable">
   <title>GPP AI · LeadLens</title>
-  <script src="../theme-boot.js?v=9.1.0.stable"></script>
-  <script src="../motion.js?v=9.1.0.stable"></script>
+  <script src="../theme-boot.js?v=10.0.0.stable"></script>
+  <script src="../motion.js?v=10.0.0.stable"></script>
   <link rel="manifest" href="../manifest.webmanifest">
-  <link rel="stylesheet" href="../styles.css?v=9.1.0.stable">
+  <link rel="stylesheet" href="../styles.css?v=10.0.0.stable">
   <script defer src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js"></script>
-  <script type="module" src="../app.js?v=9.1.0.stable"></script>
+  <script type="module" src="../app.js?v=10.0.0.stable"></script>
 </head>
 <body>
   <div id="update-banner" class="update-banner hidden" role="status">
@@ -56,7 +56,6 @@
             <button class="nav-item nav-item-child" data-view="published" data-perm="telecaller.dashboard" data-label-flat="Bucket 1"><span>📊</span>Dashboard</button>
             <button class="nav-item nav-item-child" data-view="history" data-perm="telecaller.history"><span>🕑</span>History</button>
             <button class="nav-item nav-item-child" data-view="settings" data-perm="telecaller.settings"><span>⚙️</span>Settings</button>
-            <button class="nav-item nav-item-child hidden" data-view="erp-sync" id="nav-erp-sync" data-super-only="1"><span>🔄</span>ERP Sync</button>
           </div>
         </div>
         <div class="nav-group is-collapsed" data-nav-group="perf">
@@ -70,7 +69,7 @@
           </div>
         </div>
       </nav>
-      <div class="privacy-note"><strong id="sidebar-version">v9.1.0.stable</strong><span id="sidebar-notes">v9.1.0.stable: Sales Graph KPI/byline build — corrected dashboard KPIs and byline, with a full cache-bust so live Hostinger/SW stop serving 8.0.0.stable.</span></div>
+      <div class="privacy-note"><strong id="sidebar-version">v10.0.0.stable</strong><span id="sidebar-notes">v10.0.0.stable: ERP Sync GHA-only — dedicated Super User module; daily IST upload via GitHub Actions; Hostinger cron keepalive/daily retired.</span></div>
     </aside>
 
     <main>
@@ -89,14 +88,9 @@
       </header>
 
       <section id="view-review" class="view active">
-        <div class="intro"><h2>Bucket 1 Followup Review</h2><p><strong>Excel RAW</strong> detects TeleCallers, audits the whole file, then lets you save Excel or create a dashboard. <strong>Excel Audit</strong> skips AI — upload an already-audited workbook and review.</p></div>
-        <div class="format-toggle" role="group" aria-label="Upload format">
-          <button type="button" class="format-option active" data-review-format="raw">Excel RAW</button>
-          <button type="button" class="format-option" data-review-format="audit">Excel Audit</button>
-        </div>
-        <div id="review-drop-zone" class="drop-zone" role="button" tabindex="0" aria-label="Upload Excel for Bucket 1 audit">
-          <input id="review-file-input" type="file" accept=".xlsx,.xls,.xlsm" hidden>
-          <div class="upload-icon">📤</div><h3>Drop Excel here</h3><p id="review-drop-hint">CRM / RAW export · auto-detect TeleCallers · audit then Save / Create Dashboard · XLSX, XLS or XLSM</p>
+        <div class="intro"><h2>Bucket 1 Followup Review</h2><p>Lead data is synced via <a href="../ERPSync/">ERP Sync</a> (GitHub Actions). When leads are loaded below, click <strong>Start Audit</strong> for the AI pass, then save Excel or publish a dashboard.</p></div>
+        <div id="review-erp-empty" class="empty-card" role="status">
+          <p>No leads loaded yet. Bucket 1 data is delivered through <a href="../ERPSync/">ERP Sync</a> · GitHub Actions. Configure automation in ERP Sync or wait for the next sync.</p>
         </div>
         <div id="review-file-list" class="file-list hidden"></div>
         <div id="review-validation" class="validation hidden" role="status"></div>
@@ -235,125 +229,16 @@
         </div>
       </section>
 
-      <section id="view-erp-sync" class="view">
-        <div class="settings-page">
-          <div class="settings-toolbar" role="toolbar" aria-label="ERP Sync actions">
-            <div class="settings-toolbar-copy">
-              <strong>ERP Sync</strong>
-              <span>Super User. Fetch ERP report once → store raw JSON → load into Bucket 1 Audit (same Start Audit / progress / Stop as Excel RAW).</span>
-            </div>
-            <div class="inline-actions settings-toolbar-actions">
-              <button id="erp-sync-save" type="button" class="primary-button">Save settings</button>
-              <span id="erp-sync-message" class="form-message" aria-live="polite"></span>
-            </div>
-          </div>
-
-          <div id="erp-sync-progress" class="review-live-progress" aria-live="polite">
-            <div class="progress-copy">
-              <strong id="erp-sync-progress-label">Idle</strong>
-              <span id="erp-sync-progress-percent">0%</span>
-            </div>
-            <div class="progress-track">
-              <div id="erp-sync-progress-bar" class="progress-bar" style="width:0%"></div>
-            </div>
-            <p id="erp-sync-progress-detail" class="muted form-message" style="margin:0.65rem 0 0">Configure URL + Cookie, Save, then Fetch &amp; send to Audit.</p>
-            <div class="inline-actions" style="margin-top:0.75rem">
-              <button id="erp-sync-cancel" type="button" class="danger-button hidden">Stop audit</button>
-            </div>
-          </div>
-
-          <section class="settings-card" style="margin-bottom:1rem">
-            <div class="card-title"><h2>API uploads</h2><p>Each file sent with the terminal Bucket 1 or Performance upload command. Newest first. Times are India Standard Time.</p></div>
-            <div id="erp-sync-api-uploads" class="muted form-message">No API uploads yet.</div>
-          </section>
-
-          <div class="settings-sections">
-            <section class="settings-card">
-              <div class="card-title"><h2>1 · Report request</h2><p>Paste the authenticated report URL and Cookie header from a working browser cURL. Never share cookies outside Super User.</p></div>
-              <label>Report URL<input id="erp-sync-url" type="url" autocomplete="off" placeholder="https://…/getFunction.do?…"></label>
-              <label>HTTP method
-                <select id="erp-sync-method">
-                  <option value="GET">GET</option>
-                  <option value="POST">POST</option>
-                </select>
-              </label>
-              <label>Cookie header<textarea id="erp-sync-cookie" rows="3" autocomplete="off" placeholder="JSESSIONID=…; other=…"></textarea></label>
-              <p id="erp-sync-cookie-hint" class="muted form-message"></p>
-              <label>Extra headers (JSON object, optional)<textarea id="erp-sync-headers" rows="3" placeholder='{"Accept":"application/json"}'></textarea></label>
-              <label>JSON rows path (optional)<input id="erp-sync-rows-path" type="text" placeholder="data.rows — leave blank to auto-detect"></label>
-            </section>
-
-            <section class="settings-card">
-              <div class="card-title"><h2>2 · Field map</h2><p>Comma-separated ERP column aliases per LeadLens field. After Test fetch, match keys from the preview.</p></div>
-              <div id="erp-sync-field-map" class="config-list"></div>
-              <div class="inline-actions" style="margin-top:0.75rem">
-                <button id="erp-sync-test" type="button" class="secondary-button">Test fetch</button>
-              </div>
-              <div id="erp-sync-preview" class="muted form-message" style="white-space:pre-wrap;margin-top:0.75rem"></div>
-            </section>
-
-            <section class="settings-card">
-              <div class="card-title"><h2>3 · Fetch → Audit</h2><p>Primary path: fetch the full ERP report, store it under <code>api/storage/erp-sync/</code>, map leads, then open Bucket 1 so you run Audit with the normal progress bar / Stop / Publish flow.</p></div>
-              <div class="inline-actions" style="margin-top:0.75rem;flex-wrap:wrap">
-                <button id="erp-sync-fetch-audit" type="button" class="primary-button">Fetch &amp; send to Audit</button>
-              </div>
-            </section>
-
-            <section class="settings-card">
-              <div class="card-title"><h2>4 · Daily automation &amp; cron</h2><p>Unattended at <strong>6:00 AM IST</strong>: keep-alive (every 1 minute) starts fetch → server AI audit → publish. Hostinger <code>/daily</code> cron is optional backup — PHP ignores it outside 05:55–06:45 IST, so a 4pm schedule will not run the pipeline. Cookie must stay valid overnight.</p></div>
-              <div class="field-grid run-grid">
-                <label class="check-row"><input id="erp-sync-daily" type="checkbox"><span>Enable daily auto pipeline (6:00 AM IST)</span></label>
-                <label class="check-row"><input id="erp-sync-cron-auto-publish" type="checkbox" checked><span>Cron auto-publish dashboards when daily audit completes</span></label>
-                <label class="check-row"><input id="erp-sync-keepalive" type="checkbox"><span>Enable session keep-alive (cron every 1 minute)</span></label>
-                <label class="check-row"><input id="erp-sync-auto-publish" type="checkbox"><span>Auto-publish after manual server audit (advanced)</span></label>
-                <label>Batch size<input id="erp-sync-batch-size" type="number" min="1" max="40" value="25"></label>
-                <label>Max leads / manual run<input id="erp-sync-max-leads" type="number" min="1" max="2000" value="200"></label>
-              </div>
-              <label>Keep-alive URL (optional)<input id="erp-sync-keepalive-url" type="url" autocomplete="off" placeholder="Defaults to Report URL — use a lighter same-host page if preferred"></label>
-              <label>Cron bearer secret<input id="erp-sync-cron-secret" type="password" autocomplete="new-password" placeholder="Set a long random secret"></label>
-              <p id="erp-sync-cron-hint" class="muted form-message"></p>
-              <p class="muted form-message" style="white-space:pre-wrap">Cron must be set in hPanel to */1 against <strong>production</strong> <code>https://ai.gurupunvaanii.com/api/erp-sync/keepalive</code> (not <code>/dev/api</code>). Save alone does not ping on a schedule. Prefer curl with Bearer; URL-only cron can use <code>?cron_secret=…</code>.</p>
-              <p id="erp-sync-keepalive-status" class="muted form-message" aria-live="polite" style="white-space:pre-wrap;font-weight:600"></p>
-              <p id="erp-sync-daily-status" class="muted form-message" aria-live="polite"></p>
-              <div class="inline-actions" style="margin-top:0.75rem;flex-wrap:wrap">
-                <button id="erp-sync-ping" type="button" class="secondary-button">Ping keep-alive now</button>
-                <button id="erp-sync-run-daily" type="button" class="secondary-button">Run daily now</button>
-                <button id="erp-sync-run-server" type="button" class="secondary-button">Server audit (advanced)</button>
-                <button id="erp-sync-publish" type="button" class="secondary-button">Publish last server results</button>
-              </div>
-              <pre id="erp-sync-status" class="muted" style="margin-top:0.75rem;white-space:pre-wrap;font-size:0.85rem"></pre>
-            </section>
-          </div>
-        </div>
-      </section>
-
       <section id="view-perf-report" class="view">
-        <div class="intro"><h2>TeleCalling Performance</h2><p>Upload <strong>Master Data (M)</strong> and <strong>History Data (H)</strong> workbooks, reconcile metrics, then publish dashboards for each TeleCaller.</p></div>
-        <div class="perf-upload-grid">
-          <div id="perf-master-drop" class="drop-zone" role="button" tabindex="0" aria-label="Upload Master Excel">
-            <input id="perf-master-input" type="file" accept=".xlsx,.xls,.xlsm" hidden>
-            <div class="upload-icon">📒</div><h3>Master Data (M)</h3><p>Active leads · Mobile, Project, Source, LRD, NFD, Status, Telecaller</p>
-          </div>
-          <div id="perf-history-drop" class="drop-zone" role="button" tabindex="0" aria-label="Upload History Excel">
-            <input id="perf-history-input" type="file" accept=".xlsx,.xls,.xlsm" hidden>
-            <div class="upload-icon">🕑</div><h3>History Data (H)</h3><p>Call history · includes Lead Update Date</p>
-          </div>
-        </div>
-        <div id="perf-file-list" class="file-list hidden"></div>
-        <div id="perf-validation" class="validation hidden" role="status"></div>
-        <div class="action-row"><button id="perf-create-dashboard" type="button" class="primary-button" disabled>Create Dashboard <span>→</span></button></div>
-        <div id="perf-preview-panel" class="review-dashboard-panel hidden">
-          <div class="card-title"><h2>Preview</h2><p id="perf-preview-telecallers"></p></div>
-          <div id="perf-preview-summary"></div>
-          <div class="inline-actions review-download-actions dashboard-footer-actions">
-            <button id="perf-upload-dashboard-btn" type="button" class="primary-button" disabled>Upload Dashboard</button>
-          </div>
+        <div class="intro"><h2>TeleCalling Performance</h2><p>Performance dashboards are synced via <a href="../ERPSync/">ERP Sync</a> (GitHub Actions). Open <strong>Performance Dashboard</strong> to view published boards.</p></div>
+        <div class="empty-card" role="status">
+          <p>Manual Excel upload is disabled in the app. Use ERP Sync automation or the terminal performance upload API. When a board is published, open <strong>Dashboard</strong> under TeleCalling Performance.</p>
         </div>
       </section>
 
       <section id="view-perf-dashboard" class="view view-wide">
         <div class="section-head">
-          <div><h2>Performance Dashboard</h2><p id="perf-published-meta">Published performance metrics from the latest upload.</p></div>
+          <div><h2>Performance Dashboard</h2><p id="perf-published-meta">Published performance metrics from ERP Sync.</p></div>
           <div class="inline-actions">
             <button id="export-perf-pdf" type="button" class="secondary-button" disabled>Export PDF</button>
             <button id="refresh-perf-published" type="button" class="secondary-button">Refresh</button>

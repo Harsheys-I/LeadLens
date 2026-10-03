@@ -1,5 +1,5 @@
 {
-  "version": "9.1.0.stable",
+  "version": "10.0.0.stable",
   "name": "GPP AI",
-  "notes": "v9.1.0.stable: faster server AI audit - rolling pool of up to 8 parallel OpenAI requests (batch 25, max 40) that uses each worker's full time budget; 429s honor Retry-After, pause and halve concurrency (kept across chained workers) then step back up; 5xx/timeouts retry with backoff; failing batches split and requeue instead of stopping the job; ERP Sync panel and Bucket 1 banner show the current parallel/batch level and rate-limit pauses."
+  "notes": "v10.0.0.stable: ERP Sync is GitHub Actions–only — dedicated Super User module, daily IST upload via GHA, Hostinger cron keepalive/daily retired (410); Sales Graph charts sync from ERP without in-app Excel upload."
 }
