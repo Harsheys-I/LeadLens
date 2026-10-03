@@ -2,7 +2,7 @@
 
 Login-gated multi-module app for Hostinger (PHP + MySQL) with browser-side AI audits.
 
-**Current version:** see `version.json` (9.0.0.stable).
+**Current version:** see `version.json` (9.1.0.stable).
 
 ## Routes
 
@@ -28,17 +28,19 @@ CRM / HR tiles are **Coming soon** only.
 `POST /api/audit/upload` does what Bucket 1 + Upload Dashboard do on the website, in one command: parse the workbook, audit it on the server with the saved Settings and the server OpenAI key, then publish the TeleCaller dashboards (replacing the current boards, credited to you).
 
 ```powershell
-curl.exe -sS -X POST "https://ai.gurupunvaanii.com/api/audit/upload" -F "username=YOUR_USER" -F "password=YOUR_PASSWORD" -F "file=@C:\path\to\leads.xlsx" -F "batch_size=20" -F "concurrency=2"
+curl.exe -sS -X POST "https://ai.gurupunvaanii.com/api/audit/upload" -F "username=YOUR_USER" -F "password=YOUR_PASSWORD" -F "file=@C:\path\to\leads.xlsx" -F "batch_size=25" -F "concurrency=8"
 ```
 
 | Field | Required | Meaning |
 |-------|----------|---------|
 | `username`, `password` | yes | Your LeadLens login (same check as the website; the password is not stored). The account must be active and have Bucket 1 (`telecaller.bucket1` or `module.telecaller_audit`) plus Upload Dashboard, or be Super User. |
 | `file` | yes | `.xlsx` (first sheet) or a Strategic ERP `.json` report (`A1` mobile through `A13` budget). Mobile and Project are required. |
-| `batch_size` | no | Leads per OpenAI request, 1–20. Omit to use the saved Settings value. |
-| `concurrency` | no | Parallel batches (requests in flight at once), 1–50. Omit to use the saved Settings value. |
+| `batch_size` | no | Leads per OpenAI request, 1–40 (recommended 25). Omit to use the saved Settings value. |
+| `concurrency` | no | Parallel batches (requests in flight at once), 1–50 (recommended 8). Omit to use the saved Settings value. |
 
 `batch_size` and `concurrency` apply to that run only and are never saved to Settings; out-of-range values are clamped. Everything else (model, fields, rules, yes/no values) comes from the saved Settings.
+
+These are ceilings. On an OpenAI 429 the server honors `Retry-After` / `x-ratelimit-reset-*`, pauses, halves the parallel requests (then the batch size once at 1, never below 5), and steps back up after a run of successes; the reduced level is kept in the job so the next chained worker continues at it. 5xx, timeouts, and network errors retry with exponential backoff. A batch that keeps failing is split and retried, and only a single lead OpenAI keeps rejecting is marked errored (local checks only). The job only stops on account-level errors (invalid key, no quota, unknown model) or Stop. The ERP Sync panel and the Bucket 1 banner show the current parallel / batch level, rate-limit hits, and any pause.
 
 The command returns `202` as soon as the file is accepted and the audit has started, with `lead_count`, `batch_size`, `concurrency`, and `total_batches`. The server keeps auditing in the background (one-time internal continue step, no cron secret) and publishes the dashboards when it finishes. If another server Bucket 1 audit (including the 6:00 AM ERP job) is still running, the call returns `409` with its progress and nothing is replaced — try again later.
 

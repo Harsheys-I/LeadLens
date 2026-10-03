@@ -1,8 +1,8 @@
-import {requireAuth, logout, getUser, hasPermission, requirePermission, changePassword, updateProfile} from '../auth.js?v=9.0.0.stable';
-import {AdminApi, DashboardApi} from '../api-client.js?v=9.0.0.stable';
-import {mountNotifications} from '../notifications-ui.js?v=9.0.0.stable';
-import {appUrl, homePath} from '../app-base.js?v=9.0.0.stable';
-import {initTheme} from '../theme.js?v=9.0.0.stable';
+import {requireAuth, logout, getUser, hasPermission, requirePermission, changePassword, updateProfile} from '../auth.js?v=9.1.0.stable';
+import {AdminApi, DashboardApi} from '../api-client.js?v=9.1.0.stable';
+import {mountNotifications} from '../notifications-ui.js?v=9.1.0.stable';
+import {appUrl, homePath} from '../app-base.js?v=9.1.0.stable';
+import {initTheme} from '../theme.js?v=9.1.0.stable';
 
 const $ = id => document.getElementById(id);
 const titles = {users: 'User creation', roles: 'Roles'};

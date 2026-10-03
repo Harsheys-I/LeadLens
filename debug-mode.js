@@ -16,25 +16,25 @@ import {
   sortResults,
   validateApiKey,
   SERVER_API_KEY,
-} from "./audit.js?v=9.0.0.stable";
-import {getApiKey,apiKeyIsRemembered,saveApiKey,forgetApiKey,setStorageUserId,storageKey} from "./db.js?v=9.0.0.stable";
-import {requireAuth,logout,getUser,changePassword,updateProfile} from "./auth.js?v=9.0.0.stable";
-import {SettingsApi} from "./api-client.js?v=9.0.0.stable";
-import {mountNotifications} from "./notifications-ui.js?v=9.0.0.stable";
-import {appUrl, homePath, isDevHost} from "./app-base.js?v=9.0.0.stable";
-import {initTheme} from "./theme.js?v=9.0.0.stable";
+} from "./audit.js?v=9.1.0.stable";
+import {getApiKey,apiKeyIsRemembered,saveApiKey,forgetApiKey,setStorageUserId,storageKey} from "./db.js?v=9.1.0.stable";
+import {requireAuth,logout,getUser,changePassword,updateProfile} from "./auth.js?v=9.1.0.stable";
+import {SettingsApi} from "./api-client.js?v=9.1.0.stable";
+import {mountNotifications} from "./notifications-ui.js?v=9.1.0.stable";
+import {appUrl, homePath, isDevHost} from "./app-base.js?v=9.1.0.stable";
+import {initTheme} from "./theme.js?v=9.1.0.stable";
 import {
   debugAuditBatch,
   telecallerAuditBatch,
   compareDebugVsTelecaller,
   activePromptsReady,
   normalizeActiveErrorTypes,
-} from "./debug-engine.js?v=9.0.0.stable";
+} from "./debug-engine.js?v=9.1.0.stable";
 import {
   LAB_ERROR_TYPES,
   STATUS_HISTORY_PROMPT,
   emptyErrorPrompts,
-} from "./debug-prompts.js?v=9.0.0.stable";
+} from "./debug-prompts.js?v=9.1.0.stable";
 
 const $=id=>document.getElementById(id);
 const ids=[
