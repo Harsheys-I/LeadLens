@@ -2,7 +2,7 @@ name: ERP daily upload
 
 on:
   schedule:
-    - cron: "45 0 * * *" # 06:15 IST
+    - cron: "30 18 * * *" # 00:00 IST
   workflow_dispatch:
     inputs:
       jobs:
@@ -38,6 +38,24 @@ jobs:
           pip install -r automation/requirements.txt
           python -m playwright install --with-deps chromium
 
+      - name: Pick uploads to run
+        id: pick
+        env:
+          EVENT: ${{ github.event_name }}
+          INPUT_JOBS: ${{ github.event.inputs.jobs }}
+        run: |
+          if [ "$EVENT" = "workflow_dispatch" ]; then
+            jobs="${INPUT_JOBS:-bucket1,perf}"
+          else
+            # Scheduled runs can start late, so decide by the IST date at run time.
+            jobs="bucket1"
+            if [ "$(TZ=Asia/Kolkata date +%d)" = "01" ]; then
+              jobs="bucket1,perf"
+            fi
+          fi
+          echo "Running jobs: $jobs (IST date $(TZ=Asia/Kolkata date +%F))"
+          echo "jobs=$jobs" >> "$GITHUB_OUTPUT"
+
       - name: Download ERP reports and upload to LeadLens
         working-directory: automation
         env:
@@ -47,7 +65,7 @@ jobs:
           GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
           LEADLENS_USER: ${{ secrets.LEADLENS_USER }}
           LEADLENS_PASS: ${{ secrets.LEADLENS_PASS }}
-          JOBS: ${{ github.event.inputs.jobs || 'bucket1,perf' }}
+          JOBS: ${{ steps.pick.outputs.jobs }}
           DRY_RUN: ${{ github.event.inputs.dry_run == 'true' && '1' || '0' }}
         run: python erp_upload.py
 
