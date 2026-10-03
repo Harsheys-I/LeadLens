@@ -1675,7 +1675,18 @@ export function mountPerfReportUpload(ctx) {
     for (const text of items) {
       const card = document.createElement("div");
       card.className = "file-card";
-      card.innerHTML = `<div><span class="file-icon">M</span><div><strong>${text.split(":")[0]}</strong><p>${text.includes(":") ? text.slice(text.indexOf(":") + 1).trim() : ""}</p></div></div>`;
+      const wrap = document.createElement("div");
+      const icon = document.createElement("span");
+      icon.className = "file-icon";
+      icon.textContent = "M";
+      const body = document.createElement("div");
+      const strong = document.createElement("strong");
+      strong.textContent = text.split(":")[0];
+      const p = document.createElement("p");
+      p.textContent = text.includes(":") ? text.slice(text.indexOf(":") + 1).trim() : "";
+      body.append(strong, p);
+      wrap.append(icon, body);
+      card.append(wrap);
       fileList.append(card);
     }
   }

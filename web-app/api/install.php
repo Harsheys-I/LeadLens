@@ -5,6 +5,9 @@ declare(strict_types=1);
 /**
  * One-time schema + seed. Visit /api/install.php once after configuring config.local.php.
  * Protect or remove after setup (or set app.install_locked = true).
+ *
+ * Safety: never resets an existing Super User password. Refuses to re-run when users
+ * already exist unless app.install_force_token matches ?force_token= (POST recommended).
  */
 
 header('Content-Type: text/html; charset=utf-8');
@@ -27,9 +30,30 @@ if (!empty($GLOBALS['LL_CONFIG']['app']['install_locked'])) {
   exit;
 }
 
+function ll_install_user_count(PDO $pdo): int
+{
+  try {
+    return (int) $pdo->query('SELECT COUNT(*) FROM users')->fetchColumn();
+  } catch (Throwable $e) {
+    return 0;
+  }
+}
+
 function ll_install_run(): void
 {
   $pdo = ll_pdo();
+  $existingUsers = ll_install_user_count($pdo);
+  $forceToken = trim((string) ($GLOBALS['LL_CONFIG']['app']['install_force_token'] ?? ''));
+  $provided = trim((string) ($_GET['force_token'] ?? $_POST['force_token'] ?? ''));
+  $forceOk = $forceToken !== '' && $provided !== '' && hash_equals($forceToken, $provided);
+
+  if ($existingUsers > 0 && !$forceOk) {
+    http_response_code(403);
+    echo '<h1>Install refused</h1>';
+    echo '<p>Users already exist. Re-running install is blocked so the Super User password cannot be reset via a GET.</p>';
+    echo '<p>Set <code>app.install_locked</code> to <code>true</code> in <code>config.local.php</code>, or set <code>app.install_force_token</code> and POST with <code>force_token</code> only if you intentionally need a schema repair (existing passwords are never changed).</p>';
+    exit;
+  }
 
   $pdo->exec("CREATE TABLE IF NOT EXISTS roles (
     id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
@@ -203,12 +227,9 @@ function ll_install_run(): void
   $existing->execute(['super user']);
   $userId = $existing->fetchColumn();
 
-  $hash = password_hash('12345', PASSWORD_BCRYPT);
-  if ($userId) {
-    $pdo->prepare(
-      'UPDATE users SET password_hash = ?, display_name = ?, role_id = ?, is_active = 1, must_change_password = 1 WHERE id = ?'
-    )->execute([$hash, 'Super User', $superId, (int) $userId]);
-  } else {
+  // Never reset an existing Super User password — that was an account-takeover vector via GET.
+  if (!$userId) {
+    $hash = password_hash('12345', PASSWORD_BCRYPT);
     $pdo->prepare(
       'INSERT INTO users (username, password_hash, display_name, role_id, telecaller_name, is_active, must_change_password)
        VALUES (?, ?, ?, ?, NULL, 1, 1)'
@@ -219,10 +240,11 @@ function ll_install_run(): void
 try {
   ll_install_run();
   echo '<h1>GPP AI install OK</h1>';
-  echo '<p>Tables created/verified. Seed Super User: <code>super user</code> / <code>12345</code> (change password on first login).</p>';
-  echo '<p>Recommended: set <code>app.install_locked</code> to <code>true</code> in <code>config.local.php</code>, or delete/rename this file.</p>';
+  echo '<p>Tables created/verified. If this was a first install, seed Super User is <code>super user</code> / <code>12345</code> (change password on first login).</p>';
+  echo '<p><strong>Required:</strong> set <code>app.install_locked</code> to <code>true</code> in <code>config.local.php</code>, or delete/rename this file.</p>';
   echo '<p><a href="../">Go to login</a></p>';
 } catch (Throwable $e) {
   http_response_code(500);
-  echo '<h1>Install failed</h1><pre>' . htmlspecialchars($e->getMessage(), ENT_QUOTES, 'UTF-8') . '</pre>';
+  echo '<h1>Install failed</h1><p>See server logs for details.</p>';
+  error_log('LeadLens install failed: ' . $e->getMessage());
 }

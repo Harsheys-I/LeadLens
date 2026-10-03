@@ -83,3 +83,17 @@ function ll_can_use_openai_proxy(array $user): bool
     || ll_user_has_permission($user, 'telecaller.settings')
     || ll_user_has_permission($user, 'telecaller.run_console');
 }
+
+/** Saved audit model used to constrain the OpenAI proxy. */
+function ll_audit_settings_model(): string
+{
+  $row = ll_setting_get('audit_settings');
+  $model = 'gpt-4o-mini';
+  if ($row && $row['setting_value']) {
+    $decoded = json_decode((string) $row['setting_value'], true);
+    if (is_array($decoded) && !empty($decoded['model'])) {
+      $model = trim((string) $decoded['model']);
+    }
+  }
+  return $model !== '' ? $model : 'gpt-4o-mini';
+}

@@ -76,7 +76,14 @@ export async function updateProfile({username, display_name} = {}){
 /** Redirect to login (home) if no session. Returns user or null after redirect. */
 export async function requireAuth({loginPath = homePath()} = {}){
   const user = await loadSession();
-  if (user) return user;
+  if (user) {
+    // Server also blocks APIs until password change; send them home for the modal.
+    if (user.must_change_password && !isHomePath()) {
+      location.href = loginPath;
+      return null;
+    }
+    return user;
+  }
   if (isHomePath()) return null;
   const next = encodeURIComponent(location.pathname + location.search + location.hash);
   location.href = `${loginPath}?next=${next}`;

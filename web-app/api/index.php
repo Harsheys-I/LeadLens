@@ -67,5 +67,6 @@ try {
       ll_error('Not found', 404);
   }
 } catch (Throwable $e) {
-  ll_error('Server error: ' . $e->getMessage(), 500);
+  error_log('LeadLens API error: ' . $e->getMessage());
+  ll_error('Server error', 500);
 }

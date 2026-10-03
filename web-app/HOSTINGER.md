@@ -35,9 +35,11 @@ Do not replace the entire `hostinger` tree on a normal push.
    - `db.user` → exact MySQL username from hPanel
    - `db.pass` → exact MySQL password from hPanel
    - `session.secret` → a long random string (not `change-me-to-a-long-random-string`)
+   - `app.secrets_key` → a **different** long random string (not the example placeholder; required to encrypt OpenAI/ERP secrets)
 4. Visit **https://ai.gurupunvaanii.com/api/install.php** once **after** DB credentials work.
    - Creates tables and seeds Super User: username `super user`, password `12345` (bcrypt).
-5. Log in at https://ai.gurupunvaanii.com/ and change the Super User password when prompted.
+   - Re-running when users already exist is refused (no password reset via GET). Schema repair needs `app.install_force_token` + matching `force_token`.
+5. Log in at https://ai.gurupunvaanii.com/ and change the Super User password when prompted (min 8 characters; enforced server-side).
 6. Set `app.install_locked` to `true` in `config.local.php` (or delete/rename `install.php`).
 
 ### If login says Access denied / `your_database_user`

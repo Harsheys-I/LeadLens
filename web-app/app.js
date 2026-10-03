@@ -2467,7 +2467,11 @@ async function refreshPublishedDashboards(){
     renderReviewDashboard(els["published-dashboard-mount"],[fakeJob],dashboardRenderOptions([fakeJob]));
   }catch(err){
     mount.classList.remove("hidden");
-    mount.innerHTML=`<div class="empty-card">${err.message||"Could not load dashboards."}</div>`;
+    mount.replaceChildren();
+    const empty=document.createElement("div");
+    empty.className="empty-card";
+    empty.textContent=err.message||"Could not load dashboards.";
+    mount.append(empty);
     panel?.classList.add("hidden");
   }
 }
@@ -2486,10 +2490,17 @@ function paintServerAuditBanner(progress){
   const detail=document.getElementById("server-audit-detail");
   const bar=document.getElementById("server-audit-bar");
   const pctEl=document.getElementById("server-audit-percent");
+  const stopBtn=document.getElementById("server-audit-stop");
   if(label)label.textContent=`${pipeline} audit · ${done.toLocaleString()} / ${total.toLocaleString()}`;
   if(detail)detail.textContent=progress.source_file?String(progress.source_file):"Running in the background";
   if(bar)bar.style.width=`${pct}%`;
   if(pctEl)pctEl.textContent=`${pct}%`;
+  if(stopBtn){
+    const uid=Number(getUser()?.id||0);
+    const isSuper=Boolean(getUser()?.is_super);
+    const ownsUpload=progress.pipeline==="upload"&&Number(progress.uploaded_by_id||0)===uid&&uid>0;
+    stopBtn.classList.toggle("hidden",!(isSuper||ownsUpload));
+  }
 }
 
 async function pollServerAudit(){
