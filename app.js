@@ -1,13 +1,13 @@
-import {APP_VERSION,DEFAULT_SETTINGS,DEFAULT_OUTPUT_FIELDS,SETTINGS_SEED,MAX_BATCH_SIZE,MAX_CONCURRENCY,normalizeSettings,normalizeInputFields,slugFieldId,parseWorkbook,parseAuditedWorkbook,auditBatch,downloadWorkbook,downloadReviewPack,downloadReviewPdf,splitLeadsByTelecaller,splitResultsByTelecaller,validateApiKey,HIGH_SEVERITY_ERRORS,SERVER_API_KEY} from "./audit.js?v=8.0.1.kpi-fix";
-import {getJob,getJobs,loadSettings,saveSettings,getApiKey,apiKeyIsRemembered,saveApiKey,forgetApiKey,setStorageUserId,storageKey} from "./db.js?v=8.0.1.kpi-fix";
-import {renderReviewDashboard,destroyReviewDashboard} from "./dashboard-view.js?v=8.0.1.kpi-fix";
-import {requireAuth,logout,hasPermission,getUser,changePassword,updateProfile} from "./auth.js?v=8.0.1.kpi-fix";
-import {DashboardApi,SettingsApi,api} from "./api-client.js?v=8.0.1.kpi-fix";
-import {mountNotifications} from "./notifications-ui.js?v=8.0.1.kpi-fix";
-import {persistJob,removeJobSynced,clearJobsSynced,pullJobsFromServer} from "./jobs-sync.js?v=8.0.1.kpi-fix";
-import {mountPerfReportUpload,mountPerfPublishedDashboard,refreshPerfPublished} from "./perf-dashboard.js?v=8.0.1.kpi-fix";
-import {appUrl, homePath} from "./app-base.js?v=8.0.1.kpi-fix";
-import {initTheme} from "./theme.js?v=8.0.1.kpi-fix";
+import {APP_VERSION,DEFAULT_SETTINGS,DEFAULT_OUTPUT_FIELDS,SETTINGS_SEED,MAX_BATCH_SIZE,MAX_CONCURRENCY,normalizeSettings,normalizeInputFields,slugFieldId,parseWorkbook,parseAuditedWorkbook,auditBatch,downloadWorkbook,downloadReviewPack,downloadReviewPdf,splitLeadsByTelecaller,splitResultsByTelecaller,validateApiKey,HIGH_SEVERITY_ERRORS,SERVER_API_KEY} from "./audit.js?v=9.0.0.stable";
+import {getJob,getJobs,loadSettings,saveSettings,getApiKey,apiKeyIsRemembered,saveApiKey,forgetApiKey,setStorageUserId,storageKey} from "./db.js?v=9.0.0.stable";
+import {renderReviewDashboard,destroyReviewDashboard} from "./dashboard-view.js?v=9.0.0.stable";
+import {requireAuth,logout,hasPermission,getUser,changePassword,updateProfile} from "./auth.js?v=9.0.0.stable";
+import {DashboardApi,SettingsApi,api} from "./api-client.js?v=9.0.0.stable";
+import {mountNotifications} from "./notifications-ui.js?v=9.0.0.stable";
+import {persistJob,removeJobSynced,clearJobsSynced,pullJobsFromServer} from "./jobs-sync.js?v=9.0.0.stable";
+import {mountPerfReportUpload,mountPerfPublishedDashboard,refreshPerfPublished} from "./perf-dashboard.js?v=9.0.0.stable";
+import {appUrl, homePath} from "./app-base.js?v=9.0.0.stable";
+import {initTheme} from "./theme.js?v=9.0.0.stable";
 import {mountErpSyncPanel, loadErpSyncPanel, canShowErpSync, applyErpSyncNavVisibility} from "./erp-sync.js?v=8.0.2.audit-stop";
 
 const $=id=>document.getElementById(id);

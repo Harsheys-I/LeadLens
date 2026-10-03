@@ -1,8 +1,8 @@
 /**
  * /dev Super User ERP Sync panel — fetch ERP → store raw → hand off to main Audit UI.
  */
-import {api} from './api-client.js?v=8.0.1.kpi-fix';
-import {getUser} from './auth.js?v=8.0.1.kpi-fix';
+import {api} from './api-client.js?v=9.0.0.stable';
+import {getUser} from './auth.js?v=9.0.0.stable';
 
 const FIELD_IDS = [
   'mobile', 'project', 'registration', 'telecaller', 'source', 'update',
@@ -412,18 +412,20 @@ function renderApiUploads(rows) {
   for (const row of list) {
     const line = document.createElement('p');
     line.style.margin = '0 0 0.7rem';
+    const isPerf = row.kind === 'performance';
     const audited = Number(row.audited || 0);
     const total = Number(row.lead_count || 0);
     const status = String(row.status || 'unknown');
-    const progress = status === 'auditing' && total ? ` ${audited}/${total}` : '';
+    const progress = !isPerf && status === 'auditing' && total ? ` ${audited}/${total}` : '';
     const bits = [
       formatIst(row.started_at),
+      isPerf ? 'Performance' : 'Bucket 1',
       row.source_file || 'file',
-      `${total || 0} leads`,
+      isPerf ? `${total || 0} TeleCallers` : `${total || 0} leads`,
       `${Number(row.row_count || 0)} rows`,
       row.uploaded_by ? `by ${row.uploaded_by}` : '',
-      row.batch_size ? `batch ${row.batch_size}` : '',
-      row.concurrency ? `parallel ${row.concurrency}` : '',
+      !isPerf && row.batch_size ? `batch ${row.batch_size}` : '',
+      !isPerf && row.concurrency ? `parallel ${row.concurrency}` : '',
       status + progress
     ].filter(Boolean);
     line.textContent = bits.join(' · ');

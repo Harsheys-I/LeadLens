@@ -137,6 +137,114 @@ function ll_perf_sum_pies(array $pies): array
   return $out;
 }
 
+/**
+ * Replace every published performance board with $items, then notify owners and viewers.
+ * Callers must have run ll_perf_dashboards_ensure_table().
+ *
+ * @param list<mixed> $items Dashboards as posted by the browser publish
+ * @return array{published: list<array<string, mixed>>, cleared: int}
+ */
+function ll_perf_dashboards_replace_all(array $items, array $user): array
+{
+  $pdo = ll_pdo();
+  $ins = $pdo->prepare(
+    'INSERT INTO perf_published_dashboards (telecaller_name, title, payload, meta, uploaded_by)
+     VALUES (?, ?, ?, ?, ?)'
+  );
+  $created = [];
+  $pending = [];
+  foreach ($items as $item) {
+    if (!is_array($item)) {
+      continue;
+    }
+    $telecaller = trim((string) ($item['telecaller_name'] ?? ''));
+    if ($telecaller === '') {
+      continue;
+    }
+    $title = trim((string) ($item['title'] ?? ($telecaller . ' · Performance')));
+    $summary = is_array($item['summary'] ?? null) ? $item['summary'] : [];
+    $byTelecaller = is_array($item['byTelecaller'] ?? null) ? $item['byTelecaller'] : [];
+    $byProject = is_array($item['byProject'] ?? null) ? $item['byProject'] : [];
+    $bySource = is_array($item['bySource'] ?? null) ? $item['bySource'] : [];
+    $pie = is_array($item['pie'] ?? null) ? $item['pie'] : [];
+    $dateMin = $item['date_min'] ?? $item['dateMin'] ?? null;
+    $dateMax = $item['date_max'] ?? $item['dateMax'] ?? null;
+    $reportDays = (int) ($item['report_days'] ?? $item['reportDays'] ?? 0);
+
+    $payload = json_encode([
+      'summary' => array_merge(ll_perf_empty_summary(), array_intersect_key($summary, ll_perf_empty_summary())),
+      'byTelecaller' => $byTelecaller,
+      'byProject' => $byProject,
+      'bySource' => $bySource,
+      'pie' => array_merge(ll_perf_empty_pie(), array_intersect_key($pie, ll_perf_empty_pie())),
+      'date_min' => $dateMin,
+      'date_max' => $dateMax,
+      'report_days' => $reportDays,
+      'telecaller_name' => $telecaller,
+    ], JSON_UNESCAPED_UNICODE);
+    if ($payload === false) {
+      ll_error('Failed to encode performance dashboard payload');
+    }
+
+    $meta = [
+      'uploaded_at' => gmdate('c'),
+      'uploaded_by_name' => $user['display_name'] ?: $user['username'],
+      'replaced' => true,
+      'date_min' => $dateMin,
+      'date_max' => $dateMax,
+    ];
+    if (isset($item['meta']) && is_array($item['meta'])) {
+      $meta = array_merge($meta, $item['meta']);
+      $meta['replaced'] = true;
+    }
+    $metaJson = json_encode($meta, JSON_UNESCAPED_UNICODE);
+    if ($metaJson === false) {
+      ll_error('Failed to encode performance dashboard meta');
+    }
+
+    $pending[] = [
+      'telecaller' => $telecaller,
+      'title' => $title,
+      'payload' => $payload,
+      'metaJson' => $metaJson,
+    ];
+  }
+  if (!$pending) {
+    ll_error('No valid performance dashboards to publish');
+  }
+
+  $cleared = 0;
+  $pdo->beginTransaction();
+  try {
+    $cleared = (int) $pdo->query('SELECT COUNT(*) FROM perf_published_dashboards')->fetchColumn();
+    $pdo->exec('DELETE FROM perf_published_dashboards');
+    foreach ($pending as $row) {
+      $ins->execute([$row['telecaller'], $row['title'], $row['payload'], $row['metaJson'], (int) $user['id']]);
+      $created[] = [
+        'id' => (int) $pdo->lastInsertId(),
+        'telecaller_name' => $row['telecaller'],
+        'title' => $row['title'],
+        'replaced' => $cleared > 0,
+        'prior_deleted' => $cleared,
+      ];
+    }
+    $pdo->commit();
+  } catch (Throwable $e) {
+    if ($pdo->inTransaction()) {
+      $pdo->rollBack();
+    }
+    error_log('LeadLens perf publish failed: ' . $e->getMessage());
+    ll_error('Publish failed', 500);
+  }
+
+  try {
+    ll_notify_perf_dashboard_publish($created, $user);
+  } catch (Throwable $e) {
+    // Boards saved; notification failure must not fail publish.
+  }
+  return ['published' => $created, 'cleared' => $cleared];
+}
+
 function ll_route_perf_dashboards(string $action, ?int $id): void
 {
   ll_perf_dashboards_ensure_table();
@@ -149,103 +257,12 @@ function ll_route_perf_dashboards(string $action, ?int $id): void
     if (!is_array($items) || !$items) {
       ll_error('dashboards array is required');
     }
-    $pdo = ll_pdo();
-    $ins = $pdo->prepare(
-      'INSERT INTO perf_published_dashboards (telecaller_name, title, payload, meta, uploaded_by)
-       VALUES (?, ?, ?, ?, ?)'
-    );
-    $created = [];
-    $pending = [];
-    foreach ($items as $item) {
-      if (!is_array($item)) {
-        continue;
-      }
-      $telecaller = trim((string) ($item['telecaller_name'] ?? ''));
-      if ($telecaller === '') {
-        continue;
-      }
-      $title = trim((string) ($item['title'] ?? ($telecaller . ' · Performance')));
-      $summary = is_array($item['summary'] ?? null) ? $item['summary'] : [];
-      $byTelecaller = is_array($item['byTelecaller'] ?? null) ? $item['byTelecaller'] : [];
-      $byProject = is_array($item['byProject'] ?? null) ? $item['byProject'] : [];
-      $bySource = is_array($item['bySource'] ?? null) ? $item['bySource'] : [];
-      $pie = is_array($item['pie'] ?? null) ? $item['pie'] : [];
-      $dateMin = $item['date_min'] ?? $item['dateMin'] ?? null;
-      $dateMax = $item['date_max'] ?? $item['dateMax'] ?? null;
-      $reportDays = (int) ($item['report_days'] ?? $item['reportDays'] ?? 0);
+    ll_ok(ll_perf_dashboards_replace_all($items, $user), 201);
+  }
 
-      $payload = json_encode([
-        'summary' => array_merge(ll_perf_empty_summary(), array_intersect_key($summary, ll_perf_empty_summary())),
-        'byTelecaller' => $byTelecaller,
-        'byProject' => $byProject,
-        'bySource' => $bySource,
-        'pie' => array_merge(ll_perf_empty_pie(), array_intersect_key($pie, ll_perf_empty_pie())),
-        'date_min' => $dateMin,
-        'date_max' => $dateMax,
-        'report_days' => $reportDays,
-        'telecaller_name' => $telecaller,
-      ], JSON_UNESCAPED_UNICODE);
-      if ($payload === false) {
-        ll_error('Failed to encode performance dashboard payload');
-      }
-
-      $meta = [
-        'uploaded_at' => gmdate('c'),
-        'uploaded_by_name' => $user['display_name'] ?: $user['username'],
-        'replaced' => true,
-        'date_min' => $dateMin,
-        'date_max' => $dateMax,
-      ];
-      if (isset($item['meta']) && is_array($item['meta'])) {
-        $meta = array_merge($meta, $item['meta']);
-        $meta['replaced'] = true;
-      }
-      $metaJson = json_encode($meta, JSON_UNESCAPED_UNICODE);
-      if ($metaJson === false) {
-        ll_error('Failed to encode performance dashboard meta');
-      }
-
-      $pending[] = [
-        'telecaller' => $telecaller,
-        'title' => $title,
-        'payload' => $payload,
-        'metaJson' => $metaJson,
-      ];
-    }
-    if (!$pending) {
-      ll_error('No valid performance dashboards to publish');
-    }
-
-    $cleared = 0;
-    $pdo->beginTransaction();
-    try {
-      $cleared = (int) $pdo->query('SELECT COUNT(*) FROM perf_published_dashboards')->fetchColumn();
-      $pdo->exec('DELETE FROM perf_published_dashboards');
-      foreach ($pending as $row) {
-        $ins->execute([$row['telecaller'], $row['title'], $row['payload'], $row['metaJson'], (int) $user['id']]);
-        $created[] = [
-          'id' => (int) $pdo->lastInsertId(),
-          'telecaller_name' => $row['telecaller'],
-          'title' => $row['title'],
-          'replaced' => $cleared > 0,
-          'prior_deleted' => $cleared,
-        ];
-      }
-      $pdo->commit();
-    } catch (Throwable $e) {
-      if ($pdo->inTransaction()) {
-        $pdo->rollBack();
-      }
-      error_log('LeadLens perf publish failed: ' . $e->getMessage());
-      ll_error('Publish failed', 500);
-    }
-
-    try {
-      ll_notify_perf_dashboard_publish($created, $user);
-    } catch (Throwable $e) {
-      // Boards saved; notification failure must not fail publish.
-    }
-    ll_ok(['published' => $created, 'cleared' => $cleared], 201);
+  if ($action === 'upload') {
+    require_once __DIR__ . '/perf-upload.php';
+    ll_perf_upload_route();
   }
 
   if ($method === 'GET' && ($action === 'list' || $action === '')) {
