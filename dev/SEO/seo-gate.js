@@ -9,17 +9,17 @@ import {
   getUser,
   changePassword,
   updateProfile,
-} from '../auth.js?v=8.0.1.kpi-fix';
-import {homePath} from '../app-base.js?v=8.0.1.kpi-fix';
+} from '../auth.js?v=9.0.0.stable';
+import {homePath} from '../app-base.js?v=9.0.0.stable';
 import {
   initTheme,
   getThemePreference,
   setThemePreference,
   resolveTheme,
-} from '../theme.js?v=8.0.1.kpi-fix';
-import {mountNotifications} from '../notifications-ui.js?v=8.0.1.kpi-fix';
+} from '../theme.js?v=9.0.0.stable';
+import {mountNotifications} from '../notifications-ui.js?v=9.0.0.stable';
 
-const APP_VERSION = '8.0.1.kpi-fix';
+const APP_VERSION = '9.0.0.stable';
 
 function $(id) {
   return document.getElementById(id);
