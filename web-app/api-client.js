@@ -1,7 +1,7 @@
 /**
  * Thin fetch wrapper for LeadLens PHP API (same-origin, session cookie).
  */
-import {apiBase} from './app-base.js?v=9.1.0.stable';
+import {apiBase} from './app-base.js?v=10.0.0.stable';
 
 function resolveApiBase(){
   return apiBase();
@@ -114,15 +114,9 @@ export const SettingsApi = {
 
 export const ErpSyncApi = {
   status: () => api('erp-sync/status'),
-  getConfig: () => api('erp-sync/config'),
-  saveConfig: (body) => api('erp-sync/config', {method: 'POST', body}),
-  testFetch: () => api('erp-sync/test-fetch', {method: 'POST', body: {}}),
-  fetchForAudit: () => api('erp-sync/fetch-for-audit', {method: 'POST', body: {}}),
-  latestLeads: (meta = false) => api(`erp-sync/latest-leads${meta ? '?meta=1' : ''}`),
-  run: (body = {}) => api('erp-sync/run', {method: 'POST', body}),
-  daily: (body = {}) => api('erp-sync/daily', {method: 'POST', body}),
+  trigger: (body = {}) => api('erp-sync/trigger', {method: 'POST', body}),
+  ghaStatus: () => api('erp-sync/gha-status'),
   continue: (body = {}) => api('erp-sync/continue', {method: 'POST', body}),
-  keepalive: () => api('erp-sync/keepalive', {method: 'POST', body: {}}),
   publish: () => api('erp-sync/publish', {method: 'POST', body: {}}),
   job: (full = false) => api(`erp-sync/job${full ? '?full=1' : ''}`),
 };

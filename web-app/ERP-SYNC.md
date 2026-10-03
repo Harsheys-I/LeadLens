@@ -1,96 +1,78 @@
-# ERP Sync (production + `/dev`)
+# ERP Sync (GitHub Actions only)
 
-**Two paths:**
+ERP data ingest is **GitHub Actions only**. The Super User home module **[ERP Sync](./ERPSync/)** dispatches `erp-daily-upload.yml`, shows live GHA + Lead Audit status (tokens, elapsed, estimated cost), and can stop an in-flight server audit.
 
-1. **Manual (primary for interactive work):** fetch ERP report → store raw payload → map leads → **hand off to Bucket 1 TeleCaller Audit** (browser Start Audit / progress / Stop / Publish).
-2. **Unattended daily (cron):** at **6:00 AM IST** the **keep-alive** ping (every minute) starts a fresh fetch, runs **server-side OpenAI audit** in chunks, and **auto-publishes TeleCaller dashboards**. Hostinger `/daily` cron is optional backup and is **ignored outside 05:55–06:45 IST** (a 4pm schedule will not run the pipeline). No browser tab required.
+There is **no** Cookie / Report URL / Hostinger keep-alive / daily fetch path in the UI. Those API actions return **410** with a clear “replaced by GitHub Actions” message.
 
-UI and API are available on **production `/`** and **`/dev`**, gated to **Super User** (plus cron bearer for keep-alive / daily / continue).
+## Schedules (IST)
 
-## Super User setup (once)
+| Pipeline | When | UTC cron (workflow) |
+|----------|------|---------------------|
+| Bucket 1 (Lead Audit) | Every day **00:00 IST** | `30 18 * * *` |
+| Sales Graph | Every day **00:00 IST** | same |
+| Performance | **1st of month 00:00 IST** | same schedule; workflow adds `perf` when IST day is `01` |
 
-1. Open **https://ai.gurupunvaanii.com/TeleCallerAudit/** (or `/dev/TeleCallerAudit/` for staging) and sign in as Super User.
-2. Open **ERP Sync** in the Bucket 1 nav (Super User only).
-3. Paste:
-   - **Report URL** — the `getFunction.do` (or JSON report) URL that works in cURL
-   - **Cookie header** — full `Cookie:` value from a working authenticated cURL
-   - Optional **Extra headers** as JSON (do not put Cookie here)
-4. Click **Save**, then **Test fetch**.
-5. Check preview: **keys**, **row count**, and **mapped columns**. Adjust the field map until Mobile + Project map correctly.
-6. For interactive audits: **Fetch & send to Audit** → Bucket 1 **Start Audit**.
-7. For unattended mornings: section **4 · Daily automation & cron** (below).
+Scheduled pick: `bucket1,sales` daily; on the 1st → `bucket1,sales,perf`.
 
-### Cookie refresh
+Manual **Run now** on the ERP Sync module (or Actions → workflow_dispatch) can select any of `bucket1`, `perf`, `sales`.
 
-When Test fetch / Fetch / keep-alive / daily run shows **session expired**:
+## Super User setup
 
-1. Log into ERP in a browser and copy a fresh Cookie from DevTools or a new cURL.
-2. Paste into **Cookie header** → **Save** → **Test fetch** (or **Ping keep-alive now**).
-3. No Playwright / OTP automation — refresh is always manual.
+1. Open **https://ai.gurupunvaanii.com/ERPSync/** (or `/dev/ERPSync/`) as Super User.
+2. On Hostinger, set in `api/config.local.php` (see [config.example.php](./api/config.example.php)):
 
-**Important for daily automation:** if the Cookie is dead at 6 AM, the daily job **fails clearly**, does **not** publish, and writes status for Super User. Keep-alive every 1 minute is strongly recommended so idle sessions last overnight.
+```php
+'github' => [
+  'token' => 'github_pat_…',  // fine-grained: Actions write + Contents read
+  'owner' => 'Harsheys-I',
+  'repo'  => 'LeadLens',
+  'workflow' => 'erp-daily-upload.yml',
+  'ref' => 'main',
+],
+```
 
-## Daily auto pipeline (recommended for production)
+3. Select pipelines → **Run now**. Status polls every ~4s while a GHA run or server audit is active, else ~15s.
+4. Lead Audit after GHA `audit/upload` continues via PHP **self-chain** (`erp-sync/continue`). Optional Hostinger continue cron remains a safety net.
 
-1. In ERP Sync → **4 · Daily automation & cron**:
-   - Check **Enable daily auto pipeline (6:00 AM IST)**
-   - Leave **Cron auto-publish dashboards when daily audit completes** **on** (default) so TeleCaller boards upload when audit finishes
-   - Check **Enable session keep-alive** and set a **Cron bearer secret**
-2. Save settings.
-3. Add Hostinger cron jobs (see below): **keep-alive every 1 minute is required** for 6:00 AM IST kickoff. Daily `/daily` cron is optional backup (must be `30 0 * * *` UTC). Continue-every-10m is optional backup (self-chain is primary).
-4. Watch **Last scheduled run** on the ERP Sync panel after 6 AM (or click **Run daily now**). Progress should climb without waiting for the continue cron.
+## What GHA uploads
 
-### Resume / self-chain (Hostinger time limits)
+| Job | LeadLens API | Notes |
+|-----|--------------|--------|
+| `bucket1` | `POST /api/audit/upload` | Starts server OpenAI audit + publish |
+| `perf` | `POST /api/perf-dashboards/upload` | Master + History → Perf boards |
+| `sales` | `POST /api/sales-graph/upload` | Needs shaped Sales Graph JSON (or full publish payload). **Report cURLs are placeholders** in `automation/erp_upload.py` until you paste real URLs / secrets |
 
-Each PHP request keeps up to `concurrency` OpenAI requests in flight (curl_multi rolling pool — a finished request's slot is refilled at once) for its whole time budget, saving progress every ~15s. `Max leads / manual run` (default 200) only caps the advanced **Run server audit** button; self-chained workers are limited by time only.
+Repo secrets (unchanged): `ERP_USER`, `ERP_PASS`, `GMAIL_*`, `LEADLENS_USER`, `LEADLENS_PASS`.
 
-1. **Time budget** — new requests stop being sent when the expected request time would cross `max_execution_time` minus ~18s; anything still unfinished at the deadline goes back on the job's retry queue (never dropped).
-2. **Fire-and-forget self-HTTP** — when the budget is used and the job is still incomplete, PHP POSTs `erp-sync/continue` on the same host with a one-time chain token (`X-ERP-Sync-Chain`). A running lock prevents stampede (cron + self-chain overlap → busy no-op).
-3. **Rate limits** — on 429 the worker honors `Retry-After` / `x-ratelimit-reset-*`, pauses, halves parallel requests (then batch size, min 5) and persists that level in the job; it steps back up after a run of successes. Waits longer than the remaining budget are saved and the next chained worker waits out the rest. 5xx / timeouts retry with exponential backoff + jitter.
-4. **Continue cron (optional backup)** — every 10 minutes still works if a self-chain handoff fails; idle no-ops are harmless.
+Optional sales URL overrides: `SALES_LEADS_URL`, `SALES_VISITS_URL`, `SALES_BOOKED_URL` (or fill `REPORTS` in `erp_upload.py`). If `sales` is selected and URLs are empty, the job **fails clearly** so `bucket1`/`perf` can still run alone.
 
-- **Keep-alive cron (every 1 minute)** → `POST /api/erp-sync/keepalive` — session ping, and at **6:00 AM IST** it fire-and-forgets `/daily`.
-- **Daily cron (optional backup, 6:00 AM IST)** → `POST /api/erp-sync/daily` — PHP only starts a **fresh fetch** inside **05:55–06:45 IST**. Hits at 4pm (or any other hour) are ignored.
-- **Continue cron (every 10 minutes)** → `POST /api/erp-sync/continue` — safety net only; resumes if a job is still `auditing`. You can keep or remove this cron once self-chain is confirmed working.
-
-## API (Super User session or cron bearer where noted)
+## API (kept)
 
 | Method | Path | Purpose |
 |--------|------|---------|
-| POST | `erp-sync/fetch-for-audit` | Fetch once, store raw + `latest-leads.json` (manual handoff) |
-| GET | `erp-sync/latest-leads` | Download mapped leads for Audit UI |
-| GET | `erp-sync/latest-leads?meta=1` | Counts only |
-| POST | `erp-sync/test-fetch` | Preview without Audit handoff |
-| POST | `erp-sync/keepalive` | Session keep-alive ping (also `erp-sync/ping`) |
-| POST | `erp-sync/daily` | **Cron daily:** fetch + server AI audit + self-chain + cron auto-publish |
-| POST | `erp-sync/continue` | **Resume / self-chain target:** continue audit if in progress; idle no-op |
-| POST | `erp-sync/run` | Advanced/manual server OpenAI loop (uses `auto_publish`, not cron flag) |
-| POST | `erp-sync/publish` | Publish last **server-audit** results |
-| GET | `erp-sync/status` | Config + last_status + last_daily_status + job progress |
+| POST | `erp-sync/trigger` | Super User → `workflow_dispatch` (`jobs`, optional `dry_run`) |
+| GET | `erp-sync/gha-status` | Latest runs, next schedules, last dispatch |
+| GET | `erp-sync/status` | Audit progress (tokens/cost/elapsed) + api_uploads + GHA summary |
+| POST | `erp-sync/continue` | Resume server audit (self-chain / optional cron) |
+| POST | `erp-sync/publish` | Publish last server-audit results |
+| POST | `audit/upload` | Terminal / GHA Bucket 1 |
+| GET | `audit/status` | Progress including usage |
+| POST | `audit/cancel` | Stop server audit |
+| POST | `perf-dashboards/upload` | Terminal / GHA Performance |
+| POST | `sales-graph/upload` | Terminal / GHA Sales Graph publish |
 
-## Timezone: 6:00 AM India Standard Time
+## Retired API (410)
 
-India is **UTC+5:30** (no DST).
+`erp-sync/config`, `test-fetch`, `fetch-for-audit`, `latest-leads`, `run`, `daily`, `keepalive`, `ping`.
 
-| Local (IST) | Cron expression if Hostinger uses **UTC** | Cron if Hostinger is set to **IST / Asia/Kolkata** |
-|-------------|-------------------------------------------|-----------------------------------------------------|
-| 6:00 AM IST | `30 0 * * *` (00:30 UTC) | `0 6 * * *` |
+## Hostinger cron — remove after deploy
 
-Confirm the timezone shown in **hPanel → Advanced · Cron Jobs**. Most Hostinger shared plans schedule in **UTC** — use **`30 0 * * *`** for 6:00 AM IST.
+Remove these if still configured (they no longer ingest ERP data; cookie endpoints return 410):
 
-A `/daily` cron at 4:00 PM IST almost always means the expression was `0 11 * * *` UTC (or `0 6 * * *` on a US-Central panel). PHP now ignores those hits. Keep-alive every minute is what actually starts the 6:00 AM IST run.
+- `*/1 * * * *` → `erp-sync/keepalive` (session keep-alive + 6 AM kickoff)
+- `30 0 * * *` → `erp-sync/daily` (optional daily backup)
 
-## Hostinger cron — daily kickoff (optional backup, 6:00 AM IST)
-
-```bash
-# 6:00 AM IST = 00:30 UTC  →  schedule: 30 0 * * *  (when cron is UTC)
-curl -sS -X POST -H "Authorization: Bearer YOUR_CRON_SECRET" -H "Content-Type: application/json" -d '{}' \
-  "https://ai.gurupunvaanii.com/api/erp-sync/daily"
-```
-
-## Hostinger cron — continue incomplete audits (optional backup, every 10 minutes)
-
-Self-chain is the primary resume path. Keep this cron only as a safety net (or remove it after verifying daily runs finish without it):
+**Optional keep:** continue safety net for long server audits:
 
 ```bash
 # every 10 minutes →  */10 * * * *
@@ -98,50 +80,15 @@ curl -sS -X POST -H "Authorization: Bearer YOUR_CRON_SECRET" -H "Content-Type: a
   "https://ai.gurupunvaanii.com/api/erp-sync/continue"
 ```
 
-Idle response is harmless (`idle: true`). Only runs audit work when a job needs continue. Concurrent self-chain + cron returns `busy` instead of double-auditing.
+Self-chain is primary; this cron only helps if a handoff fails. Idle responses are harmless.
 
-## Hostinger cron — session keep-alive (every 1 minute)
+> Note: `continue` still accepts the cron bearer secret. Cookie/config UI is gone — if you already stored a cron secret, it remains in the DB until rotated via settings APIs or a future ops tool.
 
-**Use the production API URL** (`/api/…`), not `/dev/api/…`. Staging and live share the same DB, but cron should target live so production PHP handles the ping. Enabling the checkbox + Save does **not** start a schedule — hPanel cron must call the endpoint every minute.
+## Manual Excel uploads
 
-```bash
-# every 1 minute →  */1 * * * *
-# Preferred: curl with Authorization (works for command-style cron)
-curl -sS -X POST -H "Authorization: Bearer YOUR_CRON_SECRET" \
-  "https://ai.gurupunvaanii.com/api/erp-sync/keepalive"
-```
-
-If hPanel only supports a **Fetch URL** job (no headers), GET is allowed:
-
-```text
-https://ai.gurupunvaanii.com/api/erp-sync/keepalive?cron_secret=YOUR_CRON_SECRET
-```
-
-Staging (preview only): replace `/api/` with `/dev/api/`.
-
-Notes:
-
-- Replace `YOUR_CRON_SECRET` with the secret saved in ERP Sync.
-- Daily / continue are ignored while **Enable daily auto pipeline** is off.
-- Self-chain uses a short-lived job token (not the cron secret hash) and never logs cookies/secrets.
-- Session expired at fetch → clear error, **no self-chain**, **no publish**.
-- Keep-alive is ignored while **Enable session keep-alive** is off (cron still records `result: disabled` so the UI shows the hit).
-- Status line shows **IST** times and whether the last ping was **manual** vs **cron**.
-- Alternative header if `Authorization` is stripped: `-H "X-ERP-Sync-Secret: YOUR_CRON_SECRET"`.
-- Cookies are never logged.
-- Keep-alive can slow absolute session TTL expiry but cannot defeat hard ERP logouts — refresh Cookie when status shows `session_expired`.
-
-## Risk controls
-
-- Cookies are encrypted at rest (`session.secret` / `app.secrets_key`); never logged.
-- Keep-alive samples a small response body only — it does not store payloads or run Audit.
-- **Cron auto-publish** defaults **on** for the daily/continue path; manual **Auto-publish after server audit** stays separate (defaults off).
-- Session expired at fetch → clear error status, **no publish**.
-- `erp-sync/*` requires Super User session or a valid cron bearer secret.
-- Raw payloads + `latest-leads.json` land under `api/storage/erp-sync/` (blocked by `.htaccess`, gitignored).
-- Manual **Fetch & send to Audit** is unchanged and still preferred for interactive review.
+Removed from the website (Bucket 1 Review, TeleCalling Performance, Sales Graph). Terminal multipart APIs above remain for GHA / automation.
 
 ## Related
 
-- Deploy / promote flow: [HOSTINGER.md](./HOSTINGER.md)
-- OpenAI key: TeleCallerAudit → Settings (client key for main Audit; server key for daily/server path)
+- Deploy / promote: [HOSTINGER.md](./HOSTINGER.md)
+- OpenAI key: TeleCallerAudit → Settings (server key for GHA/server audit)

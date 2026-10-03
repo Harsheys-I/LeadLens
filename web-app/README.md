@@ -2,7 +2,7 @@
 
 Login-gated multi-module app for Hostinger (PHP + MySQL) with browser-side AI audits.
 
-**Current version:** see `version.json` (9.1.0.stable).
+**Current version:** see `version.json` (10.0.0.stable).
 
 ## Routes
 
@@ -10,7 +10,8 @@ Login-gated multi-module app for Hostinger (PHP + MySQL) with browser-side AI au
 |------|---------|
 | `/` | Login, request access, home module tiles |
 | `/TeleCallerAudit/` | Bucket 1 audit, Run console (permission), published dashboards, History, Settings |
-| `/SalesGraph/` | Sales Graph — Leads/Visits upload, published multi-chart dashboard |
+| `/ERPSync/` | Super User — GitHub Actions ERP sync (Lead Audit / Perf / Sales Graph) |
+| `/SalesGraph/` | Sales Graph — published multi-chart dashboard (synced via ERP Sync) |
 | `/SEO/` | SEO — technical audit command center, live scanner, schema studio, 30-day action plan |
 | `/admin/` | Users, Roles, access-request queue, notifications |
 | `/api/` | PHP session auth, admin CRUD, published dashboards |
@@ -40,9 +41,9 @@ curl.exe -sS -X POST "https://ai.gurupunvaanii.com/api/audit/upload" -F "usernam
 
 `batch_size` and `concurrency` apply to that run only and are never saved to Settings; out-of-range values are clamped. Everything else (model, fields, rules, yes/no values) comes from the saved Settings.
 
-These are ceilings. On an OpenAI 429 the server honors `Retry-After` / `x-ratelimit-reset-*`, pauses, halves the parallel requests (then the batch size once at 1, never below 5), and steps back up after a run of successes; the reduced level is kept in the job so the next chained worker continues at it. 5xx, timeouts, and network errors retry with exponential backoff. A batch that keeps failing is split and retried, and only a single lead OpenAI keeps rejecting is marked errored (local checks only). The job only stops on account-level errors (invalid key, no quota, unknown model) or Stop. The ERP Sync panel and the Bucket 1 banner show the current parallel / batch level, rate-limit hits, and any pause.
+These are ceilings. On an OpenAI 429 the server honors `Retry-After` / `x-ratelimit-reset-*`, pauses, halves the parallel requests (then the batch size once at 1, never below 5), and steps back up after a run of successes; the reduced level is kept in the job so the next chained worker continues at it. 5xx, timeouts, and network errors retry with exponential backoff. A batch that keeps failing is split and retried, and only a single lead OpenAI keeps rejecting is marked errored (local checks only). The job only stops on account-level errors (invalid key, no quota, unknown model) or Stop. The **ERP Sync** module and the Bucket 1 banner show the current parallel / batch level, rate-limit hits, tokens/cost, and any pause.
 
-The command returns `202` as soon as the file is accepted and the audit has started, with `lead_count`, `batch_size`, `concurrency`, and `total_batches`. The server keeps auditing in the background (one-time internal continue step, no cron secret) and publishes the dashboards when it finishes. If another server Bucket 1 audit (including the 6:00 AM ERP job) is still running, the call returns `409` with its progress and nothing is replaced — try again later.
+The command returns `202` as soon as the file is accepted and the audit has started, with `lead_count`, `batch_size`, `concurrency`, and `total_batches`. The server keeps auditing in the background (self-chain continue) and publishes the dashboards when it finishes. If another server Bucket 1 audit is still running, the call returns `409` with its progress and nothing is replaced — try again later.
 
 ## Performance upload API
 

@@ -6,8 +6,8 @@ on:
   workflow_dispatch:
     inputs:
       jobs:
-        description: "Uploads to run: bucket1, perf, or bucket1,perf"
-        default: "bucket1,perf"
+        description: "Uploads to run: bucket1, perf, sales (comma list)"
+        default: "bucket1,sales"
       dry_run:
         description: "Download and check the reports without uploading"
         type: boolean
@@ -45,12 +45,12 @@ jobs:
           INPUT_JOBS: ${{ github.event.inputs.jobs }}
         run: |
           if [ "$EVENT" = "workflow_dispatch" ]; then
-            jobs="${INPUT_JOBS:-bucket1,perf}"
+            jobs="${INPUT_JOBS:-bucket1,sales}"
           else
             # Scheduled runs can start late, so decide by the IST date at run time.
-            jobs="bucket1"
+            jobs="bucket1,sales"
             if [ "$(TZ=Asia/Kolkata date +%d)" = "01" ]; then
-              jobs="bucket1,perf"
+              jobs="bucket1,sales,perf"
             fi
           fi
           echo "Running jobs: $jobs (IST date $(TZ=Asia/Kolkata date +%F))"

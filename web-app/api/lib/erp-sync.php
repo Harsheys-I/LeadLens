@@ -10,6 +10,7 @@ const LL_ERP_SYNC_CONFIG_KEY = 'erp_sync_config';
 const LL_ERP_SYNC_COOKIE_KEY = 'erp_sync_cookie_encrypted';
 const LL_ERP_SYNC_CRON_KEY = 'erp_sync_cron_secret_hash';
 const LL_ERP_SYNC_JOB_KEY = 'erp_sync_job';
+const LL_ERP_SYNC_GHA_KEY = 'erp_sync_gha_dispatch';
 const LL_ERP_SYNC_MAX_BYTES = 25_000_000;
 const LL_ERP_SYNC_TIMEOUT = 90;
 const LL_ERP_SYNC_KEEPALIVE_TIMEOUT = 20;
@@ -408,7 +409,8 @@ const LL_AUDIT_UPLOAD_LOG_LIMIT = 40;
 
 /**
  * Recent terminal uploads (metadata only — no lead rows). Newest first.
- * kind is "bucket1" (audit/upload; older rows have no kind) or "performance" (perf-dashboards/upload).
+ * kind is "bucket1" (audit/upload; older rows have no kind), "performance" (perf-dashboards/upload),
+ * or "sales_graph" (sales-graph/upload).
  * @return list<array<string, mixed>>
  */
 function ll_audit_upload_log_read(): array
@@ -1914,7 +1916,13 @@ function ll_erp_sync_openai_outcome(int $status, int $curlErrno, string $curlErr
       return ['kind' => 'bad', 'message' => 'OpenAI returned invalid JSON', 'wait' => 0.0];
     }
     try {
-      return ['kind' => 'ok', 'message' => '', 'wait' => 0.0, 'list' => ll_erp_sync_audit_ai_list_from_chat($decoded)];
+      return [
+        'kind' => 'ok',
+        'message' => '',
+        'wait' => 0.0,
+        'list' => ll_erp_sync_audit_ai_list_from_chat($decoded),
+        'usage' => ll_erp_sync_extract_openai_usage($decoded),
+      ];
     } catch (Throwable $e) {
       return ['kind' => 'bad', 'message' => $e->getMessage(), 'wait' => 0.0];
     }
@@ -2512,6 +2520,9 @@ function ll_erp_sync_audit_pool(array &$job, array $settings, int $deadline, ?in
           $rate['limit_streak'] = 0;
           $rate['fail_streak'] = 0;
           ll_erp_sync_rate_step_up($rate, $done);
+          if (!empty($outcome['usage']) && is_array($outcome['usage'])) {
+            ll_erp_sync_accumulate_usage($job, $outcome['usage']);
+          }
           $byReal = ll_erp_sync_audit_match_ai_list($outcome['list'] ?? [], $slot['map']);
           $missing = [];
           foreach ($item['idx'] as $i) {
@@ -2667,11 +2678,17 @@ function ll_erp_sync_public_progress(?array $job): array
       'started_at' => null,
       'error' => null,
       'cancel_requested' => false,
+      'elapsed_seconds' => 0,
+      'usage' => ['input' => 0, 'cached' => 0, 'output' => 0],
+      'estimated_cost' => 0.0,
+      'pricing' => ll_erp_sync_audit_pricing(),
     ];
   }
   $total = (int) ($job['lead_count'] ?? (isset($job['leads']) && is_array($job['leads']) ? count($job['leads']) : 0));
   $audited = isset($job['results']) && is_array($job['results']) ? count($job['results']) : (int) ($job['cursor'] ?? 0);
   $status = (string) ($job['status'] ?? 'idle');
+  $usage = ll_erp_sync_job_usage($job);
+  $pricing = ll_erp_sync_audit_pricing();
   return [
     'running' => $status === 'auditing',
     'status' => $status !== '' ? $status : 'idle',
@@ -2684,6 +2701,10 @@ function ll_erp_sync_public_progress(?array $job): array
     'error' => isset($job['error']) ? (string) $job['error'] : null,
     'cancel_requested' => !empty($job['cancel_requested']),
     'throttle' => $status === 'auditing' ? ll_erp_sync_throttle_public($job) : null,
+    'elapsed_seconds' => ll_erp_sync_job_elapsed_seconds($job),
+    'usage' => $usage,
+    'estimated_cost' => ll_erp_sync_estimate_cost($usage, $pricing),
+    'pricing' => $pricing,
   ];
 }
 
@@ -3198,6 +3219,7 @@ function ll_erp_sync_run(array $actor, bool $forceFetch = false, bool $dryRun = 
       'started_at' => gmdate('c'),
       'actor_name' => $actor['display_name'] ?? $actor['username'] ?? 'system',
       'pipeline' => $recordDaily ? 'daily' : 'manual',
+      'tokenUsage' => ['input' => 0, 'cached' => 0, 'output' => 0],
     ];
     ll_erp_sync_save_job($job);
     if ($recordDaily) {
@@ -3598,6 +3620,7 @@ function ll_erp_sync_start_upload_job(array $user, array $mapped, string $source
       'uploaded_by_id' => (int) ($user['id'] ?? 0),
       'uploaded_by_name' => $name,
       'uploaded_by_username' => (string) ($user['username'] ?? ''),
+      'tokenUsage' => ['input' => 0, 'cached' => 0, 'output' => 0],
     ];
     ll_erp_sync_save_job($job);
     ll_audit_upload_log_touch_job($job);
@@ -3628,4 +3651,346 @@ function ll_erp_sync_start_upload_job(array $user, array $mapped, string $source
     return ['ok' => false, 'error' => 'Could not start the background audit — try again', 'job' => $job];
   }
   return ['ok' => true, 'job' => $job];
+}
+
+/** @return array{input: float, cached: float, output: float} USD per 1M tokens from Settings. */
+function ll_erp_sync_audit_pricing(): array
+{
+  $settings = ll_erp_sync_audit_settings();
+  $pricing = is_array($settings['pricing'] ?? null) ? $settings['pricing'] : [];
+  return [
+    'input' => (float) ($pricing['input'] ?? 0),
+    'cached' => (float) ($pricing['cached'] ?? 0),
+    'output' => (float) ($pricing['output'] ?? 0),
+  ];
+}
+
+/**
+ * @param array<string, mixed> $decoded OpenAI chat completion JSON
+ * @return array{input: int, cached: int, output: int}
+ */
+function ll_erp_sync_extract_openai_usage(array $decoded): array
+{
+  $usage = is_array($decoded['usage'] ?? null) ? $decoded['usage'] : [];
+  $input = (int) ($usage['prompt_tokens'] ?? $usage['input_tokens'] ?? 0);
+  $details = is_array($usage['prompt_tokens_details'] ?? null)
+    ? $usage['prompt_tokens_details']
+    : (is_array($usage['input_tokens_details'] ?? null) ? $usage['input_tokens_details'] : []);
+  $cached = (int) ($details['cached_tokens'] ?? 0);
+  $output = (int) ($usage['completion_tokens'] ?? $usage['output_tokens'] ?? 0);
+  return ['input' => $input, 'cached' => $cached, 'output' => $output];
+}
+
+/**
+ * @param array<string, mixed> $job
+ * @param array{input?: int, cached?: int, output?: int} $delta
+ */
+function ll_erp_sync_accumulate_usage(array &$job, array $delta): void
+{
+  $cur = is_array($job['tokenUsage'] ?? null) ? $job['tokenUsage'] : [];
+  $job['tokenUsage'] = [
+    'input' => (int) ($cur['input'] ?? 0) + (int) ($delta['input'] ?? 0),
+    'cached' => (int) ($cur['cached'] ?? 0) + (int) ($delta['cached'] ?? 0),
+    'output' => (int) ($cur['output'] ?? 0) + (int) ($delta['output'] ?? 0),
+  ];
+}
+
+/**
+ * @param array<string, mixed> $job
+ * @return array{input: int, cached: int, output: int}
+ */
+function ll_erp_sync_job_usage(array $job): array
+{
+  $u = is_array($job['tokenUsage'] ?? null) ? $job['tokenUsage'] : [];
+  return [
+    'input' => (int) ($u['input'] ?? 0),
+    'cached' => (int) ($u['cached'] ?? 0),
+    'output' => (int) ($u['output'] ?? 0),
+  ];
+}
+
+/** Same USD formula as the client Run console. */
+function ll_erp_sync_estimate_cost(array $usage, ?array $pricing = null): float
+{
+  $rates = $pricing ?? ll_erp_sync_audit_pricing();
+  $input = (float) ($usage['input'] ?? 0);
+  $cached = (float) ($usage['cached'] ?? 0);
+  $output = (float) ($usage['output'] ?? 0);
+  $billable = max(0.0, $input - $cached);
+  return max(
+    0.0,
+    $billable * ((float) ($rates['input'] ?? 0)) / 1e6
+    + $cached * ((float) ($rates['cached'] ?? 0)) / 1e6
+    + $output * ((float) ($rates['output'] ?? 0)) / 1e6
+  );
+}
+
+/** @param array<string, mixed> $job */
+function ll_erp_sync_job_elapsed_seconds(array $job): int
+{
+  $started = trim((string) ($job['started_at'] ?? ''));
+  if ($started === '') {
+    return 0;
+  }
+  $ts = strtotime($started);
+  if ($ts === false) {
+    return 0;
+  }
+  $end = time();
+  $status = (string) ($job['status'] ?? '');
+  if ($status !== 'auditing') {
+    foreach (['published_at', 'cancelled_at', 'finished_at'] as $k) {
+      $raw = trim((string) ($job[$k] ?? ''));
+      if ($raw !== '') {
+        $endTs = strtotime($raw);
+        if ($endTs !== false) {
+          $end = $endTs;
+          break;
+        }
+      }
+    }
+  }
+  return max(0, $end - $ts);
+}
+
+/** @return array<string, mixed> */
+function ll_erp_sync_github_config(): array
+{
+  $cfg = $GLOBALS['LL_CONFIG']['github'] ?? [];
+  if (!is_array($cfg)) {
+    $cfg = [];
+  }
+  return [
+    'token' => trim((string) ($cfg['token'] ?? '')),
+    'owner' => trim((string) ($cfg['owner'] ?? 'Harsheys-I')),
+    'repo' => trim((string) ($cfg['repo'] ?? 'LeadLens')),
+    'workflow' => trim((string) ($cfg['workflow'] ?? 'erp-daily-upload.yml')),
+    'ref' => trim((string) ($cfg['ref'] ?? 'main')) ?: 'main',
+  ];
+}
+
+/**
+ * @param array<string, mixed> $query
+ * @return array{ok: bool, status: int, body: string, json: ?array, error?: string}
+ */
+function ll_erp_sync_github_request(string $method, string $path, ?array $jsonBody = null): array
+{
+  $gh = ll_erp_sync_github_config();
+  if ($gh['token'] === '') {
+    return ['ok' => false, 'status' => 0, 'body' => '', 'json' => null, 'error' => 'github.token is not configured in api/config.local.php'];
+  }
+  if ($gh['owner'] === '' || $gh['repo'] === '') {
+    return ['ok' => false, 'status' => 0, 'body' => '', 'json' => null, 'error' => 'github.owner / github.repo are not configured'];
+  }
+  $url = 'https://api.github.com/repos/' . rawurlencode($gh['owner']) . '/' . rawurlencode($gh['repo']) . $path;
+  $headers = [
+    'Authorization: Bearer ' . $gh['token'],
+    'Accept: application/vnd.github+json',
+    'X-GitHub-Api-Version: 2022-11-28',
+    'User-Agent: LeadLens-ERP-Sync',
+  ];
+  $ch = curl_init($url);
+  $opts = [
+    CURLOPT_RETURNTRANSFER => true,
+    CURLOPT_CUSTOMREQUEST => strtoupper($method),
+    CURLOPT_HTTPHEADER => $headers,
+    CURLOPT_TIMEOUT => 30,
+    CURLOPT_CONNECTTIMEOUT => 10,
+  ];
+  if ($jsonBody !== null) {
+    $payload = json_encode($jsonBody, JSON_UNESCAPED_UNICODE);
+    if ($payload === false) {
+      return ['ok' => false, 'status' => 0, 'body' => '', 'json' => null, 'error' => 'Could not encode GitHub request'];
+    }
+    $headers[] = 'Content-Type: application/json';
+    $opts[CURLOPT_HTTPHEADER] = $headers;
+    $opts[CURLOPT_POSTFIELDS] = $payload;
+  }
+  curl_setopt_array($ch, $opts);
+  $body = curl_exec($ch);
+  $status = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
+  $errno = curl_errno($ch);
+  $err = curl_error($ch);
+  curl_close($ch);
+  if ($errno !== 0 || $body === false) {
+    return ['ok' => false, 'status' => $status, 'body' => '', 'json' => null, 'error' => 'GitHub API request failed: ' . ($err !== '' ? $err : 'network error')];
+  }
+  $decoded = json_decode((string) $body, true);
+  $ok = $status >= 200 && $status < 300;
+  return [
+    'ok' => $ok,
+    'status' => $status,
+    'body' => (string) $body,
+    'json' => is_array($decoded) ? $decoded : null,
+    'error' => $ok ? null : ('GitHub API HTTP ' . $status . ': ' . substr((string) $body, 0, 400)),
+  ];
+}
+
+/**
+ * @param list<string> $jobs
+ * @return array<string, mixed>
+ */
+function ll_erp_sync_gha_dispatch(array $jobs, bool $dryRun = false): array
+{
+  $allowed = ['bucket1', 'perf', 'sales'];
+  $clean = [];
+  foreach ($jobs as $j) {
+    $j = strtolower(trim((string) $j));
+    if (in_array($j, $allowed, true) && !in_array($j, $clean, true)) {
+      $clean[] = $j;
+    }
+  }
+  if (!$clean) {
+    return ['ok' => false, 'error' => 'Select at least one job: bucket1, perf, sales'];
+  }
+  $gh = ll_erp_sync_github_config();
+  $workflow = $gh['workflow'] !== '' ? $gh['workflow'] : 'erp-daily-upload.yml';
+  $path = '/actions/workflows/' . rawurlencode($workflow) . '/dispatches';
+  $res = ll_erp_sync_github_request('POST', $path, [
+    'ref' => $gh['ref'],
+    'inputs' => [
+      'jobs' => implode(',', $clean),
+      'dry_run' => $dryRun ? 'true' : 'false',
+    ],
+  ]);
+  if (!$res['ok']) {
+    return ['ok' => false, 'error' => $res['error'] ?? 'GitHub workflow_dispatch failed', 'http_status' => $res['status']];
+  }
+  $hint = [
+    'jobs' => $clean,
+    'dry_run' => $dryRun,
+    'dispatched_at' => gmdate('c'),
+    'workflow' => $workflow,
+    'ref' => $gh['ref'],
+    'owner' => $gh['owner'],
+    'repo' => $gh['repo'],
+  ];
+  ll_erp_sync_gha_save_dispatch($hint);
+  return ['ok' => true, 'dispatch' => $hint, 'message' => 'GitHub Actions workflow dispatched'];
+}
+
+/** @param array<string, mixed> $hint */
+function ll_erp_sync_gha_save_dispatch(array $hint): void
+{
+  $json = json_encode($hint, JSON_UNESCAPED_UNICODE);
+  if ($json === false) {
+    return;
+  }
+  ll_setting_set(LL_ERP_SYNC_GHA_KEY, $json, null);
+}
+
+/** @return ?array<string, mixed> */
+function ll_erp_sync_gha_load_dispatch(): ?array
+{
+  $row = ll_setting_get(LL_ERP_SYNC_GHA_KEY);
+  if (!$row || !$row['setting_value']) {
+    return null;
+  }
+  $decoded = json_decode((string) $row['setting_value'], true);
+  return is_array($decoded) ? $decoded : null;
+}
+
+/**
+ * Next scheduled run times in IST (ISO UTC + human label).
+ * Bucket 1 + Sales: daily 00:00 IST. Perf: 1st of month 00:00 IST.
+ * @return array{bucket1: array, sales: array, perf: array}
+ */
+function ll_erp_sync_gha_next_runs(): array
+{
+  $tz = new DateTimeZone('Asia/Kolkata');
+  $now = new DateTimeImmutable('now', $tz);
+
+  // Next 00:00 IST (tomorrow if we are already past today's midnight).
+  $nextMidnight = $now->setTime(0, 0, 0)->modify('+1 day');
+
+  // Perf: 1st of month 00:00 IST — if today is the 1st before any later schedule window,
+  // the scheduled GHA already fired at midnight, so next is next month's 1st.
+  $nextPerf = $now->modify('first day of next month')->setTime(0, 0, 0);
+
+  $fmt = static function (DateTimeImmutable $dt): array {
+    $utc = $dt->setTimezone(new DateTimeZone('UTC'));
+    return [
+      'at' => $utc->format('c'),
+      'at_ist' => $dt->format('j M Y, H:i:s') . ' IST',
+      'label' => $dt->format('D j M Y') . ' 00:00 IST',
+    ];
+  };
+
+  $daily = $fmt($nextMidnight);
+  return [
+    'bucket1' => $daily,
+    'sales' => $daily,
+    'perf' => $fmt($nextPerf),
+  ];
+}
+
+/**
+ * Latest workflow runs + next schedule + last dispatch hint.
+ * @return array<string, mixed>
+ */
+function ll_erp_sync_gha_status(): array
+{
+  $gh = ll_erp_sync_github_config();
+  $workflow = $gh['workflow'] !== '' ? $gh['workflow'] : 'erp-daily-upload.yml';
+  $configured = $gh['token'] !== '';
+  $next = ll_erp_sync_gha_next_runs();
+  $dispatch = ll_erp_sync_gha_load_dispatch();
+  $runs = [];
+  $error = null;
+  if ($configured) {
+    $path = '/actions/workflows/' . rawurlencode($workflow) . '/runs?per_page=8';
+    $res = ll_erp_sync_github_request('GET', $path);
+    if (!$res['ok']) {
+      $error = $res['error'] ?? 'Could not list workflow runs';
+    } else {
+      $list = is_array($res['json']['workflow_runs'] ?? null) ? $res['json']['workflow_runs'] : [];
+      foreach ($list as $run) {
+        if (!is_array($run)) {
+          continue;
+        }
+        $runs[] = [
+          'id' => (int) ($run['id'] ?? 0),
+          'status' => (string) ($run['status'] ?? ''),
+          'conclusion' => $run['conclusion'] ?? null,
+          'url' => (string) ($run['html_url'] ?? ''),
+          'created_at' => (string) ($run['created_at'] ?? ''),
+          'updated_at' => (string) ($run['updated_at'] ?? ''),
+          'display_title' => (string) ($run['display_title'] ?? $run['name'] ?? ''),
+          'event' => (string) ($run['event'] ?? ''),
+          'run_number' => (int) ($run['run_number'] ?? 0),
+        ];
+      }
+    }
+  }
+  $latest = $runs[0] ?? null;
+  $active = false;
+  foreach ($runs as $r) {
+    if (in_array((string) ($r['status'] ?? ''), ['queued', 'in_progress', 'waiting', 'requested', 'pending'], true)) {
+      $active = true;
+      break;
+    }
+  }
+  return [
+    'configured' => $configured,
+    'owner' => $gh['owner'],
+    'repo' => $gh['repo'],
+    'workflow' => $workflow,
+    'ref' => $gh['ref'],
+    'latest' => $latest,
+    'runs' => $runs,
+    'active' => $active,
+    'next_runs' => $next,
+    'last_dispatch' => $dispatch,
+    'error' => $error,
+  ];
+}
+
+/** Cookie / Hostinger ERP fetch path retired — GHA only. */
+function ll_erp_sync_reject_cookie_path(string $action): void
+{
+  ll_error(
+    'ERP cookie / Hostinger fetch path was replaced by GitHub Actions. Use the ERP Sync module (Run now) or the erp-daily-upload workflow. Remove leftover Hostinger crons for erp-sync/keepalive and erp-sync/daily.',
+    410,
+    ['replaced_by' => 'github_actions', 'action' => $action]
+  );
 }

@@ -62,5 +62,6 @@ The API fell back to `config.example.php` because live `config.local.php` is mis
 
 ## ERP Sync (live + `/dev`)
 
-- **Manual:** Fetch ERP → store raw JSON → hand off to Bucket 1 Audit.
-- **Unattended daily:** keep-alive every 1 min (`*/1 * * * *` → **production** `erp-sync/keepalive`) starts the pipeline at **6:00 AM IST**. Optional Hostinger `POST /api/erp-sync/daily` at `30 0 * * *` UTC is a backup; PHP ignores `/daily` outside 05:55–06:45 IST. Optional continue every 10 min (`*/10 * * * *` → `erp-sync/continue`) is a safety net only. Super User only. See **[ERP-SYNC.md](./ERP-SYNC.md)**.
+- **Ingest:** GitHub Actions only (`erp-daily-upload.yml` at 00:00 IST). Super User module: `/ERPSync/`. Set `github.token` in `api/config.local.php` (Actions write + Contents read).
+- **Remove** leftover Hostinger crons for `erp-sync/keepalive` and `erp-sync/daily` (those APIs return 410).
+- **Optional:** continue every 10 min (`*/10 * * * *` → `erp-sync/continue`) as a safety net for long server audits. See **[ERP-SYNC.md](./ERP-SYNC.md)**.

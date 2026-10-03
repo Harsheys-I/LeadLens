@@ -1,8 +1,8 @@
 /**
  * Session helpers + permission checks for LeadLens shells.
  */
-import {AuthApi} from './api-client.js?v=9.1.0.stable';
-import {appUrl, homePath, isHomePath, isDevHost} from './app-base.js?v=9.1.0.stable';
+import {AuthApi} from './api-client.js?v=10.0.0.stable';
+import {appUrl, homePath, isHomePath, isDevHost} from './app-base.js?v=10.0.0.stable';
 
 let currentUser = null;
 
@@ -126,8 +126,17 @@ export function moduleTilesForUser(user = currentUser){
       href: appUrl('/SalesGraph/'),
       perm: 'module.sales_graph',
       soon: false,
-      desc: 'Leads & Visits Excel upload, published charts and tables',
+      desc: 'Published Leads, Visits & Booked charts from ERP Sync',
       icon: '📈'
+    },
+    {
+      id: 'erp-sync',
+      title: 'ERP Sync',
+      href: appUrl('/ERPSync/'),
+      superOnly: true,
+      soon: false,
+      desc: 'GitHub Actions sync for Lead Audit, Performance, and Sales Graph',
+      icon: '🔄'
     },
     {
       id: 'seo',

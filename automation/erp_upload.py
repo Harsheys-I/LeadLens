@@ -1,10 +1,13 @@
-"""Log into Strategic ERP, download the Bucket 1 and Performance reports, upload them to LeadLens.
+"""Log into Strategic ERP, download reports, and upload them to LeadLens.
 
 Environment:
   ERP_USER, ERP_PASS                 Strategic ERP login (company is ERP_COMPANY, default gurupunvaanii)
   GMAIL_USER, GMAIL_APP_PASSWORD     Inbox that receives the ERP OTP mail (read over IMAP)
-  LEADLENS_USER, LEADLENS_PASS       LeadLens account with Bucket 1 + Upload Dashboard + Upload Performance access
-  JOBS                               Comma list of bucket1, perf (default both)
+  LEADLENS_USER, LEADLENS_PASS       LeadLens account with Bucket 1, Performance, and Sales Graph upload access
+  JOBS                               Comma list of bucket1, perf, sales (default bucket1,sales)
+  SALES_LEADS_URL                    Optional override for Sales Graph Leads getreportjsondata URL
+  SALES_VISITS_URL                   Optional override for Sales Graph Visits getreportjsondata URL
+  SALES_BOOKED_URL                   Optional override for Sales Graph Booked getreportjsondata URL
   DRY_RUN=1                          Download and check the reports but do not upload
   HEADLESS=0                         Show the browser window
   OTP_FILE                           Optional path; a code written there is used if Gmail has none (local runs)
@@ -39,6 +42,17 @@ REPORTS = {
     "&loadnewdata=false&customfilters=",
     "history": ERP_BASE + "getFunction.do?actn=getreportjsondata&reportid=10000026"
     "&nameofcompany=%25&projectname=%25&startdate=01/04/2026&enddate=31/03/2027",
+    # Paste real Strategic ERP getreportjsondata cURLs here (or set SALES_*_URL env vars).
+    "sales_leads": "",
+    "sales_visits": "",
+    "sales_booked": "",
+}
+
+SALES_REPORT_KEYS = ("sales_leads", "sales_visits", "sales_booked")
+SALES_URL_ENV = {
+    "sales_leads": "SALES_LEADS_URL",
+    "sales_visits": "SALES_VISITS_URL",
+    "sales_booked": "SALES_BOOKED_URL",
 }
 
 
@@ -233,8 +247,30 @@ def login(page) -> None:
     raise Fail("OTP rejected twice")
 
 
-def fetch_report(page, name: str) -> Path:
-    resp = page.context.request.get(REPORTS[name], timeout=300_000)
+def sales_report_url(name: str) -> str:
+    if name not in SALES_URL_ENV:
+        return (REPORTS.get(name) or "").strip()
+    env_val = (os.environ.get(SALES_URL_ENV[name]) or "").strip()
+    if env_val:
+        return env_val
+    return (REPORTS.get(name) or "").strip()
+
+
+def require_sales_report_urls() -> None:
+    missing = [name for name in SALES_REPORT_KEYS if not sales_report_url(name)]
+    if missing:
+        raise Fail(
+            "sales job selected but Sales Graph ERP report URLs are not configured — "
+            "paste real getreportjsondata cURLs into REPORTS "
+            f"({', '.join(missing)}) or set SALES_LEADS_URL / SALES_VISITS_URL / SALES_BOOKED_URL"
+        )
+
+
+def fetch_report(page, name: str, url: str | None = None) -> Path:
+    report_url = (url or REPORTS.get(name) or "").strip()
+    if not report_url:
+        raise Fail(f"{name}: report URL is not configured")
+    resp = page.context.request.get(report_url, timeout=300_000)
     body = resp.text()
     if "Session expired" in body:
         raise Fail(f"{name}: ERP says Session expired")
@@ -279,11 +315,22 @@ def upload(endpoint: str, files: dict[str, Path], extra: dict[str, str], ok: int
 
 
 def main() -> int:
-    jobs = {j.strip() for j in os.environ.get("JOBS", "bucket1,perf").split(",") if j.strip()}
-    unknown = jobs - {"bucket1", "perf"}
+    jobs = {j.strip() for j in os.environ.get("JOBS", "bucket1,sales").split(",") if j.strip()}
+    unknown = jobs - {"bucket1", "perf", "sales"}
     if unknown or not jobs:
-        raise Fail(f"JOBS must be bucket1 and/or perf, got {sorted(jobs)}")
+        raise Fail(f"JOBS must be bucket1, perf, and/or sales, got {sorted(jobs)}")
     dry_run = os.environ.get("DRY_RUN") == "1"
+    sales_error: str | None = None
+    if "sales" in jobs:
+        try:
+            require_sales_report_urls()
+        except Fail as exc:
+            # Do not block bucket1/perf when Sales Graph cURLs are still placeholders.
+            sales_error = str(exc)
+            jobs = jobs - {"sales"}
+            log(f"SKIP sales: {sales_error}")
+            if not jobs:
+                raise
 
     files: dict[str, Path] = {}
     with sync_playwright() as p:
@@ -296,6 +343,10 @@ def main() -> int:
             if "perf" in jobs:
                 files["master"] = fetch_report(page, "master")
                 files["history"] = fetch_report(page, "history")
+            if "sales" in jobs:
+                files["leads"] = fetch_report(page, "sales_leads", sales_report_url("sales_leads"))
+                files["visits"] = fetch_report(page, "sales_visits", sales_report_url("sales_visits"))
+                files["booked"] = fetch_report(page, "sales_booked", sales_report_url("sales_booked"))
         except (Fail, PlaywrightError):
             shot(page, "failure")
             raise
@@ -304,6 +355,8 @@ def main() -> int:
 
     if dry_run:
         log("DRY_RUN=1: reports downloaded, skipping uploads")
+        if sales_error:
+            log(f"WARNING (sales skipped): {sales_error}")
         return 0
 
     if "bucket1" in jobs:
@@ -316,6 +369,23 @@ def main() -> int:
                    {}, ok=201, busy_wait=60)
         log(f"Performance published: telecallers={r.get('telecaller_count')} "
             f"{r.get('date_min')}..{r.get('date_max')} ({r.get('report_days')} days)")
+    if "sales" in jobs:
+        # Upload accepts shaped Sales Graph sheet JSON (or a full publish payload), not raw ERP rows.
+        # Once real cURLs are known, build that payload here before posting.
+        r = upload(
+            "sales-graph/upload",
+            {"leads": files["leads"], "visits": files["visits"], "booked": files["booked"]},
+            {},
+            ok=201,
+            busy_wait=60,
+        )
+        pub = r.get("published") or {}
+        log(f"Sales Graph published: id={pub.get('id')} title={pub.get('title')!r} "
+            f"prior_deleted={pub.get('prior_deleted')}")
+    if sales_error:
+        # Fail hard only when sales was the sole requested job; otherwise bucket1/perf already ran.
+        log(f"WARNING (sales skipped): {sales_error}")
+        return 1 if not jobs else 0
     return 0
 
 
