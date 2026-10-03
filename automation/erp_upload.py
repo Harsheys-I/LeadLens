@@ -166,14 +166,28 @@ def wait_after_password(page, timeout_s: int = 60) -> str:
 
 
 def enter_otp(page, code: str) -> bool:
+    """Fill the four OTP boxes and click Verify; True once ERP has left the OTP and login screens."""
     for i, digit in enumerate(code[:4], start=1):
         page.fill(f"#otp{i}", digit)
-    page.get_by_text("VERIFY", exact=True).first.click()
-    deadline = time.time() + 45
+    # ERP's form swallows Enter; verifyOTP() on the #verifyotp link reads the boxes and submits.
+    page.click("#verifyotp")
+    deadline = time.time() + 60
+    clear_since = None
     while time.time() < deadline:
-        if not page.locator("#otp1").is_visible():
-            return True
         time.sleep(1)
+        if "home.do" in page.url:
+            return True
+        if page.locator("#companyName").is_visible() or page.locator("#passwd").is_visible():
+            raise Fail("ERP went back to the login page after the OTP")
+        if page.locator("#otp1").is_visible():
+            if "otplogin.do" in page.url:
+                return False
+            clear_since = None
+            continue
+        clear_since = clear_since or time.time()
+        if time.time() - clear_since >= 5:
+            return True
+    shot(page, "otp-after-verify")
     return False
 
 
@@ -305,4 +319,7 @@ if __name__ == "__main__":
         sys.exit(main())
     except Fail as exc:
         log(f"FAILED: {exc}")
+        sys.exit(1)
+    except PlaywrightError as exc:
+        log(f"FAILED: browser error: {exc}")
         sys.exit(1)
