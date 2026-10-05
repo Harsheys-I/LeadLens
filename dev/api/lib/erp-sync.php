@@ -20,6 +20,8 @@ const LL_ERP_SYNC_CHAIN_SAFETY_BUFFER = 45;
 /** Stale running lock age (seconds) — allow takeover if a worker died. */
 // Must exceed the longest single PHP worker budget so keepalive cannot steal a live lock.
 const LL_ERP_SYNC_RUNNING_STALE_SEC = 300;
+/** No new audited leads for this long ⇒ treat worker as hung and auto-heal. */
+const LL_ERP_SYNC_PROGRESS_STALL_SEC = 90;
 /** Chain token TTL for fire-and-forget self-continue. */
 const LL_ERP_SYNC_CHAIN_TOKEN_TTL = 600;
 /** Inclusive IST minutes for cron daily kickoff (05:55–06:45). */
@@ -2328,21 +2330,53 @@ function ll_erp_sync_with_job_lock(callable $fn): mixed
 
 /**
  * Save progress; in-flight batches are stored as queued so a dead worker's batches re-run.
- * Returns false (and marks $job cancelled) when the user stopped the audit.
+ * Returns false (and marks $job cancelled) when the user stopped the audit, or when another
+ * worker superseded this one (running_token mismatch).
  *
  * @param array<string, mixed> $job
  * @param list<array<string, mixed>> $inFlight Queue items currently sent to OpenAI
  */
-function ll_erp_sync_pool_checkpoint(array &$job, array $inFlight): bool
+function ll_erp_sync_pool_checkpoint(array &$job, array $inFlight, string $ownerToken = ''): bool
 {
-  return ll_erp_sync_with_job_lock(static function () use (&$job, $inFlight): bool {
-    $job = ll_erp_sync_honor_cancel($job);
-    if (($job['status'] ?? '') === 'cancelled') {
+  return ll_erp_sync_with_job_lock(static function () use (&$job, $inFlight, $ownerToken): bool {
+    $latest = ll_erp_sync_load_job();
+    if (!is_array($latest)) {
       return false;
     }
+    $latest = ll_erp_sync_honor_cancel($latest);
+    if (($latest['status'] ?? '') === 'cancelled') {
+      $job = $latest;
+      return false;
+    }
+    if ($ownerToken !== '') {
+      $latestToken = (string) ($latest['running_token'] ?? '');
+      if ($latestToken !== '' && !hash_equals($latestToken, $ownerToken)) {
+        // Another worker took over — stop writing stale state.
+        $job = $latest;
+        return false;
+      }
+    }
+    $audited = isset($job['results']) && is_array($job['results']) ? count($job['results']) : 0;
+    $prevAudited = (int) ($job['progress_audited'] ?? $latest['progress_audited'] ?? -1);
     $snap = $job;
-    $snap['queue'] = array_merge($inFlight, $job['queue']);
+    $snap['queue'] = array_merge($inFlight, is_array($job['queue'] ?? null) ? $job['queue'] : []);
+    if ($audited !== $prevAudited) {
+      $snap['progress_audited'] = $audited;
+      $snap['progress_at'] = time();
+    } elseif (!isset($snap['progress_at'])) {
+      $snap['progress_at'] = (int) ($latest['progress_at'] ?? time());
+      $snap['progress_audited'] = $audited;
+    }
+    if ($ownerToken !== '') {
+      $snap['running'] = true;
+      $snap['running_token'] = $ownerToken;
+      // Keep lock ownership; do not refresh running_since (progress_at tracks health).
+      if (empty($snap['running_since'])) {
+        $snap['running_since'] = (int) ($latest['running_since'] ?? time());
+      }
+    }
     ll_erp_sync_save_job($snap);
+    $job = $snap;
     if (($job['pipeline'] ?? '') === 'upload') {
       ll_audit_upload_log_touch_job($snap);
     }
@@ -2359,9 +2393,9 @@ function ll_erp_sync_pool_checkpoint(array &$job, array $inFlight): bool
  *
  * @param array<string, mixed> $job Needs leads, results, cursor, queue, rate
  * @return array{stop: string, error?: string}
- *   stop: done | deadline | cap | cancelled | fatal
+ *   stop: done | deadline | cap | cancelled | fatal | superseded
  */
-function ll_erp_sync_audit_pool(array &$job, array $settings, int $deadline, ?int $maxNew = null): array
+function ll_erp_sync_audit_pool(array &$job, array $settings, int $deadline, ?int $maxNew = null, string $ownerToken = ''): array
 {
   $key = ll_openai_key_plaintext();
   if ($key === null || $key === '') {
@@ -2387,6 +2421,8 @@ function ll_erp_sync_audit_pool(array &$job, array $settings, int $deadline, ?in
       $job['errored'] = (int) ($job['errored'] ?? 0) + 1;
     }
     $job['results'][$idx] = $row;
+    $job['progress_audited'] = isset($job['results']) && is_array($job['results']) ? count($job['results']) : 0;
+    $job['progress_at'] = time();
   };
   $requeue = static function (array $item, float $at) use (&$job): void {
     $item['tries'] = (int) ($item['tries'] ?? 0) + 1;
@@ -2409,8 +2445,8 @@ function ll_erp_sync_audit_pool(array &$job, array $settings, int $deadline, ?in
       $now = microtime(true);
       if ($now - $lastCheckpoint >= LL_AUDIT_CHECKPOINT_SEC) {
         $lastCheckpoint = $now;
-        if (!ll_erp_sync_pool_checkpoint($job, $inFlightItems())) {
-          $stop = 'cancelled';
+        if (!ll_erp_sync_pool_checkpoint($job, $inFlightItems(), $ownerToken)) {
+          $stop = (($job['status'] ?? '') === 'cancelled') ? 'cancelled' : 'superseded';
           break;
         }
       }
@@ -2842,6 +2878,10 @@ function ll_erp_sync_acquire_run_lock(array $job, string $ownerToken): array
   $job['running'] = true;
   $job['running_since'] = time();
   $job['running_token'] = $ownerToken;
+  if (empty($job['progress_at'])) {
+    $job['progress_at'] = time();
+    $job['progress_audited'] = isset($job['results']) && is_array($job['results']) ? count($job['results']) : 0;
+  }
   // Consume chain token once a worker starts (prevents replay stampede).
   unset($job['chain_token'], $job['chain_token_at']);
   ll_erp_sync_save_job($job);
@@ -3350,7 +3390,7 @@ function ll_erp_sync_run(array $actor, bool $forceFetch = false, bool $dryRun = 
 
   $outcome = ['stop' => 'deadline'];
   try {
-    $outcome = ll_erp_sync_audit_pool($job, $settings, $deadline, $maxPerRun);
+    $outcome = ll_erp_sync_audit_pool($job, $settings, $deadline, $maxPerRun, $ownerToken);
   } finally {
     $job = ll_erp_sync_with_job_lock(static function () use ($job, $outcome, $ownerToken): array {
       $job = ll_erp_sync_honor_cancel($job);
@@ -3380,6 +3420,17 @@ function ll_erp_sync_run(array $actor, bool $forceFetch = false, bool $dryRun = 
       'done' => count($results),
       'total' => count($leads),
       'message' => 'Audit stopped',
+    ];
+  }
+  if (($outcome['stop'] ?? '') === 'superseded') {
+    return [
+      'ok' => true,
+      'status' => 'superseded',
+      'phase' => 'audit',
+      'needs_continue' => true,
+      'done' => count($results),
+      'total' => count($leads),
+      'message' => 'Worker superseded by auto-heal — another continue owns the audit',
     ];
   }
   if (($job['status'] ?? '') === 'error') {
@@ -3699,6 +3750,8 @@ function ll_erp_sync_start_upload_job(array $user, array $mapped, string $source
       'uploaded_by_name' => $name,
       'uploaded_by_username' => (string) ($user['username'] ?? ''),
       'tokenUsage' => ['input' => 0, 'cached' => 0, 'output' => 0],
+      'progress_at' => time(),
+      'progress_audited' => 0,
     ];
     ll_erp_sync_save_job($job);
     ll_audit_upload_log_touch_job($job);
@@ -3837,7 +3890,7 @@ function ll_erp_sync_job_elapsed_seconds(array $job): int
 }
 
 /**
- * If an audit is stuck with no live worker, start continue (same as Kick).
+ * If an audit is stuck (no worker, or worker hung with no new audited leads), self-heal.
  * Rate-limited so status polling cannot stampede.
  * @return ?array<string, mixed>
  */
@@ -3847,31 +3900,64 @@ function ll_erp_sync_maybe_auto_kick(array $actor): ?array
   if (!is_array($job) || ($job['status'] ?? '') !== 'auditing') {
     return null;
   }
+  $now = time();
   $lastKick = (int) ($job['auto_kick_at'] ?? 0);
-  if ($lastKick > 0 && (time() - $lastKick) < 40) {
-    return null;
-  }
-  $since = (int) ($job['running_since'] ?? 0);
-  $runningFresh = !empty($job['running']) && $since > 0 && (time() - $since) < LL_ERP_SYNC_RUNNING_STALE_SEC;
-  if ($runningFresh) {
-    return null;
-  }
-  $startedRaw = trim((string) ($job['started_at'] ?? ''));
-  $startedTs = $startedRaw !== '' ? strtotime($startedRaw) : false;
-  $elapsed = ($startedTs !== false) ? max(0, time() - $startedTs) : 0;
-  $results = isset($job['results']) && is_array($job['results']) ? count($job['results']) : 0;
-  $hasChain = trim((string) ($job['chain_token'] ?? '')) !== '';
-  // Stuck at 0 after upload, or mid-run with dead worker / pending chain.
-  $stuckZero = $results === 0 && $elapsed >= 12;
-  $stuckMid = $results > 0 && $elapsed >= 25;
-  if (!$stuckZero && !$stuckMid && !($hasChain && $elapsed >= 12)) {
+  if ($lastKick > 0 && ($now - $lastKick) < 40) {
     return null;
   }
 
-  ll_erp_sync_clear_run_lock(false);
+  $leadCount = (int) ($job['lead_count'] ?? (isset($job['leads']) && is_array($job['leads']) ? count($job['leads']) : 0));
+  $results = isset($job['results']) && is_array($job['results']) ? count($job['results']) : 0;
+  if ($leadCount > 0 && $results >= $leadCount) {
+    return null;
+  }
+
+  $since = (int) ($job['running_since'] ?? 0);
+  $runningFresh = !empty($job['running']) && $since > 0 && ($now - $since) < LL_ERP_SYNC_RUNNING_STALE_SEC;
+  $startedRaw = trim((string) ($job['started_at'] ?? ''));
+  $startedTs = $startedRaw !== '' ? strtotime($startedRaw) : false;
+  $elapsed = ($startedTs !== false) ? max(0, $now - $startedTs) : 0;
+  $hasChain = trim((string) ($job['chain_token'] ?? '')) !== '';
+  $progressAt = (int) ($job['progress_at'] ?? 0);
+  $progressAudited = (int) ($job['progress_audited'] ?? -1);
+  $stallAge = $progressAt > 0 ? max(0, $now - $progressAt) : 0;
+  // Only trust progress_at when present (set by checkpoints). Avoid force-clearing healthy
+  // legacy workers that never wrote progress_at.
+  $progressStalled = $progressAt > 0
+    && $stallAge >= LL_ERP_SYNC_PROGRESS_STALL_SEC
+    && ($progressAudited < 0 || $progressAudited === $results);
+
+  $stuckZero = $results === 0 && $elapsed >= 12;
+  $stuckNoWorker = !$runningFresh && $elapsed >= 20;
+  $lockAge = ($since > 0) ? max(0, $now - $since) : 0;
+  // Hung mid-run: lock looks fresh but audited hasn't moved, or lock held >2.5 min with a retry queue.
+  $queueLen = isset($job['queue']) && is_array($job['queue']) ? count($job['queue']) : 0;
+  $stuckHungWorker = $runningFresh && (
+    $progressStalled
+    || ($lockAge >= 150 && $queueLen > 0 && $results > 0)
+  );
+  $stuckChain = $hasChain && !$runningFresh && $elapsed >= 12;
+
+  if (!$stuckZero && !$stuckNoWorker && !$stuckHungWorker && !$stuckChain) {
+    return null;
+  }
+
+  $forced = false;
+  if ($stuckHungWorker) {
+    $cleared = ll_erp_sync_clear_run_lock(true);
+    $forced = !empty($cleared['cleared']);
+  } else {
+    ll_erp_sync_clear_run_lock(false);
+  }
+
   $fresh = ll_erp_sync_load_job();
   if (is_array($fresh)) {
-    $fresh['auto_kick_at'] = time();
+    $fresh['auto_kick_at'] = $now;
+    // Nudge progress clock so we don't immediately re-kick before the new worker moves.
+    if (empty($fresh['progress_at'])) {
+      $fresh['progress_at'] = $now;
+      $fresh['progress_audited'] = isset($fresh['results']) && is_array($fresh['results']) ? count($fresh['results']) : 0;
+    }
     ll_erp_sync_save_job($fresh);
   }
 
@@ -3886,9 +3972,21 @@ function ll_erp_sync_maybe_auto_kick(array $actor): ?array
       'at' => gmdate('c'),
     ];
   }
+
+  $reason = 'pending_chain';
+  if ($stuckHungWorker) {
+    $reason = 'progress_stall';
+  } elseif ($stuckZero) {
+    $reason = 'stuck_at_zero';
+  } elseif ($stuckNoWorker) {
+    $reason = 'stuck_no_worker';
+  }
+
   return [
     'ok' => true,
-    'reason' => $stuckZero ? 'stuck_at_zero' : ($stuckMid ? 'stuck_no_worker' : 'pending_chain'),
+    'reason' => $reason,
+    'forced_lock_clear' => $forced,
+    'stall_age_sec' => $stallAge,
     'elapsed_seconds' => $elapsed,
     'audited' => $results,
     'kick' => $kick,
@@ -4015,6 +4113,13 @@ function ll_erp_sync_diagnose(): array
     if ($status === 'auditing' && $running && !$stale && $age !== null && $age >= 180
       && $resultCount > 0 && count($queue) > 0) {
       $hints[] = 'Worker lock held >3 min with a retry queue — PHP may have hung on OpenAI. Wait for stale (5 min) or Force clear lock, then Kick continue.';
+    }
+    $progressAt = (int) ($job['progress_at'] ?? 0);
+    if ($status === 'auditing' && $progressAt > 0) {
+      $stall = $now - $progressAt;
+      if ($stall >= LL_ERP_SYNC_PROGRESS_STALL_SEC) {
+        $hints[] = "No new audited leads for {$stall}s — auto-heal should force-clear the lock and Kick continue.";
+      }
     }
     if ($status === 'auditing' && !$running && $hasChain) {
       $hints[] = 'Chain token present, waiting for next continue hit. Kick continue if idle >1 min.';

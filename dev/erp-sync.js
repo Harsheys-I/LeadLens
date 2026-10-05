@@ -345,8 +345,11 @@ async function refreshStatus() {
   schedulePoll(isActive(status));
 
   if (status.auto_kick?.ok) {
-    toast('Auto Kick continue — audit worker started');
-    setMsg(`Auto Kick continue (${status.auto_kick.reason || 'stuck'})`);
+    const why = status.auto_kick.reason || 'stuck';
+    toast(why === 'progress_stall'
+      ? 'Auto-heal: cleared hung worker and Kick continue'
+      : 'Auto Kick continue — audit worker started');
+    setMsg(`Auto Kick continue (${why})`);
     refreshDiagnose().catch(() => {});
   }
 
@@ -483,7 +486,7 @@ function readSidebarCollapsedPref() {
 async function bootErpSync() {
   initTheme();
   const ver = $('sidebar-version');
-  if (ver) ver.textContent = 'v10.0.4.stable';
+  if (ver) ver.textContent = 'v10.0.5.stable';
 
   const user = await requireAuth({loginPath: homePath()});
   if (!user) return;
