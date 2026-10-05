@@ -48,9 +48,13 @@ function ll_audit_route_session_actor(): array
 function ll_audit_route_status(): void
 {
   ll_require_method('GET');
-  ll_audit_route_session_actor();
+  $user = ll_audit_route_session_actor();
+  $autoKick = null;
+  if (!empty($user['is_super'])) {
+    $autoKick = ll_erp_sync_maybe_auto_kick($user);
+  }
   $progress = ll_erp_sync_public_progress(ll_erp_sync_load_job());
-  ll_ok(['progress' => $progress]);
+  ll_ok(['progress' => $progress, 'auto_kick' => $autoKick]);
 }
 
 function ll_audit_route_cancel(): void
