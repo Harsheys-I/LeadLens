@@ -3728,6 +3728,11 @@ function ll_erp_sync_start_upload_job(array $user, array $mapped, string $source
     }
     return ['ok' => false, 'error' => 'Could not start the background audit — try again', 'job' => $job];
   }
+  // Reload so caller can return the chain token to GHA for a reliable continue kick.
+  $armed = ll_erp_sync_load_job();
+  if (is_array($armed)) {
+    $job = $armed;
+  }
   return ['ok' => true, 'job' => $job];
 }
 
