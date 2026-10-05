@@ -1,5 +1,5 @@
 {
-  "version": "10.0.0.stable",
+  "version": "10.0.3.stable",
   "name": "GPP AI",
-  "notes": "v10.0.0.stable: ERP Sync is GitHub Actions-only - dedicated Super User module, daily IST upload via GHA, Hostinger cron keepalive/daily retired (410); Sales Graph charts sync from ERP without in-app Excel upload."
+  "notes": "v10.0.3.stable: GHA kicks erp-sync/continue after Bucket 1 upload so live audits no longer stick at 0/N; LiteSpeed self-chain hardened; cost in rupees."
 }

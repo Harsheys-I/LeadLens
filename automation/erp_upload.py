@@ -314,6 +314,35 @@ def upload(endpoint: str, files: dict[str, Path], extra: dict[str, str], ok: int
     raise Fail(f"{endpoint} failed")
 
 
+def kick_audit_continue(chain_token: str, continue_url: str | None = None) -> None:
+    """Start the server audit worker. Hostinger fire-and-forget after upload is unreliable."""
+    url = (continue_url or f"{LEADLENS}/erp-sync/continue").strip() or f"{LEADLENS}/erp-sync/continue"
+    log(f"Kicking audit continue → {url}")
+    resp = requests.post(
+        url,
+        headers={
+            "Content-Type": "application/json",
+            "X-ERP-Sync-Chain": chain_token,
+        },
+        json={},
+        timeout=600,
+    )
+    log(f"erp-sync/continue: HTTP {resp.status_code}")
+    if resp.status_code >= 400:
+        raise Fail(f"erp-sync/continue failed: HTTP {resp.status_code} {resp.text[:1000]}")
+    try:
+        body = resp.json()
+    except Exception:
+        body = {}
+    status = body.get("status") or body.get("phase") or body.get("message") or "ok"
+    done = body.get("done") or body.get("audited")
+    total = body.get("total") or body.get("lead_count")
+    if done is not None and total is not None:
+        log(f"Continue worker: {status} · {done}/{total}")
+    else:
+        log(f"Continue worker: {status}")
+
+
 def main() -> int:
     jobs = {j.strip() for j in os.environ.get("JOBS", "bucket1,sales").split(",") if j.strip()}
     unknown = jobs - {"bucket1", "perf", "sales"}
@@ -364,6 +393,11 @@ def main() -> int:
                    {"batch_size": "25", "concurrency": "8"}, ok=202, busy_wait=180)
         log(f"Bucket 1 started: lead_count={r.get('lead_count')} batch_size={r.get('batch_size')} "
             f"concurrency={r.get('concurrency')}")
+        token = str(r.get("chain_token") or "").strip()
+        if token:
+            kick_audit_continue(token, str(r.get("continue_url") or "") or None)
+        else:
+            log("WARNING: upload response had no chain_token — Kick continue from ERP Sync if audit stays at 0")
     if "perf" in jobs:
         r = upload("perf-dashboards/upload", {"master": files["master"], "history": files["history"]},
                    {}, ok=201, busy_wait=60)
