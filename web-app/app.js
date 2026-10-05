@@ -2496,7 +2496,7 @@ let serverAuditTimer=0;
 function startServerAuditWatch(){
   if(serverAuditTimer)return;
   pollServerAudit();
-  serverAuditTimer=window.setInterval(pollServerAudit,4000);
+  serverAuditTimer=window.setInterval(pollServerAudit,2000);
 }
 
 document.getElementById("server-audit-stop")?.addEventListener("click",async()=>{
