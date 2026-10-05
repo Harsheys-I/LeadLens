@@ -119,7 +119,8 @@ function ll_erp_sync_route_publish(): void
 function ll_erp_sync_route_status(): void
 {
   ll_require_method('GET');
-  ll_erp_sync_require_actor(false);
+  $actor = ll_erp_sync_require_actor(false);
+  $autoKick = ll_erp_sync_maybe_auto_kick($actor);
   $job = ll_erp_sync_load_job();
   $jobMeta = null;
   $progress = ll_erp_sync_public_progress(is_array($job) ? $job : null);
@@ -158,6 +159,7 @@ function ll_erp_sync_route_status(): void
     'gha' => $gha,
     'last_dispatch' => $gha['last_dispatch'] ?? null,
     'next_runs' => $gha['next_runs'] ?? null,
+    'auto_kick' => $autoKick,
   ]);
 }
 
@@ -194,8 +196,9 @@ function ll_erp_sync_route_job(): void
 function ll_erp_sync_route_diagnose(): void
 {
   ll_require_method('GET');
-  ll_erp_sync_require_actor(false);
-  ll_ok(['diagnose' => ll_erp_sync_diagnose()]);
+  $actor = ll_erp_sync_require_actor(false);
+  $autoKick = ll_erp_sync_maybe_auto_kick($actor);
+  ll_ok(['diagnose' => ll_erp_sync_diagnose(), 'auto_kick' => $autoKick]);
 }
 
 function ll_erp_sync_route_kick(): void

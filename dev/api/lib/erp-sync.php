@@ -3837,6 +3837,66 @@ function ll_erp_sync_job_elapsed_seconds(array $job): int
 }
 
 /**
+ * If an audit is stuck with no live worker, start continue (same as Kick).
+ * Rate-limited so status polling cannot stampede.
+ * @return ?array<string, mixed>
+ */
+function ll_erp_sync_maybe_auto_kick(array $actor): ?array
+{
+  $job = ll_erp_sync_load_job();
+  if (!is_array($job) || ($job['status'] ?? '') !== 'auditing') {
+    return null;
+  }
+  $lastKick = (int) ($job['auto_kick_at'] ?? 0);
+  if ($lastKick > 0 && (time() - $lastKick) < 40) {
+    return null;
+  }
+  $since = (int) ($job['running_since'] ?? 0);
+  $runningFresh = !empty($job['running']) && $since > 0 && (time() - $since) < LL_ERP_SYNC_RUNNING_STALE_SEC;
+  if ($runningFresh) {
+    return null;
+  }
+  $startedRaw = trim((string) ($job['started_at'] ?? ''));
+  $startedTs = $startedRaw !== '' ? strtotime($startedRaw) : false;
+  $elapsed = ($startedTs !== false) ? max(0, time() - $startedTs) : 0;
+  $results = isset($job['results']) && is_array($job['results']) ? count($job['results']) : 0;
+  $hasChain = trim((string) ($job['chain_token'] ?? '')) !== '';
+  // Stuck at 0 after upload, or mid-run with dead worker / pending chain.
+  $stuckZero = $results === 0 && $elapsed >= 12;
+  $stuckMid = $results > 0 && $elapsed >= 25;
+  if (!$stuckZero && !$stuckMid && !($hasChain && $elapsed >= 12)) {
+    return null;
+  }
+
+  ll_erp_sync_clear_run_lock(false);
+  $fresh = ll_erp_sync_load_job();
+  if (is_array($fresh)) {
+    $fresh['auto_kick_at'] = time();
+    ll_erp_sync_save_job($fresh);
+  }
+
+  try {
+    $kick = ll_erp_sync_continue_job($actor);
+  } catch (Throwable $e) {
+    error_log('LeadLens auto-kick continue failed: ' . $e->getMessage());
+    return [
+      'ok' => false,
+      'reason' => 'exception',
+      'error' => $e->getMessage(),
+      'at' => gmdate('c'),
+    ];
+  }
+  return [
+    'ok' => true,
+    'reason' => $stuckZero ? 'stuck_at_zero' : ($stuckMid ? 'stuck_no_worker' : 'pending_chain'),
+    'elapsed_seconds' => $elapsed,
+    'audited' => $results,
+    'kick' => $kick,
+    'at' => gmdate('c'),
+  ];
+}
+
+/**
  * Super-User diagnostics for stuck server audits (no leads/results/secrets).
  * @return array<string, mixed>
  */
