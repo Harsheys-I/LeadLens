@@ -144,7 +144,16 @@ function ll_audit_route_upload(): void
     ll_error((string) ($start['error'] ?? 'Could not start the audit'), 502);
   }
 
+  // Keep the request alive after 202 so LiteSpeed deferred continue can run.
+  ignore_user_abort(true);
+  $maxExec = (int) ini_get('max_execution_time');
+  if ($maxExec <= 0) {
+    $maxExec = 240;
+  }
+  @set_time_limit(max(60, min($maxExec, 420)));
+
   $leadCount = (int) $mapped['lead_count'];
+  $chainToken = trim((string) (($start['job']['chain_token'] ?? '')));
   ll_ok([
     'status' => 'auditing',
     'message' => 'Audit started for ' . $leadCount . ' lead(s). The server finishes the audit and publishes the TeleCaller dashboards.',
@@ -156,6 +165,9 @@ function ll_audit_route_upload(): void
     'total_batches' => (int) ceil($leadCount / $batchSize),
     'model' => (string) ($settings['model'] ?? ''),
     'uploaded_by' => $start['job']['uploaded_by_name'] ?? null,
+    // GHA uses this to POST erp-sync/continue reliably (Hostinger fire-and-forget is flaky).
+    'chain_token' => $chainToken !== '' ? $chainToken : null,
+    'continue_url' => ll_erp_sync_continue_self_url(),
   ], 202);
 }
 
