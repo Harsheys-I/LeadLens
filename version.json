@@ -1,5 +1,5 @@
 {
-  "version": "10.0.4.stable",
+  "version": "10.0.5.stable",
   "name": "GPP AI",
-  "notes": "v10.0.4.stable: Auto Kick continue when Bucket 1 audit sits idle (status/diagnose poll); GHA continue retries."
+  "notes": "v10.0.5.stable: Auto-heal mid-run stalls — if audited stops increasing for 90s, force-clear hung lock and Kick continue."
 }
