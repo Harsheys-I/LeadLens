@@ -343,15 +343,45 @@ async function refreshStatus() {
   paintSales(status);
   paintStopButton(status);
   schedulePoll(isActive(status));
-  // Auto-pull diagnose when audit looks stuck at 0
+
+  if (status.auto_kick?.ok) {
+    toast('Auto Kick continue — audit worker started');
+    setMsg(`Auto Kick continue (${status.auto_kick.reason || 'stuck'})`);
+    refreshDiagnose().catch(() => {});
+  }
+
+  // Client-side backup if the server did not auto-kick yet (older PHP) or still idle.
   const prog = status.progress || {};
   const stuckZero = prog.status === 'auditing'
     && Number(prog.audited || 0) === 0
-    && Number(prog.elapsed_seconds || 0) >= 60;
+    && Number(prog.elapsed_seconds || 0) >= 15;
   if (stuckZero || prog.status === 'auditing') {
-    refreshDiagnose().catch(() => { /* keep last */ });
+    refreshDiagnose().then((data) => {
+      const diag = data?.diagnose || data;
+      const w = diag?.worker || {};
+      const idle = !w.running && (w.has_chain_token || stuckZero);
+      if (idle && Number(prog.elapsed_seconds || 0) >= 15) {
+        maybeClientAutoKick();
+      }
+    }).catch(() => { /* keep last */ });
   }
   return status;
+}
+
+let lastClientAutoKick = 0;
+async function maybeClientAutoKick() {
+  const now = Date.now();
+  if (now - lastClientAutoKick < 45000) return;
+  lastClientAutoKick = now;
+  try {
+    setMsg('Auto Kick continue…');
+    const data = await api('erp-sync/kick', {method: 'POST', body: {}});
+    paintDiagnose(data);
+    toast(data.message || 'Auto Kick continue');
+    setMsg(data.message || 'Auto Kick continue');
+  } catch (err) {
+    setMsg(err.message || 'Auto Kick failed', true);
+  }
 }
 
 function schedulePoll(active) {
@@ -453,7 +483,7 @@ function readSidebarCollapsedPref() {
 async function bootErpSync() {
   initTheme();
   const ver = $('sidebar-version');
-  if (ver) ver.textContent = 'v10.0.3.stable';
+  if (ver) ver.textContent = 'v10.0.4.stable';
 
   const user = await requireAuth({loginPath: homePath()});
   if (!user) return;

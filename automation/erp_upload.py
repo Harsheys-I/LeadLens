@@ -316,31 +316,49 @@ def upload(endpoint: str, files: dict[str, Path], extra: dict[str, str], ok: int
 
 def kick_audit_continue(chain_token: str, continue_url: str | None = None) -> None:
     """Start the server audit worker. Hostinger fire-and-forget after upload is unreliable."""
-    url = (continue_url or f"{LEADLENS}/erp-sync/continue").strip() or f"{LEADLENS}/erp-sync/continue"
-    log(f"Kicking audit continue → {url}")
-    resp = requests.post(
-        url,
-        headers={
-            "Content-Type": "application/json",
-            "X-ERP-Sync-Chain": chain_token,
-        },
-        json={},
-        timeout=600,
-    )
-    log(f"erp-sync/continue: HTTP {resp.status_code}")
-    if resp.status_code >= 400:
-        raise Fail(f"erp-sync/continue failed: HTTP {resp.status_code} {resp.text[:1000]}")
-    try:
-        body = resp.json()
-    except Exception:
-        body = {}
-    status = body.get("status") or body.get("phase") or body.get("message") or "ok"
-    done = body.get("done") or body.get("audited")
-    total = body.get("total") or body.get("lead_count")
-    if done is not None and total is not None:
-        log(f"Continue worker: {status} · {done}/{total}")
-    else:
-        log(f"Continue worker: {status}")
+    urls = []
+    if continue_url and continue_url.strip():
+        urls.append(continue_url.strip())
+    urls.append(f"{LEADLENS}/erp-sync/continue")
+    # Dedupe while preserving order
+    seen: set[str] = set()
+    urls = [u for u in urls if not (u in seen or seen.add(u))]
+    last_err = ""
+    for attempt in (1, 2, 3):
+        url = urls[(attempt - 1) % len(urls)]
+        log(f"Kicking audit continue (attempt {attempt}/3) → {url}")
+        try:
+            resp = requests.post(
+                url,
+                headers={
+                    "Content-Type": "application/json",
+                    "X-ERP-Sync-Chain": chain_token,
+                },
+                json={},
+                timeout=600,
+            )
+        except Exception as exc:
+            last_err = str(exc)
+            log(f"erp-sync/continue: network error {exc}")
+            time.sleep(5)
+            continue
+        log(f"erp-sync/continue: HTTP {resp.status_code}")
+        if resp.status_code < 400:
+            try:
+                body = resp.json()
+            except Exception:
+                body = {}
+            status = body.get("status") or body.get("phase") or body.get("message") or "ok"
+            done = body.get("done") or body.get("audited")
+            total = body.get("total") or body.get("lead_count")
+            if done is not None and total is not None:
+                log(f"Continue worker: {status} · {done}/{total}")
+            else:
+                log(f"Continue worker: {status}")
+            return
+        last_err = f"HTTP {resp.status_code} {resp.text[:1000]}"
+        time.sleep(5)
+    raise Fail(f"erp-sync/continue failed after retries: {last_err}")
 
 
 def main() -> int:
