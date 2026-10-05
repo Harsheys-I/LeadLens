@@ -119,6 +119,9 @@ export const ErpSyncApi = {
   continue: (body = {}) => api('erp-sync/continue', {method: 'POST', body}),
   publish: () => api('erp-sync/publish', {method: 'POST', body: {}}),
   job: (full = false) => api(`erp-sync/job${full ? '?full=1' : ''}`),
+  diagnose: () => api('erp-sync/diagnose'),
+  kick: (body = {}) => api('erp-sync/kick', {method: 'POST', body}),
+  clearLock: (force = false) => api('erp-sync/clear-lock', {method: 'POST', body: {force: Boolean(force)}}),
 };
 
 export const JobsApi = {
