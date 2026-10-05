@@ -33,6 +33,10 @@ Manual **Run now** on the ERP Sync module (or Actions → workflow_dispatch) can
 
 3. Select pipelines → **Run now**. Status polls every ~4s while a GHA run or server audit is active, else ~15s.
 4. Lead Audit after GHA `audit/upload` continues via PHP **self-chain** (`erp-sync/continue`). Optional Hostinger continue cron remains a safety net.
+5. If Lead Audit is stuck (e.g. `0/1462` for minutes), open **Audit diagnostics** on the ERP Sync page:
+   - **Refresh diagnose** / **Copy report** — paste the JSON in chat (no leads/secrets)
+   - **Kick continue** — manually fire `erp-sync/continue`
+   - **Clear stale lock** — drop a dead worker lock after 5 minutes (or **Force clear lock** if sure)
 
 ## What GHA uploads
 
@@ -53,6 +57,10 @@ Optional sales URL overrides: `SALES_LEADS_URL`, `SALES_VISITS_URL`, `SALES_BOOK
 | POST | `erp-sync/trigger` | Super User → `workflow_dispatch` (`jobs`, optional `dry_run`) |
 | GET | `erp-sync/gha-status` | Latest runs, next schedules, last dispatch |
 | GET | `erp-sync/status` | Audit progress (tokens/cost/elapsed) + api_uploads + GHA summary |
+| GET | `erp-sync/diagnose` | Stuck-audit snapshot + hints (no leads/secrets) |
+| POST | `erp-sync/kick` | Manually fire continue + return diagnose |
+| POST | `erp-sync/clear-lock` | Clear stale run lock (`force: true` optional) |
+| GET | `erp-sync/job` | Job meta (+ `?full=1` for raw job without stripping — avoid in browser) |
 | POST | `erp-sync/continue` | Resume server audit (self-chain / optional cron) |
 | POST | `erp-sync/publish` | Publish last server-audit results |
 | POST | `audit/upload` | Terminal / GHA Bucket 1 |
