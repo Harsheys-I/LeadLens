@@ -2906,12 +2906,18 @@ function ll_erp_sync_fire_and_forget_post(string $url, array $headers, string $b
       'peer_name' => $host,
     ],
   ] : []);
-  $fp = @stream_socket_client($remote, $errno, $errstr, 1.5, STREAM_CLIENT_CONNECT, $ctx);
+  // LiteSpeed often drops work if the client closes before any response bytes —
+  // wait briefly for the status line so the worker request is accepted.
+  $fp = @stream_socket_client($remote, $errno, $errstr, 3.0, STREAM_CLIENT_CONNECT, $ctx);
   if (is_resource($fp)) {
-    stream_set_timeout($fp, 1);
-    @fwrite($fp, $req);
+    stream_set_timeout($fp, 3);
+    $written = @fwrite($fp, $req);
+    if ($written !== false && $written > 0) {
+      @stream_get_contents($fp, 64);
+      @fclose($fp);
+      return true;
+    }
     @fclose($fp);
-    return true;
   }
 
   if (!function_exists('curl_init')) {
@@ -2930,18 +2936,68 @@ function ll_erp_sync_fire_and_forget_post(string $url, array $headers, string $b
     CURLOPT_POSTFIELDS => $body,
     CURLOPT_HTTPHEADER => $curlHeaders,
     CURLOPT_RETURNTRANSFER => true,
-    CURLOPT_TIMEOUT => 1,
-    CURLOPT_CONNECTTIMEOUT => 1,
+    CURLOPT_TIMEOUT => 3,
+    CURLOPT_CONNECTTIMEOUT => 2,
     CURLOPT_NOSIGNAL => 1,
   ]);
   @curl_exec($ch);
+  $code = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
+  $errno = (int) curl_errno($ch);
   curl_close($ch);
-  return true;
+  // Accept any HTTP response as proof the worker request was received.
+  return $errno === 0 || $code > 0;
 }
 
 /**
- * Fire-and-forget POST continue with one-time chain token.
- * Does not wait for audit work; cron remains a safety net if this fails.
+ * After the HTTP response is flushed, run continue in this same PHP process.
+ * Fixes Hostinger/LiteSpeed cases where fire-and-forget POST never starts a worker.
+ */
+function ll_erp_sync_defer_continue_worker(): void
+{
+  static $registered = false;
+  if ($registered) {
+    return;
+  }
+  $registered = true;
+  register_shutdown_function(static function (): void {
+    if (function_exists('litespeed_finish_request')) {
+      @litespeed_finish_request();
+    } elseif (function_exists('fastcgi_finish_request')) {
+      @fastcgi_finish_request();
+    } else {
+      while (ob_get_level() > 0) {
+        @ob_end_flush();
+      }
+      @flush();
+    }
+    ignore_user_abort(true);
+    @set_time_limit(240);
+    $job = ll_erp_sync_load_job();
+    if (!is_array($job) || ($job['status'] ?? '') !== 'auditing') {
+      return;
+    }
+    // Another worker already holds a fresh lock — nothing to do.
+    $since = (int) ($job['running_since'] ?? 0);
+    if (!empty($job['running']) && $since > 0 && (time() - $since) < LL_ERP_SYNC_RUNNING_STALE_SEC) {
+      return;
+    }
+    $actor = [
+      'id' => 0,
+      'display_name' => 'ERP Sync Self-Chain',
+      'username' => 'erp-sync-cron',
+      'is_super' => true,
+    ];
+    try {
+      ll_erp_sync_continue_job($actor);
+    } catch (Throwable $e) {
+      error_log('LeadLens deferred continue failed: ' . $e->getMessage());
+    }
+  });
+}
+
+/**
+ * Fire-and-forget POST continue with one-time chain token, plus same-process deferred continue.
+ * Does not wait for audit work; cron remains a safety net if both handoffs fail.
  */
 function ll_erp_sync_fire_self_chain_continue(): bool
 {
@@ -2958,11 +3014,15 @@ function ll_erp_sync_fire_self_chain_continue(): bool
   $job['chain_token_at'] = time();
   unset($job['running'], $job['running_since'], $job['running_token']);
   ll_erp_sync_save_job($job);
-  return ll_erp_sync_fire_and_forget_post(
+  // Best-effort HTTP handoff (may be dropped on LiteSpeed).
+  ll_erp_sync_fire_and_forget_post(
     ll_erp_sync_continue_self_url(),
     ['X-ERP-Sync-Chain' => $token],
     '{}'
   );
+  // Reliable path: continue after this request's response is flushed.
+  ll_erp_sync_defer_continue_worker();
+  return true;
 }
 
 /**
@@ -3653,7 +3713,7 @@ function ll_erp_sync_start_upload_job(array $user, array $mapped, string $source
   return ['ok' => true, 'job' => $job];
 }
 
-/** @return array{input: float, cached: float, output: float} USD per 1M tokens from Settings. */
+/** @return array{input: float, cached: float, output: float} ₹/1M tokens from Settings. */
 function ll_erp_sync_audit_pricing(): array
 {
   $settings = ll_erp_sync_audit_settings();
@@ -3709,7 +3769,7 @@ function ll_erp_sync_job_usage(array $job): array
   ];
 }
 
-/** Same USD formula as the client Run console. */
+/** Same ₹ formula as the client Run console (Settings prices are ₹/1M tokens). */
 function ll_erp_sync_estimate_cost(array $usage, ?array $pricing = null): float
 {
   $rates = $pricing ?? ll_erp_sync_audit_pricing();

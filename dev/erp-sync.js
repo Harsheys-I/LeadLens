@@ -58,11 +58,12 @@ function formatElapsed(sec) {
   return `${h}h ${m % 60}m`;
 }
 
-function formatCost(usd) {
-  const n = Number(usd) || 0;
-  if (!n) return '$0.00';
-  if (n < 0.01) return `$${n.toFixed(4)}`;
-  return `$${n.toFixed(2)}`;
+function formatCost(inr) {
+  const n = Number(inr) || 0;
+  if (!n) return '₹0.00';
+  if (n < 0.01) return `₹${n.toFixed(4)}`;
+  if (n < 100) return `₹${n.toFixed(2)}`;
+  return `₹${n.toLocaleString('en-IN', {maximumFractionDigits: 2})}`;
 }
 
 /** Short server-audit rate note. */
@@ -358,7 +359,7 @@ function schedulePoll(active) {
     clearInterval(pollTimer);
     pollTimer = 0;
   }
-  const ms = active ? 4000 : 15000;
+  const ms = active ? 2000 : 10000;
   pollTimer = window.setInterval(() => {
     refreshStatus().catch(() => { /* keep last paint */ });
   }, ms);
@@ -452,7 +453,7 @@ function readSidebarCollapsedPref() {
 async function bootErpSync() {
   initTheme();
   const ver = $('sidebar-version');
-  if (ver) ver.textContent = 'v10.0.1.stable';
+  if (ver) ver.textContent = 'v10.0.2.stable';
 
   const user = await requireAuth({loginPath: homePath()});
   if (!user) return;
