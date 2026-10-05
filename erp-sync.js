@@ -58,11 +58,12 @@ function formatElapsed(sec) {
   return `${h}h ${m % 60}m`;
 }
 
-function formatCost(usd) {
-  const n = Number(usd) || 0;
-  if (!n) return '$0.00';
-  if (n < 0.01) return `$${n.toFixed(4)}`;
-  return `$${n.toFixed(2)}`;
+function formatCost(inr) {
+  const n = Number(inr) || 0;
+  if (!n) return '₹0.00';
+  if (n < 0.01) return `₹${n.toFixed(4)}`;
+  if (n < 100) return `₹${n.toFixed(2)}`;
+  return `₹${n.toLocaleString('en-IN', {maximumFractionDigits: 2})}`;
 }
 
 /** Short server-audit rate note. */
@@ -229,6 +230,96 @@ function paintStopButton(status) {
   stop.classList.toggle('hidden', !running);
 }
 
+let lastDiagnose = null;
+
+function paintDiagnose(payload) {
+  const diag = payload?.diagnose || payload;
+  lastDiagnose = diag || null;
+  const pre = $('erp-diag-json');
+  const hintsEl = $('erp-diag-hints');
+  if (pre) {
+    pre.textContent = diag ? JSON.stringify(diag, null, 2) : 'No diagnose payload.';
+  }
+  if (hintsEl) {
+    const hints = Array.isArray(diag?.hints) ? diag.hints : [];
+    hintsEl.textContent = hints.length
+      ? `Hints:\n• ${hints.join('\n• ')}`
+      : (diag ? 'No automatic hints — copy the JSON below if something still looks wrong.' : '');
+    hintsEl.style.color = hints.length ? 'var(--amber, #b54708)' : '';
+  }
+}
+
+async function refreshDiagnose() {
+  const data = await api('erp-sync/diagnose');
+  paintDiagnose(data);
+  return data;
+}
+
+async function copyDiagnoseReport() {
+  if (!lastDiagnose) {
+    await refreshDiagnose();
+  }
+  const text = JSON.stringify(lastDiagnose || {}, null, 2);
+  try {
+    await navigator.clipboard.writeText(text);
+    toast('Diagnostics copied — paste in chat');
+    setMsg('Diagnostics copied to clipboard');
+  } catch {
+    const pre = $('erp-diag-json');
+    if (pre) {
+      const range = document.createRange();
+      range.selectNodeContents(pre);
+      const sel = window.getSelection();
+      sel?.removeAllRanges();
+      sel?.addRange(range);
+    }
+    setMsg('Clipboard blocked — select the JSON and copy manually', true);
+  }
+}
+
+async function kickContinue() {
+  const btn = $('erp-diag-kick');
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = 'Kicking…';
+  }
+  try {
+    const data = await api('erp-sync/kick', {method: 'POST', body: {}});
+    paintDiagnose(data);
+    setMsg(data.message || data.kick?.message || 'Kick continue sent');
+    toast(data.kick?.busy ? 'Worker busy — see diagnose' : 'Kick continue sent');
+    await refreshStatus();
+  } catch (err) {
+    setMsg(err.message || 'Kick failed', true);
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = 'Kick continue';
+    }
+  }
+}
+
+async function clearLock(force = false) {
+  const id = force ? 'erp-diag-force-lock' : 'erp-diag-clear-lock';
+  const btn = $(id);
+  if (force && !window.confirm('Force-clear the run lock even if it looks fresh? Only if you are sure no PHP worker is still auditing.')) {
+    return;
+  }
+  if (btn) btn.disabled = true;
+  try {
+    const data = await api('erp-sync/clear-lock', {method: 'POST', body: {force: Boolean(force)}});
+    paintDiagnose(data);
+    setMsg(data.message || (data.cleared ? 'Lock cleared' : 'No lock cleared'));
+    toast(data.message || 'Lock updated');
+    await refreshStatus();
+  } catch (err) {
+    setMsg(err.message || 'Clear lock failed', true);
+    if (err.data) paintDiagnose(err.data);
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
 function isActive(status) {
   if (status.progress?.running || status.progress?.status === 'auditing') return true;
   if (status.gha?.active) return true;
@@ -252,6 +343,14 @@ async function refreshStatus() {
   paintSales(status);
   paintStopButton(status);
   schedulePoll(isActive(status));
+  // Auto-pull diagnose when audit looks stuck at 0
+  const prog = status.progress || {};
+  const stuckZero = prog.status === 'auditing'
+    && Number(prog.audited || 0) === 0
+    && Number(prog.elapsed_seconds || 0) >= 60;
+  if (stuckZero || prog.status === 'auditing') {
+    refreshDiagnose().catch(() => { /* keep last */ });
+  }
   return status;
 }
 
@@ -260,7 +359,7 @@ function schedulePoll(active) {
     clearInterval(pollTimer);
     pollTimer = 0;
   }
-  const ms = active ? 4000 : 15000;
+  const ms = active ? 2000 : 10000;
   pollTimer = window.setInterval(() => {
     refreshStatus().catch(() => { /* keep last paint */ });
   }, ms);
@@ -354,7 +453,7 @@ function readSidebarCollapsedPref() {
 async function bootErpSync() {
   initTheme();
   const ver = $('sidebar-version');
-  if (ver) ver.textContent = `v${APP_VERSION}`;
+  if (ver) ver.textContent = 'v10.0.2.stable';
 
   const user = await requireAuth({loginPath: homePath()});
   if (!user) return;
@@ -373,6 +472,13 @@ async function bootErpSync() {
     refreshStatus().then(() => toast('Refreshed')).catch((err) => setMsg(err.message || 'Refresh failed', true));
   });
   $('erp-sync-cancel')?.addEventListener('click', () => stopAudit());
+  $('erp-diag-refresh')?.addEventListener('click', () => {
+    refreshDiagnose().then(() => toast('Diagnose refreshed')).catch((err) => setMsg(err.message || 'Diagnose failed', true));
+  });
+  $('erp-diag-copy')?.addEventListener('click', () => copyDiagnoseReport());
+  $('erp-diag-kick')?.addEventListener('click', () => kickContinue());
+  $('erp-diag-clear-lock')?.addEventListener('click', () => clearLock(false));
+  $('erp-diag-force-lock')?.addEventListener('click', () => clearLock(true));
   $('shell-logout')?.addEventListener('click', async () => {
     await logout();
     location.href = homePath();
@@ -433,6 +539,7 @@ async function bootErpSync() {
 
   try {
     await refreshStatus();
+    await refreshDiagnose();
   } catch (err) {
     setMsg(err.message || 'Could not load ERP Sync status', true);
   }

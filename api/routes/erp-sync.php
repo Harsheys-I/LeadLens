@@ -12,6 +12,9 @@ require_once __DIR__ . '/../lib/erp-sync.php';
  *   POST erp-sync/publish      → publish last server-audit results
  *   GET  erp-sync/status       → audit job + api_uploads + GHA summary
  *   GET  erp-sync/job
+ *   GET  erp-sync/diagnose     → Super User stuck-audit snapshot (copy/share)
+ *   POST erp-sync/kick         → manually fire continue + return diagnose
+ *   POST erp-sync/clear-lock   → clear stale (or force) run lock
  *
  * Retired (410): config, test-fetch, fetch-for-audit, latest-leads, run, daily, keepalive/ping
  */
@@ -35,6 +38,15 @@ function ll_route_erp_sync(string $action): void
       break;
     case 'job':
       ll_erp_sync_route_job();
+      break;
+    case 'diagnose':
+      ll_erp_sync_route_diagnose();
+      break;
+    case 'kick':
+      ll_erp_sync_route_kick();
+      break;
+    case 'clear-lock':
+      ll_erp_sync_route_clear_lock();
       break;
     case 'config':
     case 'test-fetch':
@@ -177,4 +189,48 @@ function ll_erp_sync_route_job(): void
     ];
   }
   ll_ok(['job' => $job]);
+}
+
+function ll_erp_sync_route_diagnose(): void
+{
+  ll_require_method('GET');
+  ll_erp_sync_require_actor(false);
+  ll_ok(['diagnose' => ll_erp_sync_diagnose()]);
+}
+
+function ll_erp_sync_route_kick(): void
+{
+  ll_require_method('POST');
+  $actor = ll_erp_sync_require_actor(false);
+  // If a dead worker left a stale lock, clear it so continue can start.
+  $cleared = ll_erp_sync_clear_run_lock(false);
+  try {
+    $result = ll_erp_sync_continue_job($actor);
+  } catch (Throwable $e) {
+    error_log('LeadLens ERP kick failed: ' . $e->getMessage());
+    ll_error('Kick continue failed: ' . $e->getMessage(), 500);
+  }
+  ll_ok([
+    'ok' => true,
+    'lock_cleared' => !empty($cleared['cleared']),
+    'kick' => $result,
+    'diagnose' => ll_erp_sync_diagnose(),
+    'message' => !empty($cleared['cleared'])
+      ? 'Cleared stale lock and kicked continue'
+      : 'Kick continue dispatched',
+  ]);
+}
+
+function ll_erp_sync_route_clear_lock(): void
+{
+  ll_require_method('POST');
+  ll_erp_sync_require_actor(false);
+  $body = ll_read_json_body();
+  $force = !empty($body['force']);
+  $out = ll_erp_sync_clear_run_lock($force);
+  $out['diagnose'] = ll_erp_sync_diagnose();
+  if (empty($out['ok'])) {
+    ll_error((string) ($out['message'] ?? 'Could not clear lock'), 409, $out);
+  }
+  ll_ok($out);
 }

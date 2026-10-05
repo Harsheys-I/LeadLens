@@ -16,9 +16,9 @@ const LL_ERP_SYNC_TIMEOUT = 90;
 const LL_ERP_SYNC_KEEPALIVE_TIMEOUT = 20;
 const LL_ERP_SYNC_KEEPALIVE_MAX_BYTES = 65_536;
 /** Seconds of headroom before max_execution_time when in-request chaining. */
-const LL_ERP_SYNC_CHAIN_SAFETY_BUFFER = 18;
+const LL_ERP_SYNC_CHAIN_SAFETY_BUFFER = 45;
 /** Stale running lock age (seconds) — allow takeover if a worker died. */
-// Must exceed the longest single PHP worker budget (≈222s) so keepalive cannot steal a live lock.
+// Must exceed the longest single PHP worker budget so keepalive cannot steal a live lock.
 const LL_ERP_SYNC_RUNNING_STALE_SEC = 300;
 /** Chain token TTL for fire-and-forget self-continue. */
 const LL_ERP_SYNC_CHAIN_TOKEN_TTL = 600;
@@ -2598,8 +2598,17 @@ function ll_erp_sync_audit_pool(array &$job, array $settings, int $deadline, ?in
       }
       unset($rate);
 
-      if ($active && curl_multi_select($mh, 0.5) === -1) {
-        usleep(50_000);
+      // Abort wait early when the request budget is gone (do not sit in curl_multi until OpenAI's 180s timeout —
+      // that used to overrun set_time_limit and leave a stuck lock with batches on the retry queue).
+      if ($active) {
+        $remain = $deadline - microtime(true);
+        if ($remain <= 0) {
+          $stop = 'deadline';
+          break;
+        }
+        if (curl_multi_select($mh, min(0.5, max(0.05, $remain))) === -1) {
+          usleep(50_000);
+        }
       }
     }
   } finally {
@@ -2805,8 +2814,8 @@ function ll_erp_sync_request_deadline(int $startedAt): int
   if ($maxExec <= 0) {
     $maxExec = 240;
   }
-  // Honor set_time_limit(240) used by run — use the larger of ini / 240 when unlimited is false.
-  $budget = max(30, min($maxExec, 240));
+  // Prefer Hostinger's real limit (often 480) but never schedule past set_time_limit in run().
+  $budget = max(60, min($maxExec, 420));
   return $startedAt + $budget - LL_ERP_SYNC_CHAIN_SAFETY_BUFFER;
 }
 
@@ -2906,12 +2915,18 @@ function ll_erp_sync_fire_and_forget_post(string $url, array $headers, string $b
       'peer_name' => $host,
     ],
   ] : []);
-  $fp = @stream_socket_client($remote, $errno, $errstr, 1.5, STREAM_CLIENT_CONNECT, $ctx);
+  // LiteSpeed often drops work if the client closes before any response bytes —
+  // wait briefly for the status line so the worker request is accepted.
+  $fp = @stream_socket_client($remote, $errno, $errstr, 3.0, STREAM_CLIENT_CONNECT, $ctx);
   if (is_resource($fp)) {
-    stream_set_timeout($fp, 1);
-    @fwrite($fp, $req);
+    stream_set_timeout($fp, 3);
+    $written = @fwrite($fp, $req);
+    if ($written !== false && $written > 0) {
+      @stream_get_contents($fp, 64);
+      @fclose($fp);
+      return true;
+    }
     @fclose($fp);
-    return true;
   }
 
   if (!function_exists('curl_init')) {
@@ -2930,18 +2945,72 @@ function ll_erp_sync_fire_and_forget_post(string $url, array $headers, string $b
     CURLOPT_POSTFIELDS => $body,
     CURLOPT_HTTPHEADER => $curlHeaders,
     CURLOPT_RETURNTRANSFER => true,
-    CURLOPT_TIMEOUT => 1,
-    CURLOPT_CONNECTTIMEOUT => 1,
+    CURLOPT_TIMEOUT => 3,
+    CURLOPT_CONNECTTIMEOUT => 2,
     CURLOPT_NOSIGNAL => 1,
   ]);
   @curl_exec($ch);
+  $code = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
+  $errno = (int) curl_errno($ch);
   curl_close($ch);
-  return true;
+  // Accept any HTTP response as proof the worker request was received.
+  return $errno === 0 || $code > 0;
 }
 
 /**
- * Fire-and-forget POST continue with one-time chain token.
- * Does not wait for audit work; cron remains a safety net if this fails.
+ * After the HTTP response is flushed, run continue in this same PHP process.
+ * Fixes Hostinger/LiteSpeed cases where fire-and-forget POST never starts a worker.
+ */
+function ll_erp_sync_defer_continue_worker(): void
+{
+  static $registered = false;
+  if ($registered) {
+    return;
+  }
+  $registered = true;
+  register_shutdown_function(static function (): void {
+    if (function_exists('litespeed_finish_request')) {
+      @litespeed_finish_request();
+    } elseif (function_exists('fastcgi_finish_request')) {
+      @fastcgi_finish_request();
+    } else {
+      while (ob_get_level() > 0) {
+        @ob_end_flush();
+      }
+      @flush();
+    }
+    ignore_user_abort(true);
+    $maxExec = (int) ini_get('max_execution_time');
+    if ($maxExec <= 0) {
+      $maxExec = 240;
+    }
+    @set_time_limit(max(60, min($maxExec, 420)));
+    $job = ll_erp_sync_load_job();
+    if (!is_array($job) || ($job['status'] ?? '') !== 'auditing') {
+      return;
+    }
+    // Another worker already holds a fresh lock — nothing to do.
+    $since = (int) ($job['running_since'] ?? 0);
+    if (!empty($job['running']) && $since > 0 && (time() - $since) < LL_ERP_SYNC_RUNNING_STALE_SEC) {
+      return;
+    }
+    $actor = [
+      'id' => 0,
+      'display_name' => 'ERP Sync Self-Chain',
+      'username' => 'erp-sync-cron',
+      'is_super' => true,
+    ];
+    try {
+      ll_erp_sync_continue_job($actor);
+    } catch (Throwable $e) {
+      error_log('LeadLens deferred continue failed: ' . $e->getMessage());
+    }
+  });
+}
+
+/**
+ * Fire-and-forget POST continue with one-time chain token, plus same-process deferred continue.
+ * Does not wait for audit work; cron remains a safety net if both handoffs fail.
  */
 function ll_erp_sync_fire_self_chain_continue(): bool
 {
@@ -2958,11 +3027,15 @@ function ll_erp_sync_fire_self_chain_continue(): bool
   $job['chain_token_at'] = time();
   unset($job['running'], $job['running_since'], $job['running_token']);
   ll_erp_sync_save_job($job);
-  return ll_erp_sync_fire_and_forget_post(
+  // Best-effort HTTP handoff (may be dropped on LiteSpeed).
+  ll_erp_sync_fire_and_forget_post(
     ll_erp_sync_continue_self_url(),
     ['X-ERP-Sync-Chain' => $token],
     '{}'
   );
+  // Reliable path: continue after this request's response is flushed.
+  ll_erp_sync_defer_continue_worker();
+  return true;
 }
 
 /**
@@ -3007,7 +3080,12 @@ function ll_erp_sync_maybe_queue_daily_from_keepalive(string $source): ?array
  */
 function ll_erp_sync_run(array $actor, bool $forceFetch = false, bool $dryRun = false, array $opts = []): array
 {
-  @set_time_limit(240);
+  $maxExec = (int) ini_get('max_execution_time');
+  if ($maxExec <= 0) {
+    $maxExec = 240;
+  }
+  // Match request deadline budget so PHP does not hard-kill before we can self-chain.
+  @set_time_limit(max(60, min($maxExec, 420)));
   @ignore_user_abort(true);
   $cfg = ll_erp_sync_load_config();
   $autoPublishKey = (string) ($opts['auto_publish_key'] ?? 'auto_publish');
@@ -3653,7 +3731,7 @@ function ll_erp_sync_start_upload_job(array $user, array $mapped, string $source
   return ['ok' => true, 'job' => $job];
 }
 
-/** @return array{input: float, cached: float, output: float} USD per 1M tokens from Settings. */
+/** @return array{input: float, cached: float, output: float} ₹/1M tokens from Settings. */
 function ll_erp_sync_audit_pricing(): array
 {
   $settings = ll_erp_sync_audit_settings();
@@ -3709,7 +3787,7 @@ function ll_erp_sync_job_usage(array $job): array
   ];
 }
 
-/** Same USD formula as the client Run console. */
+/** Same ₹ formula as the client Run console (Settings prices are ₹/1M tokens). */
 function ll_erp_sync_estimate_cost(array $usage, ?array $pricing = null): float
 {
   $rates = $pricing ?? ll_erp_sync_audit_pricing();
@@ -3751,6 +3829,214 @@ function ll_erp_sync_job_elapsed_seconds(array $job): int
     }
   }
   return max(0, $end - $ts);
+}
+
+/**
+ * Super-User diagnostics for stuck server audits (no leads/results/secrets).
+ * @return array<string, mixed>
+ */
+function ll_erp_sync_diagnose(): array
+{
+  $now = time();
+  $job = ll_erp_sync_load_job();
+  $progress = ll_erp_sync_public_progress(is_array($job) ? $job : null);
+  $cfg = ll_erp_sync_load_config();
+  $settings = ll_erp_sync_audit_settings();
+  $openaiOk = ll_openai_key_configured();
+  $maxExec = (int) ini_get('max_execution_time');
+  $hints = [];
+
+  $worker = [
+    'running' => false,
+    'running_age_sec' => null,
+    'lock_stale' => false,
+    'lock_stale_after_sec' => LL_ERP_SYNC_RUNNING_STALE_SEC,
+    'has_running_token' => false,
+    'has_chain_token' => false,
+    'chain_token_age_sec' => null,
+  ];
+
+  $jobSnap = null;
+  if (is_array($job)) {
+    $since = (int) ($job['running_since'] ?? 0);
+    $running = !empty($job['running']);
+    $age = $since > 0 ? max(0, $now - $since) : null;
+    $stale = $running && $since > 0 && $age !== null && $age >= LL_ERP_SYNC_RUNNING_STALE_SEC;
+    $chainAt = (int) ($job['chain_token_at'] ?? 0);
+    $hasChain = trim((string) ($job['chain_token'] ?? '')) !== '';
+    $worker = [
+      'running' => $running,
+      'running_age_sec' => $age,
+      'lock_stale' => $stale,
+      'lock_stale_after_sec' => LL_ERP_SYNC_RUNNING_STALE_SEC,
+      'has_running_token' => trim((string) ($job['running_token'] ?? '')) !== '',
+      'has_chain_token' => $hasChain,
+      'chain_token_age_sec' => $hasChain && $chainAt > 0 ? max(0, $now - $chainAt) : null,
+    ];
+
+    $queue = is_array($job['queue'] ?? null) ? $job['queue'] : [];
+    $queueSample = [];
+    foreach (array_slice($queue, 0, 5) as $item) {
+      if (!is_array($item)) {
+        continue;
+      }
+      $idx = $item['idx'] ?? null;
+      $queueSample[] = [
+        'leads' => is_array($idx) ? count($idx) : 0,
+        'tries' => (int) ($item['tries'] ?? 0),
+        'ready_in_sec' => isset($item['at']) ? max(0, (int) ceil((float) $item['at'] - $now)) : 0,
+        'recover' => !empty($item['rec']),
+      ];
+    }
+
+    $leadCount = (int) ($job['lead_count'] ?? (isset($job['leads']) && is_array($job['leads']) ? count($job['leads']) : 0));
+    $resultCount = isset($job['results']) && is_array($job['results']) ? count($job['results']) : 0;
+    $cursor = (int) ($job['cursor'] ?? 0);
+    $jobSnap = [
+      'status' => $job['status'] ?? null,
+      'pipeline' => $job['pipeline'] ?? null,
+      'source_file' => $job['source_file'] ?? null,
+      'started_at' => $job['started_at'] ?? null,
+      'published_at' => $job['published_at'] ?? null,
+      'cancelled_at' => $job['cancelled_at'] ?? null,
+      'error' => $job['error'] ?? null,
+      'cursor' => $cursor,
+      'lead_count' => $leadCount,
+      'result_count' => $resultCount,
+      'leads_loaded' => isset($job['leads']) && is_array($job['leads']),
+      'leads_in_memory' => isset($job['leads']) && is_array($job['leads']) ? count($job['leads']) : 0,
+      'queue_len' => count($queue),
+      'queue_sample' => $queueSample,
+      'errored' => (int) ($job['errored'] ?? 0),
+      'batchSize' => $job['batchSize'] ?? ($job['batch_size'] ?? null),
+      'concurrency' => $job['concurrency'] ?? null,
+      'model' => $job['model'] ?? ($settings['model'] ?? null),
+      'cancel_requested' => !empty($job['cancel_requested']),
+      'uploaded_by_id' => isset($job['uploaded_by_id']) ? (int) $job['uploaded_by_id'] : null,
+      'usage' => $progress['usage'] ?? null,
+      'elapsed_seconds' => $progress['elapsed_seconds'] ?? 0,
+      'estimated_cost' => $progress['estimated_cost'] ?? 0,
+      'throttle' => ll_erp_sync_throttle_public($job),
+      'rate' => is_array($job['rate'] ?? null) ? [
+        'concurrency' => $job['rate']['concurrency'] ?? null,
+        'batch' => $job['rate']['batch'] ?? null,
+        'max_concurrency' => $job['rate']['max_concurrency'] ?? null,
+        'max_batch' => $job['rate']['max_batch'] ?? null,
+        'pause_until' => isset($job['rate']['pause_until']) && (float) $job['rate']['pause_until'] > $now
+          ? gmdate('c', (int) ceil((float) $job['rate']['pause_until']))
+          : null,
+        'rate_limited' => $job['rate']['rate_limited'] ?? null,
+        'transient' => $job['rate']['transient'] ?? null,
+        'last_error' => $job['rate']['last_error'] ?? null,
+      ] : null,
+    ];
+
+    $status = (string) ($job['status'] ?? '');
+    if ($status === 'auditing' && $resultCount === 0 && ($progress['elapsed_seconds'] ?? 0) >= 90) {
+      $hints[] = 'Stuck at 0 audited for 90s+ — worker may never have reached OpenAI, or self-chain never started.';
+    }
+    if (!$openaiOk) {
+      $hints[] = 'Server OpenAI API key is not configured (TeleCallerAudit → Settings).';
+    }
+    if ($status === 'auditing' && $running && $stale) {
+      $hints[] = 'Run lock is STALE (>5 min). Worker likely died mid-request. Use Clear stale lock, then Kick continue.';
+    }
+    if ($status === 'auditing' && $running && !$stale && $resultCount === 0) {
+      $hints[] = 'Run lock is fresh but audited=0 — current PHP worker may be hung on OpenAI or still starting.';
+    }
+    if ($status === 'auditing' && !$running && !$hasChain) {
+      $hints[] = 'Status=auditing but no worker lock and no chain token — self-chain likely failed. Use Kick continue.';
+    }
+    if ($status === 'auditing' && $running && !$stale && $age !== null && $age >= 180
+      && $resultCount > 0 && count($queue) > 0) {
+      $hints[] = 'Worker lock held >3 min with a retry queue — PHP may have hung on OpenAI. Wait for stale (5 min) or Force clear lock, then Kick continue.';
+    }
+    if ($status === 'auditing' && !$running && $hasChain) {
+      $hints[] = 'Chain token present, waiting for next continue hit. Kick continue if idle >1 min.';
+    }
+    if ($status === 'auditing' && $leadCount > 0 && !$jobSnap['leads_loaded']) {
+      $hints[] = 'Job has lead_count but leads array missing from storage — job payload may be corrupted.';
+    }
+    if ($status === 'auditing' && is_array($job['rate'] ?? null) && !empty($job['rate']['last_error'])) {
+      $hints[] = 'Last OpenAI/rate error: ' . (string) $job['rate']['last_error'];
+    }
+    if ($status === 'auditing' && $cursor === 0 && $resultCount === 0 && count($queue) === 0 && !$running) {
+      $hints[] = 'Cursor=0, empty queue, not running — upload started the job but the first worker never ran.';
+    }
+  } else {
+    $hints[] = 'No audit job in storage.';
+  }
+
+  if (!$openaiOk) {
+    $hints[] = 'Fix: save OpenAI key under TeleCallerAudit Settings (server key).';
+  }
+
+  return [
+    'at' => gmdate('c'),
+    'host' => [
+      'dev' => ll_is_dev_request(),
+      'php_sapi' => PHP_SAPI,
+      'max_execution_time' => $maxExec,
+      'memory_limit' => (string) ini_get('memory_limit'),
+      'self_continue_url' => ll_erp_sync_continue_self_url(),
+    ],
+    'openai' => [
+      'server_key_configured' => $openaiOk,
+      'model' => $settings['model'] ?? null,
+      'batch_size_setting' => $settings['batchSize'] ?? ($settings['batch_size'] ?? null),
+      'concurrency_setting' => $settings['concurrency'] ?? null,
+    ],
+    'progress' => $progress,
+    'worker' => $worker,
+    'job' => $jobSnap,
+    'last_status' => is_array($cfg['last_status'] ?? null) ? $cfg['last_status'] : null,
+    'api_uploads_head' => array_slice(ll_audit_upload_log_read(), 0, 5),
+    'hints' => array_values(array_unique($hints)),
+    'actions' => [
+      'kick_continue' => 'POST erp-sync/kick — fire continue now (same as self-chain)',
+      'clear_stale_lock' => 'POST erp-sync/clear-lock — drop dead running lock without cancelling',
+      'cancel' => 'POST audit/cancel — stop the audit',
+    ],
+  ];
+}
+
+/**
+ * Drop a stale (or force) run lock so Kick continue can start a new worker.
+ * @return array<string, mixed>
+ */
+function ll_erp_sync_clear_run_lock(bool $force = false): array
+{
+  return ll_erp_sync_with_job_lock(static function () use ($force): array {
+    $job = ll_erp_sync_load_job();
+    if (!is_array($job)) {
+      return ['ok' => true, 'cleared' => false, 'message' => 'No job'];
+    }
+    if (empty($job['running']) && trim((string) ($job['running_token'] ?? '')) === '') {
+      return ['ok' => true, 'cleared' => false, 'message' => 'No run lock held', 'diagnose' => null];
+    }
+    $since = (int) ($job['running_since'] ?? 0);
+    $age = $since > 0 ? max(0, time() - $since) : null;
+    $stale = $since > 0 && $age !== null && $age >= LL_ERP_SYNC_RUNNING_STALE_SEC;
+    if (!$force && !$stale) {
+      return [
+        'ok' => false,
+        'cleared' => false,
+        'message' => 'Run lock is still fresh (<5 min). Wait, Stop audit, or pass force=1 if you are sure the worker is dead.',
+        'running_age_sec' => $age,
+      ];
+    }
+    unset($job['running'], $job['running_since'], $job['running_token']);
+    ll_erp_sync_save_job($job);
+    return [
+      'ok' => true,
+      'cleared' => true,
+      'forced' => $force && !$stale,
+      'message' => $force && !$stale
+        ? 'Forced clear of fresh run lock'
+        : 'Cleared stale run lock',
+      'running_age_sec' => $age,
+    ];
+  });
 }
 
 /** @return array<string, mixed> */
