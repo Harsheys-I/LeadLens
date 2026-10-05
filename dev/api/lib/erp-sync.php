@@ -16,9 +16,9 @@ const LL_ERP_SYNC_TIMEOUT = 90;
 const LL_ERP_SYNC_KEEPALIVE_TIMEOUT = 20;
 const LL_ERP_SYNC_KEEPALIVE_MAX_BYTES = 65_536;
 /** Seconds of headroom before max_execution_time when in-request chaining. */
-const LL_ERP_SYNC_CHAIN_SAFETY_BUFFER = 18;
+const LL_ERP_SYNC_CHAIN_SAFETY_BUFFER = 45;
 /** Stale running lock age (seconds) — allow takeover if a worker died. */
-// Must exceed the longest single PHP worker budget (≈222s) so keepalive cannot steal a live lock.
+// Must exceed the longest single PHP worker budget so keepalive cannot steal a live lock.
 const LL_ERP_SYNC_RUNNING_STALE_SEC = 300;
 /** Chain token TTL for fire-and-forget self-continue. */
 const LL_ERP_SYNC_CHAIN_TOKEN_TTL = 600;
@@ -2598,8 +2598,17 @@ function ll_erp_sync_audit_pool(array &$job, array $settings, int $deadline, ?in
       }
       unset($rate);
 
-      if ($active && curl_multi_select($mh, 0.5) === -1) {
-        usleep(50_000);
+      // Abort wait early when the request budget is gone (do not sit in curl_multi until OpenAI's 180s timeout —
+      // that used to overrun set_time_limit and leave a stuck lock with batches on the retry queue).
+      if ($active) {
+        $remain = $deadline - microtime(true);
+        if ($remain <= 0) {
+          $stop = 'deadline';
+          break;
+        }
+        if (curl_multi_select($mh, min(0.5, max(0.05, $remain))) === -1) {
+          usleep(50_000);
+        }
       }
     }
   } finally {
@@ -2805,8 +2814,8 @@ function ll_erp_sync_request_deadline(int $startedAt): int
   if ($maxExec <= 0) {
     $maxExec = 240;
   }
-  // Honor set_time_limit(240) used by run — use the larger of ini / 240 when unlimited is false.
-  $budget = max(30, min($maxExec, 240));
+  // Prefer Hostinger's real limit (often 480) but never schedule past set_time_limit in run().
+  $budget = max(60, min($maxExec, 420));
   return $startedAt + $budget - LL_ERP_SYNC_CHAIN_SAFETY_BUFFER;
 }
 
@@ -2971,7 +2980,11 @@ function ll_erp_sync_defer_continue_worker(): void
       @flush();
     }
     ignore_user_abort(true);
-    @set_time_limit(240);
+    $maxExec = (int) ini_get('max_execution_time');
+    if ($maxExec <= 0) {
+      $maxExec = 240;
+    }
+    @set_time_limit(max(60, min($maxExec, 420)));
     $job = ll_erp_sync_load_job();
     if (!is_array($job) || ($job['status'] ?? '') !== 'auditing') {
       return;
@@ -3067,7 +3080,12 @@ function ll_erp_sync_maybe_queue_daily_from_keepalive(string $source): ?array
  */
 function ll_erp_sync_run(array $actor, bool $forceFetch = false, bool $dryRun = false, array $opts = []): array
 {
-  @set_time_limit(240);
+  $maxExec = (int) ini_get('max_execution_time');
+  if ($maxExec <= 0) {
+    $maxExec = 240;
+  }
+  // Match request deadline budget so PHP does not hard-kill before we can self-chain.
+  @set_time_limit(max(60, min($maxExec, 420)));
   @ignore_user_abort(true);
   $cfg = ll_erp_sync_load_config();
   $autoPublishKey = (string) ($opts['auto_publish_key'] ?? 'auto_publish');
@@ -3928,6 +3946,10 @@ function ll_erp_sync_diagnose(): array
     }
     if ($status === 'auditing' && !$running && !$hasChain) {
       $hints[] = 'Status=auditing but no worker lock and no chain token — self-chain likely failed. Use Kick continue.';
+    }
+    if ($status === 'auditing' && $running && !$stale && $age !== null && $age >= 180
+      && $resultCount > 0 && count($queue) > 0) {
+      $hints[] = 'Worker lock held >3 min with a retry queue — PHP may have hung on OpenAI. Wait for stale (5 min) or Force clear lock, then Kick continue.';
     }
     if ($status === 'auditing' && !$running && $hasChain) {
       $hints[] = 'Chain token present, waiting for next continue hit. Kick continue if idle >1 min.';

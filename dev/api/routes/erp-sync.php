@@ -202,6 +202,8 @@ function ll_erp_sync_route_kick(): void
 {
   ll_require_method('POST');
   $actor = ll_erp_sync_require_actor(false);
+  // If a dead worker left a stale lock, clear it so continue can start.
+  $cleared = ll_erp_sync_clear_run_lock(false);
   try {
     $result = ll_erp_sync_continue_job($actor);
   } catch (Throwable $e) {
@@ -210,9 +212,12 @@ function ll_erp_sync_route_kick(): void
   }
   ll_ok([
     'ok' => true,
+    'lock_cleared' => !empty($cleared['cleared']),
     'kick' => $result,
     'diagnose' => ll_erp_sync_diagnose(),
-    'message' => 'Kick continue dispatched',
+    'message' => !empty($cleared['cleared'])
+      ? 'Cleared stale lock and kicked continue'
+      : 'Kick continue dispatched',
   ]);
 }
 
