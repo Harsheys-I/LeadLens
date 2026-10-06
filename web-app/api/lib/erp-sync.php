@@ -30,8 +30,9 @@ const LL_ERP_SYNC_DAILY_WINDOW_END_MIN = 6 * 60 + 45;
 /** Server audit limits (upload, daily, advanced); max batch matches the website Settings page. */
 const LL_AUDIT_UPLOAD_MAX_BATCH = 40;
 const LL_AUDIT_UPLOAD_MAX_CONCURRENCY = 50;
-const LL_AUDIT_UPLOAD_DEFAULT_BATCH = 25;
-const LL_AUDIT_UPLOAD_DEFAULT_CONCURRENCY = 8;
+/** GHA browser-style ERP audit: 20 leads per proxy call, 4 in flight. */
+const LL_AUDIT_UPLOAD_DEFAULT_BATCH = 20;
+const LL_AUDIT_UPLOAD_DEFAULT_CONCURRENCY = 4;
 /** Manual advanced /run (no self-chain) lead cap per call; self-chained workers use their full time budget. */
 const LL_ERP_SYNC_DEFAULT_LEADS_PER_RUN = 200;
 const LL_ERP_SYNC_MAX_LEADS_PER_RUN = 2000;

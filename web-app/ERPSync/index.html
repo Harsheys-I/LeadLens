@@ -7,12 +7,12 @@
   <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#0f2d22">
   <meta name="description" content="GPP AI ERP Sync">
   <title>GPP AI · ERP Sync</title>
-  <meta name="app-version" content="10.0.6.stable">
-  <script src="../theme-boot.js?v=10.0.6.stable"></script>
-  <script src="../motion.js?v=10.0.6.stable"></script>
+  <meta name="app-version" content="10.0.7.stable">
+  <script src="../theme-boot.js?v=10.0.7.stable"></script>
+  <script src="../motion.js?v=10.0.7.stable"></script>
   <link rel="manifest" href="../manifest.webmanifest">
-  <link rel="stylesheet" href="../styles.css?v=10.0.6.stable">
-  <script type="module" src="../erp-sync.js?v=10.0.6.stable"></script>
+  <link rel="stylesheet" href="../styles.css?v=10.0.7.stable">
+  <script type="module" src="../erp-sync.js?v=10.0.7.stable"></script>
 </head>
 <body>
   <div id="update-banner" class="update-banner hidden" role="status">
@@ -25,7 +25,7 @@
       <nav aria-label="ERP Sync navigation">
         <button class="nav-item active" data-view="ops" type="button"><span>🔄</span>Ops</button>
       </nav>
-      <div class="privacy-note"><strong id="sidebar-version">v10.0.6.stable</strong><span id="sidebar-notes">v10.0.6.stable: skip already-audited leads on retry — stops ghost-queue re-billing</span></div>
+      <div class="privacy-note"><strong id="sidebar-version">v10.0.7.stable</strong><span id="sidebar-notes">v10.0.7.stable: GitHub Actions audits Bucket 1 and stops when estimated cost exceeds Rs 20</span></div>
     </aside>
 
     <main>
@@ -70,7 +70,7 @@
 
         <div class="perf-upload-grid" style="margin-bottom:1.25rem">
           <div class="settings-card" id="erp-card-bucket1">
-            <div class="card-title"><h2>Bucket 1 · Lead Audit</h2><p>GHA upload → server OpenAI audit → publish</p></div>
+            <div class="card-title"><h2>Bucket 1 · Lead Audit</h2><p>GitHub Actions stages the file, audits batches of 20 with 4 in parallel, then publishes. Cost and progress come from the API upload log.</p></div>
             <div id="erp-bucket1-body" class="muted form-message" style="white-space:pre-wrap">Loading…</div>
           </div>
           <div class="settings-card" id="erp-card-perf">

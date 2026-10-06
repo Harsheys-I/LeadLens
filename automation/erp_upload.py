@@ -13,12 +13,15 @@ Environment:
   OTP_FILE                           Optional path; a code written there is used if Gmail has none (local runs)
   OTP_WAIT_SECONDS                   How long to wait for each OTP (default 120)
 """
+import hashlib
 import imaplib
 import json
 import os
 import re
 import sys
+import threading
 import time
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from datetime import datetime, timezone
 from email import message_from_bytes
 from email.utils import parsedate_to_datetime
@@ -33,6 +36,82 @@ LEADLENS = os.environ.get("LEADLENS_API", "https://ai.gurupunvaanii.com/api").rs
 OUT = Path(os.environ.get("OUT_DIR", "erp-out"))
 SHOTS = Path(os.environ.get("SHOT_DIR", "screenshots"))
 OTP_FROM = os.environ.get("OTP_FROM", "support@gurupunvaanii.com")
+AUDIT_BATCH = 20
+AUDIT_PARALLEL = 4
+COST_CAP_INR = 20.0
+COST_STOP_MESSAGE = "Stopped: estimated cost exceeded Rs 20"
+AUDIT_JS = Path(__file__).resolve().parents[1] / "web-app" / "audit.js"
+CHECKPOINT = OUT / "bucket1-audit-checkpoint.json"
+
+AI_ALLOWED = {
+    "Lead Status Not Aligned With Comments",
+    "Customer Requirement Empty",
+    "Incorrect Customer Requirement",
+    "Customer Comment Quality Not Appropriate",
+}
+LOCAL_OWNED = {
+    "Follow-up Missed",
+    "Analysis Parameter Empty",
+    "Customer Location Empty",
+    "Estimate Budget Empty",
+    "Customer Requirement Empty",
+}
+CONNECTED_ONLY = {
+    "Customer Location Empty",
+    "Customer Requirement Empty",
+    "Estimate Budget Empty",
+    "Incorrect Customer Requirement",
+    "Customer Comment Quality Not Appropriate",
+}
+ERROR_TYPES = [
+    "Lead Status Not Aligned With Comments",
+    "Follow-up Missed",
+    "Estimate Budget Empty",
+    "Customer Requirement Empty",
+    "Customer Location Empty",
+    "Analysis Parameter Empty",
+    "Incorrect Customer Requirement",
+    "Customer Comment Quality Not Appropriate",
+]
+HIGH_SEVERITY = {
+    "Follow-up Missed",
+    "Customer Requirement Empty",
+    "Customer Comment Quality Not Appropriate",
+}
+USER_AUDIT_NOTE = (
+    "Echo each id. c=full history — judge Lead Status with STATUS Rules 1–5 "
+    "(pure RNR / 5+ trailing RNR → Cold aligned; 1–4 RNR after interest → Warm; "
+    "positive no-visit → Hot; Prospect needs last-comment site visit). "
+    'Put mismatches in e as "Lead Status Not Aligned With Comments"; freeform Error: lines are ignored. '
+    "le=local errors — explain in o/r, never copy into e. Judge non-blank rq empty-vs-wrong when k=Yes; "
+    "comment quality + q; buying intent. Never emit Follow-up Missed, Budget/Location/Parameter Empty, or any TAT label. "
+    "o (18-28 words): quote facts from c only. r (20-40 words): only coach status changes when that label is in e; "
+    "NEVER recommend Status→Lost (Cold is the floor); Cold+close on ACTIVE NI; never Cold→Lost for RNRs alone under Rules 1–2; "
+    'never "set a follow-up" when n is set; for overdue n say call/proceed now.'
+)
+RESPONSE_SCHEMA = {
+    "type": "object",
+    "additionalProperties": False,
+    "required": ["a"],
+    "properties": {
+        "a": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "additionalProperties": False,
+                "required": ["id", "q", "e", "i", "o", "r"],
+                "properties": {
+                    "id": {"type": "string"},
+                    "q": {"type": "integer", "minimum": 0, "maximum": 10},
+                    "e": {"type": "array", "items": {"type": "string"}},
+                    "i": {"type": "integer", "enum": [0, 1]},
+                    "o": {"type": "string"},
+                    "r": {"type": "string"},
+                },
+            },
+        }
+    },
+}
 
 REPORTS = {
     "bucket1": ERP_BASE + "getFunction.do?actn=getreportjsondata&reportid=10000063"
@@ -64,6 +143,10 @@ KEEP_CODES = {
 
 class Fail(Exception):
     pass
+
+
+class CostCap(Fail):
+    """Bucket 1 hit the rupee cap. Checkpoint is kept; dashboards were not published."""
 
 
 def env(name: str, default: str | None = None) -> str:
@@ -314,6 +397,587 @@ def upload(endpoint: str, files: dict[str, Path], extra: dict[str, str], ok: int
     raise Fail(f"{endpoint} failed")
 
 
+def _leadlens_session() -> requests.Session:
+    session = requests.Session()
+    user, password = env("LEADLENS_USER"), env("LEADLENS_PASS")
+    resp = session.post(
+        f"{LEADLENS}/auth/login",
+        json={"username": user, "password": password},
+        timeout=60,
+    )
+    if resp.status_code >= 400:
+        raise Fail(f"auth/login failed: HTTP {resp.status_code} {resp.text[:500]}")
+    session.auth = (user, password)
+    return session
+
+
+def _auth_params() -> dict[str, str]:
+    return {"username": env("LEADLENS_USER"), "password": env("LEADLENS_PASS")}
+
+
+def _read_audit_js_const(name: str) -> str:
+    text = AUDIT_JS.read_text(encoding="utf-8")
+    marker = f"const {name} = `"
+    start = text.find(marker)
+    if start < 0:
+        raise Fail(f"Could not find {name} in {AUDIT_JS}")
+    start += len(marker)
+    end = text.find("`", start)
+    if end < 0:
+        raise Fail(f"Could not close {name} in {AUDIT_JS}")
+    return text[start:end]
+
+
+def _app_version() -> str:
+    text = AUDIT_JS.read_text(encoding="utf-8")
+    match = re.search(r'export const APP_VERSION = "([^"]+)"', text)
+    return match.group(1) if match else "10.0.7.stable"
+
+
+def _fnv_cache_key(settings: dict) -> str:
+    material = json.dumps({
+        "v": _app_version(),
+        "model": settings.get("model"),
+        "rules": settings.get("rules") or [],
+        "additionalInstructions": settings.get("additionalInstructions") or "",
+        "aiFields": [
+            {"id": f.get("id"), "enabled": f.get("enabled") is not False, "history": bool(f.get("history"))}
+            for f in (settings.get("aiFields") or [])
+            if isinstance(f, dict)
+        ],
+    }, ensure_ascii=False, separators=(",", ":"))
+    hash_value = 2166136261
+    for ch in material:
+        hash_value ^= ord(ch)
+        hash_value = (hash_value * 16777619) & 0xFFFFFFFF
+    return f"leadlens-{_app_version()}-{hash_value:x}"
+
+
+def _status_for_ai(value) -> str:
+    text = str(value or "").strip()
+    if text.lower() == "prospect":
+        return "Qualified"
+    return text
+
+
+def _build_model_input(leads: list) -> list:
+    out = []
+    for lead in leads:
+        ctx = {"id": lead.get("leadId"), **(lead.get("auditContext") or {})}
+        if "s" in ctx:
+            ctx["s"] = _status_for_ai(ctx.get("s"))
+        day = ctx.get("day")
+        if isinstance(day, list):
+            ctx["day"] = [
+                {**snap, "s": _status_for_ai(snap.get("s"))} if isinstance(snap, dict) else snap
+                for snap in day
+            ]
+        ordered = {"id": ctx.pop("id")}
+        ordered.update(ctx)
+        out.append(ordered)
+    return out
+
+
+def _build_prompt(settings: dict) -> str:
+    rules = []
+    rule_no = 0
+    for rule in settings.get("rules") or []:
+        if not isinstance(rule, dict):
+            continue
+        instruction = str(rule.get("instruction") or "").strip()
+        if not instruction:
+            continue
+        rule_no += 1
+        field = str(rule.get("field") or "check").strip() or "check"
+        errors = [p.strip() for p in re.split(r"\s*\|\s*", str(rule.get("errors") or "")) if p.strip()]
+        line = f"{rule_no}. {field}: {instruction}"
+        if errors:
+            line += " errors:" + " | ".join(errors)
+        rules.append(line)
+    extra = str(settings.get("additionalInstructions") or "").strip()
+    handbook = _read_audit_js_const("CACHE_HANDBOOK")
+    legend = " | ".join(sorted(AI_ALLOWED, key=lambda label: [
+        "Lead Status Not Aligned With Comments",
+        "Customer Requirement Empty",
+        "Incorrect Customer Requirement",
+        "Customer Comment Quality Not Appropriate",
+    ].index(label)))
+    body = f"{handbook}\n\nALLOWED ERROR TYPES: {legend}\n\nRUN CHECKS:\n{chr(10).join(rules) or 'none'}"
+    if extra:
+        body += f"\n\nEXTRA:\n{extra}"
+    return body
+
+
+def _needs_max_completion_tokens(model: str) -> bool:
+    ident = (model or "").strip().lower()
+    if not ident or "gpt-5-chat" in ident:
+        return False
+    return bool(re.search(r"(^|[^a-z])(gpt-5|o1|o3|o4)([.-]|$)", ident) or re.match(r"^o[134]", ident))
+
+
+def build_audit_chat_body(settings: dict, leads: list) -> dict:
+    """Same chat body as audit.js requestAudit / auditBatch."""
+    model = str(settings.get("model") or "gpt-4o-mini")
+    max_tokens = max(500, len(leads) * 140)
+    model_input = _build_model_input(leads)
+    user = (
+        f"Audit {len(leads)} call(s). {USER_AUDIT_NOTE}\n"
+        + json.dumps({"L": model_input}, ensure_ascii=False, separators=(",", ":"))
+    )
+    body: dict = {
+        "model": model,
+        "messages": [
+            {"role": "system", "content": _build_prompt(settings)},
+            {"role": "user", "content": user},
+        ],
+        "prompt_cache_key": _fnv_cache_key(settings),
+        "response_format": {
+            "type": "json_schema",
+            "json_schema": {"name": "ll_audit", "strict": True, "schema": RESPONSE_SCHEMA},
+        },
+    }
+    if _needs_max_completion_tokens(model):
+        body["max_completion_tokens"] = max_tokens
+    else:
+        body["max_tokens"] = max_tokens
+        body["temperature"] = 0
+    return body
+
+
+def _clip_words(text: str, max_words: int) -> str:
+    words = str(text or "").split()
+    return " ".join(words[:max_words])
+
+
+def _merge_audited_row(lead: dict, ai: dict) -> dict:
+    static = dict(lead.get("staticValues") or {})
+    connected = str(static.get("connected") or "") == "Yes"
+    ai_errors = []
+    for label in ai.get("e") or []:
+        label = str(label).strip()
+        if label in AI_ALLOWED:
+            ai_errors.append(label)
+    if not connected:
+        ai_errors = [label for label in ai_errors if label not in CONNECTED_ONLY]
+    local_raw = lead.get("localErrors")
+    if not isinstance(local_raw, list):
+        local_raw = lead.get("deterministicErrors") or []
+    local = [str(label) for label in local_raw if str(label) in LOCAL_OWNED]
+    if not connected:
+        local = [label for label in local if label not in CONNECTED_ONLY]
+    merged = []
+    for label in [*local, *ai_errors]:
+        if label in ERROR_TYPES and label not in merged:
+            merged.append(label)
+    if "Customer Requirement Empty" in merged:
+        merged = [label for label in merged if label != "Incorrect Customer Requirement"]
+    intent_raw = ai.get("i")
+    intent = "Yes" if intent_raw in (1, "1", "Yes", "yes") else "No"
+    try:
+        quality = int(ai.get("q") if ai.get("q") is not None else 0)
+    except (TypeError, ValueError):
+        quality = 0
+    quality = max(0, min(10, quality))
+    severity = "NONE" if not merged else ("HIGH" if any(label in HIGH_SEVERITY for label in merged) else "MEDIUM")
+    overdue = static.get("overdue", "")
+    return {
+        **static,
+        "overdue": overdue,
+        "commentQuality": quality,
+        "errorTypes": ", ".join(merged) if merged else "None",
+        "errorSeverity": severity,
+        "buyingIntent": intent,
+        "observation": _clip_words(ai.get("o") or "", 28),
+        "recommendation": _clip_words(ai.get("r") or "", 40),
+    }
+
+
+def _openai_chat(session: requests.Session, body: dict) -> dict:
+    last = ""
+    for attempt in range(1, 4):
+        resp = session.post(
+            f"{LEADLENS}/openai/chat/completions",
+            json=body,
+            headers={"Accept": "application/json"},
+            timeout=180,
+        )
+        if resp.status_code == 429:
+            log("OpenAI proxy 429. Waiting 30s then retrying…")
+            time.sleep(30)
+            continue
+        if resp.status_code >= 400:
+            last = f"HTTP {resp.status_code} {resp.text[:800]}"
+            log(f"OpenAI proxy attempt {attempt} failed: {last}")
+            if attempt >= 3:
+                break
+            time.sleep(attempt * 1.5)
+            continue
+        data = resp.json()
+        content = (((data.get("choices") or [{}])[0].get("message") or {}).get("content"))
+        if not content:
+            last = "OpenAI returned no audit content"
+            if attempt >= 3:
+                break
+            time.sleep(attempt * 1.5)
+            continue
+        parsed = json.loads(content)
+        if not isinstance(parsed.get("a"), list):
+            raise Fail("OpenAI response did not contain results array")
+        usage = data.get("usage") or {}
+        details = usage.get("prompt_tokens_details") or usage.get("input_tokens_details") or {}
+        return {
+            "a": parsed["a"],
+            "usage": {
+                "input": int(usage.get("prompt_tokens") or usage.get("input_tokens") or 0),
+                "cached": int(details.get("cached_tokens") or 0),
+                "output": int(usage.get("completion_tokens") or usage.get("output_tokens") or 0),
+            },
+        }
+    raise Fail(f"OpenAI proxy failed: {last}")
+
+
+def _audit_slice(session: requests.Session, settings: dict, leads: list) -> tuple[list, dict]:
+    def once(batch: list) -> tuple[list, dict]:
+        payload = _openai_chat(session, build_audit_chat_body(settings, batch))
+        by_id = {}
+        for item in payload["a"]:
+            if isinstance(item, dict) and item.get("id") is not None:
+                by_id[str(item["id"]).strip()] = item
+        return by_id, payload["usage"]
+
+    by_id, usage = once(leads)
+    missing = [lead for lead in leads if str(lead.get("leadId") or "").strip() not in by_id]
+    if missing:
+        log(f"Model omitted {len(missing)} lead(s); retrying only those leads.")
+        recovered, extra = once(missing)
+        for key, item in recovered.items():
+            by_id[key] = item
+        usage = {k: usage[k] + extra[k] for k in usage}
+        missing = [lead for lead in leads if str(lead.get("leadId") or "").strip() not in by_id]
+    if missing:
+        raise Fail(f"OpenAI still omitted {len(missing)} lead(s). Checkpoint is safe; retry the job.")
+    rows = []
+    for lead in leads:
+        rows.append(_merge_audited_row(lead, by_id[str(lead.get("leadId") or "").strip()]))
+    return rows, usage
+
+
+def _pricing_from_settings(settings: dict) -> dict[str, float]:
+    """₹/1M tokens from Settings, same fields as ll_erp_sync_audit_pricing."""
+    raw = settings.get("pricing") if isinstance(settings.get("pricing"), dict) else {}
+    return {
+        "input": float(raw.get("input") or 0),
+        "cached": float(raw.get("cached") or 0),
+        "output": float(raw.get("output") or 0),
+    }
+
+
+def _estimate_cost(usage: dict, pricing: dict[str, float]) -> float:
+    """Same ₹ formula as ll_erp_sync_estimate_cost / the Run console."""
+    incoming = float(usage.get("input") or 0)
+    cached = float(usage.get("cached") or 0)
+    output = float(usage.get("output") or 0)
+    billable = max(0.0, incoming - cached)
+    return max(
+        0.0,
+        billable * pricing["input"] / 1e6
+        + cached * pricing["cached"] / 1e6
+        + output * pricing["output"] / 1e6,
+    )
+
+
+def _checkpoint_load(file_hash: str) -> dict | None:
+    if not CHECKPOINT.exists():
+        return None
+    try:
+        data = json.loads(CHECKPOINT.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return None
+    if data.get("file_sha256") != file_hash:
+        return None
+    return data
+
+
+def _checkpoint_save_local(data: dict) -> None:
+    CHECKPOINT.parent.mkdir(parents=True, exist_ok=True)
+    tmp = CHECKPOINT.with_suffix(".json.tmp")
+    tmp.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+    tmp.replace(CHECKPOINT)
+
+
+def _checkpoint_push(session: requests.Session, data: dict) -> None:
+    """Keep resume state on the server. A midnight runner disk does not survive the job."""
+    sha = str(data.get("file_sha256") or "")
+    try:
+        resp = session.post(
+            f"{LEADLENS}/audit/checkpoint",
+            json={**_auth_params(), "file_sha256": sha, "checkpoint": data},
+            timeout=180,
+        )
+    except requests.RequestException as exc:
+        log(f"audit/checkpoint store failed: {exc}")
+        return
+    if resp.status_code >= 400:
+        log(f"audit/checkpoint store failed: HTTP {resp.status_code} {resp.text[:400]}")
+        return
+    log("audit/checkpoint stored")
+
+
+def _checkpoint_save(session: requests.Session | None, data: dict) -> None:
+    _checkpoint_save_local(data)
+    if session is not None:
+        _checkpoint_push(session, data)
+
+
+def _checkpoint_fetch(session: requests.Session, file_hash: str) -> dict | None:
+    try:
+        resp = session.get(
+            f"{LEADLENS}/audit/checkpoint",
+            params={"sha256": file_hash, **_auth_params()},
+            timeout=120,
+        )
+    except requests.RequestException as exc:
+        log(f"audit/checkpoint fetch failed: {exc}")
+        return None
+    if resp.status_code == 404:
+        return None
+    if resp.status_code >= 400:
+        log(f"audit/checkpoint fetch failed: HTTP {resp.status_code} {resp.text[:400]}")
+        return None
+    data = (resp.json() or {}).get("checkpoint")
+    if not isinstance(data, dict) or data.get("file_sha256") != file_hash:
+        return None
+    return data
+
+
+def _checkpoint_resolve(session: requests.Session, file_hash: str) -> dict | None:
+    local = _checkpoint_load(file_hash)
+    remote = _checkpoint_fetch(session, file_hash)
+
+    def score(data: dict | None) -> int:
+        if not data:
+            return -1
+        return len(data.get("done") or {})
+
+    if score(remote) > score(local):
+        log("Using server audit checkpoint (more slices than the local file)")
+        _checkpoint_save_local(remote)
+        return remote
+    return local
+
+
+def _record_cost_stop(session: requests.Session, saved: dict, pricing: dict[str, float]) -> None:
+    usage = saved.get("usage") or {}
+    done = saved.get("done") or {}
+    audited = sum(len(v) for v in done.values() if isinstance(v, list))
+    elapsed = max(0, int(time.time() - float(saved.get("started_at") or time.time())))
+    cost = _estimate_cost(usage, pricing)
+    saved["stopped"] = COST_STOP_MESSAGE
+    saved["estimated_cost"] = cost
+    _checkpoint_save(session, saved)
+    body = {
+        **_auth_params(),
+        "stage_id": saved.get("stage_id"),
+        "message": COST_STOP_MESSAGE,
+        "usage": usage,
+        "elapsed_seconds": elapsed,
+        "audited": audited,
+    }
+    try:
+        resp = session.post(f"{LEADLENS}/audit/stop-log", json=body, timeout=60)
+    except requests.RequestException as exc:
+        log(f"{COST_STOP_MESSAGE} (upload log request failed: {exc}; estimated Rs {cost:.4f})")
+        return
+    if resp.status_code >= 400:
+        log(f"{COST_STOP_MESSAGE} (upload log HTTP {resp.status_code} {resp.text[:400]}; estimated Rs {cost:.4f})")
+        return
+    log(f"{COST_STOP_MESSAGE} · estimated Rs {cost:.4f} · audited {audited} · checkpoint kept")
+
+
+def _fetch_stage_slice(session: requests.Session, stage_id: str, offset: int) -> list:
+    resp = session.get(
+        f"{LEADLENS}/audit/stage",
+        params={"id": stage_id, "offset": offset, "limit": AUDIT_BATCH, **_auth_params()},
+        timeout=120,
+    )
+    if resp.status_code >= 400:
+        raise Fail(f"audit/stage GET failed: HTTP {resp.status_code} {resp.text[:800]}")
+    body = resp.json()
+    leads = body.get("leads")
+    if not isinstance(leads, list):
+        raise Fail("audit/stage GET did not return leads")
+    return leads
+
+
+def _fetch_audit_settings(session: requests.Session) -> dict:
+    resp = session.get(f"{LEADLENS}/settings/audit", timeout=60)
+    if resp.status_code >= 400:
+        raise Fail(f"settings/audit failed: HTTP {resp.status_code} {resp.text[:500]}")
+    settings = (resp.json() or {}).get("settings") or {}
+    if not isinstance(settings, dict):
+        settings = {}
+    return settings
+
+
+def _post_stage(path: Path) -> dict:
+    """POST audit/stage. Accept any 2xx — the route may answer 200 or 201."""
+    data = {**_auth_params()}
+    last = ""
+    for attempt in (1, 2):
+        handle = path.open("rb")
+        try:
+            resp = requests.post(
+                f"{LEADLENS}/audit/stage",
+                data=data,
+                files={"file": (path.name, handle, "application/json")},
+                timeout=600,
+            )
+        finally:
+            handle.close()
+        log(f"audit/stage: HTTP {resp.status_code}")
+        if 200 <= resp.status_code < 300:
+            return resp.json()
+        last = f"HTTP {resp.status_code} {resp.text[:1000]}"
+        if attempt == 2 or resp.status_code in (400, 401, 403, 413):
+            break
+        time.sleep(60 if resp.status_code == 409 else 20)
+    raise Fail(f"audit/stage failed: {last}")
+
+
+def _audit_complete(lead_count: int, done: dict) -> bool:
+    if lead_count <= 0:
+        return True
+    return all(str(offset) in done for offset in range(0, lead_count, AUDIT_BATCH))
+
+
+def audit_bucket1(path: Path) -> dict:
+    """Stage the ERP file, audit slices of 20 with 4 in flight, then publish."""
+    file_hash = hashlib.sha256(path.read_bytes()).hexdigest()
+    session = _leadlens_session()
+    settings = _fetch_audit_settings(session)
+    pricing = _pricing_from_settings(settings)
+    log(
+        "Audit pricing ₹/1M "
+        f"input={pricing['input']} cached={pricing['cached']} output={pricing['output']} "
+        f"(stop at Rs {COST_CAP_INR:.0f})"
+    )
+    saved = _checkpoint_resolve(session, file_hash)
+    stage_id = str((saved or {}).get("stage_id") or "")
+    if stage_id:
+        try:
+            _fetch_stage_slice(session, stage_id, 0)
+            log(f"Resuming Bucket 1 audit stage {stage_id}")
+        except Fail as exc:
+            log(f"Checkpoint stage not usable ({exc}); staging again")
+            stage_id = ""
+            saved = None
+    if not stage_id:
+        staged = _post_stage(path)
+        if staged.get("ok") is False:
+            raise Fail(f"audit/stage failed: {staged}")
+        stage_id = str(staged.get("stage_id") or "")
+        if not stage_id:
+            raise Fail(f"audit/stage returned no stage_id: {staged}")
+        lead_count = int(staged.get("lead_count") or 0)
+        saved = {
+            "file_sha256": file_hash,
+            "stage_id": stage_id,
+            "source_file": staged.get("source_file") or path.name,
+            "lead_count": lead_count,
+            "done": {},
+            "usage": {"input": 0, "cached": 0, "output": 0},
+            "started_at": time.time(),
+        }
+        _checkpoint_save(session, saved)
+        log(f"Bucket 1 staged: stage_id={stage_id} lead_count={lead_count} "
+            f"batch={AUDIT_BATCH} parallel={AUDIT_PARALLEL}")
+    lead_count = int(saved.get("lead_count") or 0)
+    done: dict = saved.setdefault("done", {})
+    usage = saved.setdefault("usage", {"input": 0, "cached": 0, "output": 0})
+    lock = threading.Lock()
+    pending = [n for n in range(0, lead_count, AUDIT_BATCH) if str(n) not in done]
+    stopped_for_cost = False
+
+    def over_cap() -> bool:
+        return _estimate_cost(usage, pricing) >= COST_CAP_INR
+
+    if pending and over_cap():
+        log(f"{COST_STOP_MESSAGE} before launching more calls "
+            f"(estimated Rs {_estimate_cost(usage, pricing):.4f})")
+        _record_cost_stop(session, saved, pricing)
+        raise CostCap(COST_STOP_MESSAGE)
+
+    def work(offset: int) -> None:
+        worker = requests.Session()
+        worker.cookies.update(session.cookies)
+        worker.auth = session.auth
+        leads = _fetch_stage_slice(worker, stage_id, offset)
+        if not leads:
+            with lock:
+                done[str(offset)] = []
+                _checkpoint_save_local(saved)
+            return
+        rows, slice_usage = _audit_slice(worker, settings, leads)
+        with lock:
+            done[str(offset)] = rows
+            for key in ("input", "cached", "output"):
+                usage[key] = int(usage.get(key) or 0) + int(slice_usage.get(key) or 0)
+            finished = sum(len(v) for v in done.values())
+            cost = _estimate_cost(usage, pricing)
+            _checkpoint_save_local(saved)
+            log(f"Audited {finished}/{lead_count} (offset {offset}, {len(rows)} leads) "
+                f"est. Rs {cost:.4f}")
+
+    if pending:
+        workers = min(AUDIT_PARALLEL, len(pending))
+        inflight: dict = {}
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            def fill() -> None:
+                while pending and len(inflight) < workers and not stopped_for_cost:
+                    offset = pending.pop(0)
+                    inflight[pool.submit(work, offset)] = offset
+
+            fill()
+            while inflight:
+                finished, _ = wait(set(inflight), return_when=FIRST_COMPLETED)
+                for future in finished:
+                    inflight.pop(future)
+                    future.result()
+                _checkpoint_push(session, saved)
+                cost = _estimate_cost(usage, pricing)
+                if not stopped_for_cost and cost >= COST_CAP_INR:
+                    stopped_for_cost = True
+                    log(f"{COST_STOP_MESSAGE} (estimated Rs {cost:.4f}). "
+                        f"In-flight batches will finish; no further OpenAI calls.")
+                if not stopped_for_cost:
+                    fill()
+
+    if not _audit_complete(lead_count, done):
+        _record_cost_stop(session, saved, pricing)
+        raise CostCap(COST_STOP_MESSAGE)
+
+    results: list = []
+    for offset in range(0, lead_count, AUDIT_BATCH):
+        results.extend(done.get(str(offset)) or [])
+    elapsed = max(0, int(time.time() - float(saved.get("started_at") or time.time())))
+    publish_body = {
+        **_auth_params(),
+        "stage_id": stage_id,
+        "results": results,
+        "usage": usage,
+        "elapsed_seconds": elapsed,
+    }
+    resp = session.post(f"{LEADLENS}/audit/publish-results", json=publish_body, timeout=300)
+    log(f"audit/publish-results: HTTP {resp.status_code}")
+    if resp.status_code >= 400:
+        raise Fail(f"audit/publish-results failed: HTTP {resp.status_code} {resp.text[:1000]}")
+    published = resp.json()
+    log(f"Bucket 1 published: leads={len(results)} elapsed={elapsed}s "
+        f"tokens in={usage.get('input')} cached={usage.get('cached')} out={usage.get('output')} "
+        f"est. Rs {_estimate_cost(usage, pricing):.4f}")
+    return published
+
+
 def kick_audit_continue(chain_token: str, continue_url: str | None = None) -> None:
     """Start the server audit worker. Hostinger fire-and-forget after upload is unreliable."""
     urls = []
@@ -406,16 +1070,15 @@ def main() -> int:
             log(f"WARNING (sales skipped): {sales_error}")
         return 0
 
+    bucket1_stopped: str | None = None
     if "bucket1" in jobs:
-        r = upload("audit/upload", {"file": files["bucket1"]},
-                   {"batch_size": "25", "concurrency": "8"}, ok=202, busy_wait=180)
-        log(f"Bucket 1 started: lead_count={r.get('lead_count')} batch_size={r.get('batch_size')} "
-            f"concurrency={r.get('concurrency')}")
-        token = str(r.get("chain_token") or "").strip()
-        if token:
-            kick_audit_continue(token, str(r.get("continue_url") or "") or None)
-        else:
-            log("WARNING: upload response had no chain_token — Kick continue from ERP Sync if audit stays at 0")
+        try:
+            audit_bucket1(files["bucket1"])
+        except CostCap as exc:
+            # Performance and Sales still run. The process exits non-zero afterwards
+            # so a cost stop is not mistaken for a full dashboard publish.
+            bucket1_stopped = str(exc)
+            log(f"FAILED: {exc}")
     if "perf" in jobs:
         r = upload("perf-dashboards/upload", {"master": files["master"], "history": files["history"]},
                    {}, ok=201, busy_wait=60)
@@ -435,9 +1098,10 @@ def main() -> int:
         log(f"Sales Graph published: id={pub.get('id')} title={pub.get('title')!r} "
             f"prior_deleted={pub.get('prior_deleted')}")
     if sales_error:
-        # Fail hard only when sales was the sole requested job; otherwise bucket1/perf already ran.
         log(f"WARNING (sales skipped): {sales_error}")
-        return 1 if not jobs else 0
+    if bucket1_stopped:
+        log(f"FAILED: {bucket1_stopped}")
+        return 1
     return 0
 
 
