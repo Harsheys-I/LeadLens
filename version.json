@@ -1,5 +1,5 @@
 {
-  "version": "10.0.5.stable",
+  "version": "10.0.7.stable",
   "name": "GPP AI",
-  "notes": "v10.0.5.stable: Auto-heal mid-run stalls — if audited stops increasing for 90s, force-clear hung lock and Kick continue."
+  "notes": "v10.0.7.stable: GitHub Actions audits Bucket 1 and stops when estimated cost exceeds Rs 20."
 }

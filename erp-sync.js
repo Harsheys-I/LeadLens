@@ -10,6 +10,10 @@ import {initTheme} from './theme.js?v=10.0.0.stable';
 
 const $ = (id) => document.getElementById(id);
 
+/** GitHub Actions Bucket 1 audit: leads per OpenAI call, and calls in flight. */
+const GHA_AUDIT_BATCH = 20;
+const GHA_AUDIT_PARALLEL = 4;
+
 let pollTimer = 0;
 let busy = false;
 
@@ -119,6 +123,9 @@ function renderApiUploads(rows) {
     const progress = kind !== 'performance' && kind !== 'sales' && status === 'auditing' && total
       ? ` ${audited}/${total}`
       : '';
+    const batch = Number(row.batch_size) || (kind === 'bucket1' || !row.kind ? GHA_AUDIT_BATCH : 0);
+    const parallel = Number(row.concurrency) || (kind === 'bucket1' || !row.kind ? GHA_AUDIT_PARALLEL : 0);
+    const usage = row.usage || {};
     const bits = [
       formatIst(row.started_at),
       label,
@@ -127,6 +134,12 @@ function renderApiUploads(rows) {
       `${Number(row.row_count || 0)} rows`,
       row.uploaded_by ? `by ${row.uploaded_by}` : '',
       status + progress,
+      batch && parallel ? `batch ${batch} · parallel ${parallel}` : '',
+      usage.input || usage.output
+        ? `tokens in ${Number(usage.input || 0).toLocaleString()} · cached ${Number(usage.cached || 0).toLocaleString()} · out ${Number(usage.output || 0).toLocaleString()}`
+        : '',
+      row.estimated_cost != null && row.estimated_cost !== '' ? `cost ${formatCost(row.estimated_cost)}` : '',
+      row.elapsed_seconds != null && row.elapsed_seconds !== '' ? `elapsed ${formatElapsed(row.elapsed_seconds)}` : '',
       row.throttle?.slowed ? `slowed: ${throttleNote(row.throttle)}` : ''
     ].filter(Boolean);
     line.textContent = bits.join(' · ');
@@ -152,10 +165,27 @@ function paintBucket1(status) {
   const upload = pickUpload(status.api_uploads, ['bucket1']);
   const lines = [];
   lines.push(`Next scheduled: ${next?.label || next?.at_ist || '—'}`);
+  lines.push(`Audit defaults: batch ${GHA_AUDIT_BATCH} · parallel ${GHA_AUDIT_PARALLEL}`);
   if (gha.latest) {
     lines.push(`GHA: ${gha.latest.conclusion || gha.latest.status} · ${formatIst(gha.latest.updated_at || gha.latest.created_at)}`);
   }
-  if (prog.running || prog.status === 'auditing') {
+  const uploadHasRun = upload && (
+    upload.usage || upload.estimated_cost != null || upload.elapsed_seconds != null || upload.audited != null
+  );
+  if (uploadHasRun && !(prog.running && Number(prog.audited || 0) > 0 && !upload.usage)) {
+    const done = Number(upload.audited ?? 0);
+    const total = Number(upload.lead_count || 0);
+    const batch = Number(upload.batch_size) || GHA_AUDIT_BATCH;
+    const parallel = Number(upload.concurrency) || GHA_AUDIT_PARALLEL;
+    lines.push(`Upload log: ${upload.status || '—'} · ${done.toLocaleString()}/${total ? total.toLocaleString() : '…'} · ${upload.source_file || ''}`);
+    lines.push(`Batch ${batch} · parallel ${parallel}`);
+    if (upload.started_at) lines.push(`Started: ${formatIst(upload.started_at)}`);
+    const u = upload.usage || {};
+    lines.push(`Tokens: in ${Number(u.input || 0).toLocaleString()} · cached ${Number(u.cached || 0).toLocaleString()} · out ${Number(u.output || 0).toLocaleString()}`);
+    lines.push(`Elapsed: ${formatElapsed(upload.elapsed_seconds)} · Est. cost: ${formatCost(upload.estimated_cost)}`);
+    if (upload.published_at) lines.push(`Published: ${formatIst(upload.published_at)}`);
+    if (upload.error) lines.push(`Error: ${upload.error}`);
+  } else if (prog.running || prog.status === 'auditing') {
     const done = Number(prog.audited ?? job.audited ?? 0);
     const total = Number(prog.total ?? job.total ?? 0);
     lines.push(`Audit: ${done.toLocaleString()}/${total ? total.toLocaleString() : '…'} (${prog.status})`);
@@ -486,7 +516,7 @@ function readSidebarCollapsedPref() {
 async function bootErpSync() {
   initTheme();
   const ver = $('sidebar-version');
-  if (ver) ver.textContent = 'v10.0.5.stable';
+  if (ver) ver.textContent = 'v10.0.7.stable';
 
   const user = await requireAuth({loginPath: homePath()});
   if (!user) return;
