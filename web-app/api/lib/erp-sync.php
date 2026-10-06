@@ -2329,6 +2329,68 @@ function ll_erp_sync_with_job_lock(callable $fn): mixed
 }
 
 /**
+ * Indices in $idx that do not yet have a saved audit result.
+ * @param array<string, mixed> $job
+ * @param list<int|string> $idx
+ * @return list<int>
+ */
+function ll_erp_sync_pending_lead_indices(array $job, array $idx): array
+{
+  $results = is_array($job['results'] ?? null) ? $job['results'] : [];
+  $out = [];
+  foreach ($idx as $i) {
+    $i = (int) $i;
+    if ($i < 0) {
+      continue;
+    }
+    if (!isset($results[$i]) || !is_array($results[$i])) {
+      $out[] = $i;
+    }
+  }
+  return $out;
+}
+
+/**
+ * Drop queue batches that only contain already-audited leads; shrink mixed batches.
+ * @param array<string, mixed> $job
+ */
+function ll_erp_sync_prune_done_queue(array &$job): void
+{
+  $queue = is_array($job['queue'] ?? null) ? $job['queue'] : [];
+  $kept = [];
+  foreach ($queue as $item) {
+    if (!is_array($item)) {
+      continue;
+    }
+    $idx = ll_erp_sync_pending_lead_indices($job, is_array($item['idx'] ?? null) ? $item['idx'] : []);
+    if (!$idx) {
+      continue;
+    }
+    $item['idx'] = $idx;
+    $kept[] = $item;
+  }
+  $job['queue'] = array_values($kept);
+}
+
+/**
+ * How many leads still need an audit result.
+ * @param array<string, mixed> $job
+ */
+function ll_erp_sync_pending_lead_count(array $job): int
+{
+  $leads = is_array($job['leads'] ?? null) ? $job['leads'] : [];
+  $total = count($leads);
+  $results = is_array($job['results'] ?? null) ? $job['results'] : [];
+  $done = 0;
+  for ($i = 0; $i < $total; $i++) {
+    if (isset($results[$i]) && is_array($results[$i])) {
+      $done++;
+    }
+  }
+  return max(0, $total - $done);
+}
+
+/**
  * Save progress; in-flight batches are stored as queued so a dead worker's batches re-run.
  * Returns false (and marks $job cancelled) when the user stopped the audit, or when another
  * worker superseded this one (running_token mismatch).
@@ -2359,7 +2421,21 @@ function ll_erp_sync_pool_checkpoint(array &$job, array $inFlight, string $owner
     $audited = isset($job['results']) && is_array($job['results']) ? count($job['results']) : 0;
     $prevAudited = (int) ($job['progress_audited'] ?? $latest['progress_audited'] ?? -1);
     $snap = $job;
-    $snap['queue'] = array_merge($inFlight, is_array($job['queue'] ?? null) ? $job['queue'] : []);
+    // Only re-queue indices that are still missing results (never re-bill completed leads).
+    $pendingFlight = [];
+    foreach ($inFlight as $item) {
+      if (!is_array($item)) {
+        continue;
+      }
+      $idx = ll_erp_sync_pending_lead_indices($snap, is_array($item['idx'] ?? null) ? $item['idx'] : []);
+      if (!$idx) {
+        continue;
+      }
+      $item['idx'] = $idx;
+      $pendingFlight[] = $item;
+    }
+    $snap['queue'] = array_merge($pendingFlight, is_array($job['queue'] ?? null) ? $job['queue'] : []);
+    ll_erp_sync_prune_done_queue($snap);
     if ($audited !== $prevAudited) {
       $snap['progress_audited'] = $audited;
       $snap['progress_at'] = time();
@@ -2413,8 +2489,13 @@ function ll_erp_sync_audit_pool(array &$job, array $settings, int $deadline, ?in
   $error = null;
   $lastCheckpoint = microtime(true);
   $mh = curl_multi_init();
+  ll_erp_sync_prune_done_queue($job);
 
   $finishLead = static function (int $idx, ?array $ai, bool $fallback, string $note = '') use (&$job, $leads): void {
+    // Keep the first saved result — never re-bill or overwrite a completed lead.
+    if (isset($job['results'][$idx]) && is_array($job['results'][$idx])) {
+      return;
+    }
     $row = ll_erp_sync_apply_ai_to_lead($leads[$idx], $ai, $fallback);
     if ($note !== '') {
       $row['observation'] = 'Server audit could not get a model answer for this lead (' . $note . ') — local checks only.';
@@ -2425,15 +2506,26 @@ function ll_erp_sync_audit_pool(array &$job, array $settings, int $deadline, ?in
     $job['progress_at'] = time();
   };
   $requeue = static function (array $item, float $at) use (&$job): void {
+    $idx = ll_erp_sync_pending_lead_indices($job, is_array($item['idx'] ?? null) ? $item['idx'] : []);
+    if (!$idx) {
+      return;
+    }
+    $item['idx'] = $idx;
     $item['tries'] = (int) ($item['tries'] ?? 0) + 1;
     $item['at'] = $at;
     $item['mark'] = $item['mark'] ?? (int) $job['rate']['ok'];
     $job['queue'][] = $item;
   };
   $split = static function (array $item) use (&$job): void {
-    $half = (int) ceil(count($item['idx']) / 2);
-    foreach ([array_slice($item['idx'], 0, $half), array_slice($item['idx'], $half)] as $part) {
-      $job['queue'][] = ['idx' => $part, 'tries' => 0, 'at' => 0.0, 'rec' => !empty($item['rec'])];
+    $idx = ll_erp_sync_pending_lead_indices($job, is_array($item['idx'] ?? null) ? $item['idx'] : []);
+    if (!$idx) {
+      return;
+    }
+    $half = (int) ceil(count($idx) / 2);
+    foreach ([array_slice($idx, 0, $half), array_slice($idx, $half)] as $part) {
+      if ($part) {
+        $job['queue'][] = ['idx' => $part, 'tries' => 0, 'at' => 0.0, 'rec' => !empty($item['rec'])];
+      }
     }
   };
   $inFlightItems = static function () use (&$active): array {
@@ -2452,6 +2544,16 @@ function ll_erp_sync_audit_pool(array &$job, array $settings, int $deadline, ?in
       }
       if ($now >= $deadline) {
         $stop = 'deadline';
+        break;
+      }
+      // Skip leads already saved in results before deciding whether work remains.
+      while ($job['cursor'] < $total && isset($job['results'][$job['cursor']]) && is_array($job['results'][$job['cursor']])) {
+        $job['cursor']++;
+      }
+      $pendingLeft = ll_erp_sync_pending_lead_count($job);
+      if ($pendingLeft === 0 && !$active) {
+        $job['queue'] = [];
+        $stop = 'done';
         break;
       }
       $freshLeft = $job['cursor'] < $total && ($maxNew === null || $newSent < $maxNew);
@@ -2474,17 +2576,33 @@ function ll_erp_sync_audit_pool(array &$job, array $settings, int $deadline, ?in
           }
         }
         if ($item === null && $job['cursor'] < $total && ($maxNew === null || $newSent < $maxNew)) {
+          while ($job['cursor'] < $total && isset($job['results'][$job['cursor']]) && is_array($job['results'][$job['cursor']])) {
+            $job['cursor']++;
+          }
+          if ($job['cursor'] >= $total) {
+            break;
+          }
           $take = min($rate['batch'], $total - $job['cursor']);
           if ($maxNew !== null) {
             $take = min($take, $maxNew - $newSent);
           }
-          $item = ['idx' => range($job['cursor'], $job['cursor'] + $take - 1), 'tries' => 0, 'at' => 0.0, 'rec' => false];
+          $rawIdx = range($job['cursor'], $job['cursor'] + $take - 1);
           $job['cursor'] += $take;
           $newSent += $take;
+          $pendingIdx = ll_erp_sync_pending_lead_indices($job, $rawIdx);
+          if (!$pendingIdx) {
+            continue;
+          }
+          $item = ['idx' => $pendingIdx, 'tries' => 0, 'at' => 0.0, 'rec' => false];
         }
         if ($item === null) {
           break;
         }
+        $pendingIdx = ll_erp_sync_pending_lead_indices($job, is_array($item['idx'] ?? null) ? $item['idx'] : []);
+        if (!$pendingIdx) {
+          continue;
+        }
+        $item['idx'] = $pendingIdx;
         $prepared = ll_erp_sync_audit_batch_prepare(array_map(static fn ($i) => $leads[$i], $item['idx']), $settings);
         $payload = json_encode($prepared['body'], JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE);
         if ($payload === false) {
@@ -2652,8 +2770,14 @@ function ll_erp_sync_audit_pool(array &$job, array $settings, int $deadline, ?in
     foreach ($active as $slot) {
       curl_multi_remove_handle($mh, $slot['ch']);
       curl_close($slot['ch']);
-      array_unshift($job['queue'], $slot['item']);
+      $item = $slot['item'];
+      $idx = ll_erp_sync_pending_lead_indices($job, is_array($item['idx'] ?? null) ? $item['idx'] : []);
+      if ($idx) {
+        $item['idx'] = $idx;
+        array_unshift($job['queue'], $item);
+      }
     }
+    ll_erp_sync_prune_done_queue($job);
     curl_multi_close($mh);
   }
   return $error !== null ? ['stop' => $stop ?? 'fatal', 'error' => $error] : ['stop' => $stop ?? 'deadline'];
@@ -4054,6 +4178,13 @@ function ll_erp_sync_diagnose(): array
 
     $leadCount = (int) ($job['lead_count'] ?? (isset($job['leads']) && is_array($job['leads']) ? count($job['leads']) : 0));
     $resultCount = isset($job['results']) && is_array($job['results']) ? count($job['results']) : 0;
+    $pendingLeads = ll_erp_sync_pending_lead_count($job);
+    $queuedLeadSlots = 0;
+    foreach ($queue as $qItem) {
+      if (is_array($qItem) && is_array($qItem['idx'] ?? null)) {
+        $queuedLeadSlots += count($qItem['idx']);
+      }
+    }
     $cursor = (int) ($job['cursor'] ?? 0);
     $jobSnap = [
       'status' => $job['status'] ?? null,
@@ -4066,6 +4197,8 @@ function ll_erp_sync_diagnose(): array
       'cursor' => $cursor,
       'lead_count' => $leadCount,
       'result_count' => $resultCount,
+      'pending_leads' => $pendingLeads,
+      'queued_lead_slots' => $queuedLeadSlots,
       'leads_loaded' => isset($job['leads']) && is_array($job['leads']),
       'leads_in_memory' => isset($job['leads']) && is_array($job['leads']) ? count($job['leads']) : 0,
       'queue_len' => count($queue),
@@ -4113,6 +4246,9 @@ function ll_erp_sync_diagnose(): array
     if ($status === 'auditing' && $running && !$stale && $age !== null && $age >= 180
       && $resultCount > 0 && count($queue) > 0) {
       $hints[] = 'Worker lock held >3 min with a retry queue — PHP may have hung on OpenAI. Wait for stale (5 min) or Force clear lock, then Kick continue.';
+    }
+    if ($status === 'auditing' && $pendingLeads > 0 && $queuedLeadSlots > max(25, $pendingLeads * 2)) {
+      $hints[] = 'Retry queue is inflated vs pending leads (ghost batches). v10.0.6+ skips already-audited indices; Kick continue to prune.';
     }
     $progressAt = (int) ($job['progress_at'] ?? 0);
     if ($status === 'auditing' && $progressAt > 0) {
