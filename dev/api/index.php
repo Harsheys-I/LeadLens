@@ -55,7 +55,7 @@ try {
       break;
     case 'audit':
       require __DIR__ . '/routes/audit-upload.php';
-      ll_route_audit($action);
+      ll_route_audit($action, $parts);
       break;
     case 'meta':
       ll_ok([
