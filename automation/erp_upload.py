@@ -13,6 +13,7 @@ Environment:
   OTP_FILE                           Optional path; a code written there is used if Gmail has none (local runs)
   OTP_WAIT_SECONDS                   How long to wait for each OTP (default 120)
 """
+import base64
 import hashlib
 import imaplib
 import json
@@ -408,6 +409,9 @@ def _leadlens_session() -> requests.Session:
     if resp.status_code >= 400:
         raise Fail(f"auth/login failed: HTTP {resp.status_code} {resp.text[:500]}")
     session.auth = (user, password)
+    # Re-prove the password on every API call. Cookie-only browser sessions stay behind
+    # must_change_password; this header is what the API accepts when Authorization is stripped.
+    session.headers["X-LeadLens-Script-Auth"] = base64.b64encode(f"{user}:{password}".encode()).decode()
     return session
 
 
