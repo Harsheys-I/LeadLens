@@ -205,13 +205,89 @@ function ll_current_user(): ?array
   return $user;
 }
 
+/**
+ * Credentials replayed by unattended clients (erp_upload.py), not by the browser.
+ * HTTP Basic, PHP_AUTH_*, multipart/query username+password, or X-LeadLens-Script-Auth
+ * (base64 user:pass). Some hosts drop Authorization; the script header is the fallback.
+ *
+ * @return array{0: string, 1: string}|null
+ */
+function ll_script_credential_pair(): ?array
+{
+  $user = '';
+  $pass = '';
+  if (isset($_SERVER['PHP_AUTH_USER'])) {
+    $user = trim((string) $_SERVER['PHP_AUTH_USER']);
+    $pass = (string) ($_SERVER['PHP_AUTH_PW'] ?? '');
+  }
+  if ($user === '' || $pass === '') {
+    $header = (string) ($_SERVER['HTTP_AUTHORIZATION'] ?? $_SERVER['REDIRECT_HTTP_AUTHORIZATION'] ?? '');
+    if (stripos($header, 'Basic ') === 0) {
+      $decoded = base64_decode(substr($header, 6), true);
+      if (is_string($decoded) && str_contains($decoded, ':')) {
+        [$basicUser, $basicPass] = explode(':', $decoded, 2);
+        $user = trim($basicUser);
+        $pass = $basicPass;
+      }
+    }
+  }
+  if ($user === '' || $pass === '') {
+    $script = (string) ($_SERVER['HTTP_X_LEADLENS_SCRIPT_AUTH'] ?? '');
+    if ($script !== '') {
+      $decoded = base64_decode($script, true);
+      if (is_string($decoded) && str_contains($decoded, ':')) {
+        [$scriptUser, $scriptPass] = explode(':', $decoded, 2);
+        $user = trim($scriptUser);
+        $pass = $scriptPass;
+      }
+    }
+  }
+  if ($user === '' || $pass === '') {
+    $user = trim((string) ($_POST['username'] ?? $_GET['username'] ?? ''));
+    $pass = (string) ($_POST['password'] ?? $_GET['password'] ?? '');
+  }
+  if ($user === '' || $pass === '') {
+    return null;
+  }
+  return [$user, $pass];
+}
+
+/**
+ * True when this request re-proves the session user's password the way erp_upload.py does.
+ * Browser cookie sessions do not send those credentials, so must_change_password still applies.
+ */
+function ll_request_is_verified_script_login(array $sessionUser): bool
+{
+  $pair = ll_script_credential_pair();
+  if ($pair === null) {
+    return false;
+  }
+  [$username, $password] = $pair;
+  $row = ll_find_user_by_username($username);
+  if (!$row || (int) $row['is_active'] !== 1) {
+    return false;
+  }
+  if ((int) $row['id'] !== (int) $sessionUser['id']) {
+    return false;
+  }
+  return password_verify($password, (string) $row['password_hash']);
+}
+
 function ll_require_user(bool $allowPasswordChangePending = false): array
 {
   $user = ll_current_user();
   if (!$user) {
     ll_error('Authentication required', 401);
   }
-  if (!$allowPasswordChangePending && !empty($user['must_change_password'])) {
+  // Midnight ERP sync logs in with the account password and keeps sending it (Basic /
+  // X-LeadLens-Script-Auth). Ignore must_change_password for that non-browser proof so
+  // settings/audit, stage, the OpenAI proxy, and publish are not blocked. Cookie-only
+  // browser sessions still get the password-change wall. Do not clear the user flag.
+  if (
+    !$allowPasswordChangePending
+    && !empty($user['must_change_password'])
+    && !ll_request_is_verified_script_login($user)
+  ) {
     ll_error('Password change required', 403, ['password_change_required' => true]);
   }
   return $user;
