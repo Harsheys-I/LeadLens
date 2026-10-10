@@ -60,8 +60,8 @@ cat /tmp/leadlens-perf-upload.json
 | Field | Required | Meaning |
 |-------|----------|---------|
 | `username`, `password` | yes | Your LeadLens login. The account must be active and have Upload Performance Dashboard (`telecaller.perf_upload`), or be Super User. |
-| `master` | yes | `.xlsx` (first sheet) or Strategic ERP `.json` report 10000022 (`A3` Mobile, `A2` Project, `A10` Source, `A9` Registration, `A7` Next Followup, `A5` Status, `A6` Telecaller). |
-| `history` | yes | `.xlsx` (first sheet) or Strategic ERP `.json` report 10000026 (`A1` Lead Update Date, `A2` Mobile, `A3` Project, `A4` Telecaller, `A5` Status, `A6` Source). |
+| `master` | yes | `.xlsx` (first sheet, header row matched by name) or Strategic ERP `.json` report 10000022. Raw JSON codes as of 10 Oct 2026: `A3` Mobile, `A2` Project, `A8` Source, `A7` Registration, `A6` Next Followup, `A4` Status, `A5` Telecaller. The daily job also accepts the same columns under those header names. |
+| `history` | yes | `.xlsx` (first sheet, header row matched by name) or Strategic ERP `.json` report 10000026. Raw JSON codes as of 10 Oct 2026: `A2` Lead Update Date, `A3` Mobile, `A4` Project, `A5` Telecaller (`Tellecaller Name` in Excel), `A6` Status, `A7` Source. |
 | `telecallers` | no | Comma-separated TeleCaller names to publish. Omit to publish every TeleCaller in the reports. Names not found are returned in `unmatched_telecallers`. |
 
 | Status | Meaning |

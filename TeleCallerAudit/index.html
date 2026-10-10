@@ -16,7 +16,7 @@
   <script defer src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js"></script>
-  <script type="module" src="../app.js?v=10.0.0.stable"></script>
+  <script type="module" src="../app.js?v=10.0.0.perfcols"></script>
 </head>
 <body>
   <div id="update-banner" class="update-banner hidden" role="status">
@@ -49,11 +49,11 @@
         <div class="nav-group is-collapsed" data-nav-group="bucket1">
           <div class="nav-parent-row">
             <button type="button" class="nav-toggle" aria-expanded="false" aria-label="Expand Bucket 1 Followup Review"></button>
-            <button type="button" class="nav-item nav-item-parent active" data-view="review" data-nav-toggle-group data-perm="telecaller.bucket1"><span>📋</span>Bucket 1 Followup Review</button>
+            <button type="button" class="nav-item nav-item-parent" data-view="published" data-nav-toggle-group data-perm="telecaller.bucket1"><span>📋</span>Bucket 1 Followup Review</button>
           </div>
           <div class="nav-children">
             <button class="nav-item nav-item-child" data-view="console" data-perm="telecaller.run_console"><span>🖥️</span>Run console</button>
-            <button class="nav-item nav-item-child" data-view="published" data-perm="telecaller.dashboard" data-label-flat="Bucket 1"><span>📊</span>Dashboard</button>
+            <button class="nav-item nav-item-child active" data-view="published" data-perm="telecaller.dashboard" data-label-flat="Bucket 1"><span>📊</span>Dashboard</button>
             <button class="nav-item nav-item-child" data-view="history" data-perm="telecaller.history"><span>🕑</span>History</button>
             <button class="nav-item nav-item-child" data-view="settings" data-perm="telecaller.settings"><span>⚙️</span>Settings</button>
           </div>
@@ -61,7 +61,7 @@
         <div class="nav-group is-collapsed" data-nav-group="perf">
           <div class="nav-parent-row">
             <button type="button" class="nav-toggle" aria-expanded="false" aria-label="Expand TeleCalling Performance"></button>
-            <button type="button" class="nav-item nav-item-parent" data-view="perf-report" data-nav-toggle-group data-perm="telecaller.perf_report"><span>📈</span>TeleCalling Performance</button>
+            <button type="button" class="nav-item nav-item-parent" data-view="perf-dashboard" data-nav-toggle-group data-perm="telecaller.perf_report"><span>📈</span>TeleCalling Performance</button>
           </div>
           <div class="nav-children">
             <button class="nav-item nav-item-child" data-view="perf-dashboard" data-perm="telecaller.perf_dashboard" data-label-flat="Performance Report"><span>📊</span>Dashboard</button>
@@ -75,7 +75,7 @@
     <main>
       <header class="topbar">
         <button id="mobile-menu" class="icon-button" aria-label="Hide left panel" title="Hide left panel" aria-expanded="true">☰</button>
-        <div><p class="eyebrow">LEADLENS</p><h1 id="page-title">Bucket 1 Followup Review</h1></div>
+        <div><p class="eyebrow">LEADLENS</p><h1 id="page-title">Dashboard</h1></div>
         <div class="topbar-actions">
           <div id="key-state" class="key-state">API key not set</div>
           <span id="shell-user-label" class="topbar-user-label"></span>
@@ -86,42 +86,6 @@
           <button type="button" id="shell-logout" class="secondary-button">Sign out</button>
         </div>
       </header>
-
-      <section id="view-review" class="view active">
-        <div class="intro"><h2>Bucket 1 Followup Review</h2><p>Lead data is synced via <a href="../ERPSync/">ERP Sync</a> (GitHub Actions). When leads are loaded below, click <strong>Start Audit</strong> for the AI pass, then save Excel or publish a dashboard.</p></div>
-        <div id="review-erp-empty" class="empty-card" role="status">
-          <p>No leads loaded yet. Bucket 1 data is delivered through <a href="../ERPSync/">ERP Sync</a> · GitHub Actions. Configure automation in ERP Sync or wait for the next sync.</p>
-        </div>
-        <div id="review-file-list" class="file-list hidden"></div>
-        <div id="review-validation" class="validation hidden" role="status"></div>
-        <div id="review-precounts" class="review-precounts hidden" aria-live="polite"></div>
-        <div class="action-row"><button id="start-review" class="primary-button" disabled>Start Audit <span>→</span></button></div>
-
-        <div id="review-run-panel" class="review-run-panel hidden">
-          <div class="section-head">
-            <div><h2>Live audit</h2><p>Progress stays here — open Run console only if you need full logs.</p></div>
-            <button id="review-open-console" type="button" class="text-button">Open Run console</button>
-          </div>
-          <div id="review-live-progress" class="review-live-progress hidden">
-            <div class="progress-copy"><strong id="review-progress-label">Waiting</strong><span id="review-progress-percent">0%</span></div>
-            <div class="progress-track"><div id="review-progress-bar" class="progress-bar"></div></div>
-          </div>
-          <div id="review-aggregate" class="review-aggregate hidden"></div>
-          <div id="review-cards" class="review-cards"></div>
-          <div id="review-post-actions" class="review-post-actions hidden">
-            <button id="download-review-excel" type="button" class="secondary-button" disabled>Save Audit Excel</button>
-            <button id="create-review-dashboard" type="button" class="primary-button" disabled>Create Dashboard</button>
-          </div>
-          <div id="review-dashboard-panel" class="review-dashboard-panel hidden">
-            <div class="card-title"><h2>Dashboard</h2><p>KPIs, TeleCaller scorecard, charts, and error details. Use the Filters tab on the right.</p></div>
-            <div id="review-dashboard-mount"></div>
-            <div class="inline-actions review-download-actions dashboard-footer-actions">
-              <button id="export-dashboard-pdf" type="button" class="secondary-button" disabled>Export PDF</button>
-              <button id="upload-dashboard-btn" type="button" class="primary-button" disabled>Upload Dashboard</button>
-            </div>
-          </div>
-        </div>
-      </section>
 
       <section id="view-console" class="view">
         <div class="run-head"><div><p class="eyebrow">CURRENT RUN</p><h2 id="run-name">No active audit</h2></div><div class="run-actions"><button id="pause-run" class="secondary-button" disabled>Pause</button><button id="download-result" class="primary-button" disabled>Download Excel</button></div></div>
@@ -134,7 +98,7 @@
         <div class="console-panel"><div class="panel-head"><div><span class="live-dot"></span><strong>Live log</strong></div><button id="clear-console" class="text-button">Clear view</button></div><div id="live-log" class="log-list"><div class="empty-state">Run activity will appear here.</div></div></div>
       </section>
 
-      <section id="view-published" class="view view-wide">
+      <section id="view-published" class="view view-wide active">
         <div class="section-head">
           <div><h2>Dashboard</h2><p>Published audit results for your TeleCaller (or all TeleCallers, if permitted). Each Upload Dashboard clears every previous published board, then saves the new selection.</p></div>
           <button id="refresh-published" type="button" class="secondary-button">Refresh</button>
@@ -226,13 +190,6 @@
               </div>
             </section>
           </div>
-        </div>
-      </section>
-
-      <section id="view-perf-report" class="view">
-        <div class="intro"><h2>TeleCalling Performance</h2><p>Performance dashboards are synced via <a href="../ERPSync/">ERP Sync</a> (GitHub Actions). Open <strong>Performance Dashboard</strong> to view published boards.</p></div>
-        <div class="empty-card" role="status">
-          <p>Manual Excel upload is disabled in the app. Use ERP Sync automation or the terminal performance upload API. When a board is published, open <strong>Dashboard</strong> under TeleCalling Performance.</p>
         </div>
       </section>
 
