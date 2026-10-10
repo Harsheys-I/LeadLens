@@ -1,28 +1,160 @@
 <!doctype html>
 <html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>GPP AI</title>
-    <script>
-      (function () {
-        var KEY = 'leadlens.theme';
-        var pref = 'system';
-        try { pref = localStorage.getItem(KEY) || 'system'; } catch (e) {}
-        if (pref !== 'light' && pref !== 'dark') pref = 'system';
-        var dark = pref === 'dark' || (pref === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
-        document.documentElement.setAttribute('data-theme', dark ? 'dark' : 'light');
-        document.documentElement.setAttribute('data-theme-pref', pref);
-        var path = location.pathname || '';
-        if (path === '/dev' || path.indexOf('/dev/') === 0) {
-          document.documentElement.classList.add('ll-dev-preview');
-        }
-      })();
-    </script>
-    <script type="module" crossorigin src="../assets/main-13_ogHDQ.js"></script>
-    <link rel="stylesheet" crossorigin href="../assets/main-xD3PqoQw.css">
-  </head>
-  <body>
-    <div id="root"></div>
-  </body>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" media="(prefers-color-scheme: light)" content="#12372a">
+  <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#0f2d22">
+  <meta name="description" content="GPP AI ERP Sync">
+  <title>GPP AI · ERP Sync</title>
+  <meta name="app-version" content="10.0.7.stable">
+  <script src="../theme-boot.js?v=10.0.7.stable"></script>
+  <script src="../motion.js?v=10.0.7.stable"></script>
+  <link rel="manifest" href="../manifest.webmanifest">
+  <link rel="stylesheet" href="../styles.css?v=10.0.7.stable">
+  <script type="module" src="../erp-sync.js?v=10.0.7.stable"></script>
+</head>
+<body>
+  <div id="update-banner" class="update-banner hidden" role="status">
+    <div id="update-banner-text"></div>
+    <button id="reload-app" type="button" class="primary-button">Hard reload now</button>
+  </div>
+  <div class="shell">
+    <aside class="sidebar">
+      <a class="brand" href="../"><img class="brand-mark" src="../assets/gpp-ai-logo.png" alt="" width="48" height="28"><span>GPP AI</span></a>
+      <nav aria-label="ERP Sync navigation">
+        <button class="nav-item active" data-view="ops" type="button"><span>🔄</span>Ops</button>
+      </nav>
+      <div class="privacy-note"><strong id="sidebar-version">v10.0.7.stable</strong><span id="sidebar-notes">v10.0.7.stable: GitHub Actions audits Bucket 1 and stops when estimated cost exceeds Rs 20</span></div>
+    </aside>
+
+    <main>
+      <header class="topbar">
+        <button id="mobile-menu" class="icon-button" aria-label="Hide left panel" title="Hide left panel" aria-expanded="true">☰</button>
+        <div><p class="eyebrow">ERP SYNC</p><h1 id="page-title">Ops</h1></div>
+        <div class="topbar-actions">
+          <span id="shell-user-label" class="topbar-user-label"></span>
+          <button type="button" id="notif-bell" class="notif-bell notif-bell-chrome" title="Notifications" aria-label="Notifications">
+            <span id="notif-count" class="notif-count hidden">0</span>
+          </button>
+          <button type="button" id="shell-account" class="secondary-button">Account</button>
+          <button type="button" id="shell-logout" class="secondary-button">Sign out</button>
+        </div>
+      </header>
+
+      <section id="view-ops" class="view active">
+        <div class="intro">
+          <h2>ERP Sync</h2>
+          <p>Dispatch GitHub Actions to pull Strategic ERP reports and publish Lead Audit, Performance, and Sales Graph. No cookie or Excel upload on this site.</p>
+        </div>
+
+        <div class="settings-card" style="margin-bottom:1.25rem">
+          <div class="card-title">
+            <h2>Run now</h2>
+            <p>Select pipelines, then dispatch <code>erp-daily-upload.yml</code>. Schedules: Bucket 1 + Sales Graph daily 00:00 IST; Performance on the 1st 00:00 IST.</p>
+          </div>
+          <div class="inline-actions" style="flex-wrap:wrap;gap:0.75rem 1.25rem;margin:0.75rem 0">
+            <label class="check-row"><input id="erp-job-bucket1" type="checkbox" checked><span>Bucket 1 (Lead Audit)</span></label>
+            <label class="check-row"><input id="erp-job-perf" type="checkbox"><span>Performance</span></label>
+            <label class="check-row"><input id="erp-job-sales" type="checkbox"><span>Sales Graph</span></label>
+            <label class="check-row"><input id="erp-job-dry" type="checkbox"><span>Dry run (download only)</span></label>
+          </div>
+          <div class="inline-actions">
+            <button id="erp-sync-run-now" type="button" class="primary-button">Run now</button>
+            <button id="erp-sync-refresh" type="button" class="secondary-button">Refresh</button>
+            <button id="erp-sync-cancel" type="button" class="danger-button hidden">Stop audit</button>
+          </div>
+          <p id="erp-sync-message" class="form-message" aria-live="polite" style="margin-top:0.75rem"></p>
+          <p id="erp-sync-gha-meta" class="muted form-message" style="white-space:pre-wrap;margin-top:0.5rem"></p>
+        </div>
+
+        <div class="perf-upload-grid" style="margin-bottom:1.25rem">
+          <div class="settings-card" id="erp-card-bucket1">
+            <div class="card-title"><h2>Bucket 1 · Lead Audit</h2><p>GitHub Actions stages the file, audits batches of 20 with 4 in parallel, then publishes. Cost and progress come from the API upload log.</p></div>
+            <div id="erp-bucket1-body" class="muted form-message" style="white-space:pre-wrap">Loading…</div>
+          </div>
+          <div class="settings-card" id="erp-card-perf">
+            <div class="card-title"><h2>Performance</h2><p>Master + History → published Perf boards</p></div>
+            <div id="erp-perf-body" class="muted form-message" style="white-space:pre-wrap">Loading…</div>
+          </div>
+          <div class="settings-card" id="erp-card-sales">
+            <div class="card-title"><h2>Sales Graph</h2><p>Leads / Visits / Booked → published board</p></div>
+            <div id="erp-sales-body" class="muted form-message" style="white-space:pre-wrap">Loading…</div>
+          </div>
+        </div>
+
+        <div class="settings-card">
+          <div class="card-title"><h2>API uploads</h2><p>Terminal / GHA multipart uploads. Newest first. Times are IST.</p></div>
+          <div id="erp-sync-api-uploads" class="muted form-message">No API uploads yet.</div>
+        </div>
+
+        <div class="settings-card" style="margin-top:1.25rem" id="erp-diag-card">
+          <div class="card-title">
+            <h2>Audit diagnostics</h2>
+            <p>Use when Bucket 1 is stuck (e.g. 0/N). Copy the report and paste it in chat. Safe — no leads, cookies, or API keys.</p>
+          </div>
+          <div class="inline-actions" style="flex-wrap:wrap;gap:0.5rem">
+            <button id="erp-diag-refresh" type="button" class="secondary-button">Refresh diagnose</button>
+            <button id="erp-diag-copy" type="button" class="secondary-button">Copy report</button>
+            <button id="erp-diag-kick" type="button" class="primary-button">Kick continue</button>
+            <button id="erp-diag-clear-lock" type="button" class="secondary-button">Clear stale lock</button>
+            <button id="erp-diag-force-lock" type="button" class="danger-button">Force clear lock</button>
+          </div>
+          <p id="erp-diag-hints" class="form-message" style="margin-top:0.75rem;white-space:pre-wrap"></p>
+          <pre id="erp-diag-json" class="muted" style="margin-top:0.75rem;max-height:28rem;overflow:auto;white-space:pre-wrap;font-size:0.8rem;padding:0.75rem;background:var(--panel-2, rgba(0,0,0,.04));border-radius:8px">Click Refresh diagnose.</pre>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+  <div id="account-modal" class="key-modal hidden" role="dialog" aria-modal="true">
+    <div class="key-modal-card">
+      <p class="eyebrow">ACCOUNT</p>
+      <h2>Your profile</h2>
+      <p class="key-modal-copy">Update username or password. Linked TeleCaller is Admin-managed.</p>
+      <label>Username<input id="account-username" type="text"></label>
+      <label>Display name<input id="account-display" type="text"></label>
+      <label>Linked TeleCaller<input id="account-telecaller" type="text" disabled></label>
+      <label>Appearance
+        <select data-theme-select aria-label="Theme">
+          <option value="system">System</option>
+          <option value="light">Light</option>
+          <option value="dark">Dark</option>
+        </select>
+      </label>
+      <hr class="account-divider">
+      <p class="muted">Change password (optional)</p>
+      <label>Current password<input id="account-pw-current" type="password"></label>
+      <label>New password<input id="account-pw-new" type="password"></label>
+      <label>Confirm new password<input id="account-pw-confirm" type="password"></label>
+      <div id="account-message" class="form-message"></div>
+      <div class="inline-actions">
+        <button id="account-save" type="button" class="primary-button">Save</button>
+        <button id="account-cancel" type="button" class="text-button">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="notif-drawer" class="notif-drawer hidden" aria-live="polite" role="dialog" aria-label="Notifications">
+    <div class="notif-drawer-head">
+      <div class="notif-drawer-title">
+        <span class="notif-drawer-mark" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M15 17h5l-1.4-1.4A2 2 0 0 1 18 14.2V11a6 6 0 1 0-12 0v3.2c0 .5-.2 1-.6 1.4L4 17h5"/><path d="M9.5 17a2.5 2.5 0 0 0 5 0"/></svg>
+        </span>
+        <div>
+          <strong>Notifications</strong>
+          <p class="notif-drawer-sub" id="notif-unread-label">Loading…</p>
+        </div>
+      </div>
+      <div class="notif-drawer-actions">
+        <button type="button" id="notif-mark-all" class="notif-action-btn">Mark all read</button>
+        <button type="button" id="notif-clear-all" class="notif-action-btn">Clear all</button>
+        <button type="button" id="notif-close" class="notif-close-btn" aria-label="Close">×</button>
+      </div>
+    </div>
+    <div id="notif-list" class="notif-list"></div>
+  </div>
+</body>
 </html>

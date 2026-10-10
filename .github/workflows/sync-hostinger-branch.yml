@@ -5,7 +5,6 @@ on:
     branches: [main]
     paths:
       - "web-app/**"
-      - "frontend/**"
       - ".github/workflows/sync-hostinger-branch.yml"
   workflow_dispatch:
     inputs:
@@ -32,17 +31,6 @@ jobs:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build React shells
-        uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: npm
-          cache-dependency-path: frontend/package-lock.json
-
-      - name: npm ci and build
-        working-directory: frontend
-        run: npm ci && npm run build
-
       - name: Sync web-app/ to hostinger/dev/
         env:
           BRANCH: hostinger
@@ -68,13 +56,8 @@ jobs:
 
           git fetch origin "$BRANCH" 2>/dev/null || true
 
-          # Vite writes React shells into web-app/. That copy is already in
-          # STAGING. Drop those working-tree edits or checkout refuses to
-          # switch onto hostinger and /dev never updates.
-          git reset --hard HEAD
-
           if git show-ref --verify --quiet "refs/remotes/origin/$BRANCH"; then
-            git checkout -f -B "$BRANCH" "origin/$BRANCH"
+            git checkout -B "$BRANCH" "origin/$BRANCH"
           else
             git checkout --orphan "$BRANCH"
             git rm -rf . >/dev/null 2>&1 || true

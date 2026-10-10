@@ -22,7 +22,7 @@ const els = Object.fromEntries(ids.map(id => [id, $(id)]));
 if (els["sidebar-version"]) els["sidebar-version"].textContent = `v${APP_VERSION}`;
 
 const titles = {dashboard: "Dashboard"};
-const RELEASE_NOTES = "v11.0.0.stable: React UI on /dev. Live stays on the previous shell until a promote.";
+const RELEASE_NOTES = "v10.0.0.stable: ERP Sync GHA-only — charts sync via GitHub Actions; manual Excel upload removed from the app.";
 
 function toast(message) {
   if (!els.toast) return;

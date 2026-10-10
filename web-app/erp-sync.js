@@ -516,7 +516,7 @@ function readSidebarCollapsedPref() {
 async function bootErpSync() {
   initTheme();
   const ver = $('sidebar-version');
-  if (ver) ver.textContent = 'v11.0.0.stable';
+  if (ver) ver.textContent = 'v10.0.7.stable';
 
   const user = await requireAuth({loginPath: homePath()});
   if (!user) return;
