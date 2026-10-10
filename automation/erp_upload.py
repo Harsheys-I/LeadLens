@@ -137,37 +137,41 @@ SALES_URL_ENV = {
 
 
 # Master is ~30 MB with every column; LeadLens rejects uploads over 25 MB and reads only these.
-# JSON keys are Excel column letters (A1 = column A) from the 10 Oct 2026 samples.
-# Slimmed rows are renamed to those headers so the upload API matches by name.
+# Strategic ERP JSON keys are Excel column letters (A1 = column A) and empty cells are
+# omitted, so a letter can be absent from row 0 even when the Excel header exists.
+# Each field is (code, canonical header, required, header aliases). A value is taken
+# from a matching header name when that key is present, otherwise from the column code.
+# Only fields the dashboards cannot run without are required. Source, registration,
+# and next follow-up are kept when present and left blank when the JSON key is missing.
 #
-# master 10000022 previously kept A2 project, A3 mobile, A5 status, A6 telecaller,
-# A7 next, A9 registration, A10 source. Unused columns were removed, so registration
-# moved A9→A7 and source A10→A8. A2 Project Name and A3 Mobile did not move.
-#   A2 Project Name, A3 Mobile, A4 Status, A5 Telecaller Name,
-#   A6 Next Followup Date, A7 Lead Registration Date, A8 Source.
-# history 10000026 used to start at A1 Lead Update Date. Sr is now column A, so each
-# field moved one letter later. The Excel header is "Tellecaller Name"; the canonical
-# name stored here is "Telecaller Name".
-#   A2 Lead Update Date, A3 Mobile, A4 Project Name, A5 Telecaller Name,
-#   A6 Status, A7 Source.
-COLUMN_HEADERS = {
-    "master": {
-        "A2": "Project Name",
-        "A3": "Mobile",
-        "A4": "Status",
-        "A5": "Telecaller Name",
-        "A6": "Next Followup Date",
-        "A7": "Lead Registration Date",
-        "A8": "Source",
-    },
-    "history": {
-        "A2": "Lead Update Date",
-        "A3": "Mobile",
-        "A4": "Project Name",
-        "A5": "Telecaller Name",
-        "A6": "Status",
-        "A7": "Source",
-    },
+# master 10000022, 10 Oct 2026 Excel row 7:
+#   A Sr, B Project Name, C Mobile, D Status, E Telecaller Name,
+#   F Next Followup Date, G Lead Registration Date, H Source.
+# Registration moved A9→A7 and source A10→A8 after unused columns were removed.
+# history 10000026, 10 Oct 2026 Excel row 7:
+#   A Sr, B Lead Update Date, C Mobile, D Project Name,
+#   E Tellecaller Name, F Status, G Source.
+# The Excel header is "Tellecaller Name"; the canonical name stored here is "Telecaller Name".
+# code, header, required, aliases (header itself is always accepted)
+_TELECALLER_ALIASES = ("telecaller name", "tellecaller name", "tele caller name", "agent name", "executive name")
+REPORT_COLUMNS = {
+    "master": (
+        ("A2", "Project Name", True, ("project name", "project")),
+        ("A3", "Mobile", True, ("mobile", "mobile number", "phone")),
+        ("A4", "Status", True, ("status", "lead status")),
+        ("A5", "Telecaller Name", True, _TELECALLER_ALIASES),
+        ("A6", "Next Followup Date", False, ("next followup date", "next follow-up date", "next follow up date")),
+        ("A7", "Lead Registration Date", False, ("lead registration date", "registration date")),
+        ("A8", "Source", False, ("source", "source name")),
+    ),
+    "history": (
+        ("A2", "Lead Update Date", True, ("lead update date", "call date", "update date", "lead update")),
+        ("A3", "Mobile", True, ("mobile", "mobile number", "phone")),
+        ("A4", "Project Name", True, ("project name", "project")),
+        ("A5", "Telecaller Name", True, _TELECALLER_ALIASES),
+        ("A6", "Status", True, ("status", "lead status")),
+        ("A7", "Source", False, ("source", "source name")),
+    ),
 }
 
 
@@ -379,6 +383,62 @@ def require_sales_report_urls() -> None:
         )
 
 
+def _norm_header(value) -> str:
+    return re.sub(r"\s+", " ", str(value or "").strip().lower())
+
+
+def slim_report_rows(name: str, rows: list) -> list[dict]:
+    """Rename ERP rows to canonical headers.
+
+    A field counts as present when any row has its column code or a matching
+    header name. Optional fields (source, registration, next follow-up) stay
+    blank when Strategic ERP omits the empty cell instead of failing the download.
+    """
+    columns = REPORT_COLUMNS.get(name)
+    if not columns:
+        raise Fail(f"{name}: no column map")
+    seen_codes: set[str] = set()
+    seen_norm: set[str] = set()
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        for key in row:
+            seen_codes.add(str(key))
+            seen_norm.add(_norm_header(key))
+    missing = []
+    absent_optional = []
+    for code, header, required, aliases in columns:
+        found = code in seen_codes or any(alias in seen_norm for alias in aliases)
+        if required and not found:
+            missing.append(header)
+        elif not required and not found:
+            absent_optional.append(header)
+    if missing:
+        raise Fail(f"{name}: report layout changed, missing {', '.join(missing)}")
+    if absent_optional:
+        log(f"{name}: optional columns not in the JSON (left blank): {', '.join(absent_optional)}")
+    slim = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        by_norm = {}
+        for key in row:
+            by_norm.setdefault(_norm_header(key), key)
+        out = {}
+        for code, header, _required, aliases in columns:
+            value = None
+            for alias in aliases:
+                src = by_norm.get(alias)
+                if src is not None and row.get(src) not in (None, ""):
+                    value = row.get(src)
+                    break
+            if value is None and code in row:
+                value = row.get(code, "")
+            out[header] = "" if value is None else value
+        slim.append(out)
+    return slim
+
+
 def fetch_report(page, name: str, url: str | None = None) -> Path:
     report_url = (url or REPORTS.get(name) or "").strip()
     if not report_url:
@@ -391,18 +451,14 @@ def fetch_report(page, name: str, url: str | None = None) -> Path:
         raise Fail(f"{name}: response is not JSON (HTTP {resp.status}): {body[:200]!r}")
     OUT.mkdir(parents=True, exist_ok=True)
     path = OUT / f"erp-{name}.json"
-    headers = COLUMN_HEADERS.get(name)
-    if headers:
+    if name in REPORT_COLUMNS:
         rows = json.loads(body)
         if not isinstance(rows, list) or not rows or not isinstance(rows[0], dict):
             raise Fail(f"{name}: expected a JSON list of rows")
-        missing = [code for code in headers if code not in rows[0]]
-        if missing:
-            raise Fail(f"{name}: report layout changed, missing {', '.join(missing)}")
-        # Header names, not A-codes, so a later letter shift is fixed in COLUMN_HEADERS only.
-        body = json.dumps([{headers[code]: row.get(code, "") for code in headers} for row in rows],
-                          ensure_ascii=False, separators=(",", ":"))
-        log(f"{name}: {len(rows):,} rows")
+        slim = slim_report_rows(name, rows)
+        # Header names, not A-codes, so a later letter shift is fixed in REPORT_COLUMNS only.
+        body = json.dumps(slim, ensure_ascii=False, separators=(",", ":"))
+        log(f"{name}: {len(slim):,} rows")
     path.write_text(body, encoding="utf-8")
     log(f"{name}: {path.stat().st_size:,} bytes")
     return path
