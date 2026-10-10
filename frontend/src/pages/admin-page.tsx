@@ -44,6 +44,7 @@ function UsersView() {
   const [roles, setRoles] = useState<Role[]>([])
   const [loading, setLoading] = useState(true)
   const [message, setMessage] = useState('')
+  const [creating, setCreating] = useState(false)
 
   async function reload() {
     const [userData, requestData, roleData] = await Promise.all([
@@ -75,7 +76,21 @@ function UsersView() {
         </ul>
       </section>
       <section className="space-y-3">
-        <h2 className="text-sm font-semibold">Users</h2>
+        <div className="flex items-center justify-between gap-3">
+          <h2 className="text-sm font-semibold">Users</h2>
+          <SlideTextButton type="button" text="New user" hoverText="Create user" onClick={() => setCreating(true)} />
+        </div>
+        {creating ? (
+          <CreateUser
+            roles={roles}
+            onDone={async () => {
+              setCreating(false)
+              await reload()
+            }}
+            onMessage={setMessage}
+            onCancel={() => setCreating(false)}
+          />
+        ) : null}
         <ul className="space-y-2 text-sm text-[var(--ink)]">
           {people.map((person) => (
             <li key={person.id} className="flex items-center justify-between gap-2 rounded-xl border border-zinc-200 bg-transparent px-3 py-2 text-[var(--ink)] dark:border-zinc-800">
@@ -84,17 +99,16 @@ function UsersView() {
             </li>
           ))}
         </ul>
-        <CreateUser roles={roles} onDone={reload} onMessage={setMessage} />
       </section>
       {message ? <p className="text-sm">{message}</p> : null}
     </div>
   )
 }
 
-function CreateUser({ roles, onDone, onMessage }: { roles: Role[]; onDone: () => Promise<void>; onMessage: (text: string) => void }) {
+function CreateUser({ roles, onDone, onMessage, onCancel }: { roles: Role[]; onDone: () => Promise<void>; onMessage: (text: string) => void; onCancel: () => void }) {
   return (
     <form
-      className="grid gap-2 border-t border-zinc-200 pt-3 dark:border-zinc-800"
+      className="grid gap-2 rounded-2xl border border-zinc-200 p-3 dark:border-zinc-800"
       onSubmit={async (event) => {
         event.preventDefault()
         const form = new FormData(event.currentTarget)
@@ -119,7 +133,10 @@ function CreateUser({ roles, onDone, onMessage }: { roles: Role[]; onDone: () =>
       <input name="password" required type="password" placeholder="Temporary password" className={inputClass} />
       <input name="telecaller_name" placeholder="Telecaller name" className={inputClass} />
       <select name="role_id" className={inputClass}>{roles.map((role) => <option key={role.id} value={role.id}>{role.name}</option>)}</select>
-      <SlideTextButton type="submit" text="Save" hoverText="Create user" />
+      <div className="flex gap-2">
+        <SlideTextButton type="submit" text="Save" hoverText="Create user" />
+        <SlideTextButton type="button" variant="ghost" text="Cancel" hoverText="Close" onClick={onCancel} />
+      </div>
     </form>
   )
 }
