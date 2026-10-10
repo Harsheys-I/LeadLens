@@ -53,31 +53,39 @@ export function SliceLegend({ items }: { items: Array<{ label: string; color?: s
 
 type BarSeries = { key: string; label: string; color: string; yAxisId?: string }
 
+/** Same slot as the pre-React hero (`CATEGORY_WIDTH_PX` in sales-graph-dashboard.js). */
+const CATEGORY_WIDTH_PX = 82
+const SCROLL_CHART_HEIGHT = 420
+
 export function GroupedBars({
   title,
   data,
   series,
   xKey = 'name',
   stacked = false,
+  scrollable = false,
 }: {
   title: string
   data: Array<Record<string, string | number>>
   series: BarSeries[]
   xKey?: string
   stacked?: boolean
+  /** Fixed pixel width per category; the card scrolls instead of shrinking bars. */
+  scrollable?: boolean
 }) {
   if (!data.length || !series.length) return <ChartCard title={title}><p className="text-sm text-[var(--muted)]">No data for this chart.</p></ChartCard>
   const axes = [...new Set(series.map((item) => item.yAxisId || 'left'))]
-  return (
-    <ChartCard title={title}>
+  const margin = { top: 16, right: 48, bottom: 48, left: 48 }
+  const chartWidth = scrollable ? margin.left + margin.right + data.length * CATEGORY_WIDTH_PX : undefined
+  const chart = (
       <BarChart
         data={data}
         xDataKey={xKey}
         stacked={stacked}
-        barGap={0.25}
-        aspectRatio="2 / 1"
-        className="min-h-[280px] overflow-hidden"
-        margin={{ top: 16, right: 48, bottom: 48, left: 48 }}
+        barGap={0.2}
+        aspectRatio={chartWidth ? `${chartWidth} / ${SCROLL_CHART_HEIGHT}` : '2 / 1'}
+        className={scrollable ? 'overflow-hidden' : 'min-h-[280px] overflow-hidden'}
+        margin={margin}
       >
         <Grid />
         <BarXAxis />
@@ -89,6 +97,14 @@ export function GroupedBars({
           <Bar key={item.key} dataKey={item.key} fill={item.color} yAxisId={item.yAxisId || 'left'} lineCap={4} />
         ))}
       </BarChart>
+  )
+  return (
+    <ChartCard title={title}>
+      {scrollable && chartWidth ? (
+        <div className="overflow-x-auto">
+          <div style={{ width: chartWidth, height: SCROLL_CHART_HEIGHT }}>{chart}</div>
+        </div>
+      ) : chart}
       <SliceLegend items={series.map((item) => ({ label: item.label, color: item.color }))} />
     </ChartCard>
   )

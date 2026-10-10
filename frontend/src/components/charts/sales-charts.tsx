@@ -103,14 +103,14 @@ export function SalesCharts({ payload }: { payload: SalesPayload }) {
           </button>
         ))}
       </div>
-      <GroupedBars title="Leads vs Visits vs Booked by month" data={model.months} series={heroSeries} xKey="month" />
-      <GroupedBars title="Leads vs Visits vs Booked by project" data={model.projects} series={heroSeries} />
+      <GroupedBars title="Leads vs Visits vs Booked by month" data={model.months} series={heroSeries} xKey="month" scrollable />
+      <GroupedBars title="Leads vs Visits vs Booked by project" data={model.projects} series={heroSeries} scrollable />
       <div className="grid gap-4 lg:grid-cols-3">
         {visible('leads') ? <ShareRing title="Leads share by project" slices={model.leadShare} scale="peak" /> : null}
         {visible('visits') ? <ShareRing title="Visits share by project" slices={model.visitShare} scale="peak" /> : null}
         {visible('booked') ? <ShareRing title="Booked share by project" slices={model.bookedShare} scale="peak" /> : null}
       </div>
-      {statusSeries.length ? <GroupedBars title="Booked · status stacked by month" data={model.statusMonths} series={statusSeries} xKey="month" stacked /> : null}
+      {statusSeries.length ? <GroupedBars title="Booked · status stacked by month" data={model.statusMonths} series={statusSeries} xKey="month" stacked scrollable /> : null}
       {visible('leads') ? (
         <ProjectMonthHeat title="Leads · Project × Month" projects={model.heatProjects} months={model.monthKeys} valueAt={(project, month) => bucketMonth(payload.leads?.byProject?.[project], month)} formatMonth={formatMonth} />
       ) : null}
