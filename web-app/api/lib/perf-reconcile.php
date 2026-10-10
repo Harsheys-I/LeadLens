@@ -33,16 +33,42 @@ function ll_perf_history_fields(): array
   return $fields;
 }
 
-/** Master report 10000022 JSON column codes → field id. */
+/**
+ * Master report 10000022 JSON column codes → field id.
+ * 10 Oct 2026 Excel (row 7): A Sr, B Project Name, C Mobile, D Status,
+ * E Telecaller Name, F Next Followup Date, G Lead Registration Date, H Source.
+ * Registration moved A9→A7 and source A10→A8 after unused columns were removed.
+ * A2 Project Name and A3 Mobile did not move.
+ */
 function ll_perf_master_erp_codes(): array
 {
-  return ['A3' => 'mobile', 'A2' => 'project', 'A10' => 'source', 'A9' => 'registration', 'A7' => 'next', 'A5' => 'status', 'A6' => 'telecaller'];
+  return [
+    'A3' => 'mobile',
+    'A2' => 'project',
+    'A8' => 'source',
+    'A7' => 'registration',
+    'A6' => 'next',
+    'A4' => 'status',
+    'A5' => 'telecaller',
+  ];
 }
 
-/** History report 10000026 JSON column codes → field id. */
+/**
+ * History report 10000026 JSON column codes → field id.
+ * 10 Oct 2026 Excel (row 7): A Sr, B Lead Update Date, C Mobile, D Project Name,
+ * E Tellecaller Name, F Status, G Source. Sr is new at A1, so the previous
+ * A1–A6 fields each shifted one letter later.
+ */
 function ll_perf_history_erp_codes(): array
 {
-  return ['A1' => 'update', 'A2' => 'mobile', 'A3' => 'project', 'A4' => 'telecaller', 'A5' => 'status', 'A6' => 'source'];
+  return [
+    'A2' => 'update',
+    'A3' => 'mobile',
+    'A4' => 'project',
+    'A5' => 'telecaller',
+    'A6' => 'status',
+    'A7' => 'source',
+  ];
 }
 
 function ll_perf_metric_keys(): array

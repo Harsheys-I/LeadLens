@@ -137,8 +137,37 @@ SALES_URL_ENV = {
 
 
 # Master is ~30 MB with every column; LeadLens rejects uploads over 25 MB and reads only these.
-KEEP_CODES = {
-    "master": ["A2", "A3", "A5", "A6", "A7", "A9", "A10"],
+# JSON keys are Excel column letters (A1 = column A) from the 10 Oct 2026 samples.
+# Slimmed rows are renamed to those headers so the upload API matches by name.
+#
+# master 10000022 previously kept A2 project, A3 mobile, A5 status, A6 telecaller,
+# A7 next, A9 registration, A10 source. Unused columns were removed, so registration
+# moved A9→A7 and source A10→A8. A2 Project Name and A3 Mobile did not move.
+#   A2 Project Name, A3 Mobile, A4 Status, A5 Telecaller Name,
+#   A6 Next Followup Date, A7 Lead Registration Date, A8 Source.
+# history 10000026 used to start at A1 Lead Update Date. Sr is now column A, so each
+# field moved one letter later. The Excel header is "Tellecaller Name"; the canonical
+# name stored here is "Telecaller Name".
+#   A2 Lead Update Date, A3 Mobile, A4 Project Name, A5 Telecaller Name,
+#   A6 Status, A7 Source.
+COLUMN_HEADERS = {
+    "master": {
+        "A2": "Project Name",
+        "A3": "Mobile",
+        "A4": "Status",
+        "A5": "Telecaller Name",
+        "A6": "Next Followup Date",
+        "A7": "Lead Registration Date",
+        "A8": "Source",
+    },
+    "history": {
+        "A2": "Lead Update Date",
+        "A3": "Mobile",
+        "A4": "Project Name",
+        "A5": "Telecaller Name",
+        "A6": "Status",
+        "A7": "Source",
+    },
 }
 
 
@@ -362,15 +391,16 @@ def fetch_report(page, name: str, url: str | None = None) -> Path:
         raise Fail(f"{name}: response is not JSON (HTTP {resp.status}): {body[:200]!r}")
     OUT.mkdir(parents=True, exist_ok=True)
     path = OUT / f"erp-{name}.json"
-    keep = KEEP_CODES.get(name)
-    if keep:
+    headers = COLUMN_HEADERS.get(name)
+    if headers:
         rows = json.loads(body)
         if not isinstance(rows, list) or not rows or not isinstance(rows[0], dict):
             raise Fail(f"{name}: expected a JSON list of rows")
-        missing = [code for code in keep if code not in rows[0]]
+        missing = [code for code in headers if code not in rows[0]]
         if missing:
             raise Fail(f"{name}: report layout changed, missing {', '.join(missing)}")
-        body = json.dumps([{code: row.get(code, "") for code in keep} for row in rows],
+        # Header names, not A-codes, so a later letter shift is fixed in COLUMN_HEADERS only.
+        body = json.dumps([{headers[code]: row.get(code, "") for code in headers} for row in rows],
                           ensure_ascii=False, separators=(",", ":"))
         log(f"{name}: {len(rows):,} rows")
     path.write_text(body, encoding="utf-8")
