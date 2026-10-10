@@ -698,27 +698,6 @@ function collapseHistoryToLatestLead(historyRows) {
   };
 }
 
-/**
- * One History row per Mobile+TeleCaller+Project: keep max Lead Update Date only.
- */
-function latestRowPerSteKey(historyFilled) {
-  const latest = new Map();
-  historyFilled.forEach((row, index) => {
-    const key = steIdentityKey(row);
-    if (!key) return;
-    const nextLud = ludMs(row);
-    const prev = latest.get(key);
-    if (!prev || nextLud > prev.lud || (nextLud === prev.lud && index > prev.index)) {
-      latest.set(key, {row, index, lud: nextLud});
-    }
-  });
-  return [...latest.values()].map(item => item.row);
-}
-
-function matchesSiteVisitScheduled(status) {
-  return norm(status) === "site visit scheduled";
-}
-
 function matchesSentToEnquiry(status) {
   const s = norm(status);
   return s === "sent to enquiry" || s === "send to enquiry";
@@ -839,8 +818,7 @@ function compoundBucketsToNested(map) {
  * Build performance metrics from parsed Master + History rows.
  * Lead = Mobile + TeleCaller.
  * STE = any History Status Send/Sent to Enquiry, once per Mobile+TeleCaller+Project.
- * SVS = latest History Status per Mobile+TeleCaller+Project (Site Visit Scheduled).
- * SVP/SVC = any History Status match, once per Mobile+TeleCaller+Project.
+ * SVS/SVP/SVC = any History Status match, once per Mobile+TeleCaller+Project.
  * NI = latest History Status (max LUD), once per lead.
  * Total Calls = History row count (after forward-fill).
  * Avg Calls per Day = Total Calls ÷ inclusive days between min/max History LUD.
@@ -938,16 +916,7 @@ export function reconcilePerf(masterRows, historyRows) {
     }
   }
 
-  // SVS: latest History Status per Mobile+TeleCaller+Project.
-  for (const row of latestRowPerSteKey(historyFilled)) {
-    if (!matchesSiteVisitScheduled(row.status)) continue;
-    for (const {map, resolve} of resolvers) {
-      const bucket = map[resolve(row)];
-      bucket.siteVisitScheduled += 1;
-      pushBucketDetailOnce(bucket, "siteVisitScheduled", row, steIdentityKey(row));
-    }
-  }
-
+  accumulateAnyRowStatusMetric(historyFilled, "site visit scheduled", maps, resolvers, "siteVisitScheduled");
   accumulateAnyRowStatusMetric(historyFilled, "site visit pending", maps, resolvers, "siteVisitPending");
   accumulateAnyRowStatusMetric(historyFilled, "site visit cancelled", maps, resolvers, "siteVisitCancelled");
 
