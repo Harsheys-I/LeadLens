@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react'
+import { type ReactNode, useState } from 'react'
 import { Bar } from './bar'
 import { BarChart } from './bar-chart'
 import { BarXAxis } from './bar-x-axis'
@@ -55,6 +55,8 @@ type BarSeries = { key: string; label: string; color: string; yAxisId?: string }
 
 /** Same slot as the pre-React hero (`CATEGORY_WIDTH_PX` in sales-graph-dashboard.js). */
 const CATEGORY_WIDTH_PX = 82
+/** Stacked month bars: about half the grouped slot so segments stay slim. */
+const STACKED_CATEGORY_WIDTH_PX = 40
 const SCROLL_CHART_HEIGHT = 420
 
 export function GroupedBars({
@@ -76,7 +78,8 @@ export function GroupedBars({
   if (!data.length || !series.length) return <ChartCard title={title}><p className="text-sm text-[var(--muted)]">No data for this chart.</p></ChartCard>
   const axes = [...new Set(series.map((item) => item.yAxisId || 'left'))]
   const margin = { top: 16, right: 48, bottom: 48, left: 48 }
-  const chartWidth = scrollable ? margin.left + margin.right + data.length * CATEGORY_WIDTH_PX : undefined
+  const categoryWidth = stacked ? STACKED_CATEGORY_WIDTH_PX : CATEGORY_WIDTH_PX
+  const chartWidth = scrollable ? margin.left + margin.right + data.length * categoryWidth : undefined
   const chart = (
       <BarChart
         data={data}
@@ -141,18 +144,34 @@ export function ShareRing({
     (scale === 'peak'
       ? data.reduce((peak, slice) => Math.max(peak, slice.value), 0)
       : data.reduce((sum, slice) => sum + slice.value, 0)) || 1
+  const [hoveredIndex, setHoveredIndex] = useState<number | null>(null)
   if (!data.length) return <ChartCard title={title}><p className="text-sm text-[var(--muted)]">No data for this chart.</p></ChartCard>
+  const hoveredLabel = hoveredIndex == null ? '' : data[hoveredIndex]?.label || ''
   return (
     <ChartCard title={title}>
       <div className="mx-auto h-[280px] w-[280px] max-w-full overflow-hidden">
         <RingChart
           data={data.map((slice) => ({ label: slice.label, value: slice.value, maxValue, color: slice.color }))}
+          hoveredIndex={hoveredIndex}
+          onHoverChange={setHoveredIndex}
           size={280}
         >
           {data.map((slice, index) => <Ring key={slice.label} index={index} color={slice.color} />)}
-          <RingCenter defaultLabel="Total" />
+          <RingCenter defaultLabel="Total">
+            {({ value }) => (
+              <span className="font-bold tabular-nums leading-none text-[clamp(1.25rem,22cqw,1.875rem)]">
+                {new Intl.NumberFormat(undefined, { maximumFractionDigits: 0 }).format(value)}
+              </span>
+            )}
+          </RingCenter>
         </RingChart>
       </div>
+      <p
+        className="mx-auto min-h-10 max-w-full break-words px-2 text-center text-sm leading-snug text-foreground"
+        title={hoveredLabel || undefined}
+      >
+        {hoveredLabel || '\u00a0'}
+      </p>
       <SliceLegend items={data} />
     </ChartCard>
   )
