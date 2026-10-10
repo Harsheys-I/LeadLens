@@ -520,12 +520,6 @@ function ll_perf_latest_per_lead(array $historyFilled): array
   return ll_perf_max_lud_rows($historyFilled, 'll_perf_lead_key', true);
 }
 
-/** latestRowPerSteKey: one History row per Mobile + TeleCaller + Project. */
-function ll_perf_latest_per_ste_key(array $historyFilled): array
-{
-  return ll_perf_max_lud_rows($historyFilled, 'll_perf_ste_key', true);
-}
-
 /** STE / accumulateAnyRowStatusMetric: rows matching a status, once per STE key. */
 function ll_perf_best_per_ste_key(array $historyFilled, callable $matches): array
 {
@@ -822,11 +816,7 @@ function ll_perf_reconcile(array $masterRows, array $historyRows, ?int $nowMs = 
     return $s === 'sent to enquiry' || $s === 'send to enquiry';
   }), 'siteVisited');
 
-  $credit(array_values(array_filter(
-    ll_perf_latest_per_ste_key($historyFilled),
-    static fn(array $row): bool => ll_perf_norm($row['status'] ?? '') === 'site visit scheduled'
-  )), 'siteVisitScheduled');
-
+  $credit(ll_perf_best_per_ste_key($historyFilled, $statusIs('site visit scheduled')), 'siteVisitScheduled');
   $credit(ll_perf_best_per_ste_key($historyFilled, $statusIs('site visit pending')), 'siteVisitPending');
   $credit(ll_perf_best_per_ste_key($historyFilled, $statusIs('site visit cancelled')), 'siteVisitCancelled');
 
