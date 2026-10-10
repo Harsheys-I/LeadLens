@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react'
 import { BarChart3, Database, FileWarning, Phone } from 'lucide-react'
 import { ActivityRings } from '@/components/ui/activity-rings.tsx'
-import BentoGrid from '@/components/ui/bento-grid.tsx'
 import Loader from '@/components/ui/loader.tsx'
 import MouseEffectCard from '@/components/ui/mouse-effect-card.tsx'
 import SlideTextButton from '@/components/ui/slide-text-button.tsx'
@@ -50,37 +49,69 @@ export default function LeadLensPage() {
   )
 }
 
-function PublishedView({ canPublish }: { canPublish: boolean }) {
-  const [state, setState] = useState<'load' | 'empty' | 'ready'>('load')
+function leadRowsFromCombined(data: Record<string, unknown>) {
+  const direct = Array.isArray(data.results) ? data.results as Array<Record<string, unknown>> : []
+  if (direct.length) return direct
+  const boards = Array.isArray(data.dashboards) ? data.dashboards as Array<Record<string, unknown>> : []
+  const nested: Array<Record<string, unknown>> = []
+  for (const board of boards) {
+    const payload = board.payload && typeof board.payload === 'object' ? board.payload as Record<string, unknown> : null
+    const rows = Array.isArray(board.results)
+      ? board.results as Array<Record<string, unknown>>
+      : payload && Array.isArray(payload.results)
+        ? payload.results as Array<Record<string, unknown>>
+        : []
+    nested.push(...rows)
+  }
+  return nested
+}
+
+function PublishedView() {
+  const [state, setState] = useState<'load' | 'empty' | 'error' | 'ready'>('load')
   const [results, setResults] = useState<Array<Record<string, unknown>>>([])
   const [title, setTitle] = useState('Dashboard')
-  const [message, setMessage] = useState('')
+  const [detail, setDetail] = useState('')
   const [panel, setPanel] = useState('summary')
 
   useEffect(() => {
     let cancel = false
     DashboardApi.combined()
-      .then((data) => {
+      .then(async (data) => {
         if (cancel) return
-        const rows = Array.isArray(data.results) ? data.results as Array<Record<string, unknown>> : []
+        let rows = leadRowsFromCombined(data)
+        const boards = Array.isArray(data.dashboards) ? data.dashboards as Array<Record<string, unknown>> : []
+        if (!rows.length && boards.length) {
+          const loaded = await Promise.all(boards.map(async (board) => {
+            const id = Number(board.id)
+            if (!Number.isFinite(id) || id < 1) return []
+            const one = await DashboardApi.get(id)
+            const dashboard = one.dashboard && typeof one.dashboard === 'object' ? one.dashboard as Record<string, unknown> : {}
+            return leadRowsFromCombined({ dashboards: [dashboard] })
+          }))
+          rows = loaded.flat()
+        }
+        if (cancel) return
         setResults(rows)
         setTitle(String(data.title || 'Dashboard'))
         setState(rows.length ? 'ready' : 'empty')
       })
-      .catch(() => { if (!cancel) setState('empty') })
+      .catch((err: unknown) => {
+        if (cancel) return
+        setDetail(err instanceof Error ? err.message : 'Could not load the published dashboard.')
+        setState('error')
+      })
     return () => { cancel = true }
   }, [])
 
   if (state === 'load') return <Loader size="md" title="Opening LeadLens" subtitle="Loading your data" />
-  if (state === 'empty') {
+  if (state === 'empty' || state === 'error') {
     return (
       <MouseEffectCard
         topText="LeadLens"
         topSubtext="B1 Leads Audit"
         title="No published dashboard"
-        subtitle="Publish a review pack when this role can upload."
-        primaryCtaText={canPublish ? 'Publish' : ''}
-        footerText="Accuracy rings appear after a published audit."
+        subtitle={state === 'error' ? detail : 'ERP Sync has not published one yet.'}
+        footerText="Dashboards are published by ERP Sync."
       />
     )
   }
@@ -127,36 +158,9 @@ function PublishedView({ canPublish }: { canPublish: boolean }) {
         {panel === 'graphs' ? <LeadCharts results={results} /> : null}
         {panel === 'errors' ? <ScoreList rows={summary.rows.filter((row) => row.errorFlag).slice(0, 40).map((row) => [row.telecaller, `${row.severity || 'Error'} · ${row.errorLabels.join(', ') || row.errorDetails}`])} /> : null}
       </SmoothTab>
-      {canPublish ? (
-        <SlideTextButton
-          type="button"
-          text="Publish"
-          hoverText="Save dashboards"
-          onClick={() => {
-            const byName = new Map<string, Array<Record<string, unknown>>>()
-            for (const row of results) {
-              const name = String(row.telecaller || 'Unknown')
-              const list = byName.get(name) || []
-              list.push(row)
-              byName.set(name, list)
-            }
-            const dashboards = [...byName.entries()].map(([telecaller_name, payload]) => ({
-              telecaller_name,
-              title: telecaller_name,
-              payload: { results: payload },
-            }))
-            setMessage('Publishing…')
-            DashboardApi.publish(dashboards)
-              .then(() => setMessage('Published.'))
-              .catch((err: unknown) => setMessage(err instanceof Error ? err.message : 'Publish failed'))
-          }}
-        />
-      ) : null}
-      {message ? <p className="text-sm">{message}</p> : null}
     </div>
   )
 }
-
 function ScoreList({ rows }: { rows: string[][] }) {
   if (!rows.length) return <p className="p-4 text-sm text-zinc-500">No rows.</p>
   return (
@@ -238,122 +242,6 @@ function PerfView() {
   )
 }
 
-function ConsoleView() {
-  const [progress, setProgress] = useState<AuditProgress>({})
-  const [message, setMessage] = useState('Choose a workbook to stage, or stop a server audit.')
-  const fileRef = useRef<HTMLInputElement>(null)
-  const running = Boolean(progress.running) || progress.status === 'auditing'
-  const audited = Number(progress.audited || 0)
-  const total = Number(progress.total || 0)
-
-  useEffect(() => {
-    let stop = false
-    const pull = () => {
-      api('audit/status').then((data) => {
-        if (stop) return
-        const next = (data.progress || data) as AuditProgress
-        setProgress(next)
-      }).catch(() => {})
-    }
-    pull()
-    const timer = window.setInterval(pull, 2000)
-    return () => { stop = true; window.clearInterval(timer) }
-  }, [])
-
-  async function toggleRun() {
-    if (running) {
-      setMessage('Stopping…')
-      try {
-        const data = await api('audit/cancel', { method: 'POST', body: {} })
-        setMessage(String(data.message || 'Audit stopped'))
-      } catch (err) {
-        setMessage(err instanceof Error ? err.message : 'Could not stop the audit')
-      }
-      return
-    }
-    fileRef.current?.click()
-  }
-
-  const rings = [
-    activityRing('Progress', audited, total || 1, RING.rose, 168, '%'),
-    activityRing('Leads', total, Math.max(total, audited, 1), RING.lime, 124, 'leads'),
-    activityRing('Audited', audited, Math.max(total, audited, 1), RING.cyan, 80, 'calls'),
-  ]
-
-  return (
-    <div className="space-y-4">
-      <ActivityRings title={progress.source_file || 'Run console'} data={rings} />
-      <input
-        ref={fileRef}
-        type="file"
-        accept=".xlsx,.xls,.csv,.json"
-        className="hidden"
-        onChange={async (event) => {
-          const file = event.target.files?.[0]
-          event.target.value = ''
-          if (!file) return
-          setMessage(`Staging ${file.name}…`)
-          const body = new FormData()
-          body.append('file', file)
-          try {
-            const data = await api('audit/stage', { method: 'POST', body })
-            setMessage(`Staged ${String(data.source_file || file.name)} · ${String(data.lead_count || 0)} leads. The OpenAI batch loop still runs from the existing audit engine.`)
-          } catch (err) {
-            setMessage(err instanceof Error ? err.message : 'Stage failed')
-          }
-        }}
-      />
-      <BentoGrid
-        items={[]}
-        voice={{
-          title: 'Run audit',
-          description: message,
-          running,
-          elapsed: Number(progress.elapsed_seconds || 0),
-          onToggle: () => { void toggleRun() },
-        }}
-      />
-      <div className="flex flex-wrap gap-2">
-        <SlideTextButton type="button" text="Run audit" hoverText={running ? 'Stop audit' : 'Choose workbook'} onClick={() => { void toggleRun() }} />
-        <SlideTextButton type="button" variant="ghost" text="Cancel" hoverText="Stop audit" onClick={() => { void toggleRun() }} />
-      </div>
-    </div>
-  )
-}
-
-function HistoryView() {
-  const [rows, setRows] = useState<Array<{ id?: string; name?: string; title?: string; status?: string; updated_at?: string }>>([])
-  const [state, setState] = useState<'load' | 'empty' | 'ready'>('load')
-  useEffect(() => {
-    Promise.all([DashboardApi.list().catch(() => ({ dashboards: [] })), JobsApi.list().catch(() => ({ jobs: [] }))])
-      .then(([dash, jobs]) => {
-        const published = Array.isArray(dash.dashboards) ? dash.dashboards as Array<Record<string, unknown>> : []
-        const jobRows = Array.isArray(jobs.jobs) ? jobs.jobs as Array<Record<string, unknown>> : []
-        const merged = [
-          ...published.map((row) => ({ id: String(row.id), name: String(row.telecaller_name || row.title || 'Dashboard'), status: 'published', updated_at: String(row.updated_at || '') })),
-          ...jobRows.map((row) => ({ id: String(row.id || row.job_id || ''), name: String(row.fileName || row.name || 'Job'), status: String(row.status || ''), updated_at: String(row.updatedAt || '') })),
-        ]
-        setRows(merged)
-        setState(merged.length ? 'ready' : 'empty')
-      })
-  }, [])
-  if (state === 'load') return <Loader size="md" title="Opening LeadLens" subtitle="Loading your data" />
-  if (state === 'empty') {
-    return (
-      <MouseEffectCard
-        topText="LeadLens"
-        topSubtext="History"
-        title="No history yet"
-        subtitle="Completed audits and published dashboards show up here."
-        primaryCtaText="Run console"
-        onPrimaryCtaClick={() => { location.hash = '#console' }}
-        footerText="Same jobs list as the PHP session."
-      />
-    )
-  }
-  return <ScoreList rows={rows.map((row) => [row.name || 'Item', `${row.status || ''} ${row.updated_at || ''}`])} />
-}
-
 function SettingsView() {
   const { user } = useAuth()
   const [model, setModel] = useState('gpt-4o-mini')
@@ -385,26 +273,14 @@ function SettingsView() {
         eyebrow="Capabilities"
         heading="LeadLens settings"
         items={[
-          { icon: Gauge, title: 'Run console', description: 'Workbook staging and the live server audit.', color: '#f59e0b' },
           { icon: BarChart3, title: 'Published dashboards', description: 'Bucket 1 accuracy, clean leads, and critical share.', color: '#04C7DD' },
-          { icon: ListTree, title: 'History', description: 'Jobs and the latest published telecaller packs.', color: '#A3F900' },
           { icon: FileWarning, title: 'OpenAI key', description: keyLine, color: '#FF2D55' },
           { icon: Phone, title: 'Performance report', description: 'Site visit, follow-up, and active leads.', color: '#8b5cf6' },
           { icon: Database, title: 'Server settings', description: user?.is_super ? 'Super User can save these for everyone.' : 'Applied for this session.', color: '#71717a' },
         ]}
       />
-      <BentoGrid
-        voice={false}
-        items={[{
-          id: 'model',
-          title: 'Audit model',
-          description: `${model} · ${keyLine}`,
-          feature: 'icons',
-          openaiStatus: keyLine,
-        }]}
-      />
       <form
-        className="grid max-w-lg gap-3"
+        className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3"
         onSubmit={async (event) => {
           event.preventDefault()
           const next = { ...settings, model, batchSize: Number(batch), concurrency: Number(concurrency) }
@@ -418,34 +294,101 @@ function SettingsView() {
           }
         }}
       >
-        <label className="text-sm">Model<input className="mt-1 w-full rounded-xl border px-3 py-2 dark:border-zinc-700 dark:bg-zinc-950" value={model} onChange={(e) => setModel(e.target.value)} /></label>
-        <label className="text-sm">Batch size<input className="mt-1 w-full rounded-xl border px-3 py-2 dark:border-zinc-700 dark:bg-zinc-950" value={batch} onChange={(e) => setBatch(e.target.value)} /></label>
-        <label className="text-sm">Concurrency<input className="mt-1 w-full rounded-xl border px-3 py-2 dark:border-zinc-700 dark:bg-zinc-950" value={concurrency} onChange={(e) => setConcurrency(e.target.value)} /></label>
-        <SlideTextButton type="submit" text="Save" hoverText="Store settings" />
-        {message ? <p className="text-sm">{message}</p> : null}
+        <label className="flex flex-col gap-2 rounded-2xl border border-zinc-200/80 bg-white p-4 text-sm dark:border-white/10 dark:bg-[#06060f]">
+          <span className="font-semibold text-zinc-900 dark:text-white">Model</span>
+          <span className="text-[12.5px] text-zinc-500 dark:text-white/40">OpenAI model used for the audit.</span>
+          <input className="mt-1 w-full rounded-xl border px-3 py-2 dark:border-zinc-700 dark:bg-zinc-950" value={model} onChange={(e) => setModel(e.target.value)} />
+        </label>
+        <label className="flex flex-col gap-2 rounded-2xl border border-zinc-200/80 bg-white p-4 text-sm dark:border-white/10 dark:bg-[#06060f]">
+          <span className="font-semibold text-zinc-900 dark:text-white">Batch size</span>
+          <span className="text-[12.5px] text-zinc-500 dark:text-white/40">Leads sent in each audit request.</span>
+          <input className="mt-1 w-full rounded-xl border px-3 py-2 dark:border-zinc-700 dark:bg-zinc-950" inputMode="numeric" value={batch} onChange={(e) => setBatch(e.target.value)} />
+        </label>
+        <label className="flex flex-col gap-2 rounded-2xl border border-zinc-200/80 bg-white p-4 text-sm dark:border-white/10 dark:bg-[#06060f]">
+          <span className="font-semibold text-zinc-900 dark:text-white">Concurrency</span>
+          <span className="text-[12.5px] text-zinc-500 dark:text-white/40">Audit requests kept in flight at once.</span>
+          <input className="mt-1 w-full rounded-xl border px-3 py-2 dark:border-zinc-700 dark:bg-zinc-950" inputMode="numeric" value={concurrency} onChange={(e) => setConcurrency(e.target.value)} />
+        </label>
+        <div className="flex flex-col items-start gap-2 sm:col-span-2 lg:col-span-3">
+          <SlideTextButton type="submit" text="Save" hoverText="Store settings" />
+          {message ? <p className="text-sm">{message}</p> : null}
+        </div>
       </form>
     </div>
   )
 }
 
+function PerfHelp({ title, items }: { title: string; items: string[] }) {
+  return (
+    <section className="rounded-2xl border border-zinc-200/80 bg-white p-4 text-sm dark:border-white/10 dark:bg-[#06060f]">
+      <h3 className="font-semibold text-zinc-900 dark:text-white">{title}</h3>
+      <ul className="mt-3 list-disc space-y-2 pl-5 text-[13.5px] leading-relaxed text-zinc-700 dark:text-zinc-200">
+        {items.map((item) => <li key={item}>{item}</li>)}
+      </ul>
+    </section>
+  )
+}
+
 function PerfSettingsView() {
-  const [message, setMessage] = useState('')
   return (
     <div className="space-y-4">
-      <p className="text-sm text-zinc-500">Performance publishing uses the same perf-dashboards API. Clearing removes every published performance pack.</p>
-      <SlideTextButton
-        type="button"
-        variant="ghost"
-        text="Clear performance"
-        hoverText="Remove all"
-        onClick={() => {
-          setMessage('Clearing…')
-          PerfDashboardApi.removeAll()
-            .then(() => setMessage('Performance dashboards removed.'))
-            .catch((err: unknown) => setMessage(err instanceof Error ? err.message : 'Could not clear'))
-        }}
+      <div className="rounded-2xl border border-zinc-200/80 bg-white p-4 dark:border-white/10 dark:bg-[#06060f]">
+        <h2 className="text-base font-semibold text-zinc-900 dark:text-white">TeleCalling Performance · column reference</h2>
+        <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">Required headers are matched case-insensitively using common aliases.</p>
+      </div>
+      <PerfHelp
+        title="Master Data (M)"
+        items={[
+          'Mobile',
+          'Project Name',
+          'Source',
+          'Lead Registration Date (LRD)',
+          'Next Followup Date (NFD)',
+          'Status — used for Draft / leads without calls',
+          'Telecaller Name',
+        ]}
       />
-      {message ? <p className="text-sm">{message}</p> : null}
+      <PerfHelp
+        title="History Data (H)"
+        items={[
+          'Mobile',
+          'Project Name',
+          'Source',
+          'Lead Update Date (LUD) — min/max across H sets the report date range',
+          'Status — Not Interested, Sent to Enquiry, Site Visit Scheduled / Pending / Cancelled',
+          'Telecaller Name',
+        ]}
+      />
+      <PerfHelp
+        title="Scorecard columns"
+        items={[
+          'Total Leads — unique leads (Mobile + TeleCaller) in Master ∪ History',
+          'History rows — Mobile/Project/Source/Telecaller forward-filled; STE uses any History Status row; SVS uses latest History Status per Mobile+TeleCaller+Project; SVP/SVC use any History Status row (once per Mobile+TeleCaller+Project); NI uses latest Status per Mobile+TeleCaller',
+          'Active Leads — unique Master leads (Mobile + TeleCaller)',
+          'Total Calls — History row count (each call row after forward-fill)',
+          'Avg Calls per Day — Total Calls ÷ inclusive calendar days between min and max History Lead Update Date',
+          'Draft Leads — Master leads with Status = Draft',
+          'Not Follow-up Leads — Master leads not present in History, Status ≠ Draft',
+          'Site Visited — any History Status = Sent/Send to Enquiry (once per Mobile+TeleCaller+Project)',
+          'Site Visit Scheduled — latest History Status = Site Visit Scheduled (once per Mobile+TeleCaller+Project)',
+          'Site Visit Pending — any History Status = Site Visit Pending',
+          'Total Leads vs Site Visited — Site Visited ÷ Total Leads',
+          'Site Visit Cancelled — any History Status = Site Visit Cancelled',
+          'Not Interested — latest History Status',
+          'Overdue Leads — Master Next Followup Date before tomorrow (once per lead)',
+        ]}
+      />
+      <PerfHelp
+        title="Status matching (case-insensitive)"
+        items={[
+          'Not Interested — History Status on latest row',
+          'Site Visit Scheduled / Pending / Cancelled — SVS from latest History Status; SVP/SVC from any History Status row (once per Mobile+TeleCaller+Project)',
+          'Sent to Enquiry / Site Visited — History Status on any row (sent to enquiry or send to enquiry)',
+        ]}
+      />
+      <p className="text-sm leading-relaxed text-zinc-600 dark:text-zinc-300">
+        Status stacks are independent tallies (a lead may appear in STE and a latest-status bucket). Overdue counts Master rows where Next Followup Date is before tomorrow (calendar day). No History filter is applied to overdue.
+      </p>
     </div>
   )
 }
