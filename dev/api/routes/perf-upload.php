@@ -230,9 +230,31 @@ function ll_perf_upload_unmatched(array $only, array $byTelecaller): array
 }
 
 /**
+ * Keys present on any row. ERP JSON drops empty cells, so row 0 can omit a column
+ * that later rows (or the Excel header) still have.
+ *
+ * @param list<mixed> $list
+ * @return array<string, true>
+ */
+function ll_perf_upload_seen_keys(array $list): array
+{
+  $seen = [];
+  foreach ($list as $item) {
+    if (!is_array($item)) {
+      continue;
+    }
+    foreach ($item as $key => $_) {
+      $seen[(string) $key] = true;
+    }
+  }
+  return $seen;
+}
+
+/**
  * ERP JSON is either header-named (erp_upload.py renames A-codes to Excel headers)
- * or still keyed by A-codes (a raw getreportjsondata upload). Header names are used
- * when Mobile and Project Name are present, so a later letter shift is fixed in Python.
+ * or still keyed by A-codes (a raw getreportjsondata upload). Header names win when
+ * Mobile and Project Name are present. Source, registration, and next follow-up are
+ * optional: a missing letter or header is left blank instead of rejecting the file.
  *
  * @param list<array{id: string, label: string, aliases: string}> $fields
  * @param array<string, string> $codes
@@ -259,8 +281,8 @@ function ll_perf_upload_parse_json(string $binary, array $fields, array $codes):
     throw new RuntimeException('JSON report has no rows');
   }
 
-  $sample = $list[0];
-  $headerColumns = ll_perf_match_columns(array_map('strval', array_keys($sample)), $fields);
+  $seen = ll_perf_upload_seen_keys($list);
+  $headerColumns = ll_perf_match_columns(array_keys($seen), $fields);
   if (($headerColumns['mobile'] ?? '') !== '' && ($headerColumns['project'] ?? '') !== '') {
     $rawRows = [];
     foreach ($list as $item) {
@@ -280,11 +302,21 @@ function ll_perf_upload_parse_json(string $binary, array $fields, array $codes):
     return ll_perf_upload_rows_from_sheet($rawRows, $fields);
   }
 
+  $requiredIds = [];
+  foreach ($fields as $field) {
+    if (ll_perf_field_required($field)) {
+      $requiredIds[$field['id']] = true;
+    }
+  }
   $hasCode = false;
-  foreach ($codes as $code => $_field) {
-    if (array_key_exists($code, $sample)) {
+  $missing = [];
+  foreach ($codes as $code => $fieldId) {
+    $headerKey = (string) ($headerColumns[$fieldId] ?? '');
+    if (isset($seen[$code]) || $headerKey !== '') {
       $hasCode = true;
-      break;
+    }
+    if (isset($requiredIds[$fieldId]) && !isset($seen[$code]) && $headerKey === '') {
+      $missing[] = $code;
     }
   }
   if (!$hasCode) {
@@ -294,12 +326,6 @@ function ll_perf_upload_parse_json(string $binary, array $fields, array $codes):
       $fields,
       $codes
     ));
-  }
-  $missing = [];
-  foreach (array_keys($codes) as $code) {
-    if (!array_key_exists($code, $sample)) {
-      $missing[] = $code;
-    }
   }
   if ($missing) {
     throw new RuntimeException(ll_perf_upload_json_error(
@@ -316,7 +342,20 @@ function ll_perf_upload_parse_json(string $binary, array $fields, array $codes):
     $assoc = [];
     $empty = true;
     foreach ($codes as $code => $fieldId) {
-      $val = $item[$code] ?? '';
+      $headerKey = (string) ($headerColumns[$fieldId] ?? '');
+      $val = null;
+      if ($headerKey !== '' && array_key_exists($headerKey, $item)) {
+        $candidate = $item[$headerKey];
+        if (is_array($candidate) || is_object($candidate)) {
+          $candidate = '';
+        }
+        if (trim((string) $candidate) !== '') {
+          $val = $candidate;
+        }
+      }
+      if ($val === null) {
+        $val = $item[$code] ?? '';
+      }
       if (is_array($val) || is_object($val)) {
         $val = '';
       }
@@ -368,7 +407,7 @@ function ll_perf_upload_parse_report(string $binary, string $kind, array $fields
  */
 function ll_perf_upload_rows_from_sheet(array $rawRows, array $fields): array
 {
-  $columns = ll_perf_match_columns(array_keys($rawRows[0] ?? []), $fields);
+  $columns = ll_perf_match_columns(array_keys(ll_perf_upload_seen_keys($rawRows)), $fields);
   $missing = ll_perf_missing_labels($columns, $fields);
   if ($missing) {
     throw new RuntimeException('Missing column(s): ' . implode(', ', $missing));

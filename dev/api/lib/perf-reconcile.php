@@ -13,13 +13,13 @@ const LL_PERF_WS = '[\s\x{00A0}\x{1680}\x{2000}-\x{200A}\x{2028}\x{2029}\x{202F}
 function ll_perf_master_fields(): array
 {
   return [
-    ['id' => 'mobile', 'label' => 'Mobile', 'aliases' => 'mobile, mobile number, phone'],
-    ['id' => 'project', 'label' => 'Project Name', 'aliases' => 'project name, project'],
-    ['id' => 'source', 'label' => 'Source', 'aliases' => 'source, source name'],
-    ['id' => 'registration', 'label' => 'Lead Registration Date', 'aliases' => 'lead registration date, registration date'],
-    ['id' => 'next', 'label' => 'Next Followup Date', 'aliases' => 'next followup date, next follow-up date, next follow up date'],
-    ['id' => 'status', 'label' => 'Status', 'aliases' => 'status, lead status'],
-    ['id' => 'telecaller', 'label' => 'Telecaller Name', 'aliases' => 'telecaller name, tellecaller name, tele caller name, agent name, executive name'],
+    ['id' => 'mobile', 'label' => 'Mobile', 'aliases' => 'mobile, mobile number, phone', 'required' => true],
+    ['id' => 'project', 'label' => 'Project Name', 'aliases' => 'project name, project', 'required' => true],
+    ['id' => 'source', 'label' => 'Source', 'aliases' => 'source, source name', 'required' => false],
+    ['id' => 'registration', 'label' => 'Lead Registration Date', 'aliases' => 'lead registration date, registration date', 'required' => false],
+    ['id' => 'next', 'label' => 'Next Followup Date', 'aliases' => 'next followup date, next follow-up date, next follow up date', 'required' => false],
+    ['id' => 'status', 'label' => 'Status', 'aliases' => 'status, lead status', 'required' => true],
+    ['id' => 'telecaller', 'label' => 'Telecaller Name', 'aliases' => 'telecaller name, tellecaller name, tele caller name, agent name, executive name', 'required' => true],
   ];
 }
 
@@ -29,7 +29,7 @@ function ll_perf_history_fields(): array
     ll_perf_master_fields(),
     static fn(array $f): bool => $f['id'] !== 'next' && $f['id'] !== 'registration'
   ));
-  $fields[] = ['id' => 'update', 'label' => 'Lead Update Date', 'aliases' => 'lead update date, call date, update date, lead update'];
+  $fields[] = ['id' => 'update', 'label' => 'Lead Update Date', 'aliases' => 'lead update date, call date, update date, lead update', 'required' => true];
   return $fields;
 }
 
@@ -39,6 +39,8 @@ function ll_perf_history_fields(): array
  * E Telecaller Name, F Next Followup Date, G Lead Registration Date, H Source.
  * Registration moved A9→A7 and source A10→A8 after unused columns were removed.
  * A2 Project Name and A3 Mobile did not move.
+ * Source, registration, and next follow-up are optional: ERP JSON omits empty cells,
+ * so those codes may be absent even when the Excel header exists.
  */
 function ll_perf_master_erp_codes(): array
 {
@@ -58,6 +60,7 @@ function ll_perf_master_erp_codes(): array
  * 10 Oct 2026 Excel (row 7): A Sr, B Lead Update Date, C Mobile, D Project Name,
  * E Tellecaller Name, F Status, G Source. Sr is new at A1, so the previous
  * A1–A6 fields each shifted one letter later.
+ * Source (A7) is optional and may be omitted when the cell is empty.
  */
 function ll_perf_history_erp_codes(): array
 {
@@ -169,11 +172,20 @@ function ll_perf_match_columns(array $headers, array $fields): array
   return $out;
 }
 
+/** Identity columns the dashboards cannot run without. Source, registration, and next are optional. */
+function ll_perf_field_required(array $field): bool
+{
+  return ($field['required'] ?? true) !== false;
+}
+
 /** @return list<string> */
 function ll_perf_missing_labels(array $columns, array $fields): array
 {
   $missing = [];
   foreach ($fields as $field) {
+    if (!ll_perf_field_required($field)) {
+      continue;
+    }
     if ((string) ($columns[$field['id']] ?? '') === '') {
       $missing[] = (string) $field['label'];
     }
