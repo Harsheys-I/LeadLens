@@ -1,0 +1,173 @@
+﻿@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: light;
+  --ink: #17211d;
+  --muted: #6c7771;
+  --line: #dfe5e1;
+  --paper: #f4f6f3;
+  --panel: #fff;
+  --green: #12372a;
+  --green-2: #1f5d45;
+  --amber: #c57924;
+  --red: #a33a32;
+  --chart-bar: #1f5d45;
+  --chart-1: #12372a;
+  --chart-2: #1f5d45;
+  --chart-3: #3f8c68;
+  --chart-4: #c57924;
+  --chart-5: #a33a32;
+  --chart-6: #2a5f9e;
+  --chart-7: #6c7771;
+  --chart-8: #9bb7a8;
+  --background: var(--paper);
+  --foreground: var(--ink);
+  --card: var(--panel);
+  --card-foreground: var(--ink);
+  --primary: var(--green);
+  --primary-foreground: #f4f6f3;
+  --secondary: #edf1ee;
+  --secondary-foreground: var(--ink);
+  --muted-fill: #f3f6f4;
+  --muted-foreground: var(--muted);
+  --accent: #dff4e8;
+  --accent-foreground: var(--green);
+  --destructive: var(--red);
+  --destructive-foreground: #fff;
+  --border: var(--line);
+  --ring: var(--green-2);
+  --chart-background: var(--panel);
+  --chart-foreground: var(--ink);
+  --chart-foreground-muted: var(--muted);
+  --chart-label: var(--muted);
+  --chart-grid: var(--line);
+  --chart-crosshair: var(--green-2);
+  --chart-line-primary: var(--chart-1);
+  --chart-line-secondary: var(--chart-2);
+  --chart-indicator: var(--green-2);
+  --chart-marker-background: var(--panel);
+  --chart-marker-border: var(--line);
+  --chart-marker-foreground: var(--ink);
+  --chart-tooltip-background: var(--panel);
+  --chart-tooltip-foreground: var(--ink);
+  --chart-tooltip-muted: var(--muted);
+  --chart-scale-1: #e8f0e4;
+  --chart-scale-2: #c5ddc4;
+  --chart-scale-3: #7eaf86;
+  --chart-scale-4: #3f8c68;
+  --chart-scale-5: #1f5d45;
+  --chart-scale-01: var(--chart-scale-1);
+  --chart-scale-02: var(--chart-scale-2);
+  --chart-scale-03: var(--chart-scale-3);
+  --chart-scale-04: var(--chart-scale-4);
+  --chart-scale-05: var(--chart-scale-5);
+  --chart-scale-pattern-color: #e8f0e4;
+}
+
+[data-theme="dark"] {
+  color-scheme: dark;
+  --ink: #e6efe9;
+  --muted: #9aaba2;
+  --line: #2c3d35;
+  --paper: #0e1411;
+  --panel: #171e1a;
+  --green: #2f6b52;
+  --green-2: #7dcea6;
+  --amber: #d79a45;
+  --red: #e07a72;
+  --chart-bar: #6fbf97;
+  --chart-1: #6fbf97;
+  --chart-2: #3f8c68;
+  --chart-3: #7dcea6;
+  --chart-4: #d79a45;
+  --chart-5: #e07a72;
+  --chart-6: #8bb4e0;
+  --chart-7: #9aaba2;
+  --chart-8: #4a7a62;
+  --background: var(--paper);
+  --foreground: var(--ink);
+  --card: var(--panel);
+  --card-foreground: var(--ink);
+  --primary: var(--green-2);
+  --primary-foreground: #0e1411;
+  --secondary: #243029;
+  --secondary-foreground: var(--ink);
+  --muted-fill: #1a2420;
+  --muted-foreground: var(--muted);
+  --accent: #1b3328;
+  --accent-foreground: var(--green-2);
+  --destructive: var(--red);
+  --border: var(--line);
+  --ring: var(--green-2);
+  --chart-scale-1: #0e2a20;
+  --chart-scale-2: #1b4a34;
+  --chart-scale-3: #2f6b52;
+  --chart-scale-4: #4a9a6e;
+  --chart-scale-5: #7dcea6;
+  --chart-scale-01: var(--chart-scale-1);
+  --chart-scale-02: var(--chart-scale-2);
+  --chart-scale-03: var(--chart-scale-3);
+  --chart-scale-04: var(--chart-scale-4);
+  --chart-scale-05: var(--chart-scale-5);
+  --chart-scale-pattern-color: #0e2a20;
+}
+
+html,
+body,
+#root {
+  min-height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: "Segoe UI", system-ui, sans-serif;
+}
+
+.ll-preview-banner {
+  display: none;
+}
+
+html.ll-dev-preview .ll-preview-banner {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 500;
+  display: flex;
+  height: 28px;
+  align-items: center;
+  justify-content: center;
+  background: #c57924;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  pointer-events: none;
+}
+
+html.ll-dev-preview body {
+  padding-top: 28px;
+}
+
+.glass {
+  background: rgba(255, 255, 255, 0.72);
+  border: 1px solid rgba(18, 55, 42, 0.12);
+  -webkit-backdrop-filter: blur(10px);
+  backdrop-filter: blur(10px);
+}
+
+[data-theme="dark"] .glass {
+  background: rgba(12, 22, 18, 0.72);
+  border-color: rgba(255, 255, 255, 0.12);
+}
+
+.profile-menu[data-state="open"],
+.profile-menu[data-state="closed"] {
+  animation-duration: 200ms !important;
+}
+
