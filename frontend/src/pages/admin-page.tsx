@@ -13,7 +13,7 @@ type Perm = { id: string; label: string; group: string }
 type Person = { id: number; username: string; display_name?: string; role_name?: string; role_id?: number; telecaller_name?: string; role_key?: string }
 type RequestRow = { id: number; full_name?: string; requested_username?: string; preferred_module?: string; reason?: string }
 
-const inputClass = 'w-full rounded-xl border border-zinc-200 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-950'
+const inputClass = 'w-full rounded-xl border border-zinc-200 bg-[var(--panel)] px-3 py-2 text-sm text-[var(--ink)] dark:border-zinc-700'
 
 export default function AdminPage() {
   const { hasPermission, user } = useAuth()
@@ -76,11 +76,11 @@ function UsersView() {
       </section>
       <section className="space-y-3">
         <h2 className="text-sm font-semibold">Users</h2>
-        <ul className="space-y-2 text-sm">
+        <ul className="space-y-2 text-sm text-[var(--ink)]">
           {people.map((person) => (
-            <li key={person.id} className="flex items-center justify-between gap-2 rounded-xl border border-zinc-200 px-3 py-2 dark:border-zinc-800">
+            <li key={person.id} className="flex items-center justify-between gap-2 rounded-xl border border-zinc-200 bg-transparent px-3 py-2 text-[var(--ink)] dark:border-zinc-800">
               <span>{person.display_name || person.username} · {person.role_name}</span>
-              <button type="button" className="text-rose-600" onClick={() => { void AdminApi.deleteUser(person.id).then(reload).catch((err: unknown) => setMessage(err instanceof Error ? err.message : 'Delete failed')) }}>Delete</button>
+              <button type="button" className="text-rose-600 dark:text-rose-300" onClick={() => { void AdminApi.deleteUser(person.id).then(reload).catch((err: unknown) => setMessage(err instanceof Error ? err.message : 'Delete failed')) }}>Delete</button>
             </li>
           ))}
         </ul>
@@ -126,8 +126,8 @@ function CreateUser({ roles, onDone, onMessage }: { roles: Role[]; onDone: () =>
 
 function RequestItem({ row, roles, onDone, onMessage }: { row: RequestRow; roles: Role[]; onDone: () => Promise<void>; onMessage: (text: string) => void }) {
   return (
-    <li className="rounded-2xl border border-zinc-200 p-3 dark:border-zinc-800">
-      <p className="font-medium">{row.full_name || row.requested_username}</p>
+    <li className="rounded-2xl border border-zinc-200 bg-transparent p-3 text-[var(--ink)] dark:border-zinc-800">
+      <p className="font-medium text-[var(--ink)]">{row.full_name || row.requested_username}</p>
       <p className="text-zinc-500">{row.preferred_module} · {row.reason}</p>
       <form
         className="mt-2 grid gap-2"
@@ -203,15 +203,15 @@ function RolesView() {
 
   return (
     <div className="space-y-4">
-      <ul className="space-y-2 text-sm">
+      <ul className="space-y-2 text-sm text-[var(--ink)]">
         {roles.map((role) => (
-          <li key={role.id} className="flex items-center justify-between rounded-2xl border border-zinc-200 px-3 py-2 dark:border-zinc-800">
-            <button type="button" className="text-left" onClick={() => { setEditing(role.id); setName(role.name); setRank(String(role.rank ?? 0)); setDraft(role.permissions || []) }}>
+          <li key={role.id} className="flex items-center justify-between rounded-2xl border border-zinc-200 bg-transparent px-3 py-2 text-[var(--ink)] dark:border-zinc-800">
+            <button type="button" className="text-left text-[var(--ink)]" onClick={() => { setEditing(role.id); setName(role.name); setRank(String(role.rank ?? 0)); setDraft(role.permissions || []) }}>
               <span className="font-medium">{role.name}</span>
               <span className="ml-2 text-[var(--muted)]">rank {role.rank ?? 0}</span>
             </button>
             {role.is_system ? null : (
-              <button type="button" className="text-rose-600" onClick={() => { void AdminApi.deleteRole(role.id).then(reload).catch((err: unknown) => setMessage(err instanceof Error ? err.message : 'Delete failed')) }}>Delete</button>
+              <button type="button" className="text-rose-600 dark:text-rose-300" onClick={() => { void AdminApi.deleteRole(role.id).then(reload).catch((err: unknown) => setMessage(err instanceof Error ? err.message : 'Delete failed')) }}>Delete</button>
             )}
           </li>
         ))}
@@ -238,10 +238,10 @@ function RolesView() {
         <input value={rank} onChange={(e) => setRank(e.target.value)} placeholder="Rank" className={inputClass} />
         <div className="grid gap-3 sm:grid-cols-2">
           {Object.entries(groups).map(([group, items]) => (
-            <fieldset key={group} className="space-y-1 rounded-2xl border border-zinc-200 p-3 dark:border-zinc-800">
-              <legend className="px-1 text-xs font-semibold">{group}</legend>
+            <fieldset key={group} className="space-y-1 rounded-2xl border border-zinc-200 p-3 text-[var(--ink)] dark:border-zinc-800">
+              <legend className="px-1 text-xs font-semibold text-[var(--ink)]">{group}</legend>
               {items.map((item) => (
-                <label key={item.id} className="flex items-center gap-2 text-sm">
+                <label key={item.id} className="flex items-center gap-2 text-sm text-[var(--ink)]">
                   <input type="checkbox" checked={draft.includes(item.id)} onChange={() => togglePerm(item.id)} />
                   {item.label}
                 </label>

@@ -9,7 +9,7 @@
  */
 
 import type { MouseEvent } from 'react'
-import { motion, type Variants } from 'motion/react'
+import { motion } from 'motion/react'
 import { cn } from '@/lib/utils'
 
 type SlideTextButtonVariant = 'default' | 'ghost'
@@ -23,16 +23,6 @@ interface SlideTextButtonProps {
   onClick?: (event: MouseEvent<HTMLButtonElement | HTMLAnchorElement>) => void
   type?: 'button' | 'submit' | 'reset'
   disabled?: boolean
-}
-
-const textVariants: Variants = {
-  initial: { y: '0%' },
-  hover: { y: '-100%' },
-}
-
-const hoverTextVariants: Variants = {
-  initial: { y: '100%' },
-  hover: { y: '0%' },
 }
 
 const entrance = {
@@ -53,7 +43,7 @@ export default function SlideTextButton({
 }: SlideTextButtonProps) {
   const classes = cn(
     'group relative inline-flex h-11 items-center justify-center overflow-hidden rounded-2xl px-6 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-400 disabled:pointer-events-none disabled:opacity-50',
-    variant === 'default' && 'bg-zinc-900 text-white dark:bg-white dark:text-zinc-900',
+    variant === 'default' && '!bg-white !text-[#17211d] ring-1 ring-black/10',
     variant === 'ghost' &&
       'bg-transparent text-zinc-900 hover:bg-zinc-100 dark:text-white dark:hover:bg-zinc-800',
     disabled && 'pointer-events-none opacity-50',
@@ -61,34 +51,23 @@ export default function SlideTextButton({
   )
 
   const label = (
-    <span className="relative block h-5 overflow-hidden">
-      <motion.span
-        className="block"
-        variants={textVariants}
-        initial="initial"
-        transition={{ duration: 0.28, ease: 'easeInOut' }}
-      >
+    <span className={cn('relative grid h-5 overflow-hidden', variant === 'default' && 'text-[#17211d]')}>
+      <span className="col-start-1 row-start-1 block whitespace-nowrap transition-transform duration-300 ease-in-out group-hover:-translate-y-full">
         {text}
-      </motion.span>
-      <motion.span
-        className="absolute inset-0 block"
-        variants={hoverTextVariants}
-        initial="initial"
-        transition={{ duration: 0.28, ease: 'easeInOut' }}
-      >
+      </span>
+      <span className="col-start-1 row-start-1 block translate-y-full whitespace-nowrap transition-transform duration-300 ease-in-out group-hover:translate-y-0">
         {hoverText}
-      </motion.span>
+      </span>
     </span>
   )
 
   if (type === 'submit' || !href) {
     return (
       <motion.button
-        type="submit"
+        type={type === 'submit' ? 'submit' : 'button'}
         className={classes}
         onClick={onClick}
         disabled={disabled}
-        whileHover={disabled ? undefined : 'hover'}
         {...entrance}
       >
         {label}
@@ -102,7 +81,6 @@ export default function SlideTextButton({
       className={classes}
       onClick={disabled ? (event) => event.preventDefault() : onClick}
       aria-disabled={disabled || undefined}
-      whileHover={disabled ? undefined : 'hover'}
       {...entrance}
     >
       {label}

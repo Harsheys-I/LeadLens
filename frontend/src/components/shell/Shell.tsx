@@ -52,10 +52,7 @@ export default function Shell({
     document.title = view === 'home' ? 'GPP AI' : `${title} · GPP AI`
   }, [title, view])
 
-  const navItems = [
-    { key: 'home', href: homeHref(), name: 'Home' },
-    ...modules.map((item) => ({ key: item.key, href: moduleHref(item.key), name: item.title })),
-  ]
+  const navItems = modules.map((item) => ({ key: item.key, href: moduleHref(item.key), name: item.title }))
 
   return (
     <div className="min-h-screen">
@@ -83,7 +80,7 @@ export default function Shell({
           onSignOut={() => { void signOut().then(() => onNavigate('home')) }}
         />
       </header>
-      <PageSlide viewKey={view} direction={direction}>
+      <PageSlide viewKey={view} direction={direction} className={view === 'home' ? 'max-w-none' : undefined}>
         {view === 'home' ? null : (
           <div>
             <p className="text-xs font-semibold uppercase tracking-[0.16em] text-teal-800 dark:text-teal-300">{title}</p>

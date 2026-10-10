@@ -165,6 +165,49 @@ const transition = {
   ease: [0.32, 0.72, 0, 1],
 };
 
+function indicatorTone(token: string): "light" | "dark" | null {
+  const bare = token.replace(/^(?:dark:)/, "");
+  if (bare.startsWith("hover:") || !bare.startsWith("bg-")) return null;
+  const name = bare.slice(3);
+  if (name === "white" || name === "zinc-50" || name === "zinc-100" || name === "zinc-200") return "light";
+  const neutral = name.match(/^(?:slate|gray|grey|neutral|stone)-(\d+)$/);
+  if (neutral) return Number(neutral[1]) <= 200 ? "light" : "dark";
+  if (/^zinc-\d+$/.test(name)) return "dark";
+  const hex = name.match(/^\[#([0-9a-fA-F]{6})\]$/);
+  if (hex) {
+    const value = hex[1];
+    const r = Number.parseInt(value.slice(0, 2), 16);
+    const g = Number.parseInt(value.slice(2, 4), 16);
+    const b = Number.parseInt(value.slice(4, 6), 16);
+    return (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255 > 0.72 ? "light" : "dark";
+  }
+  return "dark";
+}
+
+function selectedLabelClass(color?: string) {
+  const tokens = (color || "").split(/\s+/);
+  let light = false;
+  let darkLight = false;
+  let sawDark = false;
+  for (const token of tokens) {
+    const tone = indicatorTone(token);
+    if (!tone) continue;
+    if (token.startsWith("dark:")) {
+      sawDark = true;
+      if (tone === "light") darkLight = true;
+    } else if (tone === "light") {
+      light = true;
+    }
+  }
+  const lightWhenDark = sawDark ? darkLight : light;
+  // dark: utilities are emitted under :where(), so a later text-white wins.
+  // The important modifier keeps dark ink on a light pill.
+  if (light && lightWhenDark) return "text-[#17211d]";
+  if (!light && lightWhenDark) return "text-white dark:!text-[#17211d]";
+  if (light && !lightWhenDark) return "text-[#17211d] dark:!text-white";
+  return "text-white";
+}
+
 export default function SmoothTab({
   items = DEFAULT_TABS,
   defaultTabId = DEFAULT_TABS[0].id,
@@ -262,7 +305,7 @@ export default function SmoothTab({
                 className={cn(
                   "relative flex items-center justify-center gap-0.5 truncate rounded-lg px-2 py-1.5 text-sm font-medium",
                   "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                  isSelected ? "text-white" : "text-muted-foreground hover:bg-muted/50 hover:text-foreground",
+                  isSelected ? selectedLabelClass(selectedItem?.color || activeColor) : "text-muted-foreground hover:bg-muted/50 hover:text-foreground",
                 )}
                 id={`tab-${item.id}`}
                 key={item.id}
@@ -288,22 +331,7 @@ export default function SmoothTab({
     <div className="flex flex-col gap-4">
       {tabBar}
       {children !== undefined ? (
-        <div className="relative min-h-24 overflow-hidden">
-          <AnimatePresence custom={direction} initial={false} mode="popLayout">
-            <motion.div
-              animate="center"
-              className="w-full"
-              custom={direction}
-              exit="exit"
-              initial="enter"
-              key={selected}
-              transition={transition as never}
-              variants={slideVariants as never}
-            >
-              {children}
-            </motion.div>
-          </AnimatePresence>
-        </div>
+        <div className="w-full">{children}</div>
       ) : (
         <div className={cn("relative h-[200px] w-full rounded-lg border bg-card", stageClassName)}>
           <div className="absolute inset-0 overflow-hidden rounded-lg">

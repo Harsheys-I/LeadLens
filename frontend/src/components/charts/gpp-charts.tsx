@@ -30,7 +30,7 @@ export function pineRamp() {
 
 export function ChartCard({ title, children }: { title: string; children: ReactNode }) {
   return (
-    <section className="space-y-2 rounded-2xl border border-zinc-200 p-3 dark:border-zinc-800">
+    <section className="relative isolate space-y-2 overflow-hidden rounded-2xl border border-zinc-200 p-3 dark:border-zinc-800">
       <h3 className="text-sm font-semibold">{title}</h3>
       {children}
     </section>
@@ -70,19 +70,25 @@ export function GroupedBars({
   const axes = [...new Set(series.map((item) => item.yAxisId || 'left'))]
   return (
     <ChartCard title={title}>
-      <div className="h-72 w-full">
-        <BarChart data={data} xDataKey={xKey} stacked={stacked} barGap={0.25}>
-          <Grid />
-          <BarXAxis />
-          {axes.map((id) => (
-            <YAxis key={id} yAxisId={id} orientation={id === 'right' ? 'right' : 'left'} />
-          ))}
-          <ChartTooltip showDatePill={false} />
-          {series.map((item) => (
-            <Bar key={item.key} dataKey={item.key} fill={item.color} yAxisId={item.yAxisId || 'left'} lineCap={4} />
-          ))}
-        </BarChart>
-      </div>
+      <BarChart
+        data={data}
+        xDataKey={xKey}
+        stacked={stacked}
+        barGap={0.25}
+        aspectRatio="2 / 1"
+        className="min-h-[280px] overflow-hidden"
+        margin={{ top: 16, right: 48, bottom: 48, left: 48 }}
+      >
+        <Grid />
+        <BarXAxis />
+        {axes.map((id) => (
+          <YAxis key={id} yAxisId={id} orientation={id === 'right' ? 'right' : 'left'} />
+        ))}
+        <ChartTooltip showDatePill={false} />
+        {series.map((item) => (
+          <Bar key={item.key} dataKey={item.key} fill={item.color} yAxisId={item.yAxisId || 'left'} lineCap={4} />
+        ))}
+      </BarChart>
       <SliceLegend items={series.map((item) => ({ label: item.label, color: item.color }))} />
     </ChartCard>
   )
@@ -110,10 +116,10 @@ export function ShareRing({ title, slices }: { title: string; slices: Array<{ la
   if (!data.length) return <ChartCard title={title}><p className="text-sm text-[var(--muted)]">No data for this chart.</p></ChartCard>
   return (
     <ChartCard title={title}>
-      <div className="mx-auto h-64 w-64">
+      <div className="mx-auto h-[280px] w-[280px] max-w-full overflow-hidden">
         <RingChart
           data={data.map((slice) => ({ label: slice.label, value: slice.value, maxValue, color: slice.color }))}
-          size={240}
+          size={280}
         >
           {data.map((slice, index) => <Ring key={slice.label} index={index} color={slice.color} />)}
           <RingCenter defaultLabel="Total" />
@@ -154,21 +160,29 @@ export function ProjectMonthHeat({
   })
   const ramp = pineRamp()
   const denom = max > 0 ? max : 1
+  const rowPx = 22
   return (
     <ChartCard title={title}>
-      <div className="flex gap-2">
-        <ul className="max-w-40 shrink-0 space-y-1 text-xs text-[var(--muted)]">
-          {projects.map((project) => <li key={project} className="truncate">{project}</li>)}
+      <div className="flex items-start gap-2">
+        <ul className="w-40 shrink-0 text-xs text-[var(--muted)]" style={{ paddingTop: 28 }}>
+          {projects.map((project) => (
+            <li key={project} className="truncate" style={{ height: rowPx, lineHeight: `${rowPx}px` }}>
+              {project}
+            </li>
+          ))}
         </ul>
-        <div className="min-w-0 flex-1">
+        <div className="min-w-0 flex-1 overflow-x-auto">
           <HeatmapChart
             data={data}
             levelColors={ramp}
+            layout="fluid"
+            binSize={rowPx}
+            gap={2}
             colorScale={(count) => {
               const t = Math.max(0, Math.min(1, (Number(count) || 0) / denom))
               return ramp[Math.min(4, Math.round(t * 4))]
             }}
-            margin={{ top: 28, right: 8, bottom: 8, left: 8 }}
+            margin={{ top: 28, right: 8, bottom: 8, left: 4 }}
           >
             <HeatmapCells />
             <HeatmapXAxis />
