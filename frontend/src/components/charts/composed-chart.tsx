@@ -11,6 +11,7 @@ import {
   useRef,
 } from "react";
 import { cn } from "@/lib/utils";
+import { useInViewOnce } from "./use-in-view-once";
 import { Area, type AreaProps } from "./area";
 import type { LineConfig, Margin } from "./chart-context";
 import type { ChartPhase } from "./chart-phase";
@@ -297,6 +298,7 @@ export function ComposedChart({
   onPhaseChange,
 }: ComposedChartProps) {
   const containerRef = useRef<HTMLDivElement>(null);
+  const inView = useInViewOnce(containerRef);
   const margin = { ...DEFAULT_MARGIN, ...marginProp };
 
   return (
@@ -305,7 +307,7 @@ export function ComposedChart({
       ref={containerRef}
       style={{ aspectRatio, touchAction: "none" }}
     >
-      <ParentSize debounceTime={10}>
+      {inView ? <ParentSize debounceTime={10}>
         {({ width, height }) => (
           <ChartInner
             animationDuration={animationDuration}
@@ -328,7 +330,7 @@ export function ComposedChart({
             {children}
           </ChartInner>
         )}
-      </ParentSize>
+      </ParentSize> : null}
     </div>
   );
 }

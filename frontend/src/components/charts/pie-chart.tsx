@@ -18,6 +18,7 @@ import {
   useState,
 } from "react";
 import { cn } from "@/lib/utils";
+import { useInViewOnce } from "./use-in-view-once";
 import {
   defaultPieColors,
   type PieArcData,
@@ -459,6 +460,7 @@ export function PieChart({
   children,
 }: PieChartProps) {
   const containerRef = useRef<HTMLDivElement>(null);
+  const inView = useInViewOnce(containerRef);
 
   // If fixed size is provided, use it directly
   if (fixedSize) {
@@ -468,7 +470,7 @@ export function PieChart({
         ref={containerRef}
         style={{ width: fixedSize, height: fixedSize }}
       >
-        <PieChartInner
+        {inView ? <PieChartInner
           containerRef={containerRef}
           cornerRadius={cornerRadius}
           data={data}
@@ -486,7 +488,7 @@ export function PieChart({
           width={fixedSize}
         >
           {children}
-        </PieChartInner>
+        </PieChartInner> : null}
       </div>
     );
   }
@@ -497,7 +499,7 @@ export function PieChart({
       className={cn("relative aspect-square w-full", className)}
       ref={containerRef}
     >
-      <ParentSize debounceTime={10}>
+      {inView ? <ParentSize debounceTime={10}>
         {({ width, height }) => (
           <PieChartInner
             containerRef={containerRef}
@@ -519,7 +521,7 @@ export function PieChart({
             {children}
           </PieChartInner>
         )}
-      </ParentSize>
+      </ParentSize> : null}
     </div>
   );
 }

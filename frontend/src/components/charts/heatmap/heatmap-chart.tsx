@@ -14,6 +14,7 @@ import {
   useState,
 } from "react";
 import { cn } from "@/lib/utils";
+import { useInViewOnce } from "../use-in-view-once";
 import type { Margin } from "../chart-context";
 import { ChartLoadingLabel } from "../chart-loading-label";
 import {
@@ -530,11 +531,13 @@ function useHeatmapChartLifecycle({
   animationDuration,
   revealSignature = "",
   animate,
+  inView,
 }: {
   chartStatus: ChartStatus;
   animationDuration: number;
   revealSignature?: string;
   animate: boolean;
+  inView: boolean;
 }) {
   const reducedMotion = useReducedMotion();
   const [chartPhase, setChartPhase] = useState<ChartPhase>(() =>
@@ -608,6 +611,9 @@ function useHeatmapChartLifecycle({
       setChartPhase(resolveRestingChartPhase(chartStatus));
       return;
     }
+    if (!inView) {
+      return;
+    }
     if (chartStatus !== "ready") {
       return;
     }
@@ -621,6 +627,7 @@ function useHeatmapChartLifecycle({
     animationDuration,
     beginReveal,
     chartStatus,
+    inView,
     revealSignature,
   ]);
 
@@ -687,12 +694,24 @@ export function HeatmapChart({
     [levelStyles]
   );
 
+  // Measure this container directly: visx 4's <ParentSize> renders children in
+  // an absolutely positioned box, which collapses the content-sized fluid
+  // layout to zero height.
+  const { parentRef, width, height: parentHeight } = useParentSize();
+  const boxRef = useRef<HTMLDivElement>(null);
+  const inView = useInViewOnce(boxRef);
+  const setRoot = useCallback((node: HTMLDivElement | null) => {
+    boxRef.current = node;
+    parentRef(node);
+  }, [parentRef]);
+
   const { chartPhase, isLoaded, revealEpoch, revealMode, animateCells } =
     useHeatmapChartLifecycle({
       chartStatus: status,
       animationDuration,
       revealSignature,
       animate,
+      inView,
     });
 
   const showLoadingLabel = Boolean(
@@ -701,11 +720,6 @@ export function HeatmapChart({
       (chartPhase === "loading" || chartPhase === "exitingReady")
   );
 
-  // Measure this container directly: visx 4's <ParentSize> renders children in
-  // an absolutely positioned box, which collapses the content-sized fluid
-  // layout to zero height.
-  const { parentRef, width, height: parentHeight } = useParentSize();
-
   return (
     <div
       className={cn(
@@ -713,7 +727,7 @@ export function HeatmapChart({
         layout === "fill" && "h-full min-h-0",
         className
       )}
-      ref={parentRef}
+      ref={setRoot}
       style={aspectRatio ? { aspectRatio } : undefined}
     >
       <HeatmapChartInner

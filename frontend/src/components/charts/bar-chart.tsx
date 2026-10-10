@@ -43,6 +43,7 @@ import {
 } from "./chart-phase";
 import { BarLoadingSkeleton } from "./loading-sweep";
 import { extractReferenceAreaConfigs } from "./reference-area-config";
+import { useInViewOnce } from "./use-in-view-once";
 import { useScheduledTooltip } from "./use-scheduled-tooltip";
 import {
   buildYScalesForLines,
@@ -690,6 +691,7 @@ export function BarChart({
   status = "ready",
 }: BarChartProps) {
   const containerRef = useRef<HTMLDivElement>(null);
+  const inView = useInViewOnce(containerRef);
   const margin = { ...DEFAULT_MARGIN, ...marginProp };
 
   return (
@@ -698,7 +700,7 @@ export function BarChart({
       ref={containerRef}
       style={{ aspectRatio }}
     >
-      <ParentSize debounceTime={10}>
+      {inView ? <ParentSize debounceTime={10}>
         {({ width, height }) => (
           <ChartInner
             animationDuration={animationDuration}
@@ -723,7 +725,7 @@ export function BarChart({
             {children}
           </ChartInner>
         )}
-      </ParentSize>
+      </ParentSize> : null}
     </div>
   );
 }

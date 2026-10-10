@@ -6,13 +6,13 @@ import MouseEffectCard from '@/components/ui/mouse-effect-card.tsx'
 import SlideTextButton from '@/components/ui/slide-text-button.tsx'
 import SmoothTab, { type TabItem } from '@/components/ui/smooth-tab.tsx'
 import SpotlightCards from '@/components/ui/spotlight-cards.tsx'
-import { DashboardTable, scorecardColumns } from '@/components/dashboard-table.tsx'
 import { DashboardApi, PerfDashboardApi, SettingsApi } from '@/lib/api.ts'
 import { useAuth } from '@/lib/auth.tsx'
 import { LeadCharts, type LeadChartFilter } from '@/components/charts/lead-charts.tsx'
 import { PerfCharts } from '@/components/charts/perf-charts.tsx'
 import { MetricTable } from '@/components/metric-table.tsx'
-import { commentQualityKey, overdueBucket, summarizeLeads, type LeadRow } from '@/lib/lead-kpis.ts'
+import { applyLeadFilters, commentQualityLabel, EMPTY_LEAD_FILTERS, leadFilterChoices, summarizeLeads, type LeadFilters, type LeadRow } from '@/lib/lead-kpis.ts'
+import { FilterDrawer, FiltersButton, type FilterField } from '@/components/filter-drawer.tsx'
 import { activityRing, RING } from '@/lib/rings.ts'
 import { useView } from '@/lib/use-view.ts'
 
@@ -74,7 +74,8 @@ function PublishedView() {
   const [title, setTitle] = useState('Dashboard')
   const [detail, setDetail] = useState('')
   const [panel, setPanel] = useState('summary')
-  const [chartFilter, setChartFilter] = useState<LeadChartFilter | null>(null)
+  const [filters, setFilters] = useState<LeadFilters>(EMPTY_LEAD_FILTERS)
+  const [filtersOpen, setFiltersOpen] = useState(false)
   const [errorSearch, setErrorSearch] = useState('')
 
   useEffect(() => {
@@ -120,7 +121,10 @@ function PublishedView() {
     )
   }
 
-  const summary = summarizeLeads(results)
+  const choices = leadFilterChoices(results)
+  const filteredResults = applyLeadFilters(results, filters)
+  const summary = summarizeLeads(filteredResults)
+  const filtersActive = leadFiltersActive(filters)
   const scoreRows = summary.scorecard.map((row) => ({
     name: row.name,
     leads: row.leads.toLocaleString(),
@@ -164,8 +168,16 @@ function PublishedView() {
     { key: 'action', label: 'Action' },
     { key: 'severity', label: 'Severity' },
   ]
-  const filteredErrors = filterErrorRows(summary.rows, chartFilter).filter((row) => rowMatchesSearch(row, errorSearch))
-  const errorNote = `${chartFilter ? `${chartFilter.subtitle} · ` : ''}${filteredErrors.length.toLocaleString()} error row(s)`
+  const filteredErrors = summary.rows.filter((row) => row.errorFlag).map(errorRecord).filter((row) => rowMatchesSearch(row, errorSearch))
+  const errorNote = `${filtersActive ? `${leadFilterNote(filters)} · ` : ''}${filteredErrors.length.toLocaleString()} error row(s)`
+  const leadFields: FilterField[] = [
+    { key: 'telecallers', label: 'TeleCaller', options: choices.telecallers.map(option) },
+    { key: 'projects', label: 'Project', options: choices.projects.map(option) },
+    { key: 'severities', label: 'Severity', options: choices.severities.map(option) },
+    { key: 'errorTypes', label: 'Error Type', options: choices.errorTypes.map(option) },
+    { key: 'overdueBuckets', label: 'Overdue (days)', options: choices.overdueBuckets.map(option) },
+    { key: 'commentQualityBuckets', label: 'Comment quality', options: choices.commentQualityBuckets },
+  ]
   const tabs: TabItem[] = [
     { id: 'summary', title: 'Summary', color: 'bg-rose-500 hover:bg-rose-600', cardContent: null },
     { id: 'performance', title: 'Performance', color: 'bg-lime-500 hover:bg-lime-600', cardContent: null },
@@ -174,6 +186,34 @@ function PublishedView() {
   ]
   return (
     <div className="space-y-4">
+      <FiltersButton active={filtersActive} onClick={() => setFiltersOpen(true)} />
+      <FilterDrawer
+        open={filtersOpen}
+        description="Same filters as the LeadLens panel. None selected means all."
+        fields={leadFields}
+        values={{
+          telecallers: filters.telecallers,
+          projects: filters.projects,
+          severities: filters.severities,
+          errorTypes: filters.errorTypes,
+          overdueBuckets: filters.overdueBuckets,
+          commentQualityBuckets: filters.commentQualityBuckets,
+        }}
+        dates={{ from: filters.dateFrom, to: filters.dateTo }}
+        onClose={() => setFiltersOpen(false)}
+        onApply={(next, dates) => {
+          setFilters({
+            telecallers: next.telecallers || [],
+            projects: next.projects || [],
+            severities: next.severities || [],
+            errorTypes: next.errorTypes || [],
+            overdueBuckets: next.overdueBuckets || [],
+            commentQualityBuckets: next.commentQualityBuckets || [],
+            dateFrom: dates?.from || '',
+            dateTo: dates?.to || '',
+          })
+        }}
+      />
       <SmoothTab items={tabs} selected={panel} onChange={setPanel} className="w-full max-w-none">
         {panel === 'summary' ? (
           <div className="space-y-4">
@@ -192,9 +232,9 @@ function PublishedView() {
         {panel === 'performance' ? <MetricTable title="TeleCaller Performance" columns={scoreColumns} rows={scoreRows} /> : null}
         {panel === 'graphs' ? (
           <LeadCharts
-            results={results}
+            results={filteredResults}
             onFilter={(filter) => {
-              setChartFilter(filter)
+              setFilters((current) => applyChartFilter(current, filter))
               setErrorSearch('')
               setPanel('errors')
             }}
@@ -217,7 +257,7 @@ function PublishedView() {
                 type="button"
                 className="rounded-xl border border-[var(--line)] px-3 py-2 text-sm text-[var(--ink)]"
                 onClick={() => {
-                  setChartFilter(null)
+                  setFilters(EMPTY_LEAD_FILTERS)
                   setErrorSearch('')
                 }}
               >
@@ -239,18 +279,43 @@ function rowMatchesSearch(row: Record<string, string | number>, query: string) {
   return tokens.every((token) => haystack.includes(token))
 }
 
-function filterErrorRows(rows: LeadRow[], filter: LeadChartFilter | null) {
-  const errors = rows.filter((row) => row.errorFlag)
-  if (!filter) return errors.map(errorRecord)
-  const matched = errors.filter((row) => {
-    if (filter.kind === 'telecaller') return row.telecaller === filter.telecaller
-    if (filter.kind === 'errorType') return row.errorLabels.includes(filter.errorType) || row.errorType === filter.errorType
-    if (filter.kind === 'project') return (row.project || '(No project)') === filter.project
-    if (filter.kind === 'severity') return row.telecaller === filter.telecaller && row.severity === filter.severity
-    if (filter.kind === 'commentQuality') return row.telecaller === filter.telecaller && commentQualityKey(row.commentQuality) === filter.band
-    return overdueBucket(row.overdueDays) === filter.bucket
-  })
-  return matched.map(errorRecord)
+function option(value: string) {
+  return { value, label: value }
+}
+
+function leadFiltersActive(filters: LeadFilters) {
+  return Boolean(
+    filters.telecallers.length
+    || filters.projects.length
+    || filters.severities.length
+    || filters.errorTypes.length
+    || filters.overdueBuckets.length
+    || filters.commentQualityBuckets.length
+    || filters.dateFrom
+    || filters.dateTo,
+  )
+}
+
+function leadFilterNote(filters: LeadFilters) {
+  const parts = [
+    ...filters.telecallers,
+    ...filters.projects,
+    ...filters.severities,
+    ...filters.errorTypes,
+    ...filters.overdueBuckets.map((bucket) => `Overdue ${bucket}`),
+    ...filters.commentQualityBuckets.map((bucket) => commentQualityLabel(bucket)),
+  ]
+  if (filters.dateFrom || filters.dateTo) parts.push(`${filters.dateFrom || '…'}–${filters.dateTo || '…'}`)
+  return parts.join(' · ') || 'Filtered'
+}
+
+function applyChartFilter(current: LeadFilters, filter: LeadChartFilter): LeadFilters {
+  if (filter.kind === 'telecaller') return { ...current, telecallers: [filter.telecaller] }
+  if (filter.kind === 'errorType') return { ...current, errorTypes: [filter.errorType] }
+  if (filter.kind === 'project') return { ...current, projects: [filter.project] }
+  if (filter.kind === 'severity') return { ...current, telecallers: [filter.telecaller], severities: [filter.severity] }
+  if (filter.kind === 'commentQuality') return { ...current, telecallers: [filter.telecaller], commentQualityBuckets: [filter.band] }
+  return { ...current, overdueBuckets: [filter.bucket] }
 }
 
 function errorRecord(row: LeadRow) {
@@ -291,6 +356,8 @@ function PerfView() {
   const [byProject, setByProject] = useState<Record<string, PerfSummary>>({})
   const [bySource, setBySource] = useState<Record<string, PerfSummary>>({})
   const [state, setState] = useState<'load' | 'empty' | 'ready'>('load')
+  const [perfFilters, setPerfFilters] = useState({ telecallers: [] as string[], projects: [] as string[], sources: [] as string[] })
+  const [filtersOpen, setFiltersOpen] = useState(false)
 
   useEffect(() => {
     PerfDashboardApi.combined()
@@ -320,29 +387,77 @@ function PerfView() {
       />
     )
   }
-  const total = Number(summary.totalLeads || 0) || 1
-  const visited = Number(summary.siteVisited || 0)
-  const follow = Math.max(0, total - Number(summary.notFollowupLeads || 0))
-  const active = Number(summary.activeLeads || 0)
+  const teleMap = pickBuckets(byTelecaller, perfFilters.telecallers)
+  const projectMap = pickBuckets(byProject, perfFilters.projects)
+  const sourceMap = pickBuckets(bySource, perfFilters.sources)
+  const rolled = perfFilters.telecallers.length
+    ? sumPerf(teleMap)
+    : perfFilters.projects.length
+      ? sumPerf(projectMap)
+      : perfFilters.sources.length
+        ? sumPerf(sourceMap)
+        : summary
+  const total = Number(rolled.totalLeads || 0) || 1
+  const visited = Number(rolled.siteVisited || 0)
+  const follow = Math.max(0, total - Number(rolled.notFollowupLeads || 0))
+  const active = Number(rolled.activeLeads || 0)
   const rings = [
     activityRing('Site visited', visited, total, RING.rose, 168, 'leads'),
     activityRing('Follow-up', follow, total, RING.lime, 124, 'leads'),
     activityRing('Active leads', active, total, RING.cyan, 80, 'leads'),
   ]
   const dim = (map: Record<string, PerfSummary>) => Object.entries(map).map(([name, row]) => [name, `${row.siteVisited || 0} visited · ${row.totalLeads || 0} leads`])
-  const charts = <PerfCharts byTelecaller={byTelecaller} />
+  const charts = <PerfCharts byTelecaller={teleMap} />
   const tabs: TabItem[] = [
     { id: 'summary', title: 'Summary', color: 'bg-rose-500', cardContent: <div className="h-full overflow-auto"><ActivityRings title="Telecalling Performance" data={rings} /></div> },
-    { id: 'tele', title: 'By Telecaller', color: 'bg-lime-500', cardContent: <ScoreList rows={dim(byTelecaller)} /> },
-    { id: 'project', title: 'Project', color: 'bg-cyan-500', cardContent: <ScoreList rows={dim(byProject)} /> },
-    { id: 'source', title: 'Source', color: 'bg-amber-500', cardContent: <ScoreList rows={dim(bySource)} /> },
+    { id: 'tele', title: 'By Telecaller', color: 'bg-lime-500', cardContent: <ScoreList rows={dim(teleMap)} /> },
+    { id: 'project', title: 'Project', color: 'bg-cyan-500', cardContent: <ScoreList rows={dim(projectMap)} /> },
+    { id: 'source', title: 'Source', color: 'bg-amber-500', cardContent: <ScoreList rows={dim(sourceMap)} /> },
   ]
+  const perfActive = Boolean(perfFilters.telecallers.length || perfFilters.projects.length || perfFilters.sources.length)
   return (
     <div className="space-y-4">
+      <FiltersButton active={perfActive} onClick={() => setFiltersOpen(true)} />
+      <FilterDrawer
+        open={filtersOpen}
+        description="Empty means all. TeleCaller, Project, and Source match the performance panel."
+        fields={[
+          { key: 'telecallers', label: 'TeleCaller', options: Object.keys(byTelecaller).sort().map(option) },
+          { key: 'projects', label: 'Project', options: Object.keys(byProject).sort().map(option) },
+          { key: 'sources', label: 'Source', options: Object.keys(bySource).sort().map(option) },
+        ]}
+        values={perfFilters}
+        onClose={() => setFiltersOpen(false)}
+        onApply={(next) => setPerfFilters({
+          telecallers: next.telecallers || [],
+          projects: next.projects || [],
+          sources: next.sources || [],
+        })}
+      />
       {charts}
       <SmoothTab items={tabs} defaultTabId="summary" className="w-full max-w-none" stageClassName="h-[28rem]" />
     </div>
   )
+}
+
+function pickBuckets(map: Record<string, PerfSummary>, selected: string[]) {
+  if (!selected.length) return map
+  const out: Record<string, PerfSummary> = {}
+  for (const name of selected) {
+    if (map[name]) out[name] = map[name]
+  }
+  return out
+}
+
+function sumPerf(map: Record<string, PerfSummary>): PerfSummary {
+  const totals: PerfSummary = { totalLeads: 0, activeLeads: 0, siteVisited: 0, notFollowupLeads: 0 }
+  for (const row of Object.values(map)) {
+    totals.totalLeads = (totals.totalLeads || 0) + Number(row.totalLeads || 0)
+    totals.activeLeads = (totals.activeLeads || 0) + Number(row.activeLeads || 0)
+    totals.siteVisited = (totals.siteVisited || 0) + Number(row.siteVisited || 0)
+    totals.notFollowupLeads = (totals.notFollowupLeads || 0) + Number(row.notFollowupLeads || 0)
+  }
+  return totals
 }
 
 function SettingsView() {

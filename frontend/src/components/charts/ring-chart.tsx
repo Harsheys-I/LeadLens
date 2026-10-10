@@ -16,6 +16,7 @@ import {
   useState,
 } from "react";
 import { cn } from "@/lib/utils";
+import { useInViewOnce } from "./use-in-view-once";
 import {
   defaultRingColors,
   type RingContextValue,
@@ -425,6 +426,7 @@ export function RingChart({
   children,
 }: RingChartProps) {
   const containerRef = useRef<HTMLDivElement>(null);
+  const inView = useInViewOnce(containerRef);
 
   // If fixed size is provided, use it directly
   if (fixedSize) {
@@ -434,7 +436,7 @@ export function RingChart({
         ref={containerRef}
         style={{ width: fixedSize, height: fixedSize }}
       >
-        <RingChartInner
+        {inView ? <RingChartInner
           baseInnerRadius={baseInnerRadius}
           containerRef={containerRef}
           data={data}
@@ -451,7 +453,7 @@ export function RingChart({
           width={fixedSize}
         >
           {children}
-        </RingChartInner>
+        </RingChartInner> : null}
       </div>
     );
   }
@@ -462,7 +464,7 @@ export function RingChart({
       className={cn("relative aspect-square w-full", className)}
       ref={containerRef}
     >
-      <ParentSize debounceTime={10}>
+      {inView ? <ParentSize debounceTime={10}>
         {({ width, height }) => (
           <RingChartInner
             baseInnerRadius={baseInnerRadius}
@@ -483,7 +485,7 @@ export function RingChart({
             {children}
           </RingChartInner>
         )}
-      </ParentSize>
+      </ParentSize> : null}
     </div>
   );
 }

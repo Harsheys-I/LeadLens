@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useMemo } from 'react'
 import { GroupedBars, ProjectMonthHeat, ShareRing } from './gpp-charts'
 
 const COLOR_LEADS = '#1f5d45'
@@ -32,6 +32,18 @@ const METRICS = [
 
 type MetricKey = (typeof METRICS)[number]['key']
 
+export type SalesFilters = {
+  projects: string[]
+  sources: string[]
+  statuses: string[]
+  years: string[]
+  yearMonths: string[]
+  metrics: MetricKey[]
+  scaleMode: 'relative' | 'absolute'
+}
+
+export const SALES_METRICS = METRICS
+
 function formatMonth(ym: string) {
   if (!/^\d{6}$/.test(ym)) return ym
   const month = Number(ym.slice(4, 6))
@@ -61,27 +73,24 @@ function topKeys(map: Record<string, Bucket> | undefined, limit: number) {
     .map((row) => row.name)
 }
 
-export function SalesCharts({ payload }: { payload: SalesPayload }) {
-  const [on, setOn] = useState<Record<MetricKey, boolean>>({
-    leads: true,
-    visits: true,
-    salesDeclaration: true,
-    booked: true,
-    canceled: true,
-  })
-  const model = useMemo(() => buildModel(payload), [payload])
-  const visible = (key: MetricKey) => on[key]
-
-  function toggle(key: MetricKey) {
-    setOn((current) => ({ ...current, [key]: !current[key] }))
+export function SalesCharts({ payload, filters }: { payload: SalesPayload; filters?: SalesFilters }) {
+  const on: Record<MetricKey, boolean> = {
+    leads: !filters?.metrics.length || filters.metrics.includes('leads'),
+    visits: !filters?.metrics.length || filters.metrics.includes('visits'),
+    salesDeclaration: !filters?.metrics.length || filters.metrics.includes('salesDeclaration'),
+    booked: !filters?.metrics.length || filters.metrics.includes('booked'),
+    canceled: !filters?.metrics.length || filters.metrics.includes('canceled'),
   }
+  const model = useMemo(() => buildModel(payload, filters), [payload, filters])
+  const visible = (key: MetricKey) => on[key]
+  const axis = filters?.scaleMode === 'absolute' ? 'left' : undefined
 
   const heroSeries = [
-    visible('leads') ? { key: 'leads', label: 'Leads', color: COLOR_LEADS, yAxisId: 'left' } : null,
-    visible('visits') ? { key: 'visits', label: 'Visits', color: COLOR_VISITS, yAxisId: 'left' } : null,
-    visible('salesDeclaration') ? { key: 'declaration', label: 'Sales Declaration', color: COLOR_DECLARATION, yAxisId: 'right' } : null,
-    visible('booked') ? { key: 'booked', label: 'Booked', color: COLOR_BOOKED, yAxisId: 'right' } : null,
-    visible('canceled') ? { key: 'canceled', label: 'Canceled', color: COLOR_CANCELED, yAxisId: 'right' } : null,
+    visible('leads') ? { key: 'leads', label: 'Leads', color: COLOR_LEADS, yAxisId: axis || 'left' } : null,
+    visible('visits') ? { key: 'visits', label: 'Visits', color: COLOR_VISITS, yAxisId: axis || 'left' } : null,
+    visible('salesDeclaration') ? { key: 'declaration', label: 'Sales Declaration', color: COLOR_DECLARATION, yAxisId: axis || 'right' } : null,
+    visible('booked') ? { key: 'booked', label: 'Booked', color: COLOR_BOOKED, yAxisId: axis || 'right' } : null,
+    visible('canceled') ? { key: 'canceled', label: 'Canceled', color: COLOR_CANCELED, yAxisId: axis || 'right' } : null,
   ].filter((item) => item != null)
 
   const statusSeries = [
@@ -91,18 +100,6 @@ export function SalesCharts({ payload }: { payload: SalesPayload }) {
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap gap-2">
-        {METRICS.map((metric) => (
-          <button
-            key={metric.key}
-            type="button"
-            className={`rounded-full border px-3 py-1 text-xs ${on[metric.key] ? 'border-[var(--green)] bg-[var(--accent)]' : 'border-zinc-200 text-[var(--muted)] dark:border-zinc-700'}`}
-            onClick={() => toggle(metric.key)}
-          >
-            {metric.label}
-          </button>
-        ))}
-      </div>
       <GroupedBars title="Leads vs Visits vs Booked by month" data={model.months} series={heroSeries} xKey="month" scrollable />
       <GroupedBars title="Leads vs Visits vs Booked by project" data={model.projects} series={heroSeries} scrollable />
       <div className="grid gap-4 lg:grid-cols-3">
@@ -124,38 +121,60 @@ export function SalesCharts({ payload }: { payload: SalesPayload }) {
   )
 }
 
-function buildModel(payload: SalesPayload) {
+function activeSet(selected: string[] | undefined, all: string[]) {
+  if (!selected?.length || selected.length >= all.length) return null
+  return new Set(selected)
+}
+
+function buildModel(payload: SalesPayload, filters?: SalesFilters) {
   const leads = payload.leads
   const visits = payload.visits
   const booked = payload.booked
-  const monthKeys = [...new Set([
+  const allMonths = [...new Set([
     ...Object.keys(leads?.byMonth || {}),
     ...Object.keys(visits?.byMonth || {}),
     ...Object.keys(booked?.byMonth || {}),
     ...Object.keys(booked?.leadDeclaration?.byMonth || {}),
   ])].sort()
+  const allYears = [...new Set(allMonths.map((month) => month.slice(0, 4)))]
+  const yearSet = activeSet(filters?.years, allYears)
+  const monthSet = activeSet(filters?.yearMonths, allMonths)
+  const monthKeys = allMonths.filter((month) => {
+    if (yearSet && !yearSet.has(month.slice(0, 4))) return false
+    if (monthSet && !monthSet.has(month)) return false
+    return true
+  })
+  const allProjects = [...new Set([...keysOf(leads?.byProject), ...keysOf(visits?.byProject), ...keysOf(booked?.byProject)])]
+  const projectSet = activeSet(filters?.projects, allProjects)
+  const allSources = [...new Set([...keysOf(leads?.bySource), ...keysOf(visits?.bySource), ...keysOf(booked?.bySource)])]
+  const sourceSet = activeSet(filters?.sources, allSources)
+  const allStatuses = Object.keys(booked?.byStatus || {})
+  const statusSet = activeSet(filters?.statuses, allStatuses.length ? allStatuses : [STATUS_DEMAND, STATUS_CANCEL])
+  const allowStatus = (key: string) => !statusSet || statusSet.has(key) || [...statusSet].some((item) => item.toLowerCase() === key.toLowerCase())
   const months = monthKeys.map((month) => {
-    const demand = bucketMonth(booked?.byStatus?.[STATUS_DEMAND], month)
-    const cancel = bucketMonth(booked?.byStatus?.[STATUS_CANCEL], month)
+    const demand = allowStatus(STATUS_DEMAND) ? bucketMonth(booked?.byStatus?.[STATUS_DEMAND], month) : 0
+    const cancel = allowStatus(STATUS_CANCEL) ? bucketMonth(booked?.byStatus?.[STATUS_CANCEL], month) : 0
     const declaration = monthCount(booked?.leadDeclaration?.byMonth, month) || demand + cancel
+    const leadCount = sourceSet ? sourceMonth(leads, sourceSet, month) : monthCount(leads?.byMonth, month)
+    const visitCount = sourceSet ? sourceMonth(visits, sourceSet, month) : monthCount(visits?.byMonth, month)
     return {
       month: formatMonth(month),
-      leads: monthCount(leads?.byMonth, month),
-      visits: monthCount(visits?.byMonth, month),
-      booked: demand || monthCount(booked?.byMonth, month),
+      leads: leadCount,
+      visits: visitCount,
+      booked: demand || (sourceSet ? sourceMonth(booked, sourceSet, month) : monthCount(booked?.byMonth, month)),
       canceled: cancel,
       declaration,
     }
   })
-  const projectNames = [...new Set([...keysOf(leads?.byProject), ...keysOf(visits?.byProject), ...keysOf(booked?.byProject)])].sort((a, b) => a.localeCompare(b))
+  const projectNames = allProjects.filter((name) => !projectSet || projectSet.has(name)).sort((a, b) => a.localeCompare(b))
   const projects = projectNames.map((name) => {
-    const demand = sumBucket(booked?.byStatus?.[STATUS_DEMAND]?.byProject?.[name])
-    const cancel = sumBucket(booked?.byStatus?.[STATUS_CANCEL]?.byProject?.[name])
-    const bookedTotal = sumBucket(booked?.byProject?.[name])
+    const demand = allowStatus(STATUS_DEMAND) ? sumMonths(booked?.byStatus?.[STATUS_DEMAND]?.byProject?.[name], monthKeys) : 0
+    const cancel = allowStatus(STATUS_CANCEL) ? sumMonths(booked?.byStatus?.[STATUS_CANCEL]?.byProject?.[name], monthKeys) : 0
+    const bookedTotal = sumMonths(booked?.byProject?.[name], monthKeys)
     return {
       name,
-      leads: sumBucket(leads?.byProject?.[name]),
-      visits: sumBucket(visits?.byProject?.[name]),
+      leads: sumMonths(leads?.byProject?.[name], monthKeys),
+      visits: sumMonths(visits?.byProject?.[name], monthKeys),
       booked: demand || bookedTotal,
       canceled: cancel,
       declaration: demand + cancel || bookedTotal,
@@ -166,15 +185,17 @@ function buildModel(payload: SalesPayload) {
       total: sumBucket(leads?.byProject?.[name]) + sumBucket(visits?.byProject?.[name]) + sumBucket(booked?.byProject?.[name]),
     }])),
   }, 20)
-  const share = (sheet: SalesSheet | undefined, color: string) => topKeys(sheet?.byProject, 8).map((name, index) => ({
-    label: name,
-    value: sumBucket(sheet?.byProject?.[name]),
-    color: [color, '#3d8b6e', '#8b5a3c', '#6b4f8a', '#4a7c59', '#7a6a4f', '#3a5a7c', '#9a6b3c'][index % 8],
-  }))
+  const share = (sheet: SalesSheet | undefined, color: string) => topKeys(sheet?.byProject, 8)
+    .filter((name) => !projectSet || projectSet.has(name))
+    .map((name, index) => ({
+      label: name,
+      value: sumMonths(sheet?.byProject?.[name], monthKeys),
+      color: [color, '#3d8b6e', '#8b5a3c', '#6b4f8a', '#4a7c59', '#7a6a4f', '#3a5a7c', '#9a6b3c'][index % 8],
+    }))
   const statusMonths = monthKeys.map((month) => ({
     month: formatMonth(month),
-    Booked: bucketMonth(booked?.byStatus?.[STATUS_DEMAND], month),
-    Canceled: bucketMonth(booked?.byStatus?.[STATUS_CANCEL], month),
+    Booked: allowStatus(STATUS_DEMAND) ? bucketMonth(booked?.byStatus?.[STATUS_DEMAND], month) : 0,
+    Canceled: allowStatus(STATUS_CANCEL) ? bucketMonth(booked?.byStatus?.[STATUS_CANCEL], month) : 0,
   }))
   return {
     monthKeys,
@@ -186,6 +207,16 @@ function buildModel(payload: SalesPayload) {
     bookedShare: share(booked, COLOR_BOOKED),
     statusMonths,
   }
+}
+
+function sumMonths(bucket: Bucket | undefined, months: string[]) {
+  return months.reduce((sum, month) => sum + bucketMonth(bucket, month), 0)
+}
+
+function sourceMonth(sheet: SalesSheet | undefined, sources: Set<string>, month: string) {
+  let total = 0
+  for (const name of sources) total += bucketMonth(sheet?.bySource?.[name], month)
+  return total
 }
 
 function sumBucket(bucket: Bucket | undefined) {
