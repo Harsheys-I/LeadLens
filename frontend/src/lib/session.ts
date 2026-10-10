@@ -41,7 +41,7 @@ export function moduleTilesForUser(user: SessionUser | null): ModuleTile[] {
       title: 'LeadLens',
       href: appUrl('/TeleCallerAudit/#published'),
       perm: 'module.telecaller_audit',
-      desc: 'Bucket 1 Followup Review, Run console, published dashboards',
+      desc: 'Bucket 1 Followup Review and published dashboards',
     },
     {
       id: 'debug',
