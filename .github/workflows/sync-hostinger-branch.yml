@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - "web-app/**"
+      - "frontend/**"
       - ".github/workflows/sync-hostinger-branch.yml"
   workflow_dispatch:
     inputs:
@@ -30,6 +31,17 @@ jobs:
         with:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build React shells
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: npm ci and build
+        working-directory: frontend
+        run: npm ci && npm run build
 
       - name: Sync web-app/ to hostinger/dev/
         env:
