@@ -104,7 +104,7 @@ export function moduleTilesForUser(user = currentUser){
     {
       id: 'telecaller',
       title: 'LeadLens',
-      href: appUrl('/TeleCallerAudit/#published'),
+      href: appUrl('/TeleCallerAudit/'),
       perm: 'module.telecaller_audit',
       soon: false,
       desc: 'Bucket 1 Followup Review, Run console, published dashboards',
