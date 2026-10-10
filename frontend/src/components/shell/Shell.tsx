@@ -80,7 +80,7 @@ export default function Shell({
           onSignOut={() => { void signOut().then(() => onNavigate('home')) }}
         />
       </header>
-      <PageSlide viewKey={view} direction={direction} className={view === 'home' ? 'max-w-none' : undefined}>
+      <PageSlide viewKey={view} direction={direction}>
         {view === 'home' ? null : (
           <div>
             <p className="text-xs font-semibold uppercase tracking-[0.16em] text-teal-800 dark:text-teal-300">{title}</p>

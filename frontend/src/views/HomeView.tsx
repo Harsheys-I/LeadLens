@@ -23,7 +23,7 @@ export default function HomeView({ user }: { user: SessionUser }) {
     <div className="flex w-full flex-col gap-8">
       <KineticText text="Where do you want to work?" className="text-4xl tracking-tight sm:text-5xl" />
       <MouseEffectCard
-        className="w-full max-w-none"
+        className="w-full max-w-full"
         title="GPP AI"
         subtitle={user.role_name || ''}
         topText="Your workspace"

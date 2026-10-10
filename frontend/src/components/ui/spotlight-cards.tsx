@@ -240,7 +240,7 @@ export default function SpotlightCards({
         </h2>
       </div>
 
-      <div className="relative grid gap-3 [grid-template-columns:repeat(auto-fit,minmax(min(100%,16rem),1fr))]">
+      <div className="relative grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
         {items.map((item) => (
           <Card
             dimmed={hoveredTitle !== null && hoveredTitle !== item.title}
