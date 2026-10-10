@@ -137,40 +137,39 @@ SALES_URL_ENV = {
 
 
 # Master is ~30 MB with every column; LeadLens rejects uploads over 25 MB and reads only these.
-# Strategic ERP JSON keys are Excel column letters (A1 = column A) and empty cells are
-# omitted, so a letter can be absent from row 0 even when the Excel header exists.
+# Strategic ERP JSON keys are report field aliases and empty cells are omitted, so a
+# letter can be absent from row 0 even when the header exists.
 # Each field is (code, canonical header, required, header aliases). A value is taken
 # from a matching header name when that key is present, otherwise from the column code.
 # Only fields the dashboards cannot run without are required. Source, registration,
 # and next follow-up are kept when present and left blank when the JSON key is missing.
 #
-# master 10000022, 10 Oct 2026 Excel row 7:
-#   A Sr, B Project Name, C Mobile, D Status, E Telecaller Name,
-#   F Next Followup Date, G Lead Registration Date, H Source.
-# Registration moved A9→A7 and source A10→A8 after unused columns were removed.
-# history 10000026, 10 Oct 2026 Excel row 7:
-#   A Sr, B Lead Update Date, C Mobile, D Project Name,
-#   E Tellecaller Name, F Status, G Source.
-# The Excel header is "Tellecaller Name"; the canonical name stored here is "Telecaller Name".
+# master 10000022 JSON aliases:
+#   A1 Project Name, A2 Mobile, A3 Status, A4 Telecaller Name,
+#   A5 Next Followup Date, A6 Lead Registration Date, A7 Source.
+# history 10000026 JSON aliases:
+#   A1 Lead Update Date, A2 Mobile, A3 Project Name,
+#   A4 Tellecaller Name, A5 Status, A6 Source.
+# The ERP header is "Tellecaller Name"; the canonical name stored here is "Telecaller Name".
 # code, header, required, aliases (header itself is always accepted)
 _TELECALLER_ALIASES = ("telecaller name", "tellecaller name", "tele caller name", "agent name", "executive name")
 REPORT_COLUMNS = {
     "master": (
-        ("A2", "Project Name", True, ("project name", "project")),
-        ("A3", "Mobile", True, ("mobile", "mobile number", "phone")),
-        ("A4", "Status", True, ("status", "lead status")),
-        ("A5", "Telecaller Name", True, _TELECALLER_ALIASES),
-        ("A6", "Next Followup Date", False, ("next followup date", "next follow-up date", "next follow up date")),
-        ("A7", "Lead Registration Date", False, ("lead registration date", "registration date")),
-        ("A8", "Source", False, ("source", "source name")),
+        ("A1", "Project Name", True, ("project name", "project")),
+        ("A2", "Mobile", True, ("mobile", "mobile number", "phone")),
+        ("A3", "Status", True, ("status", "lead status")),
+        ("A4", "Telecaller Name", True, _TELECALLER_ALIASES),
+        ("A5", "Next Followup Date", False, ("next followup date", "next follow-up date", "next follow up date")),
+        ("A6", "Lead Registration Date", False, ("lead registration date", "registration date")),
+        ("A7", "Source", False, ("source", "source name")),
     ),
     "history": (
-        ("A2", "Lead Update Date", True, ("lead update date", "call date", "update date", "lead update")),
-        ("A3", "Mobile", True, ("mobile", "mobile number", "phone")),
-        ("A4", "Project Name", True, ("project name", "project")),
-        ("A5", "Telecaller Name", True, _TELECALLER_ALIASES),
-        ("A6", "Status", True, ("status", "lead status")),
-        ("A7", "Source", False, ("source", "source name")),
+        ("A1", "Lead Update Date", True, ("lead update date", "call date", "update date", "lead update")),
+        ("A2", "Mobile", True, ("mobile", "mobile number", "phone")),
+        ("A3", "Project Name", True, ("project name", "project")),
+        ("A4", "Telecaller Name", True, _TELECALLER_ALIASES),
+        ("A5", "Status", True, ("status", "lead status")),
+        ("A6", "Source", False, ("source", "source name")),
     ),
 }
 
