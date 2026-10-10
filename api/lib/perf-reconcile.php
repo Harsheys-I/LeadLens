@@ -35,39 +35,42 @@ function ll_perf_history_fields(): array
 
 /**
  * Master report 10000022 JSON column codes → field id.
- * A1 Project Name, A2 Mobile, A3 Status, A4 Telecaller Name,
- * A5 Next Followup Date, A6 Lead Registration Date, A7 Source.
+ * 10 Oct 2026 Excel (row 7): A Sr, B Project Name, C Mobile, D Status,
+ * E Telecaller Name, F Next Followup Date, G Lead Registration Date, H Source.
+ * Registration moved A9→A7 and source A10→A8 after unused columns were removed.
+ * A2 Project Name and A3 Mobile did not move.
  * Source, registration, and next follow-up are optional: ERP JSON omits empty cells,
- * so those codes may be absent even when the header exists.
+ * so those codes may be absent even when the Excel header exists.
  */
 function ll_perf_master_erp_codes(): array
 {
   return [
-    'A1' => 'project',
-    'A2' => 'mobile',
-    'A3' => 'status',
-    'A4' => 'telecaller',
-    'A5' => 'next',
-    'A6' => 'registration',
-    'A7' => 'source',
+    'A3' => 'mobile',
+    'A2' => 'project',
+    'A8' => 'source',
+    'A7' => 'registration',
+    'A6' => 'next',
+    'A4' => 'status',
+    'A5' => 'telecaller',
   ];
 }
 
 /**
  * History report 10000026 JSON column codes → field id.
- * A1 Lead Update Date, A2 Mobile, A3 Project Name,
- * A4 Tellecaller Name, A5 Status, A6 Source.
- * Source (A6) is optional and may be omitted when the cell is empty.
+ * 10 Oct 2026 Excel (row 7): A Sr, B Lead Update Date, C Mobile, D Project Name,
+ * E Tellecaller Name, F Status, G Source. Sr is new at A1, so the previous
+ * A1–A6 fields each shifted one letter later.
+ * Source (A7) is optional and may be omitted when the cell is empty.
  */
 function ll_perf_history_erp_codes(): array
 {
   return [
-    'A1' => 'update',
-    'A2' => 'mobile',
-    'A3' => 'project',
-    'A4' => 'telecaller',
-    'A5' => 'status',
-    'A6' => 'source',
+    'A2' => 'update',
+    'A3' => 'mobile',
+    'A4' => 'project',
+    'A5' => 'telecaller',
+    'A6' => 'status',
+    'A7' => 'source',
   ];
 }
 
