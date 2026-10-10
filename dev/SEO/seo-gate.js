@@ -19,7 +19,7 @@ import {
 } from '../theme.js?v=10.0.0.stable';
 import {mountNotifications} from '../notifications-ui.js?v=10.0.0.stable';
 
-const APP_VERSION = '11.0.0.stable';
+const APP_VERSION = '10.0.0.stable';
 
 function $(id) {
   return document.getElementById(id);
