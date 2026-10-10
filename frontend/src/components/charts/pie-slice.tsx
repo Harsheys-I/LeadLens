@@ -66,6 +66,7 @@ export interface PieSliceProps {
   hoverOffset?: number;
   /** Additional CSS class */
   className?: string;
+  onSelect?: () => void;
 }
 
 interface AnimatedSliceTranslateProps {
@@ -328,6 +329,7 @@ export const PieSlice = memo(function PieSlice({
   showGlow = true,
   hoverEffect = "translate",
   hoverOffset: hoverOffsetProp,
+  onSelect,
 }: PieSliceProps) {
   const {
     arcs,
@@ -496,6 +498,7 @@ export const PieSlice = memo(function PieSlice({
       <path
         d={hitboxPath}
         fill="transparent"
+        onClick={onSelect}
         onMouseEnter={() => setHoveredIndex(index)}
         onMouseLeave={() => setHoveredIndex(null)}
       />

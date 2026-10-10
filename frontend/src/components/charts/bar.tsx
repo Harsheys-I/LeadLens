@@ -83,6 +83,8 @@ export interface BarProps {
    * zero-value bars so they stay visible. Pair with the same value on
    * `<BarDepthProvider minBarHeight>` when using the 3D surfaces. Default: 0 */
   minBarHeight?: number;
+  /** Category (x) and this series key when a bar is clicked. */
+  onDatumClick?: (category: string, seriesKey: string) => void;
 }
 
 interface BarInnerProps extends BarProps {
@@ -108,6 +110,7 @@ interface AnimatedBarProps {
   enterTransition?: Transition;
   revealEpoch: number;
   isHorizontal: boolean;
+  onClick?: () => void;
 }
 
 function AnimatedBar({
@@ -127,6 +130,7 @@ function AnimatedBar({
   enterTransition,
   revealEpoch,
   isHorizontal,
+  onClick,
 }: AnimatedBarProps) {
   const enterAnim = transitionWithDelay(enterTransition, index * staggerDelay);
 
@@ -141,8 +145,10 @@ function AnimatedBar({
         height={height}
         initial={{ opacity: 0, filter: "blur(2px)" }}
         key={`fade-${index}-${revealEpoch}`}
+        onClick={onClick}
         rx={rx}
         ry={ry}
+        style={{ cursor: onClick ? "pointer" : "default" }}
         transition={enterAnim}
         width={width}
         x={x}
@@ -168,8 +174,10 @@ function AnimatedBar({
         fill={fill}
         initial={initial}
         key={`grow-${index}-${revealEpoch}`}
+        onClick={onClick}
         rx={rx}
         ry={ry}
+        style={{ cursor: onClick ? "pointer" : "default" }}
         transition={enterAnim}
       />
     </g>
@@ -189,6 +197,7 @@ const BarInner = memo(function BarInner({
   groupGap = 4,
   perspective = false,
   minBarHeight = 0,
+  onDatumClick,
   barScale,
   bandWidth,
   barXAccessor,
@@ -412,6 +421,7 @@ const BarInner = memo(function BarInner({
               revealEpoch={revealEpoch}
               rx={effectiveRx}
               ry={effectiveRy}
+              onClick={onDatumClick ? () => onDatumClick(String(categoryValue), dataKey) : undefined}
               staggerDelay={calculatedStaggerDelay}
               width={barW}
               x={x}
@@ -429,8 +439,9 @@ const BarInner = memo(function BarInner({
             opacity={isFaded ? fadedOpacity : 1}
             rx={effectiveRx}
             ry={effectiveRy}
+            onClick={onDatumClick ? () => onDatumClick(String(categoryValue), dataKey) : undefined}
             style={{
-              cursor: "default",
+              cursor: onDatumClick ? "pointer" : "default",
               transition: "opacity 0.15s ease-in-out",
             }}
             width={barW}

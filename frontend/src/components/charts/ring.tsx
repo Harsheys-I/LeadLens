@@ -30,6 +30,7 @@ export interface RingProps {
   animate?: boolean;
   showGlow?: boolean;
   lineCap?: RingLineCap;
+  onSelect?: () => void;
 }
 
 function ringHoverScale(isHovered: boolean, isPushedOut: boolean): number {
@@ -68,6 +69,7 @@ export const Ring = memo(function Ring({
   animate = true,
   showGlow = true,
   lineCap = "round",
+  onSelect,
 }: RingProps) {
   const {
     data,
@@ -178,6 +180,7 @@ export const Ring = memo(function Ring({
     return (
       <motion.g
         animate={{ scale: hoverScale, opacity: layerOpacity }}
+        onClick={onSelect}
         onMouseEnter={handleMouseEnter}
         onMouseLeave={handleMouseLeave}
         style={groupStyle}
@@ -195,6 +198,7 @@ export const Ring = memo(function Ring({
   if (!expandComplete) {
     return (
       <motion.g
+        onClick={onSelect}
         onMouseEnter={handleMouseEnter}
         onMouseLeave={handleMouseLeave}
         style={{
@@ -211,6 +215,7 @@ export const Ring = memo(function Ring({
   return (
     <motion.g
       animate={{ scale: hoverScale, opacity: layerOpacity }}
+      onClick={onSelect}
       onMouseEnter={handleMouseEnter}
       onMouseLeave={handleMouseLeave}
       style={groupStyle}

@@ -6,11 +6,13 @@ import MouseEffectCard from '@/components/ui/mouse-effect-card.tsx'
 import SlideTextButton from '@/components/ui/slide-text-button.tsx'
 import SmoothTab, { type TabItem } from '@/components/ui/smooth-tab.tsx'
 import SpotlightCards from '@/components/ui/spotlight-cards.tsx'
+import { DashboardTable, scorecardColumns } from '@/components/dashboard-table.tsx'
 import { DashboardApi, PerfDashboardApi, SettingsApi } from '@/lib/api.ts'
 import { useAuth } from '@/lib/auth.tsx'
-import { LeadCharts } from '@/components/charts/lead-charts.tsx'
+import { LeadCharts, type LeadChartFilter } from '@/components/charts/lead-charts.tsx'
 import { PerfCharts } from '@/components/charts/perf-charts.tsx'
-import { summarizeLeads } from '@/lib/lead-kpis.ts'
+import { MetricTable } from '@/components/metric-table.tsx'
+import { commentQualityKey, overdueBucket, summarizeLeads, type LeadRow } from '@/lib/lead-kpis.ts'
 import { activityRing, RING } from '@/lib/rings.ts'
 import { useView } from '@/lib/use-view.ts'
 
@@ -72,6 +74,8 @@ function PublishedView() {
   const [title, setTitle] = useState('Dashboard')
   const [detail, setDetail] = useState('')
   const [panel, setPanel] = useState('summary')
+  const [chartFilter, setChartFilter] = useState<LeadChartFilter | null>(null)
+  const [errorSearch, setErrorSearch] = useState('')
 
   useEffect(() => {
     let cancel = false
@@ -117,49 +121,148 @@ function PublishedView() {
   }
 
   const summary = summarizeLeads(results)
+  const scoreRows = summary.scorecard.map((row) => ({
+    name: row.name,
+    leads: row.leads.toLocaleString(),
+    correct: row.correct.toLocaleString(),
+    errors: row.errors.toLocaleString(),
+    accuracy: `${row.accuracyPct.toFixed(1)}%`,
+    rating: row.rating,
+    critical: row.critical.toLocaleString(),
+    medium: row.medium.toLocaleString(),
+  }))
+  const kpis = [
+    ['Total leads', summary.total.toLocaleString()],
+    ['Total errors', summary.errors.toLocaleString()],
+    ['Accuracy', `${(summary.accuracy * 100).toFixed(1)}%`],
+    ['Critical', summary.critical.toLocaleString()],
+    ['Medium', summary.medium.toLocaleString()],
+    ['Best TeleCaller', summary.bestTelecaller],
+    ['Lowest TeleCaller', summary.lowestTelecaller],
+  ]
   const rings = [
     activityRing('Accuracy', summary.clean, summary.total || 1, RING.rose, 168, 'clean'),
     activityRing('No error', summary.clean, summary.total || 1, RING.lime, 124, 'leads'),
     activityRing('Not critical', summary.notCritical, summary.total || 1, RING.cyan, 80, 'leads'),
   ]
+  const scoreColumns = [
+    { key: 'name', label: 'TeleCaller' },
+    { key: 'leads', label: 'Leads' },
+    { key: 'correct', label: 'Correct' },
+    { key: 'errors', label: 'Errors' },
+    { key: 'accuracy', label: 'Accuracy %' },
+    { key: 'rating', label: 'Rating', className: 'tracking-wide text-emerald-400' },
+    { key: 'critical', label: 'Critical' },
+    { key: 'medium', label: 'Medium' },
+  ]
+  const errorColumns = [
+    { key: 'project', label: 'Project' },
+    { key: 'mobile', label: 'Mobile' },
+    { key: 'telecaller', label: 'TeleCaller' },
+    { key: 'errorType', label: 'Error type' },
+    { key: 'details', label: 'Details' },
+    { key: 'action', label: 'Action' },
+    { key: 'severity', label: 'Severity' },
+  ]
+  const filteredErrors = filterErrorRows(summary.rows, chartFilter).filter((row) => rowMatchesSearch(row, errorSearch))
+  const errorNote = `${chartFilter ? `${chartFilter.subtitle} · ` : ''}${filteredErrors.length.toLocaleString()} error row(s)`
   const tabs: TabItem[] = [
-    {
-      id: 'summary',
-      title: 'Summary',
-      color: 'bg-rose-500 hover:bg-rose-600',
-      cardContent: <div className="h-full overflow-auto p-2"><ActivityRings title={title} data={rings} /></div>,
-    },
-    {
-      id: 'performance',
-      title: 'Performance',
-      color: 'bg-lime-500 hover:bg-lime-600',
-      cardContent: <ScoreList rows={summary.scorecard.map((row) => [`${row.name}`, `${Math.round(row.accuracy * 100)}% · ${row.leads} leads`])} />,
-    },
-    {
-      id: 'graphs',
-      title: 'Graphs',
-      color: 'bg-cyan-500 hover:bg-cyan-600',
-      cardContent: null,
-    },
-    {
-      id: 'errors',
-      title: 'Detailed error report',
-      color: 'bg-zinc-800 hover:bg-zinc-900',
-      cardContent: (
-        <ScoreList rows={summary.rows.filter((row) => row.errorFlag).slice(0, 40).map((row) => [row.telecaller, `${row.severity || 'Error'} · ${row.errorLabels.join(', ') || row.errorDetails}`])} />
-      ),
-    },
+    { id: 'summary', title: 'Summary', color: 'bg-rose-500 hover:bg-rose-600', cardContent: null },
+    { id: 'performance', title: 'Performance', color: 'bg-lime-500 hover:bg-lime-600', cardContent: null },
+    { id: 'graphs', title: 'Graphs', color: 'bg-cyan-500 hover:bg-cyan-600', cardContent: null },
+    { id: 'errors', title: 'Detailed error report', color: 'bg-zinc-800 hover:bg-zinc-900', cardContent: null },
   ]
   return (
     <div className="space-y-4">
       <SmoothTab items={tabs} selected={panel} onChange={setPanel} className="w-full max-w-none">
-        {panel === 'summary' ? <ActivityRings title={title} data={rings} /> : null}
-        {panel === 'performance' ? <ScoreList rows={summary.scorecard.map((row) => [`${row.name}`, `${Math.round(row.accuracy * 100)}% · ${row.leads} leads`])} /> : null}
-        {panel === 'graphs' ? <LeadCharts results={results} /> : null}
-        {panel === 'errors' ? <ScoreList rows={summary.rows.filter((row) => row.errorFlag).slice(0, 40).map((row) => [row.telecaller, `${row.severity || 'Error'} · ${row.errorLabels.join(', ') || row.errorDetails}`])} /> : null}
+        {panel === 'summary' ? (
+          <div className="space-y-4">
+            <ActivityRings title={title} data={rings} />
+            <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+              {kpis.map(([label, value]) => (
+                <div key={label} className="rounded-2xl border border-[var(--line)] bg-[var(--panel)] px-4 py-3">
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[var(--muted)]">{label}</p>
+                  <p className="mt-1 text-lg font-semibold text-[var(--ink)]">{value}</p>
+                </div>
+              ))}
+            </div>
+            <MetricTable title="TeleCaller Performance" columns={scoreColumns} rows={scoreRows} />
+          </div>
+        ) : null}
+        {panel === 'performance' ? <MetricTable title="TeleCaller Performance" columns={scoreColumns} rows={scoreRows} /> : null}
+        {panel === 'graphs' ? (
+          <LeadCharts
+            results={results}
+            onFilter={(filter) => {
+              setChartFilter(filter)
+              setErrorSearch('')
+              setPanel('errors')
+            }}
+          />
+        ) : null}
+        {panel === 'errors' ? (
+          <div className="space-y-3">
+            <div className="flex flex-wrap items-end justify-between gap-3">
+              <label className="flex min-w-[16rem] flex-1 flex-col gap-1 text-xs font-semibold uppercase tracking-[0.14em] text-[var(--muted)]">
+                Search all
+                <input
+                  type="search"
+                  value={errorSearch}
+                  placeholder="Search all fields…"
+                  className="rounded-xl border border-[var(--line)] bg-[var(--panel)] px-3 py-2 text-sm font-normal normal-case tracking-normal text-[var(--ink)]"
+                  onChange={(event) => setErrorSearch(event.target.value)}
+                />
+              </label>
+              <button
+                type="button"
+                className="rounded-xl border border-[var(--line)] px-3 py-2 text-sm text-[var(--ink)]"
+                onClick={() => {
+                  setChartFilter(null)
+                  setErrorSearch('')
+                }}
+              >
+                Clear
+              </button>
+            </div>
+            <MetricTable title="Detailed Error Report" note={errorNote} columns={errorColumns} rows={filteredErrors} />
+          </div>
+        ) : null}
       </SmoothTab>
     </div>
   )
+}
+
+function rowMatchesSearch(row: Record<string, string | number>, query: string) {
+  const tokens = query.trim().toLowerCase().split(/\s+/).filter(Boolean)
+  if (!tokens.length) return true
+  const haystack = Object.values(row).join('\n').toLowerCase()
+  return tokens.every((token) => haystack.includes(token))
+}
+
+function filterErrorRows(rows: LeadRow[], filter: LeadChartFilter | null) {
+  const errors = rows.filter((row) => row.errorFlag)
+  if (!filter) return errors.map(errorRecord)
+  const matched = errors.filter((row) => {
+    if (filter.kind === 'telecaller') return row.telecaller === filter.telecaller
+    if (filter.kind === 'errorType') return row.errorLabels.includes(filter.errorType) || row.errorType === filter.errorType
+    if (filter.kind === 'project') return (row.project || '(No project)') === filter.project
+    if (filter.kind === 'severity') return row.telecaller === filter.telecaller && row.severity === filter.severity
+    if (filter.kind === 'commentQuality') return row.telecaller === filter.telecaller && commentQualityKey(row.commentQuality) === filter.band
+    return overdueBucket(row.overdueDays) === filter.bucket
+  })
+  return matched.map(errorRecord)
+}
+
+function errorRecord(row: LeadRow) {
+  return {
+    project: row.project,
+    mobile: row.mobile,
+    telecaller: row.telecaller,
+    errorType: row.errorType,
+    details: row.errorDetails,
+    action: row.action,
+    severity: row.severity,
+  }
 }
 function ScoreList({ rows }: { rows: string[][] }) {
   if (!rows.length) return <p className="p-4 text-sm text-zinc-500">No rows.</p>

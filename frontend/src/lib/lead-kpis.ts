@@ -32,13 +32,23 @@ function mapSeverity(errorSeverity: unknown, errorLabels: string[]) {
 export type LeadRow = {
   telecaller: string
   project: string
+  mobile: string
   errorLabels: string[]
+  errorType: string
   severity: string
   errorFlag: number
   errorDetails: string
+  action: string
   status: string
   commentQuality: number | null
   overdueDays: number | null
+  registration: Date | null
+}
+
+function accuracyRating(accuracy: number) {
+  const pctValue = Math.max(0, Math.min(100, (Number(accuracy) || 0) * 100))
+  const filled = Math.min(5, Math.max(0, Math.round(pctValue / 20)))
+  return `${'★'.repeat(filled)}${'☆'.repeat(5 - filled)}`
 }
 
 export function mapLeadRows(results: Array<Record<string, unknown>>): LeadRow[] {
@@ -51,14 +61,122 @@ export function mapLeadRows(results: Array<Record<string, unknown>>): LeadRow[] 
     return {
       telecaller: clean(row.telecaller) || 'Unknown',
       project: clean(row.project),
+      mobile: clean(row.mobile),
       errorLabels: labels,
+      errorType: labels.length ? labels.join(' | ') : 'None',
       severity: mapSeverity(row.errorSeverity, labels),
       errorFlag,
       errorDetails: clean(row.observation),
+      action: clean(row.recommendation),
       status: clean(row.status),
       commentQuality: Number.isFinite(quality) ? quality : null,
       overdueDays: closed || !Number.isFinite(overdue) ? null : Math.round(overdue),
+      registration: parseLooseDate(row.registration),
     }
+  })
+}
+
+function parseLooseDate(value: unknown) {
+  if (value instanceof Date && !Number.isNaN(value.valueOf())) return startOfDay(value)
+  const text = String(value ?? '').trim()
+  if (!text) return null
+  const iso = text.match(/^(\d{4})-(\d{2})-(\d{2})/)
+  if (iso) {
+    const date = new Date(Number(iso[1]), Number(iso[2]) - 1, Number(iso[3]))
+    return Number.isNaN(date.valueOf()) ? null : date
+  }
+  const date = new Date(text)
+  return Number.isNaN(date.valueOf()) ? null : startOfDay(date)
+}
+
+function startOfDay(date: Date) {
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate())
+}
+
+export type LeadFilters = {
+  telecallers: string[]
+  projects: string[]
+  severities: string[]
+  errorTypes: string[]
+  overdueBuckets: string[]
+  commentQualityBuckets: string[]
+  dateFrom: string
+  dateTo: string
+}
+
+export const EMPTY_LEAD_FILTERS: LeadFilters = {
+  telecallers: [],
+  projects: [],
+  severities: [],
+  errorTypes: [],
+  overdueBuckets: [],
+  commentQualityBuckets: [],
+  dateFrom: '',
+  dateTo: '',
+}
+
+const CQ_LABELS: Record<string, string> = {
+  '0-2': 'Bad',
+  '3-4': 'Average',
+  '5-6': 'Good',
+  '7-8': 'Very good',
+  '9-10': 'Excellent',
+}
+
+export function commentQualityLabel(key: string) {
+  return CQ_LABELS[key] || key
+}
+
+export function leadFilterChoices(results: Array<Record<string, unknown>>) {
+  const rows = mapLeadRows(results)
+  const unique = (values: string[]) => [...new Set(values.filter(Boolean))].sort((a, b) => a.localeCompare(b))
+  const labels: string[] = []
+  for (const row of rows) labels.push(...row.errorLabels)
+  return {
+    telecallers: unique(rows.map((row) => row.telecaller)),
+    projects: unique(rows.map((row) => row.project || '(No project)')),
+    severities: ['Critical', 'Medium'],
+    errorTypes: unique(labels),
+    overdueBuckets: [...OVERDUE_BUCKETS],
+    commentQualityBuckets: Object.entries(CQ_LABELS).map(([value, label]) => ({ value, label })),
+  }
+}
+
+function listed(values: string[]) {
+  return values.map((value) => value.trim()).filter((value) => value && !/^all$/i.test(value))
+}
+
+/** Same inclusion rules as dashboard-metrics.js applyFilters. Empty lists mean all. */
+export function applyLeadFilters(results: Array<Record<string, unknown>>, filters: LeadFilters) {
+  const rows = mapLeadRows(results)
+  const telecallers = listed(filters.telecallers)
+  const projects = listed(filters.projects)
+  const severities = listed(filters.severities)
+  const errorTypes = listed(filters.errorTypes)
+  const overdueBuckets = listed(filters.overdueBuckets)
+  const commentQualityBuckets = listed(filters.commentQualityBuckets)
+  const dateFrom = parseLooseDate(filters.dateFrom)
+  const dateTo = parseLooseDate(filters.dateTo)
+  return results.filter((_, index) => {
+    const row = rows[index]
+    if (telecallers.length && !telecallers.includes(row.telecaller)) return false
+    if (projects.length && !projects.includes(row.project || '(No project)')) return false
+    if (severities.length && !severities.includes(row.severity)) return false
+    if (errorTypes.length && !errorTypes.some((label) => row.errorLabels.includes(label) || row.errorType === label)) return false
+    if (overdueBuckets.length) {
+      const bucket = overdueBucket(row.overdueDays)
+      if (!bucket || !overdueBuckets.includes(bucket)) return false
+    }
+    if (commentQualityBuckets.length) {
+      const bucket = commentQualityKey(row.commentQuality)
+      if (!bucket || !commentQualityBuckets.includes(bucket)) return false
+    }
+    if (dateFrom || dateTo) {
+      if (!row.registration) return false
+      if (dateFrom && row.registration < dateFrom) return false
+      if (dateTo && row.registration > dateTo) return false
+    }
+    return true
   })
 }
 
@@ -67,6 +185,7 @@ export function summarizeLeads(results: Array<Record<string, unknown>>) {
   const total = rows.length
   const errors = rows.reduce((sum, row) => sum + row.errorFlag, 0)
   const critical = rows.filter((row) => row.severity === 'Critical').length
+  const medium = rows.filter((row) => row.severity === 'Medium').length
   const clean = Math.max(0, total - errors)
   const notCritical = Math.max(0, total - critical)
   const accuracy = total ? Math.max(0, 1 - errors / total) : 0
@@ -82,10 +201,16 @@ export function summarizeLeads(results: Array<Record<string, unknown>>) {
   const scorecard = [...byTele.values()]
     .map((bucket) => {
       const acc = bucket.leads ? Math.max(0, 1 - bucket.errors / bucket.leads) : 0
-      return { ...bucket, accuracy: acc }
+      const correct = Math.max(0, bucket.leads - bucket.errors)
+      return { ...bucket, correct, accuracy: acc, accuracyPct: acc * 100, rating: accuracyRating(acc) }
     })
     .sort((a, b) => b.accuracy - a.accuracy || a.name.localeCompare(b.name))
-  return { rows, total, errors, critical, clean, notCritical, accuracy, scorecard }
+  const withLeads = scorecard.filter((row) => row.leads > 0)
+  const bestTelecaller = withLeads[0]?.name || 'N/A'
+  const lowestTelecaller = withLeads.length
+    ? withLeads.reduce((worst, row) => (row.accuracy < worst.accuracy ? row : worst)).name
+    : 'N/A'
+  return { rows, total, errors, critical, medium, clean, notCritical, accuracy, scorecard, bestTelecaller, lowestTelecaller }
 }
 
 const OVERDUE_BUCKETS = ['1-5', '5-20', '20-50', '50-100', '100+'] as const
@@ -97,7 +222,7 @@ const CQ_BUCKETS = [
   { key: '9-10', label: 'Excellent', color: 'var(--chart-bar)' },
 ] as const
 
-function overdueBucket(days: number | null) {
+export function overdueBucket(days: number | null) {
   if (days == null || !Number.isFinite(days) || days < 1) return null
   if (days <= 5) return '1-5'
   if (days <= 20) return '5-20'
@@ -106,7 +231,7 @@ function overdueBucket(days: number | null) {
   return '100+'
 }
 
-function commentQualityKey(score: number | null) {
+export function commentQualityKey(score: number | null) {
   if (score == null || !Number.isFinite(score)) return null
   if (score <= 2) return '0-2'
   if (score <= 4) return '3-4'

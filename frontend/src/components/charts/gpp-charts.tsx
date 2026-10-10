@@ -37,14 +37,29 @@ export function ChartCard({ title, children }: { title: string; children: ReactN
   )
 }
 
-export function SliceLegend({ items }: { items: Array<{ label: string; color?: string; value?: number }> }) {
+export function SliceLegend({
+  items,
+  onPick,
+}: {
+  items: Array<{ label: string; color?: string; value?: number }>
+  onPick?: (label: string) => void
+}) {
   if (!items.length) return null
   return (
     <ul className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs text-[var(--muted)]">
       {items.map((item) => (
-        <li key={item.label} className="flex items-center gap-1.5">
-          <span className="size-2 rounded-full" style={{ background: item.color || 'var(--chart-1)' }} />
-          <span>{item.label}{item.value != null ? ` · ${item.value}` : ''}</span>
+        <li key={item.label}>
+          {onPick ? (
+            <button type="button" className="flex items-center gap-1.5 rounded-md px-1 py-0.5 hover:bg-black/5 dark:hover:bg-white/10" onClick={() => onPick(item.label)}>
+              <span className="size-2 rounded-full" style={{ background: item.color || 'var(--chart-1)' }} />
+              <span>{item.label}{item.value != null ? ` · ${item.value}` : ''}</span>
+            </button>
+          ) : (
+            <span className="flex items-center gap-1.5">
+              <span className="size-2 rounded-full" style={{ background: item.color || 'var(--chart-1)' }} />
+              <span>{item.label}{item.value != null ? ` · ${item.value}` : ''}</span>
+            </span>
+          )}
         </li>
       ))}
     </ul>
@@ -66,6 +81,7 @@ export function GroupedBars({
   xKey = 'name',
   stacked = false,
   scrollable = false,
+  onSegment,
 }: {
   title: string
   data: Array<Record<string, string | number>>
@@ -74,6 +90,7 @@ export function GroupedBars({
   stacked?: boolean
   /** Fixed pixel width per category; the card scrolls instead of shrinking bars. */
   scrollable?: boolean
+  onSegment?: (category: string, seriesLabel: string) => void
 }) {
   if (!data.length || !series.length) return <ChartCard title={title}><p className="text-sm text-[var(--muted)]">No data for this chart.</p></ChartCard>
   const axes = [...new Set(series.map((item) => item.yAxisId || 'left'))]
@@ -97,7 +114,17 @@ export function GroupedBars({
         ))}
         <ChartTooltip showDatePill={false} />
         {series.map((item) => (
-          <Bar key={item.key} dataKey={item.key} fill={item.color} yAxisId={item.yAxisId || 'left'} lineCap={4} />
+          <Bar
+            key={item.key}
+            dataKey={item.key}
+            fill={item.color}
+            yAxisId={item.yAxisId || 'left'}
+            lineCap={4}
+            onDatumClick={onSegment ? (category, seriesKey) => {
+              const match = series.find((item) => item.key === seriesKey)
+              onSegment(category, match?.label || seriesKey)
+            } : undefined}
+          />
         ))}
       </BarChart>
   )
@@ -113,18 +140,28 @@ export function GroupedBars({
   )
 }
 
-export function SolidPie({ title, slices }: { title: string; slices: Array<{ label: string; value: number; color?: string }> }) {
+export function SolidPie({
+  title,
+  slices,
+  onSegment,
+}: {
+  title: string
+  slices: Array<{ label: string; value: number; color?: string }>
+  onSegment?: (label: string) => void
+}) {
   const data = slices.filter((slice) => slice.value > 0)
   if (!data.length) return <ChartCard title={title}><p className="text-sm text-[var(--muted)]">No data for this chart.</p></ChartCard>
   return (
     <ChartCard title={title}>
       <div className="mx-auto w-fit">
         <PieChart data={data} innerRadius={0} size={220}>
-          {data.map((slice, index) => <PieSlice key={slice.label} index={index} color={slice.color} />)}
+          {data.map((slice, index) => (
+            <PieSlice key={slice.label} index={index} color={slice.color} onSelect={onSegment ? () => onSegment(slice.label) : undefined} />
+          ))}
           <PieCenter defaultLabel={title} />
         </PieChart>
       </div>
-      <SliceLegend items={data} />
+      <SliceLegend items={data} onPick={onSegment} />
     </ChartCard>
   )
 }
@@ -133,11 +170,13 @@ export function ShareRing({
   title,
   slices,
   scale = 'sum',
+  onSegment,
 }: {
   title: string
   slices: Array<{ label: string; value: number; color?: string }>
   /** `sum` fills the ring as a share of the total. `peak` sets the ring ceiling to the largest slice in this chart. */
   scale?: 'sum' | 'peak'
+  onSegment?: (label: string) => void
 }) {
   const data = slices.filter((slice) => slice.value > 0)
   const maxValue =
@@ -156,7 +195,9 @@ export function ShareRing({
           onHoverChange={setHoveredIndex}
           size={280}
         >
-          {data.map((slice, index) => <Ring key={slice.label} index={index} color={slice.color} />)}
+          {data.map((slice, index) => (
+            <Ring key={slice.label} index={index} color={slice.color} onSelect={onSegment ? () => onSegment(slice.label) : undefined} />
+          ))}
           <RingCenter defaultLabel="Total">
             {({ value }) => (
               <span className="font-bold tabular-nums leading-none text-[clamp(1.25rem,22cqw,1.875rem)]">
@@ -172,7 +213,7 @@ export function ShareRing({
       >
         {hoveredLabel || '\u00a0'}
       </p>
-      <SliceLegend items={data} />
+      <SliceLegend items={data} onPick={onSegment} />
     </ChartCard>
   )
 }
