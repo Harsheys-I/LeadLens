@@ -110,9 +110,21 @@ export function SolidPie({ title, slices }: { title: string; slices: Array<{ lab
   )
 }
 
-export function ShareRing({ title, slices }: { title: string; slices: Array<{ label: string; value: number; color?: string }> }) {
+export function ShareRing({
+  title,
+  slices,
+  scale = 'sum',
+}: {
+  title: string
+  slices: Array<{ label: string; value: number; color?: string }>
+  /** `sum` fills the ring as a share of the total. `peak` sets the ring ceiling to the largest slice in this chart. */
+  scale?: 'sum' | 'peak'
+}) {
   const data = slices.filter((slice) => slice.value > 0)
-  const maxValue = data.reduce((sum, slice) => sum + slice.value, 0) || 1
+  const maxValue =
+    (scale === 'peak'
+      ? data.reduce((peak, slice) => Math.max(peak, slice.value), 0)
+      : data.reduce((sum, slice) => sum + slice.value, 0)) || 1
   if (!data.length) return <ChartCard title={title}><p className="text-sm text-[var(--muted)]">No data for this chart.</p></ChartCard>
   return (
     <ChartCard title={title}>

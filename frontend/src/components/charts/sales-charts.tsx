@@ -106,9 +106,9 @@ export function SalesCharts({ payload }: { payload: SalesPayload }) {
       <GroupedBars title="Leads vs Visits vs Booked by month" data={model.months} series={heroSeries} xKey="month" />
       <GroupedBars title="Leads vs Visits vs Booked by project" data={model.projects} series={heroSeries} />
       <div className="grid gap-4 lg:grid-cols-3">
-        {visible('leads') ? <ShareRing title="Leads share by project" slices={model.leadShare} /> : null}
-        {visible('visits') ? <ShareRing title="Visits share by project" slices={model.visitShare} /> : null}
-        {visible('booked') ? <ShareRing title="Booked share by project" slices={model.bookedShare} /> : null}
+        {visible('leads') ? <ShareRing title="Leads share by project" slices={model.leadShare} scale="peak" /> : null}
+        {visible('visits') ? <ShareRing title="Visits share by project" slices={model.visitShare} scale="peak" /> : null}
+        {visible('booked') ? <ShareRing title="Booked share by project" slices={model.bookedShare} scale="peak" /> : null}
       </div>
       {statusSeries.length ? <GroupedBars title="Booked · status stacked by month" data={model.statusMonths} series={statusSeries} xKey="month" stacked /> : null}
       {visible('leads') ? (
