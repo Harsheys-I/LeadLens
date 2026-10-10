@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Shield, UserPlus, Users } from 'lucide-react'
 import Loader from '@/components/ui/loader.tsx'
 import SlideTextButton from '@/components/ui/slide-text-button.tsx'
+import SmoothDrawer from '@/components/ui/smooth-drawer.tsx'
 import SmoothTab, { type TabItem } from '@/components/ui/smooth-tab.tsx'
 import SpotlightCards from '@/components/ui/spotlight-cards.tsx'
 import { AdminApi } from '@/lib/api.ts'
@@ -80,7 +81,12 @@ function UsersView() {
           <h2 className="text-sm font-semibold">Users</h2>
           <SlideTextButton type="button" text="New user" hoverText="Create user" onClick={() => setCreating(true)} />
         </div>
-        {creating ? (
+        <SmoothDrawer
+          open={creating}
+          title="New user"
+          description="Username, display name, and role"
+          onClose={() => setCreating(false)}
+        >
           <CreateUser
             roles={roles}
             onDone={async () => {
@@ -90,7 +96,7 @@ function UsersView() {
             onMessage={setMessage}
             onCancel={() => setCreating(false)}
           />
-        ) : null}
+        </SmoothDrawer>
         <ul className="space-y-2 text-sm text-[var(--ink)]">
           {people.map((person) => (
             <li key={person.id} className="flex items-center justify-between gap-2 rounded-xl border border-zinc-200 bg-transparent px-3 py-2 text-[var(--ink)] dark:border-zinc-800">
@@ -108,7 +114,7 @@ function UsersView() {
 function CreateUser({ roles, onDone, onMessage, onCancel }: { roles: Role[]; onDone: () => Promise<void>; onMessage: (text: string) => void; onCancel: () => void }) {
   return (
     <form
-      className="grid gap-2 rounded-2xl border border-zinc-200 p-3 dark:border-zinc-800"
+      className="grid gap-2"
       onSubmit={async (event) => {
         event.preventDefault()
         const form = new FormData(event.currentTarget)

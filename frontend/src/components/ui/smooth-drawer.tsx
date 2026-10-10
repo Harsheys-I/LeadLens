@@ -77,20 +77,27 @@ export type Notice = {
 export default function SmoothDrawer({
   open,
   onClose,
-  unread,
-  notes,
+  unread = 0,
+  notes = [],
   onRead,
   onMarkAll,
   onClearAll,
+  title,
+  description,
+  children,
 }: {
   open: boolean
   onClose: () => void
-  unread: number
-  notes: Notice[]
-  onRead: (id: number) => void
-  onMarkAll: () => void
-  onClearAll: () => void
+  unread?: number
+  notes?: Notice[]
+  onRead?: (id: number) => void
+  onMarkAll?: () => void
+  onClearAll?: () => void
+  title?: string
+  description?: string
+  children?: ReactNode
 }) {
+  const custom = children != null
   return (
     <Drawer open={open} onOpenChange={(next) => { if (!next) onClose() }}>
       <DrawerContent className="mx-auto max-h-[88vh] max-w-lg rounded-t-2xl p-6 shadow-xl">
@@ -103,17 +110,20 @@ export default function SmoothDrawer({
           <motion.div variants={itemVariants}>
             <DrawerHeader className="space-y-2.5 px-0">
               <DrawerTitle className="flex items-center gap-2.5 font-semibold text-2xl tracking-tighter">
-                <span className="rounded-xl bg-gradient-to-br from-zinc-100 to-zinc-200 p-1.5 shadow-inner dark:from-zinc-800 dark:to-zinc-900">
-                  <img alt="" height={32} width={48} src={assetUrl('assets/gpp-ai-logo.png')} className="h-8 w-12 object-contain" />
-                </span>
-                <span>Notifications</span>
+                {custom ? null : (
+                  <span className="rounded-xl bg-gradient-to-br from-zinc-100 to-zinc-200 p-1.5 shadow-inner dark:from-zinc-800 dark:to-zinc-900">
+                    <img alt="" height={32} width={48} src={assetUrl('assets/gpp-ai-logo.png')} className="h-8 w-12 object-contain" />
+                  </span>
+                )}
+                <span>{custom ? (title || 'New user') : 'Notifications'}</span>
               </DrawerTitle>
               <DrawerDescription className="text-sm text-zinc-600 dark:text-zinc-400">
-                {unread} unread
+                {custom ? (description || 'Create a user account') : `${unread} unread`}
               </DrawerDescription>
             </DrawerHeader>
           </motion.div>
 
+          {custom ? <motion.div variants={itemVariants}>{children}</motion.div> : (
           <motion.ul variants={itemVariants} className="max-h-[40vh] space-y-2 overflow-y-auto">
             {notes.length === 0 ? <li className="py-6 text-center text-sm text-zinc-500">No notifications</li> : null}
             {notes.map((note) => {
@@ -123,7 +133,7 @@ export default function SmoothDrawer({
                   <button
                     type="button"
                     className={`w-full rounded-xl border px-3 py-3 text-left ${unreadRow ? 'border-teal-200 bg-teal-50/70 dark:border-teal-900 dark:bg-teal-950/40' : 'border-zinc-200 dark:border-zinc-800'}`}
-                    onClick={() => onRead(note.id)}
+                    onClick={() => onRead?.(note.id)}
                   >
                     <strong className="block text-sm">{note.title || 'Notification'}</strong>
                     {note.body ? <span className="mt-1 block text-sm text-zinc-600 dark:text-zinc-300">{note.body}</span> : null}
@@ -133,13 +143,15 @@ export default function SmoothDrawer({
               )
             })}
           </motion.ul>
+          )}
 
+          {custom ? null : (
           <motion.div variants={itemVariants}>
             <DrawerFooter className="flex flex-col gap-3 px-0">
               <button
                 type="button"
                 className="group relative inline-flex h-11 w-full items-center justify-center overflow-hidden rounded-xl bg-gradient-to-r from-rose-500 to-pink-500 text-sm font-semibold text-white"
-                onClick={onMarkAll}
+                onClick={() => onMarkAll?.()}
               >
                 <motion.span
                   className="absolute inset-0 translate-x-[-200%] bg-gradient-to-r from-transparent via-white/20 to-transparent"
@@ -148,7 +160,7 @@ export default function SmoothDrawer({
                 />
                 <span className="relative">Mark all read</span>
               </button>
-              <Button type="button" variant="outline" className="h-11 w-full rounded-xl" onClick={onClearAll}>
+              <Button type="button" variant="outline" className="h-11 w-full rounded-xl" onClick={() => onClearAll?.()}>
                 Clear all
               </Button>
               <DrawerClose asChild>
@@ -158,6 +170,7 @@ export default function SmoothDrawer({
               </DrawerClose>
             </DrawerFooter>
           </motion.div>
+          )}
         </motion.div>
       </DrawerContent>
     </Drawer>
