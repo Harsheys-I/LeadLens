@@ -219,8 +219,15 @@ export default function SmoothTab({
   stageClassName,
   children,
 }: SmoothTabProps) {
-  const [uncontrolled, setUncontrolled] = React.useState<string>(defaultTabId);
+  const fallbackId = items.some((item) => item.id === defaultTabId) ? defaultTabId : (items[0]?.id ?? defaultTabId);
+  const [uncontrolled, setUncontrolled] = React.useState<string>(fallbackId);
   const selected = selectedProp ?? value ?? uncontrolled;
+
+  React.useEffect(() => {
+    if (selectedProp !== undefined || value !== undefined) return;
+    if (items.some((item) => item.id === uncontrolled)) return;
+    setUncontrolled(items[0]?.id ?? defaultTabId);
+  }, [items, uncontrolled, selectedProp, value, defaultTabId]);
   const [direction, setDirection] = React.useState(0);
   const [dimensions, setDimensions] = React.useState({ width: 0, left: 0 });
 

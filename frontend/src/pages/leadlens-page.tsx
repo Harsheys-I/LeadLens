@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState } from 'react'
-import { BarChart3, Database, FileWarning, Gauge, ListTree, Phone } from 'lucide-react'
+import { useEffect, useState } from 'react'
+import { BarChart3, Database, FileWarning, Phone } from 'lucide-react'
 import { ActivityRings } from '@/components/ui/activity-rings.tsx'
 import BentoGrid from '@/components/ui/bento-grid.tsx'
 import Loader from '@/components/ui/loader.tsx'
@@ -7,7 +7,7 @@ import MouseEffectCard from '@/components/ui/mouse-effect-card.tsx'
 import SlideTextButton from '@/components/ui/slide-text-button.tsx'
 import SmoothTab, { type TabItem } from '@/components/ui/smooth-tab.tsx'
 import SpotlightCards from '@/components/ui/spotlight-cards.tsx'
-import { api, DashboardApi, JobsApi, PerfDashboardApi, SettingsApi } from '@/lib/api.ts'
+import { DashboardApi, PerfDashboardApi, SettingsApi } from '@/lib/api.ts'
 import { useAuth } from '@/lib/auth.tsx'
 import { LeadCharts } from '@/components/charts/lead-charts.tsx'
 import { PerfCharts } from '@/components/charts/perf-charts.tsx'
@@ -15,25 +15,14 @@ import { summarizeLeads } from '@/lib/lead-kpis.ts'
 import { activityRing, RING } from '@/lib/rings.ts'
 import { useView } from '@/lib/use-view.ts'
 
-const VIEWS = ['published', 'perf-dashboard', 'console', 'history', 'settings', 'perf-settings']
+const VIEWS = ['published', 'perf-dashboard', 'settings', 'perf-settings']
 const ALIASES: Record<string, string> = { review: 'published', 'perf-report': 'perf-dashboard' }
 
-type AuditProgress = {
-  running?: boolean
-  status?: string
-  audited?: number
-  total?: number
-  elapsed_seconds?: number
-  source_file?: string
-}
-
 export default function LeadLensPage() {
-  const { hasPermission, user } = useAuth()
+  const { hasPermission } = useAuth()
   const allowed = VIEWS.filter((id) => {
     if (id === 'published') return hasPermission('telecaller.dashboard')
     if (id === 'perf-dashboard') return hasPermission('telecaller.perf_dashboard')
-    if (id === 'console') return hasPermission('telecaller.run_console')
-    if (id === 'history') return hasPermission('telecaller.history')
     if (id === 'settings') return hasPermission('telecaller.settings')
     if (id === 'perf-settings') return hasPermission('telecaller.perf_settings')
     return false
@@ -43,8 +32,6 @@ export default function LeadLensPage() {
   const items = [
     { id: 'published', name: 'B1 Leads Audit' },
     { id: 'perf-dashboard', name: 'Telecalling Performance' },
-    { id: 'console', name: 'Run console' },
-    { id: 'history', name: 'History' },
     { id: 'settings', name: 'Settings' },
     { id: 'perf-settings', name: 'Performance settings' },
   ].filter((item) => allowed.includes(item.id))
@@ -55,10 +42,8 @@ export default function LeadLensPage() {
       selected={allowed.includes(view) ? view : fallback}
       onChange={select}
     >
-      {view === 'published' ? <PublishedView canPublish={Boolean(user?.is_super || hasPermission('telecaller.upload_dashboard'))} /> : null}
+      {view === 'published' ? <PublishedView /> : null}
       {view === 'perf-dashboard' ? <PerfView /> : null}
-      {view === 'console' ? <ConsoleView /> : null}
-      {view === 'history' ? <HistoryView /> : null}
       {view === 'settings' ? <SettingsView /> : null}
       {view === 'perf-settings' ? <PerfSettingsView /> : null}
     </SmoothTab>
@@ -94,8 +79,7 @@ function PublishedView({ canPublish }: { canPublish: boolean }) {
         topSubtext="B1 Leads Audit"
         title="No published dashboard"
         subtitle="Publish a review pack when this role can upload."
-        primaryCtaText={canPublish ? 'Publish' : 'History'}
-        onPrimaryCtaClick={() => { if (!canPublish) location.hash = '#history' }}
+        primaryCtaText={canPublish ? 'Publish' : ''}
         footerText="Accuracy rings appear after a published audit."
       />
     )
@@ -249,7 +233,7 @@ function PerfView() {
   return (
     <div className="space-y-4">
       {charts}
-      <SmoothTab items={tabs} className="w-full max-w-none" stageClassName="h-[28rem]" />
+      <SmoothTab items={tabs} defaultTabId="summary" className="w-full max-w-none" stageClassName="h-[28rem]" />
     </div>
   )
 }
