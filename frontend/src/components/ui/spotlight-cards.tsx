@@ -24,6 +24,9 @@ export interface SpotlightItem {
   description: string;
   color: string;
   href?: string;
+  selected?: boolean;
+  status?: string;
+  onClick?: () => void;
 }
 
 const DEFAULT_ITEMS: SpotlightItem[] = [
@@ -114,6 +117,7 @@ function Card({ item, dimmed, onHoverStart, onHoverEnd }: CardProps) {
     onHoverEnd();
   };
 
+  const interactive = Boolean(item.onClick);
   const card = (
     <motion.div
       animate={{
@@ -121,11 +125,13 @@ function Card({ item, dimmed, onHoverStart, onHoverEnd }: CardProps) {
         opacity: dimmed ? 0.5 : 1,
       }}
       className={cn(
-        "group relative flex flex-col gap-5 overflow-hidden rounded-2xl border p-6",
+        "group relative flex h-full w-full flex-col gap-5 overflow-hidden rounded-2xl border p-6 text-left",
         "border-zinc-200 bg-white shadow-[0_2px_8px_rgba(0,0,0,0.04)]",
         "dark:border-white/10 dark:bg-white/5 dark:shadow-none",
-        "transition-[border-color] duration-300",
-        "hover:border-zinc-300 dark:hover:border-white/14"
+        "transition-[border-color,background-color] duration-300",
+        "hover:border-zinc-300 dark:hover:border-white/14",
+        interactive && "cursor-pointer",
+        item.selected && "dark:bg-white/[0.08]"
       )}
       onMouseEnter={handleMouseEnter}
       onMouseLeave={handleMouseLeave}
@@ -135,6 +141,8 @@ function Card({ item, dimmed, onHoverStart, onHoverEnd }: CardProps) {
         rotateX,
         rotateY,
         transformPerspective: 900,
+        borderColor: item.selected ? item.color : undefined,
+        boxShadow: item.selected ? `inset 0 0 0 1px ${item.color}55` : undefined,
       }}
       transition={{ duration: 0.18, ease: "easeOut" }}
     >
@@ -177,6 +185,11 @@ function Card({ item, dimmed, onHoverStart, onHoverEnd }: CardProps) {
         <p className="text-[12.5px] text-zinc-500 leading-relaxed dark:text-white/40">
           {item.description}
         </p>
+        {item.status ? (
+          <p className="text-[12px] font-medium leading-relaxed text-zinc-700 dark:text-white/70">
+            {item.status}
+          </p>
+        ) : null}
       </div>
 
       <div
@@ -188,6 +201,18 @@ function Card({ item, dimmed, onHoverStart, onHoverEnd }: CardProps) {
       />
     </motion.div>
   );
+  if (item.onClick) {
+    return (
+      <button
+        type="button"
+        aria-pressed={Boolean(item.selected)}
+        onClick={item.onClick}
+        className="block h-full w-full rounded-2xl text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      >
+        {card}
+      </button>
+    );
+  }
   if (!item.href) return card;
   return (
     <a href={item.href} className="block rounded-2xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">

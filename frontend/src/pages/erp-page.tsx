@@ -109,6 +109,42 @@ function pickUpload(rows: UploadRow[] | undefined, kinds: string[]) {
   return (rows || []).find((row) => want.has(String(row.kind || 'bucket1'))) || null
 }
 
+function pipelineStatus(status: ErpStatus | null, kind: 'bucket1' | 'perf' | 'sales') {
+  if (!status) return 'Loading…'
+  if (kind === 'bucket1') {
+    const prog = status.progress || {}
+    const job = status.job || {}
+    const upload = pickUpload(status.api_uploads, ['bucket1'])
+    if (prog.running || prog.status === 'auditing' || job.status === 'auditing') {
+      const done = Number(prog.audited ?? job.audited ?? 0).toLocaleString()
+      const all = Number(prog.total ?? job.total ?? 0)
+      return `Last run · auditing ${done}/${all ? all.toLocaleString() : '…'}`
+    }
+    const raw = String(upload?.status || job.status || '').toLowerCase()
+    const gha = String(status.gha?.latest?.conclusion || status.gha?.latest?.status || '').toLowerCase()
+    if (raw.includes('fail') || gha === 'failure' || upload?.error || job.error) {
+      return `Failed${upload?.error || job.error ? ` · ${upload?.error || job.error}` : ''}`
+    }
+    if (raw.includes('publish') || upload?.published_at) {
+      return `Published · ${formatIst(upload?.published_at || upload?.started_at)}`
+    }
+    if (raw || gha) {
+      const label = upload?.status || job.status || status.gha?.latest?.conclusion || status.gha?.latest?.status
+      return `Last run · ${label}`
+    }
+    return 'Idle'
+  }
+  const upload = pickUpload(status.api_uploads, kind === 'perf' ? ['performance'] : ['sales', 'sales_graph'])
+  if (!upload) return 'Idle'
+  const raw = String(upload.status || '').toLowerCase()
+  if (raw.includes('fail') || upload.error) return `Failed${upload.error ? ` · ${upload.error}` : ''}`
+  if (raw.includes('publish') || upload.published_at) {
+    return `Published · ${formatIst(upload.published_at || upload.started_at)}`
+  }
+  if (raw) return `Last run · ${upload.status}`
+  return 'Idle'
+}
+
 function linesFor(status: ErpStatus, kind: 'bucket1' | 'perf' | 'sales') {
   const gha = status.gha || {}
   const next = status.next_runs?.[kind] || gha.next_runs?.[kind]
@@ -217,9 +253,33 @@ export default function ErpPage() {
         eyebrow="Pipelines"
         heading="Dispatch"
         items={[
-          { icon: Database, title: 'Bucket 1', description: 'Lead audit workbook through GitHub Actions.', color: '#FF2D55' },
-          { icon: Timer, title: 'Performance', description: 'Telecalling performance publish.', color: '#A3F900' },
-          { icon: LineChart, title: 'Sales Graph', description: 'Leads, visits, and booked.', color: '#04C7DD' },
+          {
+            icon: Database,
+            title: 'Bucket 1',
+            description: 'Lead audit workbook through GitHub Actions.',
+            color: '#FF2D55',
+            selected: bucket1,
+            status: pipelineStatus(status, 'bucket1'),
+            onClick: () => setBucket1((on) => !on),
+          },
+          {
+            icon: Timer,
+            title: 'Performance',
+            description: 'Telecalling performance publish.',
+            color: '#A3F900',
+            selected: perf,
+            status: pipelineStatus(status, 'perf'),
+            onClick: () => setPerf((on) => !on),
+          },
+          {
+            icon: LineChart,
+            title: 'Sales Graph',
+            description: 'Leads, visits, and booked.',
+            color: '#04C7DD',
+            selected: sales,
+            status: pipelineStatus(status, 'sales'),
+            onClick: () => setSales((on) => !on),
+          },
         ]}
       />
       <div className="flex flex-wrap gap-4 text-sm">
