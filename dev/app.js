@@ -5,7 +5,7 @@ import {requireAuth,logout,hasPermission,getUser,changePassword,updateProfile} f
 import {DashboardApi,SettingsApi,api} from "./api-client.js?v=10.0.0.stable";
 import {mountNotifications} from "./notifications-ui.js?v=10.0.0.stable";
 import {persistJob,removeJobSynced,clearJobsSynced,pullJobsFromServer} from "./jobs-sync.js?v=10.0.0.stable";
-import {mountPerfReportUpload,mountPerfPublishedDashboard,refreshPerfPublished} from "./perf-dashboard.js?v=10.0.0.stable";
+import {mountPerfReportUpload,mountPerfPublishedDashboard,refreshPerfPublished} from "./perf-dashboard.js?v=10.0.0.perfcols";
 import {appUrl, homePath} from "./app-base.js?v=10.0.0.stable";
 import {initTheme} from "./theme.js?v=10.0.0.stable";
 import {throttleNote} from "./erp-sync.js?v=10.0.0.stable";

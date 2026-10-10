@@ -230,6 +230,116 @@ function ll_perf_upload_unmatched(array $only, array $byTelecaller): array
 }
 
 /**
+ * ERP JSON is either header-named (erp_upload.py renames A-codes to Excel headers)
+ * or still keyed by A-codes (a raw getreportjsondata upload). Header names are used
+ * when Mobile and Project Name are present, so a later letter shift is fixed in Python.
+ *
+ * @param list<array{id: string, label: string, aliases: string}> $fields
+ * @param array<string, string> $codes
+ * @return list<array<string, mixed>>
+ */
+function ll_perf_upload_parse_json(string $binary, array $fields, array $codes): array
+{
+  $decoded = json_decode($binary, true);
+  unset($binary);
+  if (!is_array($decoded)) {
+    throw new RuntimeException('Invalid JSON');
+  }
+  $list = $decoded;
+  if (!isset($decoded[0]) || !is_array($decoded[0])) {
+    foreach (['data', 'rows', 'records', 'result', 'results', 'reportData', 'jsondata'] as $key) {
+      if (isset($decoded[$key]) && is_array($decoded[$key]) && isset($decoded[$key][0]) && is_array($decoded[$key][0])) {
+        $list = $decoded[$key];
+        break;
+      }
+    }
+  }
+  unset($decoded);
+  if (!isset($list[0]) || !is_array($list[0])) {
+    throw new RuntimeException('JSON report has no rows');
+  }
+
+  $sample = $list[0];
+  $headerColumns = ll_perf_match_columns(array_map('strval', array_keys($sample)), $fields);
+  if (($headerColumns['mobile'] ?? '') !== '' && ($headerColumns['project'] ?? '') !== '') {
+    $rawRows = [];
+    foreach ($list as $item) {
+      if (!is_array($item)) {
+        continue;
+      }
+      $assoc = [];
+      foreach ($item as $key => $val) {
+        if (is_array($val) || is_object($val)) {
+          $val = '';
+        }
+        $assoc[(string) $key] = trim((string) $val);
+      }
+      $rawRows[] = $assoc;
+    }
+    unset($list);
+    return ll_perf_upload_rows_from_sheet($rawRows, $fields);
+  }
+
+  $hasCode = false;
+  foreach ($codes as $code => $_field) {
+    if (array_key_exists($code, $sample)) {
+      $hasCode = true;
+      break;
+    }
+  }
+  if (!$hasCode) {
+    $codeKeys = array_keys($codes);
+    throw new RuntimeException(ll_perf_upload_json_error(
+      'JSON report is missing ' . $codeKeys[0] . '–' . $codeKeys[count($codeKeys) - 1] . ' columns',
+      $fields,
+      $codes
+    ));
+  }
+  $missing = [];
+  foreach (array_keys($codes) as $code) {
+    if (!array_key_exists($code, $sample)) {
+      $missing[] = $code;
+    }
+  }
+  if ($missing) {
+    throw new RuntimeException(ll_perf_upload_json_error(
+      'JSON report is missing column(s): ' . implode(', ', $missing),
+      $fields,
+      $codes
+    ));
+  }
+  $fieldRows = [];
+  foreach ($list as $item) {
+    if (!is_array($item)) {
+      continue;
+    }
+    $assoc = [];
+    $empty = true;
+    foreach ($codes as $code => $fieldId) {
+      $val = $item[$code] ?? '';
+      if (is_array($val) || is_object($val)) {
+        $val = '';
+      }
+      $val = trim((string) $val);
+      if ($val !== '') {
+        $empty = false;
+      }
+      $assoc[$fieldId] = $val;
+    }
+    if (!$empty) {
+      $fieldRows[] = $assoc;
+    }
+  }
+  unset($list);
+  $rows = ll_perf_rows_from_field_rows($fieldRows, $fields);
+  unset($fieldRows);
+  if (!$rows) {
+    throw new RuntimeException('The JSON report has no data rows');
+  }
+  return $rows;
+}
+
+/**
  * One uploaded report → normalized Performance rows.
  * Throws RuntimeException with a user-facing message for layout/content problems.
  *
@@ -240,18 +350,7 @@ function ll_perf_upload_unmatched(array $only, array $byTelecaller): array
 function ll_perf_upload_parse_report(string $binary, string $kind, array $fields, array $codes): array
 {
   if ($kind === 'json') {
-    try {
-      $fieldRows = ll_erp_json_rows($binary, $codes, false, array_keys($codes));
-    } catch (RuntimeException $e) {
-      throw new RuntimeException(ll_perf_upload_json_error($e->getMessage(), $fields, $codes));
-    }
-    unset($binary);
-    $rows = ll_perf_rows_from_field_rows($fieldRows, $fields);
-    unset($fieldRows);
-    if (!$rows) {
-      throw new RuntimeException('The JSON report has no data rows');
-    }
-    return $rows;
+    return ll_perf_upload_parse_json($binary, $fields, $codes);
   }
 
   $rawRows = ll_erp_sync_parse_xlsx_rows($binary, ll_erp_sync_default_field_map());

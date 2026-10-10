@@ -498,13 +498,49 @@ function validateColumns(columns, kind) {
   return {ok: missing.length === 0, missing, columns, fields};
 }
 
+/** StrategicERP title blocks sit above Mobile / Project Name — find that header row. */
+function sheetRowsFromMatrix(sheet) {
+  const matrix = XLSX.utils.sheet_to_json(sheet, {header: 1, defval: "", raw: true});
+  let headerIndex = 0;
+  const limit = Math.min(matrix.length, 25);
+  for (let i = 0; i < limit; i++) {
+    const labels = (matrix[i] || []).map(cell => clean(cell)).filter(Boolean);
+    if (!labels.length) continue;
+    const columns = matchColumns(labels, MASTER_FIELDS);
+    if (columns.mobile && columns.project) {
+      headerIndex = i;
+      break;
+    }
+  }
+  const headerCells = matrix[headerIndex] || [];
+  const headers = [];
+  const colIndexes = [];
+  for (let c = 0; c < headerCells.length; c++) {
+    const label = clean(headerCells[c]);
+    if (!label) continue;
+    headers.push(label);
+    colIndexes.push(c);
+  }
+  const rows = [];
+  for (let r = headerIndex + 1; r < matrix.length; r++) {
+    const cells = matrix[r] || [];
+    const obj = {};
+    let empty = true;
+    for (let i = 0; i < headers.length; i++) {
+      const value = cells[colIndexes[i]];
+      if (value !== "" && value != null) empty = false;
+      obj[headers[i]] = value ?? "";
+    }
+    if (!empty) rows.push(obj);
+  }
+  return {rows, headers};
+}
+
 function sheetRowsFromBuffer(arrayBuffer) {
   if (!window.XLSX) throw new Error("Excel reader failed to load. Check your network connection and reload.");
   const workbook = XLSX.read(arrayBuffer, {type: "array", cellDates: true});
   const candidates = workbook.SheetNames.map(name => {
-    const rows = XLSX.utils.sheet_to_json(workbook.Sheets[name], {defval: "", raw: true});
-    const headers = rows.length ? Object.keys(rows[0]) : [];
-    return {name, rows, headers};
+    return {name, ...sheetRowsFromMatrix(workbook.Sheets[name])};
   }).filter(c => c.rows.length > 0);
   if (!candidates.length) throw new Error("Workbook has no data rows.");
   return candidates.sort((a, b) => b.rows.length - a.rows.length)[0];
