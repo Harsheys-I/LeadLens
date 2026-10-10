@@ -80,6 +80,13 @@ export interface HeatmapChartProps {
   margin?: Partial<Margin>;
   /** Fixed cell size in pixels. When 0, cells are square and sized to fit the plot. Default: 0 */
   binSize?: number;
+  /**
+   * Keep row height at `binSize` and stretch column width to the plot.
+   * Columns narrower than `minBinWidth` grow and the chart scrolls instead.
+   */
+  stretchColumns?: boolean;
+  /** Minimum column width when `stretchColumns` is set. Default: 36 */
+  minBinWidth?: number;
   /** Gap between cells in pixels. Default: 2 */
   gap?: number;
   /** Override the default color scale. */
@@ -139,6 +146,8 @@ function computeHeatmapDimensions({
   binSize,
   layout,
   separator,
+  stretchColumns,
+  minBinWidth,
 }: {
   width: number;
   parentHeight: number;
@@ -148,6 +157,8 @@ function computeHeatmapDimensions({
   binSize: number;
   layout: HeatmapLayout;
   separator: Pick<HeatmapSeparatorLayout, "spacing" | "atColumns"> | null;
+  stretchColumns: boolean;
+  minBinWidth: number;
 }) {
   const innerWidth = Math.max(width - margin.left - margin.right, 0);
   const availableHeight = Math.max(
@@ -160,7 +171,11 @@ function computeHeatmapDimensions({
   let binWidth: number;
   let binHeight: number;
 
-  if (binSize > 0) {
+  if (stretchColumns && binSize > 0 && columnCount > 0) {
+    binHeight = binSize;
+    const fitted = (innerWidth - totalSpacing) / columnCount;
+    binWidth = Math.max(minBinWidth, fitted);
+  } else if (binSize > 0) {
     binWidth = binSize;
     binHeight = binSize;
   } else if (layout === "fluid") {
@@ -186,10 +201,13 @@ function computeHeatmapDimensions({
     layout === "fluid"
       ? margin.top + innerHeight + margin.bottom
       : Math.max(parentHeight, margin.top + innerHeight + margin.bottom);
+  const stretchedWidth = margin.left + plotInnerWidth + margin.right;
   const chartWidth =
-    binSize > 0 && layout === "fluid"
-      ? margin.left + plotInnerWidth + margin.right
-      : width;
+    stretchColumns
+      ? Math.max(width, stretchedWidth)
+      : binSize > 0 && layout === "fluid"
+        ? stretchedWidth
+        : width;
 
   return {
     binWidth,
@@ -209,6 +227,8 @@ interface HeatmapChartInnerProps {
   sizingColumnCount?: number;
   margin: Margin;
   binSize: number;
+  stretchColumns: boolean;
+  minBinWidth: number;
   gap: number;
   layout: HeatmapLayout;
   colorScale: (count: number | null | undefined) => string;
@@ -242,6 +262,8 @@ function HeatmapChartInner({
   sizingColumnCount: sizingColumnCountProp,
   margin,
   binSize,
+  stretchColumns,
+  minBinWidth,
   gap,
   layout,
   colorScale,
@@ -313,9 +335,13 @@ function HeatmapChartInner({
         binSize,
         layout,
         separator: separatorLayout,
+        stretchColumns,
+        minBinWidth,
       }),
     [
       binSize,
+      stretchColumns,
+      minBinWidth,
       columnCount,
       layout,
       margin,
@@ -624,6 +650,8 @@ export function HeatmapChart({
   layout = "fluid",
   margin: marginProp,
   binSize = 0,
+  stretchColumns = false,
+  minBinWidth = 36,
   gap = 2,
   colorScale: colorScaleProp,
   levelColors,
@@ -692,6 +720,8 @@ export function HeatmapChart({
         animateCells={animateCells}
         animationDuration={animationDuration}
         binSize={binSize}
+        stretchColumns={stretchColumns}
+        minBinWidth={minBinWidth}
         chartPhase={chartPhase}
         chartStatus={status}
         colorScale={colorScale}

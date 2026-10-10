@@ -16,7 +16,7 @@ const monthFmt = new Intl.DateTimeFormat("en-US", { month: "short" });
 export const HeatmapXAxis = memo(function HeatmapXAxis({
   className,
 }: HeatmapXAxisProps) {
-  const { containerRef, data, margin, xScale } = useHeatmap();
+  const { containerRef, data, margin, xScale, binWidth } = useHeatmap();
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
@@ -67,9 +67,10 @@ export const HeatmapXAxis = memo(function HeatmapXAxis({
         style={{
           top: 0,
           left: tick.x,
-          width: 0,
+          width: Math.max(binWidth, 0),
           display: "flex",
-          justifyContent: "flex-start",
+          justifyContent: "center",
+          overflow: "hidden",
         }}
       >
         <span

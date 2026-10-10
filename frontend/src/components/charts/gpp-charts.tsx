@@ -207,13 +207,13 @@ export function ProjectMonthHeat({
   })
   const ramp = pineRamp()
   const denom = max > 0 ? max : 1
-  const rowPx = 22
+  const rowPx = 26
   return (
     <ChartCard title={title}>
-      <div className="flex items-start gap-2">
-        <ul className="w-40 shrink-0 text-xs text-[var(--muted)]" style={{ paddingTop: 28 }}>
+      <div className="flex items-start gap-3">
+        <ul className="w-36 shrink-0 text-xs text-[var(--muted)]" style={{ paddingTop: 28 }}>
           {projects.map((project) => (
-            <li key={project} className="truncate" style={{ height: rowPx, lineHeight: `${rowPx}px` }}>
+            <li key={project} className="truncate" title={project} style={{ height: rowPx, lineHeight: `${rowPx}px` }}>
               {project}
             </li>
           ))}
@@ -224,12 +224,17 @@ export function ProjectMonthHeat({
             levelColors={ramp}
             layout="fluid"
             binSize={rowPx}
-            gap={2}
+            stretchColumns
+            minBinWidth={36}
+            gap={5}
             colorScale={(count) => {
-              const t = Math.max(0, Math.min(1, (Number(count) || 0) / denom))
-              return ramp[Math.min(4, Math.round(t * 4))]
+              const value = Number(count) || 0
+              if (value <= 0) return ramp[0]
+              const t = Math.max(0, Math.min(1, value / denom))
+              const curved = t ** 2
+              return ramp[Math.min(4, Math.max(1, Math.ceil(curved * 4 - 1e-9)))]
             }}
-            margin={{ top: 28, right: 8, bottom: 8, left: 4 }}
+            margin={{ top: 28, right: 4, bottom: 8, left: 4 }}
           >
             <HeatmapCells />
             <HeatmapXAxis />
