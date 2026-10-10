@@ -214,14 +214,18 @@ function setNavGroupExpanded(group,expanded){
 }
 
 function expandNavGroupForView(name){
-  const btn=document.querySelector(`.nav-item[data-view="${name}"]:not(.hidden)`)
-    ||document.querySelector(`.nav-item[data-view="${name}"]`);
+  const buttons=[...document.querySelectorAll(`.nav-item[data-view="${name}"]`)];
+  const btn=buttons.find(item=>item.classList.contains("nav-item-child")&&!item.closest(".nav-group.hidden"))
+    ||buttons.find(item=>item.classList.contains("nav-item-child"))
+    ||buttons[0];
   if(!btn?.classList.contains("nav-item-child"))return;
-  const group=btn?.closest(".nav-group");
+  const group=btn.closest(".nav-group");
   if(group)setNavGroupExpanded(group,true);
 }
 
 function showView(name,{keepMenu=false}={}){
+  if(name==="review")name="published";
+  if(name==="perf-report")name="perf-dashboard";
   const btn=document.querySelector(`.nav-item[data-view="${name}"]:not(.hidden)`)
     ||document.querySelector(`.nav-item[data-view="${name}"]`);
   if(btn?.dataset.perm&&!hasPermission(btn.dataset.perm)){
@@ -234,7 +238,9 @@ function showView(name,{keepMenu=false}={}){
   document.querySelectorAll(".nav-item").forEach(button=>{
     const match=button.dataset.view===name;
     const visible=!button.classList.contains("hidden")&&!button.closest(".hidden");
-    button.classList.toggle("active",match&&visible);
+    const childAlso=button.classList.contains("nav-item-parent")
+      &&document.querySelector(`.nav-item-child[data-view="${name}"]:not(.hidden)`);
+    button.classList.toggle("active",match&&visible&&!childAlso);
   });
   if(els["page-title"])els["page-title"].textContent=titleForView(name);
   expandNavGroupForView(name);
@@ -1008,8 +1014,8 @@ function loadErpIntoAudit(entry){
   reviewParsedFiles=[packed];
   renderReviewFileList();
   updateReviewValidation();
-  showView("review");
-  toast(`${entry.leads.length.toLocaleString()} ERP leads ready — click Start Audit →`);
+  showView("published");
+  toast(`${entry.leads.length.toLocaleString()} ERP leads ready.`);
 }
 
 function scheduleReviewProgress(){
@@ -2243,13 +2249,16 @@ async function bootTeleCallerAudit(){
   await renderHistory();
 
   const hashView=location.hash.slice(1);
-  if(hashView==="published"&&hasPermission("telecaller.dashboard"))showView("published");
-  else if(hashView==="perf-dashboard"&&hasPermission("telecaller.perf_dashboard"))showView("perf-dashboard");
-  else if(hashView==="perf-report"&&hasPermission("telecaller.perf_report"))showView("perf-report");
+  if((hashView==="published"||hashView==="review"||!hashView)&&hasPermission("telecaller.dashboard"))showView("published");
+  else if((hashView==="perf-dashboard"||hashView==="perf-report")&&hasPermission("telecaller.perf_dashboard"))showView("perf-dashboard");
   else if(hashView==="perf-settings"&&hasPermission("telecaller.perf_settings"))showView("perf-settings");
+  else if(hashView&&hashView!=="review"&&hashView!=="perf-report")showView(hashView);
+  else if(hasPermission("telecaller.dashboard"))showView("published");
+  else if(hasPermission("telecaller.perf_dashboard"))showView("perf-dashboard");
   else{
-    const firstVisible=[...document.querySelectorAll(".nav-item[data-view]:not(.hidden)")][0];
-    showView(firstVisible?.dataset.view||"review");
+    const firstVisible=[...document.querySelectorAll(".nav-item[data-view]:not(.hidden)")]
+      .find(btn=>btn.dataset.view!=="review"&&btn.dataset.view!=="perf-report"&&!btn.closest(".hidden"));
+    if(firstVisible)showView(firstVisible.dataset.view);
   }
   await restoreFromStorage();
   checkForUpdate();
@@ -2273,7 +2282,8 @@ async function bootTeleCallerAudit(){
   window.addEventListener("hashchange",()=>{
     if(location.hash==="#published"&&hasPermission("telecaller.dashboard"))showView("published");
     if(location.hash==="#perf-dashboard"&&hasPermission("telecaller.perf_dashboard"))showView("perf-dashboard");
-    if(location.hash==="#perf-report"&&hasPermission("telecaller.perf_report"))showView("perf-report");
+    if(location.hash==="#perf-report"&&hasPermission("telecaller.perf_dashboard"))showView("perf-dashboard");
+    if(location.hash==="#review"&&hasPermission("telecaller.dashboard"))showView("published");
     if(location.hash==="#perf-settings"&&hasPermission("telecaller.perf_settings"))showView("perf-settings");
   });
   setInterval(()=>{
