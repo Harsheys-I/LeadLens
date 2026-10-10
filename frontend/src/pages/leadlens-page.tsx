@@ -343,15 +343,33 @@ function ScoreList({ rows }: { rows: string[][] }) {
   )
 }
 
-type PerfSummary = {
-  totalLeads?: number
-  activeLeads?: number
-  siteVisited?: number
-  notFollowupLeads?: number
+const PERF_COUNT_KEYS = [
+  'totalLeads',
+  'activeLeads',
+  'totalCalls',
+  'draftLeads',
+  'notFollowupLeads',
+  'siteVisited',
+  'siteVisitScheduled',
+  'siteVisitPending',
+  'siteVisitCancelled',
+  'notInterested',
+  'overdue',
+] as const
+
+type PerfCountKey = (typeof PERF_COUNT_KEYS)[number]
+type PerfSummary = Partial<Record<PerfCountKey, number>>
+
+type PerfMeta = {
+  dateMin?: string
+  dateMax?: string
+  reportDays: number
+  viewAll: boolean
 }
 
 function PerfView() {
   const [summary, setSummary] = useState<PerfSummary | null>(null)
+  const [meta, setMeta] = useState<PerfMeta>({ reportDays: 0, viewAll: false })
   const [byTelecaller, setByTelecaller] = useState<Record<string, PerfSummary>>({})
   const [byProject, setByProject] = useState<Record<string, PerfSummary>>({})
   const [bySource, setBySource] = useState<Record<string, PerfSummary>>({})
@@ -365,6 +383,12 @@ function PerfView() {
         const next = (data.summary || {}) as PerfSummary
         const total = Number(next.totalLeads || 0)
         setSummary(next)
+        setMeta({
+          dateMin: typeof data.date_min === 'string' ? data.date_min : undefined,
+          dateMax: typeof data.date_max === 'string' ? data.date_max : undefined,
+          reportDays: perfReportDays(data),
+          viewAll: Boolean(data.view_all),
+        })
         setByTelecaller((data.byTelecaller || {}) as Record<string, PerfSummary>)
         setByProject((data.byProject || {}) as Record<string, PerfSummary>)
         setBySource((data.bySource || {}) as Record<string, PerfSummary>)
@@ -408,8 +432,20 @@ function PerfView() {
   ]
   const dim = (map: Record<string, PerfSummary>) => Object.entries(map).map(([name, row]) => [name, `${row.siteVisited || 0} visited · ${row.totalLeads || 0} leads`])
   const charts = <PerfCharts byTelecaller={teleMap} />
+  const period = perfPeriodLabel(meta.dateMin, meta.dateMax)
+  const totalsTitle = meta.viewAll ? 'All TeleCallers · totals' : 'Totals'
   const tabs: TabItem[] = [
-    { id: 'summary', title: 'Summary', color: 'bg-rose-500', cardContent: <div className="h-full overflow-auto"><ActivityRings title="Telecalling Performance" data={rings} /></div> },
+    {
+      id: 'summary',
+      title: 'Summary',
+      color: 'bg-rose-500',
+      cardContent: (
+        <div className="h-full space-y-4 overflow-auto">
+          <ActivityRings title="Telecalling Performance" data={rings} />
+          <PerfTotalsList title={totalsTitle} period={period} summary={rolled} reportDays={meta.reportDays} />
+        </div>
+      ),
+    },
     { id: 'tele', title: 'By Telecaller', color: 'bg-lime-500', cardContent: <ScoreList rows={dim(teleMap)} /> },
     { id: 'project', title: 'Project', color: 'bg-cyan-500', cardContent: <ScoreList rows={dim(projectMap)} /> },
     { id: 'source', title: 'Source', color: 'bg-amber-500', cardContent: <ScoreList rows={dim(sourceMap)} /> },
@@ -435,7 +471,7 @@ function PerfView() {
         })}
       />
       {charts}
-      <SmoothTab items={tabs} defaultTabId="summary" className="w-full max-w-none" stageClassName="h-[28rem]" />
+      <SmoothTab items={tabs} defaultTabId="summary" className="w-full max-w-none" stageClassName="h-auto min-h-[36rem]" />
     </div>
   )
 }
@@ -450,14 +486,89 @@ function pickBuckets(map: Record<string, PerfSummary>, selected: string[]) {
 }
 
 function sumPerf(map: Record<string, PerfSummary>): PerfSummary {
-  const totals: PerfSummary = { totalLeads: 0, activeLeads: 0, siteVisited: 0, notFollowupLeads: 0 }
+  const totals: PerfSummary = {}
+  for (const key of PERF_COUNT_KEYS) totals[key] = 0
   for (const row of Object.values(map)) {
-    totals.totalLeads = (totals.totalLeads || 0) + Number(row.totalLeads || 0)
-    totals.activeLeads = (totals.activeLeads || 0) + Number(row.activeLeads || 0)
-    totals.siteVisited = (totals.siteVisited || 0) + Number(row.siteVisited || 0)
-    totals.notFollowupLeads = (totals.notFollowupLeads || 0) + Number(row.notFollowupLeads || 0)
+    for (const key of PERF_COUNT_KEYS) totals[key] = (totals[key] || 0) + Number(row[key] || 0)
   }
   return totals
+}
+
+const PERF_TOTAL_ROWS: { key: PerfCountKey | 'avgCallsPerDay' | 'totalLeadsVsSiteVisitedPct'; label: string }[] = [
+  { key: 'totalLeads', label: 'Total Leads' },
+  { key: 'activeLeads', label: 'Active Leads' },
+  { key: 'totalCalls', label: 'Total Calls' },
+  { key: 'avgCallsPerDay', label: 'Avg Calls per Day' },
+  { key: 'draftLeads', label: 'Draft Leads' },
+  { key: 'notFollowupLeads', label: 'Not Follow-up Leads' },
+  { key: 'siteVisited', label: 'Site Visited' },
+  { key: 'siteVisitScheduled', label: 'Site Visit Scheduled' },
+  { key: 'siteVisitPending', label: 'Site Visit Pending' },
+  { key: 'siteVisitCancelled', label: 'Site Visit Cancelled' },
+  { key: 'notInterested', label: 'Not Interested' },
+  { key: 'totalLeadsVsSiteVisitedPct', label: 'Total Leads vs Site Visited' },
+  { key: 'overdue', label: 'Overdue Leads' },
+]
+
+function perfReportDays(data: { reportDays?: unknown; report_days?: unknown; date_min?: unknown; date_max?: unknown }) {
+  const direct = Number(data.reportDays || data.report_days || 0)
+  if (direct > 0) return direct
+  const min = parsePerfDate(data.date_min)
+  const max = parsePerfDate(data.date_max)
+  if (!min || !max) return 0
+  const start = new Date(min)
+  const end = new Date(max)
+  start.setHours(0, 0, 0, 0)
+  end.setHours(0, 0, 0, 0)
+  return Math.floor((end.getTime() - start.getTime()) / 86400000) + 1
+}
+
+function parsePerfDate(value: unknown) {
+  if (typeof value !== 'string' || !value) return null
+  const parsed = new Date(value)
+  return Number.isNaN(parsed.getTime()) ? null : parsed
+}
+
+function perfPeriodLabel(dateMin?: string, dateMax?: string) {
+  if (!dateMin && !dateMax) return ''
+  const fmt = (iso?: string) => {
+    const parsed = parsePerfDate(iso)
+    if (!parsed) return '—'
+    return parsed.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' })
+  }
+  return `Report period (from History Lead Update Date): ${fmt(dateMin)} – ${fmt(dateMax)}`
+}
+
+function perfTotalValue(summary: PerfSummary, key: (typeof PERF_TOTAL_ROWS)[number]['key'], reportDays: number) {
+  if (key === 'avgCallsPerDay') {
+    const days = Number(reportDays) || 0
+    if (days <= 0) return '—'
+    return String(Math.round(Number(summary.totalCalls || 0) / days))
+  }
+  if (key === 'totalLeadsVsSiteVisitedPct') {
+    const total = Number(summary.totalLeads || 0)
+    if (total <= 0) return '—'
+    const value = Math.round((Number(summary.siteVisited || 0) / total) * 1000) / 10
+    return `${value.toFixed(value % 1 === 0 ? 0 : 1)}%`
+  }
+  return String(Number(summary[key] || 0))
+}
+
+function PerfTotalsList({ title, period, summary, reportDays }: { title: string; period: string; summary: PerfSummary; reportDays: number }) {
+  return (
+    <section className="rounded-xl border border-[var(--line)] bg-[var(--panel)] px-4 py-3 text-sm">
+      {period ? <p className="mb-3 text-xs text-[var(--muted)]">{period}</p> : null}
+      <h3 className="mb-2 text-sm font-semibold text-emerald-400">{title}</h3>
+      <dl>
+        {PERF_TOTAL_ROWS.map((row) => (
+          <div key={row.key} className="flex items-center justify-between gap-4 border-t border-[var(--line)] py-2 first:border-t-0">
+            <dt className="text-[var(--ink)]">{row.label}</dt>
+            <dd className="font-medium tabular-nums text-emerald-300">{perfTotalValue(summary, row.key, reportDays)}</dd>
+          </div>
+        ))}
+      </dl>
+    </section>
+  )
 }
 
 function SettingsView() {
